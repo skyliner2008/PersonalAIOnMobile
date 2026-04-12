@@ -268,7 +268,7 @@ object GeminiVoiceProfiles {
 class LiveGeminiService(
     private val client: HttpClient,
     private var apiKey: String,
-    private var liveModelName: String = "gemini-3.1-flash-live-preview",
+    private var liveModelName: String,
     private val maxRetries: Int = 3,
     private val baseRetryDelayMs: Long = 1000L
 ) {

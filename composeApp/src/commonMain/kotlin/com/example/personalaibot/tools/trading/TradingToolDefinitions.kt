@@ -56,7 +56,7 @@ object TradingToolDefinitions {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "market"   to ParameterProperty("STRING", "ตลาดที่ต้องการ: US, TH, Crypto, Global (Default: Global)"),
+                    "market"   to ParameterProperty("STRING", "ตลาดที่ต้องการ: US (Stocks), TH (หุ้นไทย), Crypto, Forex, Gold, Global (Default: Global)"),
                     "sector"   to ParameterProperty("STRING", "กลุ่มอุตสาหกรรม (ถ้ามี): Energy, Technology, Finance, Healthcare ฯลฯ"),
                     "limit"    to ParameterProperty("NUMBER", "จำนวนผลลัพธ์ (Default 10)")
                 ),
@@ -106,8 +106,8 @@ object TradingToolDefinitions {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, AAPL, THYAO, ETHUSDT"),
-                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, KUCOIN, NASDAQ, NYSE, BIST"),
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD (Gold), EURUSD, AAPL, THYAO"),
+                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, NYSE, OANDA (FX), TVC (Gold)"),
                     "interval" to ParameterProperty(
                         type = "STRING",
                         description = "Timeframe: 15m, 1h, 4h, 1D, 1W",
@@ -127,8 +127,8 @@ object TradingToolDefinitions {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, AAPL"),
-                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, KUCOIN ฯลฯ")
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
+                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA, TVC ฯลฯ")
                 ),
                 required = listOf("symbol", "exchange")
             )
@@ -231,25 +231,22 @@ object TradingToolDefinitions {
         // ── 13. Combined Analysis (Power Tool) ────────────────────────────
         FunctionDeclaration(
             name = "trading_combined",
-            description = """Power Tool: วิเคราะห์ครบทุกมิติใน tool call เดียว
-                |รวม Technical Analysis + Reddit Sentiment + Financial News + สรุป confluence
-                |ใช้เมื่อผู้ใช้ถามว่า "วิเคราะห์ BTC ให้ครบ", "ควรซื้อ AAPL ไหม", "ช่วยวิเคราะห์ ETH ให้หน่อย"
-                |เหมาะสำหรับการตัดสินใจลงทุน""".trimMargin(),
+            description = """วิเคราะห์ครบทุกด้านพร้อมกัน: TA + Reddit Sentiment + Financial News
+                |ให้ Confluence Decision สุดท้าย (BUY/SELL/MIXED) พร้อม reasoning
+                |ใช้เมื่อผู้ใช้ถามว่า "วิเคราะห์ BTC ทุกด้าน", "ดู ETH full analysis", "combined BTCUSDT" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, AAPL, ETHUSDT"),
-                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, KUCOIN, NASDAQ, NYSE"),
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
+                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA, TVC"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 1h, 4h, 1D (default 1h)",
-                        enum = listOf("1h", "4h", "1D")
+                        description = "Timeframe: 15m, 1h, 4h, 1D",
+                        enum = listOf("15m", "1h", "4h", "1D")
                     )
                 ),
                 required = listOf("symbol", "exchange")
             )
         )
     )
-
-    val toolNames: Set<String> = allDefinitions.map { it.name }.toSet()
 }

@@ -8,7 +8,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.personalaibot.db.DatabaseDriverFactory
@@ -30,7 +33,8 @@ fun App(
     onStartWidget: () -> Unit = {},
     onStopWidget: () -> Unit = {},
     onSetWidgetListening: (Boolean) -> Unit = {},
-    registerToggleLive: (() -> Unit) -> Unit = {}
+    registerToggleLive: (() -> Unit) -> Unit = {},
+    registerWidgetClosed: (() -> Unit) -> Unit = {}
 ) {
     val viewModel: JarvisViewModel = viewModel {
         JarvisViewModel(databaseDriverFactory, voiceManager)
@@ -41,14 +45,28 @@ fun App(
     val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
     val voiceError     by viewModel.voiceError.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
+    val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
 
-    var showSettings by remember { mutableStateOf(false) }
+    var showSettings  by remember { mutableStateOf(false) }
+    var showToolList  by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     // Sync widget listening state
-    LaunchedEffect(isListening) {
-        onSetWidgetListening(isListening)
+    LaunchedEffect(isListening, isWidgetEnabled) {
+        if (isWidgetEnabled) {
+            onSetWidgetListening(isListening)
+        }
+    }
+
+    // Sync widget service with persistent setting
+    LaunchedEffect(isWidgetEnabled) {
+        if (isWidgetEnabled) {
+            onStartWidget()
+        } else {
+            onStopWidget()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -70,12 +88,32 @@ fun App(
 
     MaterialTheme(colorScheme = JarvisTheme.ColorScheme) {
         Scaffold(
+            modifier = Modifier.fillMaxSize(),
             containerColor = JarvisTheme.Dark,
             topBar = {
                 JarvisTopBar(
                     isListening  = isListening,
-                    showSettings = { showSettings = true }
+                    showSettings = { showSettings = true },
+                    showTools    = { showToolList  = true },
+                    onClearChat  = { showClearConfirm = true }
                 )
+            },
+            bottomBar = {
+                if (isListening) {
+                    LiveModePanel(
+                        isCameraActive = isCameraActive,
+                        activeToolName = activeToolName,
+                        onToggleCamera = { viewModel.toggleCamera() },
+                        onEndLive      = { viewModel.stopVoiceInput() }
+                    )
+                } else {
+                    ChatInputBar(
+                        onSend = { viewModel.sendMessage(it) },
+                        onStartLive = { viewModel.startVoiceInput() },
+                        enabled = !isTyping,
+                        voiceAvailable = voiceManager.isAvailable()
+                    )
+                }
             }
         ) { padding ->
             Column(
@@ -113,23 +151,13 @@ fun App(
                 if (isTyping) {
                     TypingIndicator()
                 }
+            }
+        }
 
-                // Bottom input area
-                if (isListening) {
-                    LiveModePanel(
-                        isCameraActive = isCameraActive,
-                        activeToolName = activeToolName,
-                        onToggleCamera = { viewModel.toggleCamera() },
-                        onEndLive      = { viewModel.stopVoiceInput() }
-                    )
-                } else {
-                    ChatInputBar(
-                        onSend = { viewModel.sendMessage(it) },
-                        onStartLive = { viewModel.startVoiceInput() },
-                        enabled = !isTyping,
-                        voiceAvailable = voiceManager.isAvailable()
-                    )
-                }
+        // Handle widget close from service
+        LaunchedEffect(Unit) {
+            registerWidgetClosed {
+                viewModel.setFloatingWidgetEnabled(false)
             }
         }
 
@@ -139,6 +167,45 @@ fun App(
                 onDismiss = { showSettings = false },
                 onStartWidget = onStartWidget,
                 onStopWidget = onStopWidget
+            )
+        }
+
+        if (showToolList) {
+            ToolListDialog(onDismiss = { showToolList = false })
+        }
+
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                containerColor = JarvisTheme.Card,
+                title = { Text("ล้างประวัติการสนทนา?", color = JarvisTheme.Red, fontWeight = FontWeight.Bold) },
+                text = { 
+                    Column {
+                        Text("ประวัติในหน้าจอจะหายไปทั้งหมด", color = Color.White)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "💡 ความจำหลัก (Core Memory) จะยังอยู่ครบถ้วน แต่ความจำล่าสุดอาจจะยังไม่ได้ประมวลผล แนะนำให้กด 'จำศีล' ก่อนถ้าอยากให้ JARVIS จำเนื้อหาล่าสุดได้แม่นยำครับ",
+                            color = Color.White.copy(0.6f),
+                            fontSize = 12.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            viewModel.clearChat()
+                            showClearConfirm = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Red)
+                    ) {
+                        Text("ล้างเลย", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearConfirm = false }) {
+                        Text("ยกเลิก", color = Color.White.copy(0.6f))
+                    }
+                }
             )
         }
     }

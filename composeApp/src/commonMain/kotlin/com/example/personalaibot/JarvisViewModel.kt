@@ -29,8 +29,8 @@ class JarvisViewModel(
     private val memoryManager = JarvisMemoryManager(database)
     private val client = createHttpClient()
 
-    private val defaultMainModel = "gemini-3.1-pro"
-    private val defaultLiveModel = "gemini-3.1-flash-live-preview"
+    private val defaultMainModel = com.example.personalaibot.data.ModelConfig.DEFAULT_MAIN_MODEL
+    private val defaultLiveModel = com.example.personalaibot.data.ModelConfig.DEFAULT_LIVE_MODEL
 
     // List of old/deprecated models to auto-migrate from
     private val deprecatedLiveModels = listOf(
@@ -70,6 +70,9 @@ class JarvisViewModel(
     private val _isSleeping = MutableStateFlow(false)
     val isSleeping: StateFlow<Boolean> = _isSleeping.asStateFlow()
 
+    private val _floatingWidgetEnabled = MutableStateFlow(false)
+    val floatingWidgetEnabled: StateFlow<Boolean> = _floatingWidgetEnabled.asStateFlow()
+
     private val maxContextTurns = 10
 
     init {
@@ -100,6 +103,9 @@ class JarvisViewModel(
             database.jarvisDatabaseQueries.getSetting("voice_name").executeAsOneOrNull()
                 ?: defaultVoiceName
         }
+        val savedWidgetEnabled = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("floating_widget_enabled").executeAsOneOrNull() == "true"
+        }
 
         // Auto-migration logic for deprecated live models
         if (deprecatedLiveModels.contains(savedLiveModel)) {
@@ -115,6 +121,7 @@ class JarvisViewModel(
         _selectedModel.value = savedModel
         _liveModelName.value = savedLiveModel
         _voiceName.value = savedVoiceName
+        _floatingWidgetEnabled.value = savedWidgetEnabled
         orchestrator.updateConfig(savedKey, savedModel, savedLiveModel, savedVoiceName)
 
         if (savedKey.isNotBlank()) {
@@ -136,6 +143,13 @@ class JarvisViewModel(
             }
             orchestrator.updateConfig(key, model, liveModel, voice)
             fetchModels()
+        }
+    }
+
+    fun setFloatingWidgetEnabled(enabled: Boolean) {
+        _floatingWidgetEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("floating_widget_enabled", enabled.toString())
         }
     }
 
@@ -371,6 +385,15 @@ class JarvisViewModel(
 
     fun clearVoiceError() {
         _voiceError.value = null
+    }
+
+    fun clearChat() {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.deleteAllMessages()
+            withContext(Dispatchers.Main) {
+                _messages.value = emptyList()
+            }
+        }
     }
 
     fun triggerSleepCycle() {

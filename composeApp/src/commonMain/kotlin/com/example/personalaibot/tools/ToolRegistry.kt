@@ -1,6 +1,7 @@
 package com.example.personalaibot.tools
 
 import com.example.personalaibot.tools.trading.TradingToolDefinitions
+import com.example.personalaibot.tools.trading.SmcToolDefinitions
 
 object ToolRegistry {
 
@@ -128,33 +129,45 @@ object ToolRegistry {
     private val _tradingTools: Map<String, FunctionDeclaration> =
         TradingToolDefinitions.allDefinitions.associateBy { it.name }
 
+    // ─── SMC (Smart Money Concepts) Tools ────────────────────────────────────
+    private val _smcTools: Map<String, FunctionDeclaration> =
+        SmcToolDefinitions.allDefinitions.associateBy { it.name }
+
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
-                               _customTools.values.toList()
+                                              _smcTools.values.toList() +
+                               _customTools.values.toList() +
+                               _skills.values.map { skill ->
+                                   FunctionDeclaration(
+                                       name        = skill.name,
+                                       description = skill.description,
+                                       parameters  = null
+                                   )
+                               }
     )
 
-    fun allToolNames(): List<String> =
-        _builtinTools.keys.toList() + _tradingTools.keys.toList() + _customTools.keys.toList()
+    fun allToolNames(): Set<String> =
+        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _customTools.keys + _skills.keys
 
-    fun isTradingTool(name: String): Boolean = name in TradingToolDefinitions.toolNames
+    fun isTradingTool(name: String): Boolean =
+        name in _tradingTools || name in _smcTools
 
-    fun registerSkill(skill: SkillDescriptor) {
-        _skills[skill.name] = skill
-        _customTools[skill.name] = FunctionDeclaration(
-            name = skill.name,
-            description = skill.description,
-            // Custom skills currently don't have typed parameters
-            parameters = null
-        )
+    fun getSkill(name: String): SkillDescriptor? = _skills[name]
+
+    fun registerCustomTool(declaration: FunctionDeclaration) {
+        _customTools[declaration.name] = declaration
+    }
+
+    fun registerSkill(descriptor: SkillDescriptor) {
+        _skills[descriptor.name] = descriptor
     }
 
     fun unregisterSkill(name: String) {
         _skills.remove(name)
-        _customTools.remove(name)
     }
 
-    fun getSkill(name: String): SkillDescriptor? = _skills[name]
-
-    fun getAllSkills(): List<SkillDescriptor> = _skills.values.toList()
+    fun clearCustomTools() {
+        _customTools.clear()
+    }
 }

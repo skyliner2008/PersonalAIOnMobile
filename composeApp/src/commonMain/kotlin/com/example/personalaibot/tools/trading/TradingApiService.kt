@@ -16,6 +16,32 @@ class TradingApiService(private val client: HttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
+    /**
+     * Resolve the best exchange for a given symbol if not specified by the user.
+     * Maps Forex to OANDA/FX_IDC and Commodities to TVC/COMEX.
+     */
+    fun resolveExchange(symbol: String, requestedExchange: String?): String {
+        if (!requestedExchange.isNullOrBlank() && requestedExchange != "BINANCE") return requestedExchange
+        
+        val s = symbol.uppercase()
+        return when {
+            // Gold, Silver, Oil
+            s == "XAUUSD" || s == "GOLD" -> "TVC"
+            s == "XAGUSD" || s == "SILVER" -> "TVC"
+            s == "USOIL" || s == "WTI" || s == "CL=F" -> "TVC"
+            
+            // Forex: usually 6 chars (EURUSD, USDJPY, etc.)
+            s.length == 6 && s.all { it.isLetter() } -> "OANDA"
+            s.endsWith("=X") -> "FX_IDC"
+            
+            // Stocks: if user requests common stocks but doesn't specify exchange
+            s in listOf("AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA") -> "NASDAQ"
+            
+            // Default to BINANCE for crypto-like symbols or if nothing matches
+            else -> requestedExchange ?: "BINANCE"
+        }
+    }
+
     // ─── Yahoo Finance ──────────────────────────────────────────────────────
 
     suspend fun getYahooPrice(symbol: String): Map<String, String> {
@@ -137,6 +163,18 @@ class TradingApiService(private val client: HttpClient) {
         }
         if (market?.uppercase() == "TH") return getSectorSnapshot("All", "TH", limit)
         if (market?.uppercase() == "CRYPTO") return getTopGainers("BINANCE", limit)
+        
+        // Forex Snapshot
+        if (market?.uppercase() == "FOREX" || market?.uppercase() == "FX") {
+            val fxPairs = listOf("EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X")
+            return fxPairs.associateWith { try { getYahooPrice(it) } catch (_: Exception) { mapOf("error" to "N/A") } }
+        }
+        
+        // Commodities Snapshot
+        if (market?.uppercase() == "GOLD" || market?.uppercase() == "COMMODITY") {
+            val comms = mapOf("Gold" to "GC=F", "Silver" to "SI=F", "Oil (WTI)" to "CL=F", "Oil (Brent)" to "BZ=F", "Copper" to "HG=F")
+            return comms.mapValues { try { getYahooPrice(it.value) } catch (_: Exception) { mapOf("error" to "N/A") } }
+        }
 
         val symbols = mapOf(
             "S&P500" to "^GSPC", "NASDAQ" to "^IXIC", "DOW" to "^DJI", "VIX" to "^VIX",

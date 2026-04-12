@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
     // Callback ส่งกลับไปที่ Compose เพื่อ toggle live mode จาก widget
     private var onToggleLiveFromWidget: (() -> Unit)? = null
+    private var onWidgetClosedCallback: (() -> Unit)? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -48,7 +49,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(
+                android.graphics.Color.TRANSPARENT
+            ),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(
+                android.graphics.Color.TRANSPARENT
+            )
+        )
         super.onCreate(savedInstanceState)
         
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -86,6 +94,9 @@ class MainActivity : ComponentActivity() {
                 },
                 registerToggleLive = { callback ->
                     onToggleLiveFromWidget = callback
+                },
+                registerWidgetClosed = { callback ->
+                    onWidgetClosedCallback = callback
                 }
             )
         }
@@ -96,6 +107,10 @@ class MainActivity : ComponentActivity() {
         // Widget long-press → toggle live
         if (intent.action == "com.example.personalaibot.TOGGLE_LIVE") {
             onToggleLiveFromWidget?.invoke()
+        }
+        // Widget close button → disable everywhere
+        if (intent.action == FloatingWidgetService.ACTION_WIDGET_CLOSED) {
+            onWidgetClosedCallback?.invoke()
         }
     }
 

@@ -40,6 +40,7 @@ class FloatingWidgetService : Service() {
         const val ACTION_START_LIVE = "com.example.personalaibot.START_LIVE"
         const val ACTION_STOP_LIVE  = "com.example.personalaibot.STOP_LIVE"
         const val ACTION_SET_LISTENING = "com.example.personalaibot.SET_LISTENING"
+        const val ACTION_WIDGET_CLOSED = "com.example.personalaibot.WIDGET_CLOSED"
         const val EXTRA_LISTENING = "isListening"
 
         fun startWidget(context: Context) {
@@ -128,8 +129,22 @@ class FloatingWidgetService : Service() {
                 setPadding(0, 0, 8, 0)
             }
 
+            val closeButton = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(40, 40).apply {
+                    leftMargin = 16
+                }
+                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                setColorFilter(Color.WHITE)
+                alpha = 0.5f
+                setOnClickListener {
+                    broadcastWidgetClosed()
+                    stopSelf()
+                }
+            }
+
             layout.addView(statusDot)
             layout.addView(statusText)
+            layout.addView(closeButton)
 
             floatingView = layout
 
@@ -237,8 +252,22 @@ class FloatingWidgetService : Service() {
         startActivity(intent)
     }
 
+    private fun broadcastWidgetClosed() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = ACTION_WIDGET_CLOSED
+        }
+        startActivity(intent)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         try {
             floatingView?.let { windowManager?.removeView(it) }
         } catch (e: Exception) {

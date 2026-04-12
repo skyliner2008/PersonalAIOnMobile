@@ -104,10 +104,8 @@ class JarvisOrchestrator(
         return memoryManager.performSleepCycle(geminiService)
     }
 
-    private fun supportsNativeTools(model: String): Boolean {
-        val m = model.lowercase().removePrefix("models/")
-        return m.contains("native-audio") || m.contains("3.1-flash") || m.contains("3.1-pro") || m.contains("2.5-flash") || m.contains("2.5-pro") || m.contains("live")
-    }
+    private fun supportsNativeTools(model: String): Boolean =
+        com.example.personalaibot.data.ModelConfig.supportsNativeTools(model)
 
     // ─── Tool interception helpers ────────────────────────────────────────────
 

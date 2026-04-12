@@ -1,150 +1,352 @@
-# 🤖 Personal AI Bot & Trading Agent On Mobile
+# 🤖 PersonalAIBot — JARVIS for Android
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-1.9.20-blue.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
-[![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-orange.svg?style=flat&logo=jetpack-compose)](https://www.jetbrains.com/lp/compose-multiplatform/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
+[![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-orange.svg?style=flat)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![Gemini](https://img.shields.io/badge/AI-Gemini%20Flash-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูงที่สร้างขึ้นด้วย **Kotlin Multiplatform (KMP)** ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์การเงินอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 2.0/2.5/3.1**
+**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูงที่สร้างขึ้นด้วย **Kotlin Multiplatform (KMP)** ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์การเงินอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 2.0 / 2.5 / 3.x Flash**
 
 ---
 
-## 🚀 Key Features (ความสามารถหลัก)
+## 🚀 Key Features
 
-### 🎙️ 1. Live Voice Mode (ระบบสั่งการด้วยเสียงแบบ Real-time)
-สัมผัสประสบการณ์การคุยกับ AI แบบไร้รอยต่อด้วย **Gemini Live API**:
-- **Low Latency**: ตอบโต้ด้วยความเร็วสูงเหมือนคุยกับมนุษย์
-- **Native Audio Flow**: ระบบจัดการ PCM Audio 16kHz พร้อม AEC (Acoustic Echo Cancellation) และ Noise Suppression
-- **Voice-First Design**: เน้นการพูดคุยเป็นหลัก โดยมีระบบ Chat UI คอยซัพพอร์ตข้อมูลภาพประกอบ
+### 🎙️ 1. Live Voice Mode
+สั่งการด้วยเสียงแบบ Real-time ผ่าน **Gemini Live API**:
+- **Low Latency** — ตอบโต้ความเร็วสูงเหมือนคุยกับมนุษย์
+- **Native Audio Flow** — PCM Audio 16kHz พร้อม AEC + Noise Suppression
+- **Voice-First Design** — เน้นการพูดคุยเป็นหลัก ไม่ต้องพิมพ์
 
-### 📊 2. Agentic Financial Analysis (นักวิเคราะห์หุ้นอัจฉริยะ)
-JARVIS ไม่เพียงแค่ตอบคำถาม แต่เขาสามารถ **"คิดและวางแผน"** การหาข้อมูลได้เอง:
-- **Multi-round Orchestration**: วนลูปเรียกใช้ Tools อัตโนมัติ (เช่น Snapshot ตลาด -> เจาะลึกราคาหุ้นเด่น -> วิเคราะห์ TA) จนกว่าจะได้คำตอบที่สมบูรณ์ที่สุด
-- **Proactive Execution**: ค้นหาข้อมูลเชิงลึกเพิ่มทันทีหากพบสัญญาณที่น่าสนใจในตลาด
-- **Professional Reporting**: จัดทำรายงานที่อ่านง่าย มีตารางข้อมูล และบทสรุปเชิงลึก
+### 📸 2. Real-time Camera
+- วิเคราะห์ภาพจากกล้องแบบ Live ร่วมกับ Gemini Multimodal
+- ส่ง frame อัตโนมัติขณะ Live Mode เปิดอยู่
 
-### 🧠 3. Long-term Memory (ความจำระยะยาว)
-ระบบจดจำข้อเท็จจริงและความต้องการของผู้ใช้:
-- **Fact Storage**: บันทึกข้อมูลสำคัญลงในฐานข้อมูล SQLDelight
-- **Recursive Recall**: ค้นหาและดึงความจำที่เกี่ยวข้องมาใช้ในการสนทนาอัตโนมัติ
+### 🧠 3. 4-Layer Memory Engine
+- **Short-term** — บันทึก context การสนทนาปัจจุบัน
+- **Long-term** — จำข้อมูลข้ามเซสชันใน SQLite
+- **Vector + GraphRAG** — ค้นหาความหมายและความสัมพันธ์
+- **Embeddings** — เข้าใจบริบทเชิงความหมาย
 
----
+### 🤖 4. Multi-Agent Orchestration
+- วิเคราะห์ intent และ route งานซับซ้อนไปยัง Swarm of AI Agents
+- Skills system — เพิ่ม agent เฉพาะทางได้ไม่จำกัด
 
-## 🛠️ Performance Tools (เครื่องมือที่รองรับ)
+### 📊 5. Trading Intelligence (SMC + TA)
+- **SMC** — Smart Money Concepts (Order Blocks, BOS/CHoCH, FVG, Liquidity)
+- **Technical Analysis** — RSI, MACD, Bollinger, EMA, Volume, ATR
+- **Sentiment** — Reddit + Financial News scraping
+- **Multi-Timeframe** — M1 → D1 sweep analysis
 
-JARVIS มาพร้อมกับชุดเครื่องมือ (Tools) มากกว่า 15 ชนิด:
-- **Finance**: `trading_market_snapshot`, `trading_technical_analysis`, `trading_sentiment`, `trading_news`, `trading_combined`
-- **Utilities**: `search_web` (Google Search), `calculate`, `translate_text`, `summarize_text`
-- **Memory**: `remember_fact`, `recall_memory`
-
----
-
-## 🧠 Intelligence System (ระบบสมองกล)
-
-JARVIS ใช้สถาปัตยกรรม **Dual-Brain Orchestration** เพื่อมอบประสบการณ์ที่ดีที่สุดในแต่ละโหมด:
-
-### 1. Chat Mode: Recursive Reasoning
-ในโหมดแชทตัวอักษร JARVIS จะใช้ลูปการคิดแบบโต้ตอบ (Recursive Loop):
-- **Tool Detection**: วิเคราะห์เจตนา (Intent) ของผู้ใช้เพื่อเลือกใช้เครื่องมือที่เหมาะสม
-- **Data Reflection**: เมื่อได้รับข้อมูลจาก Tool แล้ว AI จะนำมาวิเคราะห์ต่อ หากข้อมูลยังไม่เพียงพอ ระบบจะเรียก Tool เพิ่มเติมโดยอัตโนมัติ (รองรับสูงสุด 5 รอบ)
-- **Final Analysis**: รวบรวมข้อมูลทั้งหมดเพื่อสรุปและจัดทำรายงานในรูปแบบตารางและ Markdown ที่สวยงาม
-
-### 2. Live Mode: Low-Latency Bidi-Stream
-ในโหมดเสียง JARVIS จะทำงานผ่าน **Bidi-streaming WebSocket**:
-- **Real-time Audio**: ใช้พลังของ Gemini 2.0/3.1 Flash สำหรับการโต้ตอบด้วยเสียงที่รวดเร็ว ( latency ต่ำกว่า 1 วินาที)
-- **Live Tool Bridge**: ระบบส่งต่อคำสั่งพิเศษจาก Live API ไปยังชุดเครื่องมือ (Tools) ในเครื่อง และส่งผลลัพธ์กลับไปยัง AI เพื่อให้มัน "รับรู้" ทันที
+### 🔧 6. Floating Widget
+- ทำงานแบบพื้นหลัง — กดปุ่มลอยเพื่อ toggle Live Mode ได้ทุกที่
 
 ---
 
-## 🧠 Cognitive & Memory Systems (ระบบความคิดและความจำ)
+## 🛠️ Tech Stack
 
-JARVIS มาพร้อมกับสถาปัตยกรรมหน่วยความจำที่ซับซ้อนเลียนแบบการทำงานของสมองมนุษย์ แบ่งออกเป็น **4 เลเยอร์สำคัญ**:
-
-### 1. 📂 4-Layer Memory Architecture
-- **Layer 1: Core Memory (ความจำหลัก)**: เก็บข้อมูลพื้นฐานที่ JARVIS ต้องจำเกี่ยวกับคุณเสมอ (เช่น ชื่อ, อาชีพ, ความสนใจ) ข้อมูลส่วนนี้จะถูกใส่เข้าไปในทุกการสนทนาเพื่อให้ AI เข้าใจบริบทความเป็นคุณ
-- **Layer 2: Working Memory (ความจำชั่วคราว)**: จัดเก็บประวัติการสนทนาล่าสุด เพื่อให้การพูดคุยมีความต่อเนื่องและลื่นไหล
-- **Layer 3: Archival Memory (คลังความจำระยะยาว)**: เก็บรักษาข้อเท็จจริง (Facts) ที่เคยเกิดขึ้นในอดีต พร้อมระบบจัดเรียงตาม **"ระดับความสำคัญ" (Importance Score)**
-- **Layer 4: GraphRAG (โครงข่ายความรู้)**: เชื่อมโยงข้อมูลต่างๆ เข้าด้วยกันในรูปแบบ Node และ Edge (Knowledge Graph) ทำให้ AI สามารถเข้าใจความสัมพันธ์เชิงเหตุและผลที่ซับซ้อนได้
-
-### 2. 🌙 Sleep Cycle: The Dream Engine (ระบบหลับฝัน)
-นวัตกรรมที่ทำให้ JARVIS เหนือกว่าแชทบอททั่วไป คือระบบ **"การรวมข้อมูลขณะพัก" (Consolidation Phase)**:
-- **Knowledge Extraction**: เมื่อถึงเวลา "หลับ" JARVIS จะนำประวัติการสนทนาที่ยาวเหยียดมาวิเคราะห์และสกัดเอา "แก่นความรู้" ออกมา
-- **Dreaming Logic**: AI จะทำการย้ายข้อมูลจาก Working Memory ไปยัง Archival Memory และสร้างความสัมพันธ์ใหม่ๆ ลงใน Knowledge Graph (เหมือนสมองมนุษย์ที่เรียบเรียงความจำขณะฝัน)
-- **Data Compaction**: ช่วยให้เจตจำนงและความรู้เดิมไม่สูญหายไป แม้จะมีการลบประวัติการสนทนาเก่าๆ ออกเพื่อประหยัดพื้นที่และรักษาความเร็วนั่นเอง
+| Layer | Technology |
+|-------|-----------|
+| Language | Kotlin 2.0 (KMP) |
+| UI | Jetpack Compose + Material3 |
+| AI Model | Google Gemini 2.0/2.5/3.x Flash |
+| Audio | Gemini Live API (WebSocket) |
+| HTTP | Ktor HttpClient |
+| Database | SQLDelight (SQLite) |
+| Market Data | Binance API v3 |
 
 ---
 
-## 🏗️ Technical Architecture (โครงสร้างสถาปัตยกรรม)
+## 🎨 Theme (JarvisTheme)
 
-```mermaid
-graph TD
-    User((User)) <--> UI[Compose UI / ViewModel]
-    UI <--> Orc[JarvisOrchestrator]
-    
-    subgraph "AI Brain Layer"
-        Orc <--> Gemini[GeminiService - REST/SSE]
-        Orc <--> Live[LiveGeminiService - WebSockets]
-    end
-    
-    Live <--> Bridge[LiveToolBridge]
-    Bridge <--> Executor[ToolExecutor]
-    Gemini <--> Executor
-    
-    subgraph "Tools & Data"
-        Executor --- Trading[Trading API]
-        Executor --- Search[Search Web]
-        Executor --- DB[(SQLDelight Memory)]
-    end
+| Color | Hex | Usage |
+|-------|-----|-------|
+| Cyan | `#00E5FF` | Primary accent, JARVIS title |
+| Dark | `#0A0A14` | Background |
+| Surface | `#141422` | TopBar, cards |
+| Card | `#1C1C2E` | Chat bubbles, panels |
+| Purple | `#7C4DFF` | AI messages, highlights |
+| Red | `#FF1744` | LIVE indicator |
+
+---
+
+## 📦 Tool Catalogue
+
+ระบบมีเครื่องมือทั้งหมด **28 tools** แบ่งเป็น 4 หมวดหมู่ สามารถดูได้ผ่านปุ่ม **⊞** (Apps icon) ใน TopBar
+
+---
+
+### 🔷 BUILT-IN TOOLS (6 tools)
+
+#### 1. `calculator` — เครื่องคิดเลข
+คำนวณนิพจน์คณิตศาสตร์ทุกรูปแบบ
+- บวก ลบ คูณ หาร ยกกำลัง รากที่สอง
+- ตรีโกณมิติ (sin, cos, tan)
+- ลอการิทึม, เลขชี้กำลัง
+- **ตัวอย่าง**: "คำนวณ 15% ของ 8500", "sqrt(144) + 3^4"
+
+#### 2. `unit_converter` — แปลงหน่วย
+แปลงหน่วยวัดทุกประเภทในระบบสากล
+- ความยาว, น้ำหนัก, อุณหภูมิ, พื้นที่, ปริมาตร
+- ความเร็ว, ข้อมูล (KB/MB/GB)
+- **ตัวอย่าง**: "100 กิโลเมตรเท่ากับกี่ไมล์", "แปลง 37°C เป็น Fahrenheit"
+
+#### 3. `datetime_info` — วันเวลาและปฏิทิน
+ข้อมูลวันที่ เวลา เขตเวลา ทั่วโลก
+- วันนี้คือวันอะไร, กี่วันถึง...
+- เปรียบเทียบ timezone ทั่วโลก
+- นับวันระหว่างสองวัน
+- **ตัวอย่าง**: "ตอนนี้กี่โมงที่ Tokyo", "เหลืออีกกี่วันถึงปีใหม่"
+
+#### 4. `random_generator` — สุ่มตัวเลขและข้อมูล
+สุ่มค่าต่างๆ ตามที่กำหนด
+- ตัวเลข UUID รหัสผ่าน
+- เลือกสุ่มจากรายการ (เช่น เมนูอาหาร)
+- **ตัวอย่าง**: "สุ่มเลข 1-100", "สุ่มเมนูอาหารเย็นให้หน่อย"
+
+#### 5. `web_search` — ค้นหาข้อมูลออนไลน์
+ค้นหาข้อมูล ข่าวสาร และเนื้อหาล่าสุดจากอินเทอร์เน็ต
+- ข่าวล่าสุด, ราคา, สภาพอากาศ
+- ความรู้ทั่วไป, คำนิยาม
+- **ตัวอย่าง**: "ข่าว BTC วันนี้", "นายกรัฐมนตรีไทยคนปัจจุบัน"
+
+#### 6. `memory_manager` — จัดการความจำ
+บันทึกและเรียกข้อมูลจากหน่วยความจำระยะยาว
+- จำข้อมูลสำคัญข้ามเซสชัน
+- ค้นหาบทสนทนาที่ผ่านมา
+- **ตัวอย่าง**: "จำไว้ว่าฉันชอบ timeframe 4h", "ฉันเคยบอกอะไรเกี่ยวกับ BTC?"
+
+---
+
+### 📈 TRADING TOOLS (9 tools)
+
+#### 7. `trading_price` — ราคาคริปโตแบบ Real-time
+ราคา OHLCV + % เปลี่ยนแปลงใน 24h จาก Binance
+- ราคาปัจจุบัน, High/Low 24h, Volume
+- **ตัวอย่าง**: "ราคา BTC ตอนนี้", "ETH ขึ้นหรือลงวันนี้"
+
+#### 8. `trading_technical` — Technical Analysis
+วิเคราะห์เทคนิคครบถ้วนด้วย Indicator หลัก
+- RSI, MACD, Bollinger Bands
+- EMA 9/21/50, Volume analysis, ATR
+- Overall Signal: BUY / SELL / NEUTRAL
+- **ตัวอย่าง**: "TA BTC 4h", "RSI ETH ตอนนี้เท่าไหร่"
+
+#### 9. `trading_sentiment` — Reddit Sentiment
+วิเคราะห์ความรู้สึกของ community จาก Reddit
+- Bullish/Bearish/Neutral score
+- Top keywords, trending topics
+- **ตัวอย่าง**: "Reddit คิดยังไงกับ BTC", "sentiment SOL วันนี้"
+
+#### 10. `trading_news` — Financial News
+ดึงข่าวการเงินล่าสุดจากหลายแหล่ง
+- Sentiment ของข่าวแต่ละชิ้น
+- Impact assessment (HIGH/MEDIUM/LOW)
+- **ตัวอย่าง**: "ข่าว ETHUSDT ล่าสุด", "มีข่าวอะไรกระทบ BTC บ้าง"
+
+#### 11. `trading_portfolio` — Portfolio Tracker
+ติดตาม Portfolio คริปโตแบบ Real-time
+- คำนวณมูลค่ารวม, P&L แต่ละเหรียญ
+- สัดส่วน allocation
+- **ตัวอย่าง**: "portfolio ฉันเป็นยังไงบ้าง", "คำนวณกำไรขาดทุน"
+
+#### 12. `trading_alert` — Price Alert
+ตั้ง Alert เมื่อราคาถึง target ที่กำหนด
+- Trigger เมื่อ price >= หรือ <= target
+- แจ้งเตือนใน session ปัจจุบัน
+- **ตัวอย่าง**: "แจ้งเมื่อ BTC ถึง 100000", "set alert ETH ต่ำกว่า 3000"
+
+#### 13. `trading_scan` — Market Scanner
+สแกนหา trading opportunities จาก watchlist
+- ค้นหา oversold/overbought, breakout, volume spike
+- **ตัวอย่าง**: "scan crypto ที่น่าสนใจ", "หา coin ที่ RSI oversold"
+
+#### 14. `trading_backtest` — Strategy Backtester
+ทดสอบกลยุทธ์ด้วยข้อมูลย้อนหลัง
+- Simulated trades, Win rate, Max drawdown
+- Sharpe ratio, Profit factor
+- **ตัวอย่าง**: "backtest EMA cross BTC 1h", "ทดสอบ RSI strategy SOL"
+
+#### 15. `trading_combined` — Full Confluence Analysis
+วิเคราะห์ครบทุกด้านพร้อมกัน
+- TA + Reddit Sentiment + Financial News
+- Confluence Decision: BUY / SELL / MIXED
+- **ตัวอย่าง**: "วิเคราะห์ BTC ครบทุกด้าน", "combined analysis ETHUSDT 4h"
+
+---
+
+### 🟣 SMC TOOLS — Smart Money Concepts (5 tools)
+
+แปลงจาก TradingView indicator "SMC & Multi-TF Order Blocks Sweeps V8.3" (Pine Script v6)
+
+#### 16. `trading_smc_analysis` — Full SMC Dashboard
+วิเคราะห์ครบทุก Smart Money Concept
+- Market Structure (BOS/CHoCH)
+- Order Blocks + FVG Confirmation
+- Liquidity Zones (Equal H/L)
+- Premium/Discount zones
+- Confluence Stars (★★★★★)
+- **ตัวอย่าง**: "วิเคราะห์ SMC BTC", "Order blocks ETH 4h", "zone ไหน strong ที่สุด"
+
+#### 17. `trading_smc_sweeps` — Multi-TF Sweep Detection
+ตรวจจับ Liquidity Sweep signals ข้ามทุก Timeframe (M1→H4)
+- Sweep = ราคา wick ทะลุ OB แล้ว reclaim >50% (Reversal signal)
+- Bullish Sweep → สัญญาณ Long
+- Bearish Sweep → สัญญาณ Short
+- **ตัวอย่าง**: "sweep BTC ทุก TF", "MTF sweep ETHUSDT", "มี sweep ไหมวันนี้"
+
+#### 18. `trading_smc_liquidity` — MTF Liquidity Zones
+แสดง Liquidity Zones ข้ามหลาย Timeframe พร้อม Confluence Stars
+- Equal Highs = Sell-side Liquidity (ราคาจะ sweep ก่อนลง)
+- Equal Lows = Buy-side Liquidity (ราคาจะ sweep ก่อนขึ้น)
+- **ตัวอย่าง**: "liquidity BTC ทุก TF", "Equal highs ETH", "ราคาจะไป sweep ที่ไหน"
+
+#### 19. `trading_smc_orderblocks` — Order Blocks + FVG
+ตรวจจับ Bullish/Bearish Order Blocks พร้อม FVG Confirmation
+- Bullish OB 🟢 — แหล่ง demand, ราคามักเด้งขึ้น
+- Bearish OB 🔴 — แหล่ง supply, ราคามักร่วงลง
+- แสดง distance % จากราคาปัจจุบัน + ⚡NEAR tag
+- **ตัวอย่าง**: "Order blocks BTC 4h", "OB ที่ยังไม่โดน ETHUSDT", "demand zone SOL"
+
+#### 20. `trading_smc_structure` — Market Structure
+วิเคราะห์ Market Structure: BOS, CHoCH, Premium/Discount
+- BOS (Break of Structure) — breakout ต่อเนื่อง
+- CHoCH (Change of Character) — สัญญาณ trend reversal
+- Premium zone (>75%) — แพง → Short
+- Discount zone (<25%) — ถูก → Long
+- Equilibrium (50%) — จุดสมดุล
+- **ตัวอย่าง**: "structure BTC 4h", "BOS หรือ CHoCH ETHUSDT", "ราคาอยู่ใน premium หรือ discount"
+
+---
+
+### ⚙️ SYSTEM TOOLS (8 tools)
+
+#### 21. `system_status` — System Monitor
+ตรวจสอบสถานะระบบและการตั้งค่าทั้งหมด
+- Model ที่ใช้งาน, Memory usage
+- Tools ที่ active, Session info
+- **ตัวอย่าง**: "สถานะระบบตอนนี้", "ใช้โมเดลอะไรอยู่"
+
+#### 22. `skill_manager` — Skill Manager
+จัดการ Skills (Custom AI agents) ในระบบ
+- ดู Skills ที่มีอยู่, เปิด/ปิด Skill
+- ดู trigger keywords, system prompt addon
+- **ตัวอย่าง**: "Skills ที่มีอยู่มีอะไรบ้าง", "เปิด skill trading"
+
+#### 23. `image_analyzer` — Image Analyzer
+วิเคราะห์รูปภาพด้วย Gemini Vision
+- อธิบายภาพ, อ่านข้อความในรูป (OCR)
+- วิเคราะห์กราฟ chart จากภาพ
+- **ตัวอย่าง**: "อธิบายรูปนี้", "อ่านข้อความในภาพ", "วิเคราะห์ chart นี้"
+
+#### 24. `code_executor` — Code Runner
+รันโค้ด Python/JavaScript ได้โดยตรง
+- คำนวณ, data processing
+- ทดสอบ algorithm, script อัตโนมัติ
+- **ตัวอย่าง**: "รันโค้ด Python นี้", "คำนวณ fibonacci 20 ตัว"
+
+#### 25. `file_manager` — File Manager
+จัดการไฟล์และโฟลเดอร์ในอุปกรณ์
+- อ่าน สร้าง แก้ไข ลบไฟล์
+- ค้นหาไฟล์ด้วย pattern
+- **ตัวอย่าง**: "ดูไฟล์ใน Downloads", "สร้างไฟล์ note.txt"
+
+#### 26. `app_controller` — App Controller
+ควบคุม app และระบบ Android
+- เปิด/ปิด app, ปรับ settings
+- ส่ง notification, ดู app list
+- **ตัวอย่าง**: "เปิด Spotify", "ลด volume ลง 20%"
+
+#### 27. `reminder_scheduler` — Reminder & Scheduler
+ตั้งการแจ้งเตือนและกำหนดการ
+- Reminder แบบครั้งเดียว/ซ้ำ
+- Calendar event, deadline tracker
+- **ตัวอย่าง**: "เตือนฉันทุกเช้า 8 โมง", "ตั้ง reminder ประชุม พรุ่งนี้ 14:00"
+
+#### 28. `custom_skill_trigger` — Custom Skill Trigger
+เรียกใช้ Custom Skills ที่ผู้ใช้สร้างเอง
+- Trigger ด้วย keyword หรือชื่อ skill โดยตรง
+- รองรับ skill แบบ chain (multi-step)
+- **ตัวอย่าง**: "เรียกใช้ skill ของฉัน", "run skill:trading_journal"
+
+---
+
+## 📱 UI Guide
+
+### TopBar Actions
+| Icon | Action |
+|------|--------|
+| ⊞ (Apps) | เปิดรายการ Tools ทั้งหมด (Tool List Dialog) |
+| ⚙️ (Settings) | เปิด Settings — เลือก Model, API Key, Widget |
+
+### Tool List Dialog
+- **Search bar** — ค้นหา tool ด้วยชื่อหรือคำอธิบาย
+- **Category chips** — กรองตามหมวด: All / Built-in / Trading / SMC / System
+- **Tool cards** — กดเพื่อขยายดู capabilities + example prompts + function name
+
+### Chat Input
+- พิมพ์ข้อความและกด Send หรือกด 🎙️ เพื่อเริ่ม Live Voice Mode
+- พิมพ์แล้วถาม JARVIS ได้เลยโดยไม่ต้องระบุ tool — ระบบ route ให้อัตโนมัติ
+
+---
+
+## 🏗️ Project Structure
+
+```
+composeApp/src/commonMain/kotlin/com/example/personalaibot/
+├── App.kt                          # Entry point
+├── JarvisViewModel.kt              # Main ViewModel
+├── tools/
+│   ├── ToolRegistry.kt             # Registry of all tools
+│   ├── ToolExecutor.kt             # Built-in tool executor
+│   ├── LiveToolBridge.kt           # Bridge for Live mode
+│   └── trading/
+│       ├── TradingToolDefinitions.kt
+│       ├── TradingToolExecutor.kt
+│       ├── TradingApiService.kt
+│       ├── SmcToolDefinitions.kt   # 5 SMC tool definitions
+│       ├── SmcToolExecutor.kt      # SMC tool executor
+│       └── SmcApiService.kt        # SMC algorithms + Binance API
+├── ui/
+│   ├── screen/
+│   │   ├── JarvisTopBar.kt         # TopBar with Tools + Settings buttons
+│   │   ├── ToolListDialog.kt       # Full-screen tool catalogue dialog
+│   │   ├── SettingsDialog.kt
+│   │   ├── ChatInputBar.kt
+│   │   └── LiveModePanel.kt
+│   ├── components/
+│   └── theme/
+│       └── JarvisTheme.kt
+├── db/                             # SQLDelight database
+├── voice/                          # VoiceManager (Live API)
+└── memory/                         # Memory Engine
 ```
 
-### Technology Deep Dive
-
-| Layer | Technologies & Innovation |
-| :--- | :--- |
-| **AI Models** | `gemini-2.0-flash-exp`, `gemini-1.5-flash`, `gemini-3.1-flash` |
-| **Voice UI** | รองรับโปรไฟล์เสียงมากกว่า **30 รูปแบบ** (เช่น Aoede, Puck, Charon) แยกเพศและบุคลิกได้ |
-| **Audio Engine** | ระบบจัดการ PCM 16kHz พร้อมเปิดใช้งาน **Hardware AEC** และ **NoiseSuppression** |
-| **Networking** | Ktor Client พร้อมฟีเจอร์ WebSockets สำหรับ Real-time Bidi-streaming |
-| **Design** | **JarvisTheme**: ระบบ Dynamic Color ที่ใช้ค่า HSL เพื่อสร้างโทนสี Carbon/Cyan ที่พรีเมียม |
-
-### 📂 Directory Structure (รายละเอียดโครงสร้าง)
-- `/ai`: ส่วนควบคุมสมองกล (Orchestrator, Bridge logic สำหรับเชื่อมต่อ Live API เข้ากับ Tools)
-- `/data`: ชั้นสื่อสารกับ AI (Gemini Services, WebSocket Frame Handler)
-- `/tools`: ชุดทักษะของ AI (Financial API, Indicator Calculators, Long-term Memory)
-- `/ui`: ส่วนแสดงผล (Material 3, Custom Components, Theme System)
-
 ---
 
----
-
-## ⚙️ Setup & Installation
+## 🚀 Getting Started
 
 ### Prerequisites
-- Android Studio Iguana หรือเวอร์ชันใหม่กว่า
-- [Google AI Studio API Key](https://aistudio.google.com/app/apikey)
+- Android Studio Hedgehog+
+- Kotlin 2.0+
+- Google Gemini API Key ([Get here](https://aistudio.google.com/))
 
-### Steps
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-username/PersonalAIBot.git
-   ```
-2. **Setup API Key**
-   เปิดแอปขึ้นมาแล้วเข้าไปที่เมนู **Settings** จากนั้นนำ API Key จาก Google AI Studio มาใส่ให้เรียบร้อย
-3. **Build & Run**
-   เลือก Target เป็น Android หรือ iOS แล้วกด Run ได้เลย!
+### Setup
+1. Clone repository
+2. เปิดด้วย Android Studio
+3. ใส่ Gemini API Key ใน Settings Dialog ของแอป
+4. Build & Run บน Android device/emulator
 
----
-
-## 🔮 Future Roadmap
-- [ ] Hardening iOS Native Audio implementation.
-- [ ] Integration with advanced charting libraries for Technical Analysis.
-- [ ] Custom Voice Profiles (Voice cloning support).
-- [ ] Visual Intent (ใช้กล้องมือถือร่วมกับการสนทนาในโหมด Live).
+### Build
+```bash
+./gradlew :composeApp:assembleDebug
+```
 
 ---
 
-## 📄 License
-Disclaimer: โปรเจคนี้สร้างขึ้นเพื่อการศึกษาและการใช้งานส่วนบุคคล ข้อมูลจากการวิเคราะห์ทางการเงินไม่ใช่คำแนะนำในการลงทุน (Financial Advice) โปรดใช้วิจารณญาณในการตัดสินใจ
+## 📝 License
+
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
-*Created with ❤️ by Antigravity (Advanced AI Coding Assistant)*
+
+*Built with ❤️ using Kotlin Multiplatform + Gemini AI*

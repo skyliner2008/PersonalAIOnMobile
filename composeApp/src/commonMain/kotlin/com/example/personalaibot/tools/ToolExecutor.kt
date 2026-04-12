@@ -344,6 +344,8 @@ object ToolExecutor {
         "m/s" to 1.0, "ms" to 1.0,
         "km/h" to 1.0/3.6, "kph" to 1.0/3.6,
         "mph" to 0.44704,
-        "knot" to 0.514444
+        "knot" to 0.514444, "knots" to 0.514444,
+        "ft/s" to 0.3048, "fps" to 0.3048
     )
+
 }

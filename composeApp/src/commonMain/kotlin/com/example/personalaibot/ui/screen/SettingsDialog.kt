@@ -35,6 +35,7 @@ fun SettingsDialog(
     val currentLiveModel by viewModel.liveModelName.collectAsStateWithLifecycle()
     val currentVoice   by viewModel.voiceName.collectAsStateWithLifecycle()
     val availableModels  by viewModel.availableModels.collectAsStateWithLifecycle()
+    val isWidgetEnabled  by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
 
     var apiKey       by remember { mutableStateOf(currentApiKey) }
     var mainModel    by remember { mutableStateOf(currentModel) }
@@ -44,7 +45,7 @@ fun SettingsDialog(
     var liveExpanded by remember { mutableStateOf(false) }
     var voiceExpanded by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
-    var widgetActive by remember { mutableStateOf(false) }
+    var widgetActive by remember(isWidgetEnabled) { mutableStateOf(isWidgetEnabled) }
 
     // Filter live-compatible models
     val liveModels = availableModels.filter { model ->
@@ -301,6 +302,7 @@ fun SettingsDialog(
                         checked = widgetActive,
                         onCheckedChange = { active ->
                             widgetActive = active
+                            viewModel.setFloatingWidgetEnabled(active)
                             if (active) {
                                 onStartWidget()
                             } else {

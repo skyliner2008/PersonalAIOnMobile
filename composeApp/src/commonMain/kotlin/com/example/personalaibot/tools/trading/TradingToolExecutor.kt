@@ -8,10 +8,13 @@ import com.example.personalaibot.logDebug
 /**
  * TradingToolExecutor — รัน trading tool calls และ format ผลลัพธ์เป็น text
  * สำหรับส่งกลับให้ Gemini อ่านและอธิบายให้ผู้ใช้
+ *
+ * รองรับทั้ง Classic Trading Tools และ SMC (Smart Money Concepts) Tools
  */
 class TradingToolExecutor(private val client: HttpClient, private val geminiService: GeminiService) {
 
     private val api = TradingApiService(client)
+    private val smcExecutor = SmcToolExecutor(client)
 
     /**
      * Execute tool call และ return ผลลัพธ์เป็น String
@@ -31,6 +34,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "trading_sentiment"        -> executeSentiment(args)
             "trading_news"             -> executeNews(args)
             "trading_combined"         -> executeCombined(args)
+            // ─── SMC (Smart Money Concepts) Tools ─────────────────────────────
+            "trading_smc_analysis",
+            "trading_smc_sweeps",
+            "trading_smc_liquidity",
+            "trading_smc_orderblocks",
+            "trading_smc_structure"    -> smcExecutor.execute(toolName, args)
             else -> "ไม่พบ trading tool: $toolName"
         }
     }
@@ -112,9 +121,9 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
 
     private suspend fun executeTechnicalAnalysis(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol"
-        val exchange = args["exchange"] ?: "BINANCE"
+        val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
         val interval = args["interval"] ?: "1h"
-        val data = api.getTechnicalAnalysis(symbol, exchange, interval)
+        val data = api.getTechnicalAnalysis(symbol, resolvedExchange, interval)
 
         if (data.containsKey("error")) return "❌ TA error: ${data["error"]}"
 
@@ -158,8 +167,8 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
 
     private suspend fun executeMultiTimeframe(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol"
-        val exchange = args["exchange"] ?: "BINANCE"
-        val data = api.getMultiTimeframeAnalysis(symbol, exchange)
+        val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
+        val data = api.getMultiTimeframeAnalysis(symbol, resolvedExchange)
 
         return buildString {
             appendLine("⏱ **Multi-Timeframe Analysis — ${symbol.uppercase()}**")
@@ -313,47 +322,38 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             appendLine("")
             appendLine("─".repeat(45))
             appendLine("**🎯 Confluence Decision: $finalCall**")
-            appendLine(if (confluenceMatch) "✅ สัญญาณ TA + Sentiment ตรงกัน (confidence สูง)"
-                       else "⚠️ สัญญาณขัดแย้ง — ควร wait ยืนยันก่อน")
+            appendLine(if (confluenceMatch) "✅ TA และ Sentiment ยืนยันทิศทางเดียวกัน" else "⚠️ TA กับ Sentiment ขัดแย้งกัน — ใช้ความระวัง")
         }
     }
 
-    // ─── Helpers ────────────────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private fun formatScanResults(
-        title: String,
-        results: List<Map<String, String>>,
-        extraKey: String? = null
-    ): String {
-        if (results.firstOrNull()?.containsKey("error") == true) {
-            return "❌ ${results.first()["error"]}"
-        }
-        return buildString {
-            appendLine("$title")
-            appendLine("─".repeat(40))
-            results.take(20).forEachIndexed { i, row ->
-                val sym    = row["symbol"] ?: "?"
-                val desc   = row["description"] ?: sym
-                val change = row["change"] ?: "0.0"
-                val cap    = row["market_cap_basic"] ?: "N/A"
-                val extra  = if (extraKey != null) " | $extraKey: ${row[extraKey] ?: "N/A"}" else ""
-                val dir    = if ((change.toDoubleOrNull() ?: 0.0) >= 0) "▲" else "▼"
-                
-                // Premium format: Name (Symbol)
-                val displayName = if (desc != sym && desc.isNotBlank()) "**$desc** ($sym)" else "**$sym**"
-                val capStr = if (cap != "N/A") " | Cap: $cap" else ""
-                appendLine("${i+1}. $dir $displayName — $change%$capStr$extra")
-            }
-            appendLine("(${results.size} รายการ)")
-        }
-    }
-
-    private fun signalEmoji(signal: String): String = when (signal) {
+    private fun signalEmoji(signal: String) = when (signal) {
         "STRONG BUY"  -> "🟢🟢"
         "BUY"         -> "🟢"
         "HOLD"        -> "🟡"
         "SELL"        -> "🔴"
         "STRONG SELL" -> "🔴🔴"
-        else           -> "⚪"
+        else          -> "⚪"
+    }
+
+    private fun formatScanResults(
+        title: String,
+        results: List<Map<String, String>>,
+        extraKey: String? = null
+    ): String = buildString {
+        appendLine(title)
+        appendLine("─".repeat(title.length.coerceAtMost(40)))
+        if (results.isEmpty()) {
+            appendLine("ไม่พบข้อมูล")
+            return@buildString
+        }
+        results.forEachIndexed { i, row ->
+            val symbol  = row["symbol"] ?: row["name"] ?: "?"
+            val change  = row["change_pct"] ?: row["change"] ?: ""
+            val price   = row["price"] ?: row["close"] ?: ""
+            val extra   = if (extraKey != null) row[extraKey]?.let { " | $extraKey: $it" } ?: "" else ""
+            appendLine("${i + 1}. **$symbol** — $price $change$extra")
+        }
     }
 }

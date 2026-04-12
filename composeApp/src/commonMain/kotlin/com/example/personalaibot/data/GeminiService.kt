@@ -113,7 +113,7 @@ private const val JARVIS_SYSTEM_PROMPT = """คุณคือ JARVIS โฮส�
 class GeminiService(
     private val client: HttpClient,
     private var apiKey: String,
-    private var modelName: String = "gemini-3.1-flash"
+    private var modelName: String
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
