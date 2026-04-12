@@ -1,0 +1,189 @@
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 1: Working Memory — บทสนทนา
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ChatMessage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    metadata TEXT
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- App Settings
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AppSetting (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 1: Core Memory — ข้อมูลผู้ใช้ที่สำคัญ (always in context)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS CoreMemory (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 3: Archival Memory — ข้อมูลระยะยาว + Embedding vector
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ArchivalMemory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    embedding_json TEXT,         -- JSON array of floats (Gemini embedding)
+    source_role TEXT NOT NULL,   -- "user" | "model" | "system"
+    importance REAL NOT NULL DEFAULT 0.5,
+    timestamp INTEGER NOT NULL,
+    access_count INTEGER NOT NULL DEFAULT 0
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 4: GraphRAG — Knowledge Graph nodes
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS KnowledgeNode (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    node_type TEXT NOT NULL,     -- "person" | "place" | "concept" | "event" | "preference"
+    properties TEXT,             -- JSON
+    weight REAL NOT NULL DEFAULT 1.0,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 4: GraphRAG — Knowledge Graph edges (relations)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS KnowledgeEdge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES KnowledgeNode(id),
+    target_id INTEGER NOT NULL REFERENCES KnowledgeNode(id),
+    relation TEXT NOT NULL,      -- "likes" | "knows" | "works_at" | "dislikes" | etc.
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- User Profile — Jarvis รู้จักผู้ใช้
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS UserProfile (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field TEXT NOT NULL UNIQUE,  -- "name" | "language" | "occupation" | "interest" | ...
+    value TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.8,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ChatMessage
+-- ═══════════════════════════════════════════════════════════════
+insertMessage:
+INSERT INTO ChatMessage(role, content, timestamp, metadata)
+VALUES (?, ?, ?, ?);
+
+getRecentHistory:
+SELECT * FROM ChatMessage ORDER BY timestamp DESC LIMIT :limit;
+
+getHistoryAfter:
+SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp ASC;
+
+getOldMessages:
+SELECT * FROM ChatMessage ORDER BY timestamp ASC LIMIT :limit;
+
+deleteMessagesByIds:
+DELETE FROM ChatMessage WHERE id IN ?;
+
+deleteAllMessages:
+DELETE FROM ChatMessage;
+
+countMessages:
+SELECT COUNT(*) FROM ChatMessage;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: AppSetting
+-- ═══════════════════════════════════════════════════════════════
+getSetting:
+SELECT value FROM AppSetting WHERE key = ?;
+
+insertSetting:
+INSERT OR REPLACE INTO AppSetting(key, value)
+VALUES (?, ?);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: CoreMemory
+-- ═══════════════════════════════════════════════════════════════
+upsertCoreMemory:
+INSERT OR REPLACE INTO CoreMemory(key, value, updated_at)
+VALUES (?, ?, ?);
+
+getCoreMemory:
+SELECT * FROM CoreMemory ORDER BY updated_at DESC;
+
+getCoreMemoryByKey:
+SELECT value FROM CoreMemory WHERE key = ?;
+
+deleteCoreMemory:
+DELETE FROM CoreMemory WHERE key = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ArchivalMemory
+-- ═══════════════════════════════════════════════════════════════
+insertArchival:
+INSERT INTO ArchivalMemory(content, embedding_json, source_role, importance, timestamp)
+VALUES (?, ?, ?, ?, ?);
+
+getArchivalRecent:
+SELECT * FROM ArchivalMemory ORDER BY timestamp DESC LIMIT :limit;
+
+getArchivalByImportance:
+SELECT * FROM ArchivalMemory ORDER BY importance DESC LIMIT :limit;
+
+updateArchivalAccess:
+UPDATE ArchivalMemory SET access_count = access_count + 1 WHERE id = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: KnowledgeNode
+-- ═══════════════════════════════════════════════════════════════
+insertKnowledgeNode:
+INSERT OR IGNORE INTO KnowledgeNode(name, node_type, properties, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?);
+
+getNodeByName:
+SELECT * FROM KnowledgeNode WHERE name = ? LIMIT 1;
+
+updateKnowledgeNodeWeight:
+UPDATE KnowledgeNode SET weight = weight + :weightDelta, access_count = access_count + 1, updated_at = :updatedAt WHERE id = :id;
+
+getAllNodes:
+SELECT * FROM KnowledgeNode ORDER BY updated_at DESC LIMIT :limit;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: KnowledgeEdge
+-- ═══════════════════════════════════════════════════════════════
+insertKnowledgeEdge:
+INSERT OR IGNORE INTO KnowledgeEdge(source_id, target_id, relation, weight, created_at)
+VALUES (?, ?, ?, ?, ?);
+
+getEdgesFrom:
+SELECT ke.*, kn.name AS target_name, kn.node_type AS target_type
+FROM KnowledgeEdge ke
+JOIN KnowledgeNode kn ON ke.target_id = kn.id
+WHERE ke.source_id = ?;
+
+updateKnowledgeEdgeWeight:
+UPDATE KnowledgeEdge SET weight = weight + :weightDelta WHERE source_id = :sourceId AND target_id = :targetId;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: UserProfile
+-- ═══════════════════════════════════════════════════════════════
+upsertUserProfile:
+INSERT OR REPLACE INTO UserProfile(field, value, confidence, updated_at)
+VALUES (?, ?, ?, ?);
+
+getAllUserProfile:
+SELECT * FROM UserProfile ORDER BY field ASC;
+
+getUserProfileField:
+SELECT value FROM UserProfile WHERE field = ?;
