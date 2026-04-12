@@ -22,7 +22,8 @@ data class Message(val role: String, val content: String)
 
 class JarvisViewModel(
     driverFactory: DatabaseDriverFactory,
-    private val voiceManager: VoiceManager
+    private val voiceManager: VoiceManager,
+    private val fileHandler: (suspend (String, Map<String, String>) -> String)? = null
 ) : ViewModel() {
 
     private val database = createDatabase(driverFactory)
@@ -53,7 +54,14 @@ class JarvisViewModel(
     private val _availableModels = MutableStateFlow<List<GeminiModel>>(emptyList())
     val availableModels: StateFlow<List<GeminiModel>> = _availableModels.asStateFlow()
 
-    private val orchestrator = JarvisOrchestrator(client, memoryManager, "", defaultMainModel, defaultLiveModel)
+    private val orchestrator = JarvisOrchestrator(
+        client = client,
+        memoryManager = memoryManager,
+        apiKey = "",
+        modelName = defaultMainModel,
+        liveModelName = defaultLiveModel,
+        fileHandler = fileHandler
+    )
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()

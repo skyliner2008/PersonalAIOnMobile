@@ -1,5 +1,6 @@
 package com.example.personalaibot.ui.screen
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,7 +29,9 @@ fun SettingsDialog(
     viewModel: JarvisViewModel,
     onDismiss: () -> Unit,
     onStartWidget: () -> Unit = {},
-    onStopWidget: () -> Unit = {}
+    onStopWidget: () -> Unit = {},
+    requestAllFilesPermission: () -> Unit = {},
+    allFilesAccessGranted: Boolean = false
 ) {
     val currentApiKey    by viewModel.apiKey.collectAsStateWithLifecycle()
     val currentModel     by viewModel.selectedModel.collectAsStateWithLifecycle()
@@ -313,6 +316,57 @@ fun SettingsDialog(
                             checkedThumbColor = JarvisTheme.Card,
                             checkedTrackColor = JarvisTheme.Cyan
                         )
+                    )
+                }
+
+                HorizontalDivider(color = Color.White.copy(0.1f), modifier = Modifier.padding(vertical = 8.dp))
+                
+                // ── Permissions ──
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("สิทธิ์การเข้าถึง (Permissions)", color = JarvisTheme.Cyan.copy(0.8f), fontSize = 12.sp)
+                    Surface(
+                        color = if (allFilesAccessGranted) JarvisTheme.Cyan.copy(0.1f) else JarvisTheme.Red.copy(0.1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = if (allFilesAccessGranted) "  ได้รับสิทธิ์แล้ว  " else "  ยังไม่มีสิทธิ์  ",
+                            color = if (allFilesAccessGranted) JarvisTheme.Cyan else JarvisTheme.Red,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+                
+                Button(
+                    onClick = requestAllFilesPermission,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = JarvisTheme.Surface,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(0.1f))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📁 ขอสิทธิ์เข้าถึงไฟล์ทั้งหมด (All Files Access)", fontSize = 13.sp)
+                    }
+                }
+                
+                if (!allFilesAccessGranted) {
+                    Text(
+                        text = "💡 ขั้นตอน: กดปุ่มด้านบน -> หาชื่อ 'PersonalAIBot' ในรายการ -> กด 'อนุญาต' (Toggle ON)",
+                        color = Color.White.copy(0.5f),
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
 

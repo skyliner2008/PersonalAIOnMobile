@@ -42,6 +42,7 @@ enum class ToolCategory(val label: String, val color: Color) {
     BUILTIN("Built-in",     Color(0xFF00E5FF)),
     TRADING("Trading",      Color(0xFF00C853)),
     SMC    ("SMC",          Color(0xFFFF6D00)),
+    FILE   ("Files",        Color(0xFFFDD835)),
     SYSTEM ("System",       Color(0xFF7C4DFF))
 }
 
@@ -193,6 +194,43 @@ private val ALL_TOOLS = listOf(
         "BOS / CHoCH detection + Premium/Discount zones (Pure SMC)",
         listOf("BOS: Break of Structure (ยืนยัน trend)", "CHoCH: Change of Character (Trend Reversal!)", "Premium zone ≥75% = แพง, ควร Short", "Discount zone ≤25% = ถูก, ควร Long", "Equilibrium 50% = จุดสมดุล", "% ของ range ที่ราคาอยู่"),
         listOf("Structure BTC 4h", "BOS หรือ CHoCH ETHUSDT?", "ราคาอยู่ใน premium หรือ discount?")
+    ),
+
+    // ── File Management Tools ──────────────────────────────────────────────
+    ToolInfo("file_list", "File Browser", ToolCategory.FILE, "📂",
+        "เรียกดูรายการไฟล์และโฟลเดอร์ในเครื่อง",
+        listOf("แสดงไฟล์ทั้งหมดในโฟลเดอร์", "แยกแยะประเภท [DIR] และ [FILE]", "แสดงขนาดไฟล์เบื้องต้น"),
+        listOf("ดูไฟล์ในโฟลเดอร์ Download", "มีอะไรอยู่ใน /sdcard/Documents?")
+    ),
+    ToolInfo("file_read", "File Reader", ToolCategory.FILE, "📄",
+        "อ่านเนื้อหาไฟล์ข้อความ (Text, MD, CSV, JSON)",
+        listOf("อ่านไฟล์ text ได้ทุกประเภท", "รองรับ UTF-8", "แสดงเนื้อหาทั้งหมดในแชท"),
+        listOf("อ่านไฟล์ note.txt ให้หน่อย", "ขอเนื้อหาในไฟล์ logs.csv")
+    ),
+    ToolInfo("file_write", "File Creator", ToolCategory.FILE, "📝",
+        "สร้างไฟล์ใหม่หรือเขียนทับไฟล์เดิม",
+        listOf("สร้างไฟล์พร้อมเนื้อหา", "สร้างโฟลเดอร์ให้อัตโนมัติ", "แก้ไขข้อมูลในไฟล์"),
+        listOf("สร้างไฟล์ชื่อ hello.txt ใน Download", "เขียนสรุปการประชุมลงไฟล์ summary.md")
+    ),
+    ToolInfo("file_delete", "File Delete", ToolCategory.FILE, "🗑️",
+        "ลบไฟล์หรือโฟลเดอร์ที่ไม่ต้องการ",
+        listOf("ลบไฟล์เดี่ยว", "ลบทั้งโฟลเดอร์ (Recursive)", "ประหยัดพื้นที่จัดเก็บ"),
+        listOf("ลบไฟล์ขยะใน Download", "ลบโฟลเดอร์ test_data")
+    ),
+    ToolInfo("file_analyze", "Deep Analyzer", ToolCategory.FILE, "🧠",
+        "วิเคราะห์ไฟล์เอกสาร PDF, Word และรูปภาพด้วย Gemini",
+        listOf("สรุปเนื้อหา PDF", "อ่านไฟล์ Word (.docx)", "แกะข้อความจากรูปภาพ (OCR)", "ส่งไฟล์วิเคราะห์แบบ Native"),
+        listOf("สรุปไฟล์รายงาน.pdf ให้หน่อย", "วิเคราะห์รูปภาพนี้มีอะไรบ้าง?")
+    ),
+    ToolInfo("file_move", "File Organizer", ToolCategory.FILE, "🚚",
+        "ย้ายตำแหน่งไฟล์หรือเปลี่ยนชื่อไฟล์",
+        listOf("ย้ายไฟล์ข้ามโฟลเดอร์", "เปลี่ยนชื่อไฟล์ (Rename)", "จัดระเบียบข้อมูล"),
+        listOf("ย้ายภาพจาก Download ไปที่ Pictures", "เปลี่ยนชื่อ old_name.txt เป็น new_name.txt")
+    ),
+    ToolInfo("file_search", "File Search", ToolCategory.FILE, "🔍",
+        "ค้นหาไฟล์ทั่วทั้งเครื่องด้วยชื่อหรือนามสกุล",
+        listOf("ค้นหาด้วย Keyword", "กรองตามนามสกุลไฟล์", "ค้นในโฟลเดอร์มาตรฐานอัตโนมัติ"),
+        listOf("ช่วยหาไฟล์ที่มีคำว่า 'invoice'", "ค้นหาไฟล์ .pdf ในเครื่องให้หน่อย")
     )
 )
 

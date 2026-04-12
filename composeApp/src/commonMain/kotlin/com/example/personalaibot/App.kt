@@ -34,10 +34,13 @@ fun App(
     onStopWidget: () -> Unit = {},
     onSetWidgetListening: (Boolean) -> Unit = {},
     registerToggleLive: (() -> Unit) -> Unit = {},
-    registerWidgetClosed: (() -> Unit) -> Unit = {}
+    registerWidgetClosed: (() -> Unit) -> Unit = {},
+    requestAllFilesPermission: () -> Unit = {},
+    allFilesAccessGranted: Boolean = false,
+    fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null
 ) {
     val viewModel: JarvisViewModel = viewModel {
-        JarvisViewModel(databaseDriverFactory, voiceManager)
+        JarvisViewModel(databaseDriverFactory, voiceManager, fileToolHandler)
     }
     val messages       by viewModel.messages.collectAsStateWithLifecycle()
     val isTyping       by viewModel.isTyping.collectAsStateWithLifecycle()
@@ -166,7 +169,9 @@ fun App(
                 viewModel = viewModel,
                 onDismiss = { showSettings = false },
                 onStartWidget = onStartWidget,
-                onStopWidget = onStopWidget
+                onStopWidget = onStopWidget,
+                requestAllFilesPermission = requestAllFilesPermission,
+                allFilesAccessGranted = allFilesAccessGranted
             )
         }
 

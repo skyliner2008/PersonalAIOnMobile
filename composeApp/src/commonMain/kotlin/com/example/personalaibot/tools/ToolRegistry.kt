@@ -2,6 +2,7 @@ package com.example.personalaibot.tools
 
 import com.example.personalaibot.tools.trading.TradingToolDefinitions
 import com.example.personalaibot.tools.trading.SmcToolDefinitions
+import com.example.personalaibot.tools.file.FileToolDefinitions
 
 object ToolRegistry {
 
@@ -133,10 +134,15 @@ object ToolRegistry {
     private val _smcTools: Map<String, FunctionDeclaration> =
         SmcToolDefinitions.allDefinitions.associateBy { it.name }
 
+    // ─── File Management Tools ───────────────────────────────────────────────
+    private val _fileTools: Map<String, FunctionDeclaration> =
+        FileToolDefinitions.allDefinitions.associateBy { it.name }
+
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
                                               _smcTools.values.toList() +
+                               _fileTools.values.toList() +
                                _customTools.values.toList() +
                                _skills.values.map { skill ->
                                    FunctionDeclaration(
@@ -148,10 +154,13 @@ object ToolRegistry {
     )
 
     fun allToolNames(): Set<String> =
-        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _customTools.keys + _skills.keys
+        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _fileTools.keys + _customTools.keys + _skills.keys
 
     fun isTradingTool(name: String): Boolean =
         name in _tradingTools || name in _smcTools
+
+    fun isFileTool(name: String): Boolean =
+        name in _fileTools
 
     fun getSkill(name: String): SkillDescriptor? = _skills[name]
 

@@ -43,7 +43,14 @@ data class GeminiContent(
 data class Part(
     val text: String? = null,
     val functionCall: JsonObject? = null,
-    val functionResponse: JsonObject? = null
+    val functionResponse: JsonObject? = null,
+    val inlineData: InlineData? = null
+)
+
+@Serializable
+data class InlineData(
+    val mimeType: String,
+    val data: String // Base64
 )
 
 @Serializable
@@ -146,7 +153,8 @@ class GeminiService(
         enableGrounding: Boolean = false,
         includeFunctionTools: Boolean = false,
         extraContents: List<JsonObject> = emptyList(),
-        forceTool: Boolean = false
+        forceTool: Boolean = false,
+        fileData: List<InlineData> = emptyList()
     ): JsonObject {
         val systemPrompt = buildString {
             append(JARVIS_SYSTEM_PROMPT)
@@ -166,7 +174,19 @@ class GeminiService(
             }
             add(buildJsonObject {
                 put("role", "user")
-                put("parts", buildJsonArray { add(buildJsonObject { put("text", userMessage) }) })
+                put("parts", buildJsonArray { 
+                    // Add files first (recommended by Google for better context)
+                    fileData.forEach { file ->
+                        add(buildJsonObject {
+                            put("inline_data", buildJsonObject {
+                                put("mime_type", file.mimeType)
+                                put("data", file.data)
+                            })
+                        })
+                    }
+                    // Add text prompt
+                    add(buildJsonObject { put("text", userMessage) }) 
+                })
             })
             extraContents.forEach { add(it) }
         }
@@ -274,6 +294,7 @@ class GeminiService(
         }
 
         val toolHistory = mutableListOf<JsonObject>()
+        val pendingFiles = mutableListOf<InlineData>()
         var round = 1
         val maxRounds = 5
 
@@ -292,8 +313,12 @@ class GeminiService(
                     enableGrounding = enableGrounding,
                     includeFunctionTools = true,
                     forceTool = forceTool && round == 1, // บังคับเฉพาะรอบแรก
-                    extraContents = toolHistory
+                    extraContents = toolHistory,
+                    fileData = pendingFiles
                 )
+                
+                // Clear pending files after sending them
+                pendingFiles.clear()
 
                 var foundFunctionCall = false
                 val currentRoundFunctionCalls = mutableListOf<DetectedFunctionCall>()
@@ -372,14 +397,43 @@ class GeminiService(
                             com.example.personalaibot.tools.ToolResult(fc.name, "Error: ${e.message}", true)
                         }
                         
-                        toolResponseParts.add(buildJsonObject {
-                            put("functionResponse", buildJsonObject {
-                                put("name", fc.name)
-                                put("response", buildJsonObject {
-                                    put("result", toolResult.result)
+                        logDebug("GeminiService", "✅ Tool Result: ${toolResult.result}")
+
+                        // Intercept Binary Files for Native Processing
+                        if (toolResult.result.startsWith("GEMINI_FILE::")) {
+                            try {
+                                val mime = toolResult.result.substringAfter("mime=").substringBefore("::data=")
+                                val base64 = toolResult.result.substringAfter("::data=")
+                                pendingFiles.add(InlineData(mime, base64))
+                                
+                                toolResponseParts.add(buildJsonObject {
+                                    put("functionResponse", buildJsonObject {
+                                        put("name", fc.name)
+                                        put("response", buildJsonObject {
+                                            put("result", "Binary file ($mime) detected and attached for multi-modal analysis. Please analyze its content in the next turn.")
+                                        })
+                                    })
+                                })
+                            } catch (e: Exception) {
+                                toolResponseParts.add(buildJsonObject {
+                                    put("functionResponse", buildJsonObject {
+                                        put("name", fc.name)
+                                        put("response", buildJsonObject {
+                                            put("result", "Error parsing binary file data: ${e.message}")
+                                        })
+                                    })
+                                })
+                            }
+                        } else {
+                            toolResponseParts.add(buildJsonObject {
+                                put("functionResponse", buildJsonObject {
+                                    put("name", fc.name)
+                                    put("response", buildJsonObject {
+                                        put("result", toolResult.result)
+                                    })
                                 })
                             })
-                        })
+                        }
                     }
 
                     // Update History for next round
@@ -458,7 +512,8 @@ class GeminiService(
         history: List<ConversationTurn> = emptyList(),
         intentAddon: String = "",
         coreContext: String = "",
-        enableGrounding: Boolean = false
+        enableGrounding: Boolean = false,
+        fileData: List<InlineData> = emptyList()
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
             emit("⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน")
@@ -467,7 +522,7 @@ class GeminiService(
         try {
             client.preparePost(streamGenerateContentUrl()) {
                 contentType(ContentType.Application.Json)
-                setBody(buildRequestJson(prompt, history, intentAddon, coreContext, enableGrounding))
+                setBody(buildRequestJson(prompt, history, intentAddon, coreContext, enableGrounding, fileData = fileData))
             }.execute { res ->
                 val channel = res.bodyAsChannel()
                 while (!channel.isClosedForRead) {
@@ -485,6 +540,18 @@ class GeminiService(
             }
         } catch (e: Exception) { emit("⚠️ Error: ${e.message}") }
     }
+
+    /**
+     * วิเคราะห์ไฟล์แบบ Native ผ่าน Gemini API
+     */
+    fun generateResponseWithFile(
+        prompt: String,
+        mimeType: String,
+        base64Data: String
+    ): Flow<String> = generateResponseFlow(
+        prompt = prompt,
+        fileData = listOf(InlineData(mimeType, base64Data))
+    )
 
     private fun extractAllTextFromResp(response: GeminiResponse): String = buildString {
         response.candidates?.forEach { it.content?.parts?.forEach { part -> part.text?.let { append(it) } } }

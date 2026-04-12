@@ -39,6 +39,8 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.sqldelight.android.driver)
             implementation(libs.ktor.client.okhttp)
+            
+            // File Analysis is now handled natively by Gemini API
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

@@ -15,6 +15,7 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class LiveToolBridge(
@@ -24,6 +25,8 @@ class LiveToolBridge(
 ) {
     private val _activeToolName = MutableStateFlow<String?>(null)
     val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
+
+    private var collectionJob: Job? = null
 
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
         logDebug("LiveBridge", "▶ Path A: ${event.name}(${event.args})")
@@ -182,31 +185,54 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                     intentAddon = "สรุปอย่างเดียว ห้ามอธิบายการกระทำของคุณ"
                 )
             }
+            resultData.startsWith("GEMINI_FILE::") -> {
+                val mime = resultData.substringAfter("mime=").substringBefore("::data=")
+                val data = resultData.substringAfter("::data=")
+                logDebug("LiveBridge", "Intercept file: $mime")
+                val chunks = StringBuilder()
+                try {
+                    geminiService.generateResponseWithFile(
+                        prompt = "ช่วยสรุปเนื้อหาสำคัญของไฟล์นี้ให้หน่อย",
+                        mimeType = mime,
+                        base64Data = data
+                    ).collect { chunks.append(it) }
+                    chunks.toString()
+                } catch (e: Exception) {
+                    "เกิดข้อผิดพลาดในการวิเคราะห์ไฟล์: ${e.message}"
+                }
+            }
             else -> resultData
         }
     }
 
     fun startCollecting(memoryContextProvider: () -> String) {
-        scope.launch {
-            liveService.nativeToolCallFlow.collect { event ->
-                try {
-                    handleNativeToolCall(event, memoryContextProvider())
-                } catch (e: Exception) {
-                    logError("LiveBridge", "Native tool handling error", e)
+        // เคลียร์ Job เก่าออกก่อนเพื่อป้องกันการเรียก Tool ซ้ำซ้อน (Duplicate Collectors)
+        collectionJob?.cancel()
+        
+        collectionJob = scope.launch {
+            // Path A: Native Tool Calls (Function Calling)
+            launch {
+                liveService.nativeToolCallFlow.collect { event ->
+                    try {
+                        handleNativeToolCall(event, memoryContextProvider())
+                    } catch (e: Exception) {
+                        logError("LiveBridge", "Native tool handling error", e)
+                    }
+                }
+            }
+
+            // Path B: Bridge Tool Requests (Model text instructions)
+            launch {
+                liveService.toolRequestFlow.collect { intentText ->
+                    try {
+                        handleBridgeRequest(intentText, memoryContextProvider())
+                    } catch (e: Exception) {
+                        logError("LiveBridge", "Bridge tool handling error", e)
+                    }
                 }
             }
         }
 
-        scope.launch {
-            liveService.toolRequestFlow.collect { intentText ->
-                try {
-                    handleBridgeRequest(intentText, memoryContextProvider())
-                } catch (e: Exception) {
-                    logError("LiveBridge", "Bridge tool handling error", e)
-                }
-            }
-        }
-
-        logDebug("LiveBridge", "✅ Bridge collectors started (Path A + Path B)")
+        logDebug("LiveBridge", "✅ Bridge collectors started (Cleaned & Restarted)")
     }
 }

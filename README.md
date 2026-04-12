@@ -37,7 +37,13 @@
 - **Sentiment** — Reddit + Financial News scraping
 - **Multi-Timeframe** — M1 → D1 sweep analysis
 
-### 🔧 6. Floating Widget
+
+### 📁 6. Advanced Android File Management
+- **Autonomous File Agent** — จัดการไฟล์ได้เหมือนมนุษย์ (List, Read, Write, Move, Delete)
+- **Native Document Processing** — วิเคราะห์เอกสาร (PDF, Word, Excel) และรูปภาพ (OCR) โดยส่งไฟล์ตรงให้สมองของ Gemini แบบ Base64 ไม่ต้องพึ่งพา Library ภายนอก
+- **Intelligent Path Resolution** — แปลง Virtual Path (`/sdcard/`) เป็น System Path (`/storage/emulated/0/`) อัตโนมัติ
+
+### 🔧 7. Floating Widget
 - ทำงานแบบพื้นหลัง — กดปุ่มลอยเพื่อ toggle Live Mode ได้ทุกที่
 
 ---
@@ -71,7 +77,7 @@
 
 ## 📦 Tool Catalogue
 
-ระบบมีเครื่องมือทั้งหมด **28 tools** แบ่งเป็น 4 หมวดหมู่ สามารถดูได้ผ่านปุ่ม **⊞** (Apps icon) ใน TopBar
+ระบบมีเครื่องมือทั้งหมด **35 tools** แบ่งเป็น 5 หมวดหมู่ สามารถดูได้ผ่านปุ่ม **⊞** (Apps icon) ใน TopBar
 
 ---
 
@@ -216,57 +222,91 @@
 - Equilibrium (50%) — จุดสมดุล
 - **ตัวอย่าง**: "structure BTC 4h", "BOS หรือ CHoCH ETHUSDT", "ราคาอยู่ใน premium หรือ discount"
 
+
+---
+
+### 📂 FILE MANAGEMENT TOOLS (7 tools)
+
+#### 21. `file_list` — เลือกดูรายการไฟล์
+เรียกดูรายชื่อไฟล์และโฟลเดอร์ในตำแหน่งที่กำหนด
+- แยกประเภทโฟลเดอร์ และไฟล์ชัดเจน พร้อมระบุขนาด
+- **ตัวอย่าง**: "ดูไฟล์ในโฟลเดอร์ Download", "มีอะไรอยู่ใน Documents"
+
+#### 22. `file_read` — อ่านไฟล์ข้อความ
+เปิดอ่านเนื้อหาในไฟล์ (txt, md, csv, json, log)
+- **ตัวอย่าง**: "อ่านไฟล์ note.txt", "ขอเนื้อหาในไฟล์ logs.csv"
+
+#### 23. `file_write` — สร้าง/แก้ไขไฟล์
+สร้างไฟล์ใหม่ หรือเขียนทับข้อมูลลงในไฟล์เดิม
+- **ตัวอย่าง**: "สร้างไฟล์ memo.txt", "เขียนสรุปงานลง summary.md"
+
+#### 24. `file_delete` — ลบไฟล์/โฟลเดอร์
+ลบข้อมูลที่ไม่ต้องการออกจากเครื่อง (Recursive delete สำหรับโฟลเดอร์)
+- **ตัวอย่าง**: "ลบไฟล์ temp.txt", "ลบโฟลเดอร์ junk_folder"
+
+#### 25. `file_analyze` — วิเคราะห์เอกสารเชิงลึก
+ส่งไฟล์ PDF, Word หรือรูปภาพให้ Gemini วิเคราะห์แบบ Native (Multimodal)
+- **ตัวอย่าง**: "สรุปไฟล์รายงาน.pdf", "แกะข้อความจากรูปนี้ให้หน่อย"
+
+#### 26. `file_move` — จัดระเบียบไฟล์
+ย้านตำแหน่งไฟล์ หรือใช้สำหรับ Rename เปลี่ยนชื่อไฟล์
+- **ตัวอย่าง**: "ย้ายไฟล์งานไปที่ Documents", "เปลี่ยนชื่อ old.txt เป็น new.txt"
+
+#### 27. `file_search` — ค้นหาไฟล์อัจฉริยะ
+ค้นหาไฟล์ทั่วเครื่องด้วย Keyword หรือนามสกุลไฟล์
+- **ตัวอย่าง**: "หาไฟล์ที่มีคำว่า invoice", "หาไฟล์ .pdf ทั้งหมด"
+
 ---
 
 ### ⚙️ SYSTEM TOOLS (8 tools)
 
-#### 21. `system_status` — System Monitor
+#### 28. `system_status` — System Monitor
 ตรวจสอบสถานะระบบและการตั้งค่าทั้งหมด
 - Model ที่ใช้งาน, Memory usage
 - Tools ที่ active, Session info
 - **ตัวอย่าง**: "สถานะระบบตอนนี้", "ใช้โมเดลอะไรอยู่"
 
-#### 22. `skill_manager` — Skill Manager
+#### 29. `skill_manager` — Skill Manager
 จัดการ Skills (Custom AI agents) ในระบบ
 - ดู Skills ที่มีอยู่, เปิด/ปิด Skill
 - ดู trigger keywords, system prompt addon
 - **ตัวอย่าง**: "Skills ที่มีอยู่มีอะไรบ้าง", "เปิด skill trading"
 
-#### 23. `image_analyzer` — Image Analyzer
+#### 30. `image_analyzer` — Image Analyzer
 วิเคราะห์รูปภาพด้วย Gemini Vision
 - อธิบายภาพ, อ่านข้อความในรูป (OCR)
 - วิเคราะห์กราฟ chart จากภาพ
 - **ตัวอย่าง**: "อธิบายรูปนี้", "อ่านข้อความในภาพ", "วิเคราะห์ chart นี้"
 
-#### 24. `code_executor` — Code Runner
+#### 31. `code_executor` — Code Runner
 รันโค้ด Python/JavaScript ได้โดยตรง
 - คำนวณ, data processing
 - ทดสอบ algorithm, script อัตโนมัติ
 - **ตัวอย่าง**: "รันโค้ด Python นี้", "คำนวณ fibonacci 20 ตัว"
 
-#### 25. `file_manager` — File Manager
-จัดการไฟล์และโฟลเดอร์ในอุปกรณ์
-- อ่าน สร้าง แก้ไข ลบไฟล์
-- ค้นหาไฟล์ด้วย pattern
-- **ตัวอย่าง**: "ดูไฟล์ใน Downloads", "สร้างไฟล์ note.txt"
 
-#### 26. `app_controller` — App Controller
+#### 32. `app_controller` — App Controller
 ควบคุม app และระบบ Android
 - เปิด/ปิด app, ปรับ settings
 - ส่ง notification, ดู app list
 - **ตัวอย่าง**: "เปิด Spotify", "ลด volume ลง 20%"
 
-#### 27. `reminder_scheduler` — Reminder & Scheduler
+#### 33. `reminder_scheduler` — Reminder & Scheduler
 ตั้งการแจ้งเตือนและกำหนดการ
 - Reminder แบบครั้งเดียว/ซ้ำ
 - Calendar event, deadline tracker
 - **ตัวอย่าง**: "เตือนฉันทุกเช้า 8 โมง", "ตั้ง reminder ประชุม พรุ่งนี้ 14:00"
 
-#### 28. `custom_skill_trigger` — Custom Skill Trigger
+#### 34. `custom_skill_trigger` — Custom Skill Trigger
 เรียกใช้ Custom Skills ที่ผู้ใช้สร้างเอง
 - Trigger ด้วย keyword หรือชื่อ skill โดยตรง
 - รองรับ skill แบบ chain (multi-step)
 - **ตัวอย่าง**: "เรียกใช้ skill ของฉัน", "run skill:trading_journal"
+
+#### 35. `system_diagnostics` — System Diagnostics
+ตรวจสอบสถานะเครื่องและทรัพยากร
+- CPU, RAM, Battery, Storage info
+- **ตัวอย่าง**: "เช็คสถานะเครือง", "ความจำเหลือเท่าไหร่?"
 
 ---
 

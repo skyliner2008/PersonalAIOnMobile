@@ -18,6 +18,7 @@ sqlDelight = "2.0.2"
 coroutines = "1.10.1"
 kotlinx-datetime = "0.6.2"
 kotlinx-serialization = "1.8.0"
+# File analysis is now handled natively via Gemini API
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -51,6 +52,7 @@ sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", versi
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+# Native Gemini processing used instead
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

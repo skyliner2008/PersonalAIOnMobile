@@ -18,7 +18,8 @@ class JarvisOrchestrator(
     private val memoryManager: JarvisMemoryManager,
     private var apiKey: String,
     private var modelName: String,
-    private var liveModelName: String
+    private var liveModelName: String,
+    private val fileHandler: (suspend (String, Map<String, String>) -> String)? = null
 ) {
     private val geminiService = GeminiService(client, apiKey, modelName)
     private val liveService   = LiveGeminiService(client, apiKey, liveModelName)
@@ -27,6 +28,8 @@ class JarvisOrchestrator(
     init {
         // เชื่อม HttpClient + GeminiService เข้ากับ TradingToolExecutor
         com.example.personalaibot.tools.ToolExecutor.init(client, geminiService)
+        // เชื่อม File handler (Platform specific)
+        fileHandler?.let { com.example.personalaibot.tools.ToolExecutor.initFileHandler(it) }
     }
 
     private val toolBridge = LiveToolBridge(

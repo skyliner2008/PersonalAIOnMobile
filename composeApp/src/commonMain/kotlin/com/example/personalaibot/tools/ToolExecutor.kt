@@ -17,8 +17,15 @@ object ToolExecutor {
     // TradingToolExecutor จะถูก initialize เมื่อ HttpClient พร้อม
     private var _tradingExecutor: TradingToolExecutor? = null
 
+    // Bridge สำหรับ File Management (Platform specific)
+    private var _fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null
+
     fun init(client: HttpClient, geminiService: com.example.personalaibot.data.GeminiService) {
         _tradingExecutor = TradingToolExecutor(client, geminiService)
+    }
+
+    fun initFileHandler(handler: suspend (String, Map<String, String>) -> String) {
+        _fileToolHandler = handler
     }
 
     /**
@@ -34,6 +41,11 @@ object ToolExecutor {
                     val trader = _tradingExecutor
                         ?: return ToolResult(call.name, "⚠️ Trading module ยังไม่พร้อม กรุณาตั้งค่า API Key ก่อน", true)
                     trader.execute(call.name, call.args)
+                }
+                // ─── File Management Tools ─────────────────────────────────
+                ToolRegistry.isFileTool(call.name) -> {
+                    _fileToolHandler?.invoke(call.name, call.args)
+                        ?: "⚠️ ระบบจัดการไฟล์ยังไม่พร้อม หรือยังไม่ได้รับ Permission"
                 }
                 // ─── Built-in Tools ────────────────────────────────────────
                 else -> when (call.name) {

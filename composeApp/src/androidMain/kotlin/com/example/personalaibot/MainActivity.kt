@@ -17,9 +17,11 @@ import com.example.personalaibot.db.DatabaseDriverFactory
 import com.example.personalaibot.service.FloatingWidgetService
 import com.example.personalaibot.service.JarvisService
 import com.example.personalaibot.voice.VoiceManager
+import com.example.personalaibot.tools.file.FileToolExecutor
 
 import android.media.AudioManager
 import android.content.Context
+import android.os.Environment
 
 class MainActivity : ComponentActivity() {
 
@@ -48,6 +50,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ขอ MANAGE_EXTERNAL_STORAGE สำหรับ All Files Access (Android 11+)
+    private val allFilesPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        updatePermissionStatus()
+    }
+
+    private val _allFilesAccessGranted = androidx.compose.runtime.mutableStateOf(false)
+
+    private fun updatePermissionStatus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            _allFilesAccessGranted.value = Environment.isExternalStorageManager()
+        } else {
+            // Android 10 and below use standard runtime permissions
+            _allFilesAccessGranted.value = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePermissionStatus()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.dark(
@@ -74,6 +101,7 @@ class MainActivity : ComponentActivity() {
 
         val driverFactory = DatabaseDriverFactory(applicationContext)
         voiceManager = VoiceManager(applicationContext)
+        val fileToolExecutor = FileToolExecutor(applicationContext)
 
         checkAndRequestPermissions()
 
@@ -97,6 +125,13 @@ class MainActivity : ComponentActivity() {
                 },
                 registerWidgetClosed = { callback ->
                     onWidgetClosedCallback = callback
+                },
+                requestAllFilesPermission = {
+                    requestAllFilesPermission()
+                },
+                allFilesAccessGranted = _allFilesAccessGranted.value,
+                fileToolHandler = { name, args ->
+                    fileToolExecutor.execute(name, args)
                 }
             )
         }
@@ -167,4 +202,16 @@ class MainActivity : ComponentActivity() {
     fun canDrawOverlay(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this)
         else true
+
+    fun requestAllFilesPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                allFilesPermissionLauncher.launch(intent)
+            }
+        }
+    }
 }
