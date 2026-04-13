@@ -39,7 +39,13 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.sqldelight.android.driver)
             implementation(libs.ktor.client.okhttp)
-            
+
+            // CameraX
+            implementation(libs.camerax.core)
+            implementation(libs.camerax.camera2)
+            implementation(libs.camerax.lifecycle)
+            implementation(libs.camerax.view)
+
             // File Analysis is now handled natively by Gemini API
         }
         commonMain.dependencies {
@@ -106,8 +112,4 @@ sqldelight {
             packageName.set("com.example.personalaibot.db")
         }
     }
-}
-
-dependencies {
-    debugImplementation(libs.compose.uiTooling)
 }

@@ -18,6 +18,7 @@ sqlDelight = "2.0.2"
 coroutines = "1.10.1"
 kotlinx-datetime = "0.6.2"
 kotlinx-serialization = "1.8.0"
+camerax = "1.4.1"
 # File analysis is now handled natively via Gemini API
 
 [libraries]
@@ -52,6 +53,10 @@ sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", versi
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+camerax-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 # Native Gemini processing used instead
 
 [plugins]

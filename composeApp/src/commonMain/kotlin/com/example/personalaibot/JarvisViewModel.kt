@@ -3,15 +3,22 @@ package com.example.personalaibot
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.personalaibot.ai.JarvisOrchestrator
+import com.example.personalaibot.camera.CameraAnalysisService
+import com.example.personalaibot.camera.CameraMode
+import com.example.personalaibot.camera.CameraProviderType
 import com.example.personalaibot.data.GeminiModel
 import com.example.personalaibot.db.DatabaseDriverFactory
 import com.example.personalaibot.db.createDatabase
 import com.example.personalaibot.memory.JarvisMemoryManager
 import com.example.personalaibot.voice.PcmAudioEngine
 import com.example.personalaibot.voice.VoiceManager
+import com.example.personalaibot.tools.ToolExecutor
+import com.example.personalaibot.tools.camera.CameraToolExecutor
 import io.ktor.util.encodeBase64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,11 +89,115 @@ class JarvisViewModel(
     val floatingWidgetEnabled: StateFlow<Boolean> = _floatingWidgetEnabled.asStateFlow()
 
     private val maxContextTurns = 10
+    
+    // ─── Camera Analysis System ──────────────────────────────────────────────
+    val cameraService = CameraAnalysisService(client)
+
+    private val _isCameraActive = MutableStateFlow(false)
+    val isCameraActive: StateFlow<Boolean> = _isCameraActive.asStateFlow()
+
+    private val _isFrontCamera = MutableStateFlow(false)
+    val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
+
+    private val _isMuted = MutableStateFlow(false)
+    val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
+
+    private val _showCameraScreen = MutableStateFlow(false)
+    val showCameraScreen: StateFlow<Boolean> = _showCameraScreen.asStateFlow()
+
+    private var cameraFrameJob: Job? = null
+    
+    private val _isUserSpeaking = MutableStateFlow(false)
+    val isUserSpeaking: StateFlow<Boolean> = _isUserSpeaking.asStateFlow()
+
+    private val _isAiVisionRequested = MutableStateFlow(false)
+    val isAiVisionRequested: StateFlow<Boolean> = _isAiVisionRequested.asStateFlow()
+
+    private var visionTimeoutJob: Job? = null
+    
+    /** เก็บคำสั่งสุดท้ายของผู้ใช้ที่ยังทำไม่เสร็จตอนเปลี่ยนเสียง เพื่อนำไปสั่ง AI ต่อทันทีที่เชื่อมต่อใหม่ */
+    private var pendingCommandAfterVoiceChange: String? = null
+
+    private val pcmAudioEngine = PcmAudioEngine()
+
+    private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
 
     init {
+        // Bridge camera frames to the unified Live session in the orchestrator
+        cameraService.onLiveFrameReady = { jpegBase64 ->
+            orchestrator.sendLiveCameraFrame(jpegBase64)
+        }
+
+        // Initialize Camera Tool Executor
+        ToolExecutor.initCameraExecutor(CameraToolExecutor(cameraService))
+
+        // Bridge speech state to camera service for Adaptive Vision (Token Saving)
+        pcmAudioEngine.onVolumeChanged = { volume ->
+            val speaking = volume > speechThreshold
+            if (speaking != _isUserSpeaking.value) {
+                _isUserSpeaking.value = speaking
+                cameraService.isUserSpeaking = speaking
+            }
+        }
+
+        // Bridge AI vision request to camera service with safety timeout
+        orchestrator.setAiVisionToggle { active ->
+            if (active) {
+                _isAiVisionRequested.value = true
+                cameraService.isAiVisionRequested = true
+                
+                // Auto-stop AI-Vision flag after 60s safety timeout
+                visionTimeoutJob?.cancel()
+                visionTimeoutJob = viewModelScope.launch {
+                    delay(60000)
+                    _isAiVisionRequested.value = false
+                    cameraService.isAiVisionRequested = false
+                    // Only stop service if manual preview is also off
+                    if (!_isCameraActive.value) {
+                        cameraService.stop()
+                    }
+                }
+                cameraService.start()
+            } else {
+                visionTimeoutJob?.cancel()
+                _isAiVisionRequested.value = false
+                cameraService.isAiVisionRequested = false
+                // Only stop service if manual preview is also off
+                if (!_isCameraActive.value) {
+                    cameraService.stop()
+                }
+            }
+        }
+
+        // --- AI-Controlled Voice Change ---
+        orchestrator.setVoiceChangeHandler { newVoice ->
+            viewModelScope.launch {
+                // เก็บคำถามล่าสุดของผู้ใช้ไว้ (ถ้ามี) เพื่อนำไปป้อนให้ session ใหม่
+                val lastMsg = _messages.value.lastOrNull { it.role == "user" }?.content
+                pendingCommandAfterVoiceChange = lastMsg
+                
+                logDebug("JarvisVM", "🔄 Voice change requested: $newVoice. Task cached: $lastMsg")
+                
+                _voiceName.value = newVoice
+                updateSettings(_apiKey.value, _selectedModel.value, _liveModelName.value, newVoice)
+                
+                // Immediate Apply: Restart session if active
+                if (_isListening.value) {
+                    stopVoiceInput()
+                    delay(800) // เพิ่ม delay เล็กน้อยเพื่อให้ระบบเคลียร์ resources และบันทึกความจำได้ทัน
+                    startVoiceInput()
+                }
+            }
+        }
+
         viewModelScope.launch {
             loadSettings()
-            loadHistory()
+        }
+
+        viewModelScope.launch {
+            isAiVisionRequested.collect { requested ->
+                cameraService.isAiVisionRequested = requested
+            }
         }
     }
 
@@ -125,16 +236,34 @@ class JarvisViewModel(
             }
         }
 
+        // Load external API keys
+        val savedOpenaiKey = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("openai_api_key").executeAsOneOrNull() ?: ""
+        }
+        val savedClaudeKey = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("claude_api_key").executeAsOneOrNull() ?: ""
+        }
+
         _apiKey.value = savedKey
         _selectedModel.value = savedModel
         _liveModelName.value = savedLiveModel
         _voiceName.value = savedVoiceName
         _floatingWidgetEnabled.value = savedWidgetEnabled
+        _openaiApiKey.value = savedOpenaiKey
+        _claudeApiKey.value = savedClaudeKey
         orchestrator.updateConfig(savedKey, savedModel, savedLiveModel, savedVoiceName)
+
+        // Initialize camera service keys
+        cameraService.updateProviderKeys(
+            geminiApiKey = savedKey,
+            openaiApiKey = savedOpenaiKey,
+            claudeApiKey = savedClaudeKey
+        )
 
         if (savedKey.isNotBlank()) {
             fetchModels()
         }
+        loadHistory()
     }
 
     fun updateSettings(key: String, model: String, liveModel: String = _liveModelName.value, voice: String = _voiceName.value) {
@@ -299,16 +428,114 @@ class JarvisViewModel(
         return result
     }
 
-    private val _isCameraActive = MutableStateFlow(false)
-    val isCameraActive: StateFlow<Boolean> = _isCameraActive.asStateFlow()
+    // ─── External API Keys (OpenAI, Claude) ────────────────────────────────
+    private val _openaiApiKey = MutableStateFlow("")
+    val openaiApiKey: StateFlow<String> = _openaiApiKey.asStateFlow()
+
+    private val _claudeApiKey = MutableStateFlow("")
+    val claudeApiKey: StateFlow<String> = _claudeApiKey.asStateFlow()
+
+    fun updateExternalApiKeys(openai: String, claude: String) {
+        viewModelScope.launch {
+            _openaiApiKey.value = openai
+            _claudeApiKey.value = claude
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("openai_api_key", openai)
+                database.jarvisDatabaseQueries.insertSetting("claude_api_key", claude)
+            }
+            // Update camera service with new keys
+            cameraService.updateProviderKeys(
+                geminiApiKey = _apiKey.value,
+                openaiApiKey = openai,
+                claudeApiKey = claude
+            )
+        }
+    }
 
     fun toggleCamera() {
-        _isCameraActive.value = !_isCameraActive.value
+        val newState = !_isCameraActive.value
+        _isCameraActive.value = newState
+        if (newState) {
+            startCameraAnalysis()
+        } else {
+            // Only stop if AI is not also using it
+            if (!_isAiVisionRequested.value) {
+                stopCameraAnalysis()
+            }
+        }
+    }
+
+    fun switchCamera() {
+        _isFrontCamera.value = !_isFrontCamera.value
+        logDebug("JARVIS_VM", "Switching camera (Front: ${_isFrontCamera.value})")
+    }
+
+    fun toggleMute() {
+        _isMuted.value = !_isMuted.value
+        logDebug("JARVIS_VM", "Microphone muted: ${_isMuted.value}")
+    }
+
+    fun openCameraScreen() {
+        _showCameraScreen.value = true
+        // Initialize camera service with current API keys
+        viewModelScope.launch {
+            cameraService.updateProviderKeys(
+                geminiApiKey = _apiKey.value,
+                openaiApiKey = _openaiApiKey.value,
+                claudeApiKey = _claudeApiKey.value
+            )
+        }
+    }
+
+    fun closeCameraScreen() {
+        _showCameraScreen.value = false
+        stopCameraAnalysis()
+    }
+
+    fun switchCameraProvider(provider: CameraProviderType) {
+        viewModelScope.launch {
+            cameraService.switchProvider(provider)
+        }
+    }
+
+    fun switchCameraMode(mode: CameraMode) {
+        viewModelScope.launch {
+            cameraService.switchMode(mode)
+        }
+    }
+
+    fun startCameraAnalysis() {
+        cameraService.start()
+    }
+
+    fun stopCameraAnalysis() {
+        cameraService.stop()
+        cameraFrameJob?.cancel()
+        cameraFrameJob = null
+    }
+
+    /**
+     * เรียกจาก platform-specific camera callback เมื่อได้เฟรมใหม่
+     * @param jpegBase64 ภาพ JPEG ในรูป base64
+     * @param rawBytes raw JPEG bytes สำหรับ motion detection
+     */
+    fun onCameraFrame(jpegBase64: String, rawBytes: ByteArray? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            cameraService.onCameraFrame(jpegBase64, rawBytes)
+        }
+    }
+
+    /**
+     * ถ่ายภาพ Snapshot แล้ววิเคราะห์ทันที
+     */
+    fun captureAndAnalyze(jpegBase64: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            cameraService.captureAndAnalyze(jpegBase64)
+        }
     }
 
     // ─── Live Voice (Gemini Multimodal Live) ─────────────────────────────────
 
-    private val pcmAudioEngine = PcmAudioEngine()
 
     /** ชื่อ tool ที่กำลัง execute อยู่ — expose ไปยัง UI */
     val activeToolName: StateFlow<String?> = orchestrator.activeToolName
@@ -319,6 +546,7 @@ class JarvisViewModel(
         if (_isListening.value) return
         _isListening.value = true
         _voiceError.value = null
+        _isMuted.value = false // Start unmuted
         logDebug("JARVIS_VM", "Starting Live Voice Input")
 
         liveSessionJob?.cancel()
@@ -332,10 +560,20 @@ class JarvisViewModel(
                     "${if (it.role == "user") "User" else "JARVIS"}: ${it.content}" 
                 }
 
-                // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
+                    // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
                 launch {
                     logDebug("JARVIS_VM", "Connecting Live session (with memory context)...")
-                    orchestrator.startLiveVoiceSessionWithMemory(coreContext, historySnapshot)
+                    
+                    // หากมีงานค้างจากการเปลี่ยนเสียง ให้ฉีด Prompt เข้าไปบอก AI ในบรรทัดแรกของประวัติ
+                    val contextToSubmit = if (!pendingCommandAfterVoiceChange.isNullOrBlank()) {
+                        val task = pendingCommandAfterVoiceChange
+                        pendingCommandAfterVoiceChange = null // Clear ทันทีเพื่อป้องกันการ loop
+                        "SYSTEM_INFO: คุณเพิ่งเปลี่ยนเสียงสำเร็จ งานต่อไปที่คุณต้องทำทันทีคือ: $task. โปรดดำเนินการต่อและแจ้งผู้ใช้ด้วยเสียงใหม่ของคุณ."
+                    } else {
+                        historySnapshot
+                    }
+                    
+                    orchestrator.startLiveVoiceSessionWithMemory(coreContext, contextToSubmit)
                 }
 
                 // 4. Collect audio output → speaker
@@ -365,10 +603,18 @@ class JarvisViewModel(
 
                 // 6. Start mic recording → stream to Live model
                 logDebug("JARVIS_VM", "Microphone starting...")
+                var frameCount = 0
                 pcmAudioEngine.startRecording { bytes ->
-                    val base64 = bytes.encodeBase64()
-                    viewModelScope.launch(Dispatchers.IO) {
-                        orchestrator.sendLiveAudioChunk(base64)
+                    if (!_isMuted.value) {
+                        frameCount++
+                        // SILENCED: Heavy log
+                        // if (frameCount % 50 == 0) {
+                        //    logDebug("JARVIS_VM", "🎙️ Transmitting audio chunk #$frameCount (${bytes.size} bytes)")
+                        // }
+                        val base64 = bytes.encodeBase64()
+                        viewModelScope.launch(Dispatchers.IO) {
+                            orchestrator.sendLiveAudioChunk(base64)
+                        }
                     }
                 }
 
@@ -383,6 +629,7 @@ class JarvisViewModel(
     fun stopVoiceInput() {
         logDebug("JARVIS_VM", "Stopping Live Voice Input")
         _isListening.value = false
+        _isMuted.value = false
         pcmAudioEngine.stopRecording()
         liveSessionJob?.cancel()
         liveSessionJob = null
@@ -429,6 +676,8 @@ class JarvisViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        stopCameraAnalysis()
+        cameraService.release()
         pcmAudioEngine.release()
         voiceManager.shutdown()
         client.close()

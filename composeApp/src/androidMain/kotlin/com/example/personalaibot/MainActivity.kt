@@ -143,40 +143,30 @@ class MainActivity : ComponentActivity() {
         if (intent.action == "com.example.personalaibot.TOGGLE_LIVE") {
             onToggleLiveFromWidget?.invoke()
         }
-        // Widget close button → disable everywhere
-        if (intent.action == FloatingWidgetService.ACTION_WIDGET_CLOSED) {
+        if (intent.action == "com.example.personalaibot.WIDGET_CLOSED") {
             onWidgetClosedCallback?.invoke()
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        voiceManager.shutdown()
-    }
+    // ─── Permissions ──────────────────────────────────────────────────────────
 
     private fun checkAndRequestPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA
         )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            permissions.add(Manifest.permission.FOREGROUND_SERVICE_MICROPHONE)
-            permissions.add(Manifest.permission.FOREGROUND_SERVICE_CAMERA)
-        }
-
-        val missingPermissions = permissions.filter {
+        val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
 
-        if (missingPermissions.isEmpty()) {
-            startJarvisService()
+        if (missing.isNotEmpty()) {
+            requestPermissionLauncher.launch(missing.toTypedArray())
         } else {
-            requestPermissionLauncher.launch(missingPermissions.toTypedArray())
+            startJarvisService()
         }
     }
 
@@ -189,29 +179,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun requestOverlayPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+    private fun requestOverlayPermission() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        overlayPermissionLauncher.launch(intent)
+    }
+
+    private fun requestAllFilesPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                 Uri.parse("package:$packageName")
             )
-            overlayPermissionLauncher.launch(intent)
+            allFilesPermissionLauncher.launch(intent)
+        } else {
+            requestPermissionLauncher.launch(
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            )
         }
     }
 
-    fun canDrawOverlay(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this)
-        else true
-
-    fun requestAllFilesPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                allFilesPermissionLauncher.launch(intent)
-            }
-        }
-    }
+    private fun canDrawOverlay(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
 }

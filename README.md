@@ -17,9 +17,16 @@
 - **Native Audio Flow** — PCM Audio 16kHz พร้อม AEC + Noise Suppression
 - **Voice-First Design** — เน้นการพูดคุยเป็นหลัก ไม่ต้องพิมพ์
 
-### 📸 2. Real-time Camera
-- วิเคราะห์ภาพจากกล้องแบบ Live ร่วมกับ Gemini Multimodal
-- ส่ง frame อัตโนมัติขณะ Live Mode เปิดอยู่
+### 📸 2. Real-time Camera Vision (Multi-Provider)
+ระบบวิเคราะห์ภาพแบบ Real-time รองรับหลาย AI Provider:
+- **Gemini Live** — WebSocket streaming ความเร็วสูง (`gemini-3.1-flash-live-preview`)
+- **Gemini Flash** — REST snapshot analysis (`gemini-2.5-flash`)
+- **OpenAI GPT-4o / GPT-4.1** — Vision API snapshot analysis
+- **Claude Sonnet / Opus** — Anthropic Vision API snapshot analysis
+- **AI Adaptive Vision (On-Demand AI Eyes)** — ระบบวิสัยทัศน์อัจฉริยะที่ AI ควบคุมการเปิด/ปิด "ดวงตา" ได้ด้วยตัวเองผ่าน Tool Calling
+- **Token Saving Architecture** — ปรับความเร็วภาพอัตโนมัติ 0–3 FPS (0 FPS เมื่อเงียบ, 1 FPS เมื่อพูด, 3 FPS เมื่อ AI ร้องขอ)
+- **Safety Timeout** — ระบบตัดการส่งภาพอัตโนมัติหาก AI ลืมสั่งปิดตา เพื่อป้องกันการเสีย Token โดยไม่จำเป็น
+- **AR Overlay Engine** — Bounding box, labels, scan animation ทับภาพจริง
 
 ### 🧠 3. 4-Layer Memory Engine
 - **Short-term** — บันทึก context การสนทนาปัจจุบัน
@@ -301,92 +308,62 @@
 เรียกใช้ Custom Skills ที่ผู้ใช้สร้างเอง
 - Trigger ด้วย keyword หรือชื่อ skill โดยตรง
 - รองรับ skill แบบ chain (multi-step)
-- **ตัวอย่าง**: "เรียกใช้ skill ของฉัน", "run skill:trading_journal"
-
-#### 35. `system_diagnostics` — System Diagnostics
-ตรวจสอบสถานะเครื่องและทรัพยากร
-- CPU, RAM, Battery, Storage info
-- **ตัวอย่าง**: "เช็คสถานะเครือง", "ความจำเหลือเท่าไหร่?"
+- **ตัวอย่าง**: "เรียกใช้ skill ของฉัน", "รัน MyTradingSkill"
 
 ---
 
-## 📱 UI Guide
+### 📷 Camera & Vision Tools (5 tools)
 
-### TopBar Actions
-| Icon | Action |
-|------|--------|
-| ⊞ (Apps) | เปิดรายการ Tools ทั้งหมด (Tool List Dialog) |
-| ⚙️ (Settings) | เปิด Settings — เลือก Model, API Key, Widget |
+#### 35. `camera_analyze_scene` — Scene Analyzer
+วิเคราะห์ภาพจากกล้องแบบ Real-time
+- อธิบายวัตถุ, บริบท, ข้อความที่เห็นในกล้อง
+- รองรับ Gemini Live, OpenAI GPT-4o, Claude Vision
+- **ตัวอย่าง**: "ดูกล้องแล้วบอกว่าเห็นอะไร", "อ่านข้อความที่กล้องเห็น"
 
-### Tool List Dialog
-- **Search bar** — ค้นหา tool ด้วยชื่อหรือคำอธิบาย
-- **Category chips** — กรองตามหมวด: All / Built-in / Trading / SMC / System
-- **Tool cards** — กดเพื่อขยายดู capabilities + example prompts + function name
+#### 36. `camera_detect_objects` — Object Detector
+ตรวจจับวัตถุพร้อม bounding box และ confidence score
+- AR Overlay แสดงกรอบวัตถุบนภาพจริง
+- รองรับ multi-object detection
+- **ตัวอย่าง**: "หาวัตถุในกล้อง", "หาแมวในภาพ"
 
-### Chat Input
-- พิมพ์ข้อความและกด Send หรือกด 🎙️ เพื่อเริ่ม Live Voice Mode
-- พิมพ์แล้วถาม JARVIS ได้เลยโดยไม่ต้องระบุ tool — ระบบ route ให้อัตโนมัติ
+#### 37. `camera_read_text` — Camera OCR
+อ่านและดึงข้อความ (OCR) จากกล้อง
+- อ่านป้าย, เอกสาร, หน้าจอ, ฉลาก
+- **ตัวอย่าง**: "อ่านข้อความจากป้ายนี้", "อ่านเอกสารหน้ากล้อง"
 
----
+#### 38. `camera_switch_provider` — Provider Switcher
+สลับ AI Provider สำหรับวิเคราะห์ภาพ
+- Gemini Live / Flash, OpenAI GPT-4o / GPT-4.1, Claude Sonnet / Opus
+- **ตัวอย่าง**: "สลับไปใช้ OpenAI", "ใช้ Claude วิเคราะห์"
 
-## 🏗️ Project Structure
+#### 39. `camera_switch_mode` — Mode Switcher
+เปลี่ยนโหมดกล้อง
+- Live Stream, Snapshot, Object Detection, AR Overlay
+- **ตัวอย่าง**: "เปลี่ยนเป็น AR mode", "ใช้โหมด snapshot"
 
-```
-composeApp/src/commonMain/kotlin/com/example/personalaibot/
-├── App.kt                          # Entry point
-├── JarvisViewModel.kt              # Main ViewModel
-├── tools/
-│   ├── ToolRegistry.kt             # Registry of all tools
-│   ├── ToolExecutor.kt             # Built-in tool executor
-│   ├── LiveToolBridge.kt           # Bridge for Live mode
-│   └── trading/
-│       ├── TradingToolDefinitions.kt
-│       ├── TradingToolExecutor.kt
-│       ├── TradingApiService.kt
-│       ├── SmcToolDefinitions.kt   # 5 SMC tool definitions
-│       ├── SmcToolExecutor.kt      # SMC tool executor
-│       └── SmcApiService.kt        # SMC algorithms + Binance API
-├── ui/
-│   ├── screen/
-│   │   ├── JarvisTopBar.kt         # TopBar with Tools + Settings buttons
-│   │   ├── ToolListDialog.kt       # Full-screen tool catalogue dialog
-│   │   ├── SettingsDialog.kt
-│   │   ├── ChatInputBar.kt
-│   │   └── LiveModePanel.kt
-│   ├── components/
-│   └── theme/
-│       └── JarvisTheme.kt
-├── db/                             # SQLDelight database
-├── voice/                          # VoiceManager (Live API)
-└── memory/                         # Memory Engine
-```
+#### 40. `vision_activate` — เปิดดวงตา (AI-Managed)
+สั่งให้แอปเริ่มส่งสตรีมภาพความละเอียดสูงให้ AI แบบ Real-time
+- **ตัวอย่าง**: จาร์วิสเรียกใช้เองเมื่อคุณถามว่า "นี่คืออะไร"
+
+#### 41. `vision_deactivate` — ปิดดวงตา (Token Saving)
+สั่งหยุดส่งสตรีมภาพทันทีเพื่อประหยัด Token และแบตเตอรี่
+- **ตัวอย่าง**: จาร์วิสเรียกใช้เองหลังจากตอบคำถามด้านสายตาเสร็จ
+
+#### 42. `vision_adaptive_logic` — AI Adaptive Vision
+ระบบวิเคราะห์ความสำคัญของภาพอัตโนมัติ
+- ปรับความละเอียด (Resolution) ตามความซับซ้อนของสิ่งที่เห็น
+- ลดการส่งภาพซ้ำหากไม่มีการเคลื่อนไหว (Motion Detection)
+- **ตัวอย่าง**: "เปิดโหมดประหยัดพลังงานสายตา"
 
 ---
 
-## 🚀 Getting Started
+## 📊 สรุปจำนวน Tools ทั้งหมด: **41 Tools** (6 หมวดหมู่)
 
-### Prerequisites
-- Android Studio Hedgehog+
-- Kotlin 2.0+
-- Google Gemini API Key ([Get here](https://aistudio.google.com/))
-
-### Setup
-1. Clone repository
-2. เปิดด้วย Android Studio
-3. ใส่ Gemini API Key ใน Settings Dialog ของแอป
-4. Build & Run บน Android device/emulator
-
-### Build
-```bash
-./gradlew :composeApp:assembleDebug
-```
-
----
-
-## 📝 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-*Built with ❤️ using Kotlin Multiplatform + Gemini AI*
+| หมวด | จำนวน |
+|------|-------|
+| 🧠 Built-in Tools | 10 |
+| 📊 Trading Tools | 10 |
+| 📈 SMC Tools | 5 |
+| 📁 File Management | 7 |
+| 🎯 System Tools | 2 |
+| 📷 Camera & Vision | 7 |

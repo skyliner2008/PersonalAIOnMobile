@@ -21,7 +21,9 @@ import kotlinx.coroutines.launch
 class LiveToolBridge(
     private val liveService: LiveGeminiService,
     private val geminiService: GeminiService,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    var onAiVisionToggle: ((Boolean) -> Unit)? = null,
+    var onVoiceChange: ((String) -> Unit)? = null
 ) {
     private val _activeToolName = MutableStateFlow<String?>(null)
     val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
@@ -46,6 +48,45 @@ class LiveToolBridge(
         
         // --- UI Optimizations for Live Mode ---
         when {
+            event.name == "vision_activate" -> {
+                onAiVisionToggle?.invoke(true)
+                
+                val contextReminder = if (liveService.lastUserText.isNotBlank()) {
+                    "เพื่อตอบคำถามล่าสุดของคุณ: \"${liveService.lastUserText}\""
+                } else {
+                    "เพื่อสังเกตสภาพแวดล้อมรอบตัว"
+                }
+                
+                liveService.sendNativeToolResponse(
+                    callId   = event.callId,
+                    toolName = event.name,
+                    result   = "OK_EYES_OPEN. คุณเห็นภาพวิดีโอสดแล้ว $contextReminder โปรดวิเคราะห์สตรีมวิดีโอและตอบสิ่งที่เห็นหรือสรุปข้อมูลให้ผู้ใช้ฟังทันทีโดยไม่ถามซ้ำ"
+                )
+                logDebug("LiveBridge", "👁️ Vision activated (Context: ${liveService.lastUserText})")
+                return
+            }
+            event.name == "vision_deactivate" -> {
+                onAiVisionToggle?.invoke(false)
+                liveService.sendNativeToolResponse(
+                    callId   = event.callId,
+                    toolName = event.name,
+                    result   = "OK_SILENT"
+                )
+                logDebug("LiveBridge", "🕶️ Vision deactivated by AI (Silenced)")
+                return
+            }
+            event.name == "camera_analyze_scene" || event.name == "camera_read_text" -> {
+                // In Live mode, the video frames are already streaming through the WebSocket.
+                // A separate REST API call would fail because it's a different session.
+                // Tell the AI to just look at the stream it's already receiving.
+                liveService.sendNativeToolResponse(
+                    callId   = event.callId,
+                    toolName = event.name,
+                    result   = "เครื่องมือ ${event.name} ไม่จำเป็นต้องใช้ในตอนนี้ เนื่องจากคุณได้เปิดโหมด Vision และกำลังรับวิดีโอสด (Live Stream) อยู่แล้ว โปรดประมวลผลสิ่งที่คุณเห็นจากสตรีมวิดีโอที่ได้รับในปัจจุบันและอธิบายให้ผู้ใช้ฟังทันที"
+                )
+                logDebug("LiveBridge", "📹 Redirected ${event.name} to Live Stream (no separate API needed)")
+                return
+            }
             event.name == "analyze_and_display_report" -> {
                 // Extract detailed markdown and emit to chat
                 val report = event.args["detailed_markdown"] ?: ""
@@ -58,6 +99,21 @@ class LiveToolBridge(
                     result   = "✅ รายงานการวิเคราะห์ถูกแสดงในหน้าแชทแล้ว โปรดพูดสรุปใจความสำคัญให้ผู้ใช้ฟังทันที"
                 )
                 logDebug("LiveBridge", "📊 Report tool executed")
+                return
+            }
+            event.name == "voice_get_profiles" -> {
+                val list = com.example.personalaibot.data.GeminiVoiceProfiles.getVoiceListSummary()
+                liveService.sendNativeToolResponse(event.callId, event.name, "📋 รายชื่อเสียงที่สามารถใช้ได้:\n$list")
+                return
+            }
+            event.name == "voice_set_profile" -> {
+                val name = event.args["name"] ?: ""
+                if (name.isNotBlank()) {
+                    onVoiceChange?.invoke(name)
+                    liveService.sendNativeToolResponse(event.callId, event.name, "✅ รับทราบครับ ผมกำลังเปลี่ยนเสียงเป็น '$name' กรุณารอสักครู่ขณะผมปรับจูนระบบ...")
+                } else {
+                    liveService.sendNativeToolResponse(event.callId, event.name, "❌ ผิดพลาด: ไม่ระบุชื่อเสียง")
+                }
                 return
             }
             event.name == "trading_market_snapshot" && finalResultText.startsWith("📊") -> {

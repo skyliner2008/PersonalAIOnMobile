@@ -18,6 +18,7 @@ actual class PcmAudioEngine {
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
     private var isRecording = false
+    actual var onVolumeChanged: ((Float) -> Unit)? = null
 
     init {
         logDebug("PcmAudio", "Initializing AudioTrack (Speaker)")
@@ -112,6 +113,10 @@ actual class PcmAudioEngine {
                     val read = record.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         onAudioData(buffer.copyOf(read))
+                        
+                        // Compute RMS volume for Speech Detection
+                        val volume = calculateRMS(buffer, read)
+                        onVolumeChanged?.invoke(volume)
                     }
                 }
                 logDebug("PcmAudio", "Mic thread stopped")
@@ -153,5 +158,15 @@ actual class PcmAudioEngine {
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
+    }
+
+    private fun calculateRMS(buffer: ByteArray, size: Int): Float {
+        var sum = 0.0
+        for (i in 0 until size / 2) {
+            val sample = ((buffer[i * 2 + 1].toInt() shl 8) or (buffer[i * 2].toInt() and 0xFF)).toShort()
+            sum += sample.toDouble() * sample.toDouble()
+        }
+        val rms = Math.sqrt(sum / (size / 2))
+        return (rms / 32768.0).toFloat() // Normalized 0.0 to 1.0
     }
 }

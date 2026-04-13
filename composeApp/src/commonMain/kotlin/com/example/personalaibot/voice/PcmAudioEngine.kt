@@ -5,6 +5,7 @@ package com.example.personalaibot.voice
  * ส่งเข้า Gemini Live (Recording) และเล่นจาก Gemini Live (Playing)
  */
 expect class PcmAudioEngine() {
+    var onVolumeChanged: ((Float) -> Unit)?
     fun startRecording(onAudioData: (ByteArray) -> Unit)
     fun stopRecording()
     fun playAudio(pcmBytes: ByteArray)

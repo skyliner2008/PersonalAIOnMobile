@@ -141,8 +141,9 @@ object ToolRegistry {
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
-                                              _smcTools.values.toList() +
+                               _smcTools.values.toList() +
                                _fileTools.values.toList() +
+                               _cameraTools.values.toList() +
                                _customTools.values.toList() +
                                _skills.values.map { skill ->
                                    FunctionDeclaration(
@@ -154,7 +155,7 @@ object ToolRegistry {
     )
 
     fun allToolNames(): Set<String> =
-        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _fileTools.keys + _customTools.keys + _skills.keys
+        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _fileTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
 
     fun isTradingTool(name: String): Boolean =
         name in _tradingTools || name in _smcTools
@@ -162,21 +163,130 @@ object ToolRegistry {
     fun isFileTool(name: String): Boolean =
         name in _fileTools
 
+    fun isCameraTool(name: String): Boolean =
+        name in _cameraTools
+
+    fun registerCustomTool(decl: FunctionDeclaration) {
+        _customTools[decl.name] = decl
+    }
+
+    fun registerSkill(skill: SkillDescriptor) {
+        _skills[skill.name] = skill
+    }
+
     fun getSkill(name: String): SkillDescriptor? = _skills[name]
 
-    fun registerCustomTool(declaration: FunctionDeclaration) {
-        _customTools[declaration.name] = declaration
+    // ─── Camera / Vision Tools ──────────────────────────────────────────────
+    private val _cameraTools: Map<String, FunctionDeclaration> = buildMap {
+        put("vision_activate", FunctionDeclaration(
+            name = "vision_activate",
+            description = "Turns ON the AI's eyes for real-time video analysis. IMPORTANT: Once active, you will receive a continuous live video stream. DO NOT call 'camera_analyze_scene' or any other camera tools while this is active, as you already have the visual data in your multimodal input.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "duration_seconds" to ParameterProperty("NUMBER", "How long to keep the eyes open (default 60s).")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("vision_deactivate", FunctionDeclaration(
+            name = "vision_deactivate",
+            description = "Turns OFF the AI's eyes. Call this immediately after you have gathered enough visual information to save the user's tokens.",
+            parameters = null
+        ))
+        put("camera_analyze_scene", FunctionDeclaration(
+            name = "camera_analyze_scene",
+            description = "Analyzes a single camera frame (Snapshot mode). ONLY use this if 'vision_activate' is NOT active. If you are already in Live Vision mode, ignore this tool and use your live video input instead.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "prompt" to ParameterProperty("STRING", "Optional custom prompt to guide the analysis (e.g., 'read the text on the sign').")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("camera_detect_objects", FunctionDeclaration(
+            name = "camera_detect_objects",
+            description = "Detects and locates objects in the camera view with bounding boxes and confidence scores.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "target" to ParameterProperty("STRING", "Optional specific object to look for (e.g., 'cat', 'license plate').")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("camera_read_text", FunctionDeclaration(
+            name = "camera_read_text",
+            description = "Reads and extracts text (OCR) from the camera view — signs, documents, screens, labels.",
+            parameters = null
+        ))
+        put("camera_switch_provider", FunctionDeclaration(
+            name = "camera_switch_provider",
+            description = "Switches the active AI vision provider for camera analysis.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "provider" to ParameterProperty(
+                        "STRING",
+                        "The provider to switch to.",
+                        enum = listOf("gemini_live", "gemini_flash", "openai_gpt4o", "openai_gpt41", "claude_sonnet", "claude_opus")
+                    )
+                ),
+                required = listOf("provider")
+            )
+        ))
+        put("camera_switch_mode", FunctionDeclaration(
+            name = "camera_switch_mode",
+            description = "Changes the camera operating mode.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "mode" to ParameterProperty(
+                        "STRING",
+                        "The mode to switch to.",
+                        enum = listOf("live_stream", "snapshot", "object_detect", "ar_overlay")
+                    )
+                ),
+                required = listOf("mode")
+            )
+        ))
+
+        // --- Voice / Persona Tools ---
+        put("voice_get_profiles", FunctionDeclaration(
+            name = "voice_get_profiles",
+            description = "Returns a list of all 30 available Gemini Live voice profiles with their gender and tone descriptions.",
+            parameters = null
+        ))
+        put("voice_set_profile", FunctionDeclaration(
+            name = "voice_set_profile",
+            description = "Changes the current assistant voice profile. Note: This will cause a brief 2-second reconnect to apply the new voice.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "The name of the voice profile to switch to (e.g., 'Puck', 'Kore', 'Aoede').")
+                ),
+                required = listOf("name")
+            )
+        ))
     }
 
-    fun registerSkill(descriptor: SkillDescriptor) {
-        _skills[descriptor.name] = descriptor
-    }
+    // ─── Tool Catalogue (for ToolListDialog) ────────────────────────────────
 
-    fun unregisterSkill(name: String) {
-        _skills.remove(name)
-    }
+    data class ToolCategory(
+        val name: String,
+        val icon: String,
+        val tools: List<FunctionDeclaration>
+    )
 
-    fun clearCustomTools() {
-        _customTools.clear()
-    }
+    fun getToolCategories(): List<ToolCategory> = listOf(
+        ToolCategory("🧠 Built-in Tools", "🧠", _builtinTools.values.toList()),
+        ToolCategory("📊 Trading Tools", "📊", _tradingTools.values.toList()),
+        ToolCategory("📈 SMC Tools", "📈", _smcTools.values.toList()),
+        ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
+        ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList())
+    )
+
+    fun totalToolCount(): Int =
+        _builtinTools.size + _tradingTools.size + _smcTools.size + _fileTools.size + _cameraTools.size + _customTools.size
 }

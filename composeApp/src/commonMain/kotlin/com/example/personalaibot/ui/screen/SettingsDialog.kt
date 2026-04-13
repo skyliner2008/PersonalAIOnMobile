@@ -40,10 +40,15 @@ fun SettingsDialog(
     val availableModels  by viewModel.availableModels.collectAsStateWithLifecycle()
     val isWidgetEnabled  by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
 
+    val currentOpenaiKey  by viewModel.openaiApiKey.collectAsStateWithLifecycle()
+    val currentClaudeKey  by viewModel.claudeApiKey.collectAsStateWithLifecycle()
+
     var apiKey       by remember { mutableStateOf(currentApiKey) }
     var mainModel    by remember { mutableStateOf(currentModel) }
     var liveModel    by remember { mutableStateOf(currentLiveModel) }
     var voiceName    by remember { mutableStateOf(currentVoice) }
+    var openaiApiKey by remember { mutableStateOf(currentOpenaiKey) }
+    var claudeApiKey by remember { mutableStateOf(currentClaudeKey) }
     var mainExpanded by remember { mutableStateOf(false) }
     var liveExpanded by remember { mutableStateOf(false) }
     var voiceExpanded by remember { mutableStateOf(false) }
@@ -183,114 +188,9 @@ fun SettingsDialog(
                     }
                 }
 
-                // ── Voice Profile (Live) — 30 voices ──
-                Text("เสียงผู้ช่วย (Live Profile)", color = JarvisTheme.Cyan.copy(0.8f), fontSize = 12.sp)
-
-                // Gender filter tabs
-                var selectedGender by remember { mutableStateOf<VoiceGender?>(null) }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = selectedGender == null,
-                        onClick = { selectedGender = null },
-                        label = { Text("ทั้งหมด (30)", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = JarvisTheme.Cyan.copy(0.2f),
-                            selectedLabelColor = JarvisTheme.Cyan,
-                            containerColor = JarvisTheme.Surface,
-                            labelColor = Color.White.copy(0.6f)
-                        )
-                    )
-                    FilterChip(
-                        selected = selectedGender == VoiceGender.FEMALE,
-                        onClick = { selectedGender = VoiceGender.FEMALE },
-                        label = { Text("หญิง (14)", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFFF69B4).copy(0.2f),
-                            selectedLabelColor = Color(0xFFFF69B4),
-                            containerColor = JarvisTheme.Surface,
-                            labelColor = Color.White.copy(0.6f)
-                        )
-                    )
-                    FilterChip(
-                        selected = selectedGender == VoiceGender.MALE,
-                        onClick = { selectedGender = VoiceGender.MALE },
-                        label = { Text("ชาย (16)", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF4FC3F7).copy(0.2f),
-                            selectedLabelColor = Color(0xFF4FC3F7),
-                            containerColor = JarvisTheme.Surface,
-                            labelColor = Color.White.copy(0.6f)
-                        )
-                    )
-                }
-
-                val filteredVoices = when (selectedGender) {
-                    VoiceGender.FEMALE -> GeminiVoiceProfiles.females
-                    VoiceGender.MALE -> GeminiVoiceProfiles.males
-                    null -> GeminiVoiceProfiles.all
-                }
-
-                ExposedDropdownMenuBox(
-                    expanded = voiceExpanded,
-                    onExpandedChange = { voiceExpanded = !voiceExpanded }
-                ) {
-                    val currentProfile = GeminiVoiceProfiles.findByName(voiceName)
-                    val genderIcon = if (currentProfile?.gender == VoiceGender.FEMALE) "♀" else "♂"
-                    val displayText = "$genderIcon ${voiceName} — ${currentProfile?.tone ?: ""}"
-                    OutlinedTextField(
-                        value = displayText,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = voiceExpanded) },
-                        modifier = Modifier.menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = JarvisTheme.Cyan.copy(0.5f),
-                            unfocusedBorderColor = Color.White.copy(0.2f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedContainerColor = JarvisTheme.Surface,
-                            unfocusedContainerColor = JarvisTheme.Surface
-                        )
-                    )
-                    ExposedDropdownMenu(
-                        expanded = voiceExpanded,
-                        onDismissRequest = { voiceExpanded = false },
-                        containerColor = JarvisTheme.Card
-                    ) {
-                        filteredVoices.forEach { profile ->
-                            val icon = if (profile.gender == VoiceGender.FEMALE) "♀" else "♂"
-                            val genderColor = if (profile.gender == VoiceGender.FEMALE) Color(0xFFFF69B4) else Color(0xFF4FC3F7)
-                            val isSelected = voiceName == profile.name
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            "$icon ${profile.name}",
-                                            color = if (isSelected) JarvisTheme.Cyan else Color.White,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            profile.tone,
-                                            color = genderColor.copy(0.7f),
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                },
-                                onClick = { voiceName = profile.name; voiceExpanded = false }
-                            )
-                        }
-                    }
-                }
-
                 HorizontalDivider(color = Color.White.copy(0.1f))
+
+                // [REMOVED] Manual Voice Selection — System now manages persona via verbal interaction.
 
                 // ── Floating Widget toggle ──
                 Row(
@@ -341,70 +241,75 @@ fun SettingsDialog(
                     }
                 }
                 
-                Button(
-                    onClick = requestAllFilesPermission,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = JarvisTheme.Surface,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(0.1f))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("📁 ขอสิทธิ์เข้าถึงไฟล์ทั้งหมด (All Files Access)", fontSize = 13.sp)
-                    }
-                }
-                
                 if (!allFilesAccessGranted) {
-                    Text(
-                        text = "💡 ขั้นตอน: กดปุ่มด้านบน -> หาชื่อ 'PersonalAIBot' ในรายการ -> กด 'อนุญาต' (Toggle ON)",
-                        color = Color.White.copy(0.5f),
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
+                    Button(
+                        onClick = { requestAllFilesPermission() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Purple.copy(0.3f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("ขอสิทธิ์เข้าถึงไฟล์", color = Color.White, fontSize = 13.sp)
+                    }
                 }
 
                 HorizontalDivider(color = Color.White.copy(0.1f), modifier = Modifier.padding(vertical = 8.dp))
 
-                val isSleeping by viewModel.isSleeping.collectAsStateWithLifecycle()
-                Button(
-                    onClick = { viewModel.triggerSleepCycle() },
+                // ── OpenAI API Key ──
+                Text("OpenAI API Key (สำหรับ Camera Vision)", color = JarvisTheme.Cyan.copy(0.8f), fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = openaiApiKey,
+                    onValueChange = { openaiApiKey = it },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSleeping,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = JarvisTheme.Cyan.copy(0.2f), 
-                        contentColor = JarvisTheme.Cyan,
-                        disabledContainerColor = Color.White.copy(0.1f),
-                        disabledContentColor = Color.White.copy(0.5f)
-                    )
-                ) {
-                    Text(if (isSleeping) "💤 กำลังจัดเรียงความจำ (Sleeping)..." else "💤 เริ่มกระบวนการจำศีล (Sleep)")
-                }
+                    placeholder = { Text("sk-...", color = Color.White.copy(0.3f), fontSize = 13.sp) },
+                    visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = JarvisTheme.Cyan,
+                        unfocusedBorderColor = Color.White.copy(0.2f),
+                        cursorColor = JarvisTheme.Cyan
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ── Claude API Key ──
+                Text("Claude API Key (สำหรับ Camera Vision)", color = JarvisTheme.Cyan.copy(0.8f), fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = claudeApiKey,
+                    onValueChange = { claudeApiKey = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("sk-ant-...", color = Color.White.copy(0.3f), fontSize = 13.sp) },
+                    visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = JarvisTheme.Cyan,
+                        unfocusedBorderColor = Color.White.copy(0.2f),
+                        cursorColor = JarvisTheme.Cyan
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     viewModel.updateSettings(apiKey, mainModel, liveModel, voiceName)
+                    viewModel.updateExternalApiKeys(openaiApiKey, claudeApiKey)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = JarvisTheme.Cyan,
-                    contentColor = Color.Black
-                )
+                colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Cyan)
             ) {
-                Text("SAVE", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("บันทึก", color = JarvisTheme.Dark, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White.copy(0.5f))
+                Text("ยกเลิก", color = Color.White.copy(0.7f))
             }
         }
     )

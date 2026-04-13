@@ -2,6 +2,7 @@ package com.example.personalaibot
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -18,6 +19,8 @@ import com.example.personalaibot.db.DatabaseDriverFactory
 import com.example.personalaibot.ui.components.ErrorBanner
 import com.example.personalaibot.ui.components.MessageBubble
 import com.example.personalaibot.ui.components.TypingIndicator
+import com.example.personalaibot.camera.CameraMode
+import com.example.personalaibot.camera.CameraProviderType
 import com.example.personalaibot.ui.screen.*
 import com.example.personalaibot.ui.theme.JarvisTheme
 import com.example.personalaibot.voice.VoiceManager
@@ -46,6 +49,9 @@ fun App(
     val isTyping       by viewModel.isTyping.collectAsStateWithLifecycle()
     val isListening    by viewModel.isListening.collectAsStateWithLifecycle()
     val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
+    val isFrontCamera  by viewModel.isFrontCamera.collectAsStateWithLifecycle()
+    val isMuted        by viewModel.isMuted.collectAsStateWithLifecycle()
+    val isAiVisionRequested by viewModel.isAiVisionRequested.collectAsStateWithLifecycle()
     val voiceError     by viewModel.voiceError.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
     val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
@@ -105,9 +111,15 @@ fun App(
                 if (isListening) {
                     LiveModePanel(
                         isCameraActive = isCameraActive,
+                        isFrontCamera  = isFrontCamera,
+                        isMuted        = isMuted,
+                        isAiVisionRequested = isAiVisionRequested,
                         activeToolName = activeToolName,
                         onToggleCamera = { viewModel.toggleCamera() },
-                        onEndLive      = { viewModel.stopVoiceInput() }
+                        onSwitchCamera = { viewModel.switchCamera() },
+                        onToggleMute   = { viewModel.toggleMute() },
+                        onEndLive      = { viewModel.stopVoiceInput() },
+                        onFrameCapture = { jpeg, raw -> viewModel.onCameraFrame(jpeg, raw) }
                     )
                 } else {
                     ChatInputBar(
@@ -145,25 +157,40 @@ fun App(
                     // Welcome message
                     if (messages.isEmpty()) {
                         item {
-                            JarvisWelcome()
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                color = JarvisTheme.Card,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(20.dp)) {
+                                    Text(
+                                        "สวัสดีครับ ผม JARVIS",
+                                        color = JarvisTheme.Cyan,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "ผู้ช่วย AI ส่วนตัวของคุณพร้อมให้บริการแล้ว\nพิมพ์ข้อความหรือกดไมค์เพื่อเริ่มสนทนา",
+                                        color = Color.White.copy(0.6f),
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Typing indicator
+                    if (isTyping) {
+                        item {
+                            TypingIndicator()
                         }
                     }
                 }
-
-                // Typing indicator
-                if (isTyping) {
-                    TypingIndicator()
-                }
             }
         }
 
-        // Handle widget close from service
-        LaunchedEffect(Unit) {
-            registerWidgetClosed {
-                viewModel.setFloatingWidgetEnabled(false)
-            }
-        }
-
+        // ─── Settings Dialog ──────────────────────────────────────
         if (showSettings) {
             SettingsDialog(
                 viewModel = viewModel,
@@ -175,43 +202,38 @@ fun App(
             )
         }
 
+        // ─── Tool List Dialog ─────────────────────────────────────
         if (showToolList) {
             ToolListDialog(onDismiss = { showToolList = false })
         }
 
+        // ─── Clear Chat Confirmation ──────────────────────────────
         if (showClearConfirm) {
             AlertDialog(
                 onDismissRequest = { showClearConfirm = false },
-                containerColor = JarvisTheme.Card,
-                title = { Text("ล้างประวัติการสนทนา?", color = JarvisTheme.Red, fontWeight = FontWeight.Bold) },
-                text = { 
-                    Column {
-                        Text("ประวัติในหน้าจอจะหายไปทั้งหมด", color = Color.White)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "💡 ความจำหลัก (Core Memory) จะยังอยู่ครบถ้วน แต่ความจำล่าสุดอาจจะยังไม่ได้ประมวลผล แนะนำให้กด 'จำศีล' ก่อนถ้าอยากให้ JARVIS จำเนื้อหาล่าสุดได้แม่นยำครับ",
-                            color = Color.White.copy(0.6f),
-                            fontSize = 12.sp
-                        )
-                    }
-                },
+                title = { Text("ลบประวัติการสนทนา?", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = { Text("ข้อความทั้งหมดจะถูกลบ ไม่สามารถกู้คืนได้", color = Color.White.copy(0.7f)) },
                 confirmButton = {
                     Button(
-                        onClick = { 
+                        onClick = {
                             viewModel.clearChat()
-                            showClearConfirm = false 
+                            showClearConfirm = false
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Red)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF1744))
                     ) {
-                        Text("ล้างเลย", color = Color.White)
+                        Text("ลบ", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showClearConfirm = false }) {
-                        Text("ยกเลิก", color = Color.White.copy(0.6f))
+                        Text("ยกเลิก", color = Color.White.copy(0.7f))
                     }
-                }
+                },
+                containerColor = Color(0xFF1C1C2E),
+                shape = RoundedCornerShape(20.dp)
             )
         }
+
+        // ─── Camera Screen - REMOVED (Merged into LiveModePanel) ─────
     }
 }

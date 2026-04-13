@@ -1,6 +1,7 @@
 package com.example.personalaibot.tools
 
 import com.example.personalaibot.tools.trading.TradingToolExecutor
+import com.example.personalaibot.tools.camera.CameraToolExecutor
 import io.ktor.client.*
 import kotlinx.datetime.*
 import kotlin.math.*
@@ -20,12 +21,19 @@ object ToolExecutor {
     // Bridge สำหรับ File Management (Platform specific)
     private var _fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null
 
+    // Executor สำหรับ Camera & Vision
+    private var _cameraExecutor: CameraToolExecutor? = null
+
     fun init(client: HttpClient, geminiService: com.example.personalaibot.data.GeminiService) {
         _tradingExecutor = TradingToolExecutor(client, geminiService)
     }
 
     fun initFileHandler(handler: suspend (String, Map<String, String>) -> String) {
         _fileToolHandler = handler
+    }
+
+    fun initCameraExecutor(executor: CameraToolExecutor) {
+        _cameraExecutor = executor
     }
 
     /**
@@ -46,6 +54,11 @@ object ToolExecutor {
                 ToolRegistry.isFileTool(call.name) -> {
                     _fileToolHandler?.invoke(call.name, call.args)
                         ?: "⚠️ ระบบจัดการไฟล์ยังไม่พร้อม หรือยังไม่ได้รับ Permission"
+                }
+                // ─── Camera & Vision Tools ─────────────────────────────────
+                ToolRegistry.isCameraTool(call.name) -> {
+                    _cameraExecutor?.execute(call.name, call.args)
+                        ?: "⚠️ ระบบกล้องยังไม่พร้อม กรุณาเปิดกล้องก่อนใช้งาน"
                 }
                 // ─── Built-in Tools ────────────────────────────────────────
                 else -> when (call.name) {
@@ -337,27 +350,91 @@ object ToolExecutor {
     private val massToKg = mapOf(
         "kg" to 1.0, "kilogram" to 1.0, "kilograms" to 1.0,
         "g" to 0.001, "gram" to 0.001, "grams" to 0.001,
-        "mg" to 0.000001,
-        "pound" to 0.453592, "pounds" to 0.453592, "lb" to 0.453592, "lbs" to 0.453592,
-        "ounce" to 0.0283495, "oz" to 0.0283495,
-        "ton" to 1000.0, "tonne" to 1000.0,
-        "stone" to 6.35029
+        "mg" to 0.000001, "milligram" to 0.000001,
+        "lb" to 0.453592, "lbs" to 0.453592, "pound" to 0.453592, "pounds" to 0.453592,
+        "oz" to 0.0283495, "ounce" to 0.0283495, "ounces" to 0.0283495,
+        "ton" to 1000.0, "tonne" to 1000.0
     )
 
     private val areaToM2 = mapOf(
-        "m2" to 1.0, "sqm" to 1.0,
-        "km2" to 1_000_000.0,
-        "hectare" to 10_000.0, "ha" to 10_000.0,
-        "acre" to 4046.86,
-        "sqft" to 0.092903, "sqyard" to 0.836127
+        "m2" to 1.0, "sqm" to 1.0, "square_meter" to 1.0, "square_meters" to 1.0,
+        "km2" to 1_000_000.0, "square_km" to 1_000_000.0,
+        "cm2" to 0.0001, "mm2" to 0.000001,
+        "ft2" to 0.092903, "sqft" to 0.092903, "square_foot" to 0.092903, "square_feet" to 0.092903,
+        "in2" to 0.00064516, "sqin" to 0.00064516,
+        "yard2" to 0.836127, "sqyard" to 0.836127,
+        "acre" to 4046.86, "acres" to 4046.86,
+        "hectare" to 10000.0, "hectares" to 10000.0, "ha" to 10000.0,
+        "rai" to 1600.0  // Thai unit
     )
 
     private val speedToMs = mapOf(
-        "m/s" to 1.0, "ms" to 1.0,
-        "km/h" to 1.0/3.6, "kph" to 1.0/3.6,
-        "mph" to 0.44704,
+        "m/s" to 1.0, "ms" to 1.0, "meter_per_second" to 1.0,
+        "km/h" to 0.277778, "kph" to 0.277778, "kmh" to 0.277778,
+        "mph" to 0.44704, "mile_per_hour" to 0.44704,
         "knot" to 0.514444, "knots" to 0.514444,
         "ft/s" to 0.3048, "fps" to 0.3048
     )
 
+    private fun convertUnits(value: Double, fromUnit: String, toUnit: String): String {
+        val from = fromUnit.lowercase().trim()
+        val to = toUnit.lowercase().trim()
+
+        // Temperature — special case
+        if (from in listOf("celsius", "c", "°c") || to in listOf("celsius", "c", "°c") ||
+            from in listOf("fahrenheit", "f", "°f") || to in listOf("fahrenheit", "f", "°f") ||
+            from in listOf("kelvin", "k") || to in listOf("kelvin", "k")) {
+            return convertTemperature(value, from, to)
+        }
+
+        // Length
+        val fromM = lengthToMeter[from]
+        val toM = lengthToMeter[to]
+        if (fromM != null && toM != null) {
+            val result = value * fromM / toM
+            return "$value $fromUnit = ${"%.6g".format(result)} $toUnit"
+        }
+
+        // Area
+        val fromA = areaToM2[from]
+        val toA = areaToM2[to]
+        if (fromA != null && toA != null) {
+            val result = value * fromA / toA
+            return "$value $fromUnit = ${"%.6g".format(result)} $toUnit"
+        }
+
+        // Speed
+        val fromS = speedToMs[from]
+        val toS = speedToMs[to]
+        if (fromS != null && toS != null) {
+            val result = value * fromS / toS
+            return "$value $fromUnit = ${"%.6g".format(result)} $toUnit"
+        }
+
+        // Mass
+        val fromKg = massToKg[from]
+        val toKg = massToKg[to]
+        if (fromKg != null && toKg != null) {
+            val result = value * fromKg / toKg
+            return "$value $fromUnit = ${"%.6g".format(result)} $toUnit"
+        }
+
+        return "ไม่รองรับการแปลงจาก $fromUnit เป็น $toUnit"
+    }
+
+    private fun convertTemperature(value: Double, from: String, to: String): String {
+        val celsius = when {
+            from in listOf("celsius", "c", "°c") -> value
+            from in listOf("fahrenheit", "f", "°f") -> (value - 32) * 5.0 / 9.0
+            from in listOf("kelvin", "k") -> value - 273.15
+            else -> return "ไม่รู้จักหน่วย $from"
+        }
+        val result = when {
+            to in listOf("celsius", "c", "°c") -> celsius
+            to in listOf("fahrenheit", "f", "°f") -> celsius * 9.0 / 5.0 + 32
+            to in listOf("kelvin", "k") -> celsius + 273.15
+            else -> return "ไม่รู้จักหน่วย $to"
+        }
+        return "$value $from = ${"%.2f".format(result)} $to"
+    }
 }

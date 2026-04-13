@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
@@ -32,14 +33,14 @@ import kotlinx.serialization.json.*
 
 @Serializable
 data class LiveSetupMessage(
-    val setup: LiveSetup
+    @SerialName("setup") val setup: LiveSetup
 )
 
 @Serializable
 data class LiveSetup(
     val model: String,
-    val generationConfig: LiveGenerationConfig? = null,
-    val systemInstruction: LiveSystemInstruction? = null,
+    @SerialName("generation_config") val generationConfig: LiveGenerationConfig? = null,
+    @SerialName("system_instruction") val systemInstruction: LiveSystemInstruction? = null,
     val tools: List<GeminiTool>? = null
 )
 
@@ -52,30 +53,30 @@ data class LiveSystemInstruction(
 
 @Serializable
 data class LiveGenerationConfig(
-    val responseModalities: List<String>? = null,
-    val speechConfig: LiveSpeechConfig? = null
+    @SerialName("response_modalities") val responseModalities: List<String>? = null,
+    @SerialName("speech_config") val speechConfig: LiveSpeechConfig? = null
 )
 
 @Serializable
 data class LiveSpeechConfig(
-    val voiceConfig: LiveVoiceConfig? = null
+    @SerialName("voice_config") val voiceConfig: LiveVoiceConfig? = null
 )
 
 @Serializable
 data class LiveVoiceConfig(
-    val prebuiltVoiceConfig: LivePrebuiltVoiceConfig? = null
+    @SerialName("prebuilt_voice_config") val prebuiltVoiceConfig: LivePrebuiltVoiceConfig? = null
 )
 
 @Serializable
 data class LivePrebuiltVoiceConfig(
-    val voiceName: String? = null
+    @SerialName("voice_name") val voiceName: String? = null
 )
 
 // ── RealtimeInput (audio / video / text streaming) ───────────────
 
 @Serializable
 data class LiveRealtimeInputMessage(
-    val realtimeInput: LiveRealtimeInputData
+    @SerialName("realtimeInput") val realtimeInput: LiveRealtimeInputData
 )
 
 @Serializable
@@ -87,7 +88,7 @@ data class LiveRealtimeInputData(
 
 @Serializable
 data class LiveBlob(
-    val mimeType: String,
+    @SerialName("mimeType") val mimeType: String,
     val data: String   // Base64
 )
 
@@ -95,13 +96,13 @@ data class LiveBlob(
 
 @Serializable
 data class LiveClientContentMessage(
-    val clientContent: LiveContentWrapper
+    @SerialName("clientContent") val clientContent: LiveContentWrapper
 )
 
 @Serializable
 data class LiveContentWrapper(
     val turns: List<LiveTurn>,
-    val turnComplete: Boolean = true
+    @SerialName("turnComplete") val turnComplete: Boolean = true
 )
 
 @Serializable
@@ -112,7 +113,7 @@ data class LiveTurn(
 
 @Serializable
 data class LivePart(
-    val inlineData: LiveBlob? = null,
+    @SerialName("inlineData") val inlineData: LiveBlob? = null,
     val text: String? = null
 )
 
@@ -120,7 +121,7 @@ data class LivePart(
 
 @Serializable
 data class LiveToolResponseMessage(
-    val toolResponse: LiveToolResponseWrapper
+    @SerialName("toolResponse") val toolResponse: LiveToolResponseWrapper
 )
 
 @Serializable
@@ -141,15 +142,15 @@ data class LiveFunctionResponse(
 
 @Serializable
 data class LiveServerMessage(
-    val serverContent: LiveServerContent? = null,
-    val setupComplete: JsonObject? = null,
-    val toolCall: LiveToolCallWrapper? = null,
+    @SerialName("serverContent") val serverContent: LiveServerContent? = null,
+    @SerialName("setupComplete") val setupComplete: JsonObject? = null,
+    @SerialName("toolCall") val toolCall: LiveToolCallWrapper? = null,
     val error: LiveError? = null
 )
 
 @Serializable
 data class LiveToolCallWrapper(
-    val functionCalls: List<LiveFunctionCall>
+    @SerialName("functionCalls") val functionCalls: List<LiveFunctionCall>
 )
 
 @Serializable
@@ -166,11 +167,11 @@ data class LiveError(
 
 @Serializable
 data class LiveServerContent(
-    val modelTurn: LiveModelTurn? = null,
-    val turnComplete: Boolean? = null,
+    @SerialName("modelTurn") val modelTurn: LiveModelTurn? = null,
+    @SerialName("turnComplete") val turnComplete: Boolean? = null,
     val interrupted: Boolean? = null,
-    val inputTranscription: LiveTranscription? = null,
-    val outputTranscription: LiveTranscription? = null
+    @SerialName("inputTranscription") val inputTranscription: LiveTranscription? = null,
+    @SerialName("outputTranscription") val outputTranscription: LiveTranscription? = null
 )
 
 @Serializable
@@ -258,6 +259,13 @@ object GeminiVoiceProfiles {
     fun findByName(name: String): VoiceProfile? =
         all.find { it.name.equals(name, ignoreCase = true) }
 
+    fun getVoiceListSummary(): String {
+        return all.joinToString("\n") { p ->
+            val icon = if (p.gender == VoiceGender.FEMALE) "♀" else "♂"
+            "- ${p.name} ($icon): ${p.tone}"
+        }
+    }
+
     val defaultVoice: VoiceProfile = all.first { it.name == "Aoede" }
 }
 
@@ -278,6 +286,10 @@ class LiveGeminiService(
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    // คลังความจำระยะสั้น: เก็บประโยคสุดท้ายที่ผู้ใช้พูด เพื่อใช้เตือนสมาธิ AI ตอนเปิดเครื่องมือ
+    var lastUserText: String = ""
+        private set
+
     private val _audioOutputFlow = MutableSharedFlow<ByteArray>()
     val audioOutputFlow: Flow<ByteArray> = _audioOutputFlow.asSharedFlow()
 
@@ -295,16 +307,13 @@ class LiveGeminiService(
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
-    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการเงินและการวิเคราะห์ระดับโลก
-กฎการทำงานระดับ Agentic (STRICT):
-1. การรวบรวมข้อมูล: เมื่อผู้ใช้ถามถึงตลาดหรือหุ้น คุณต้องค้นหาข้อมูลทีละขั้นตอน (Multi-turn):
-   - ขั้นที่ 1: ใช้ `trading_market_snapshot` เพื่อดูภาพรวม
-   - ขั้นที่ 2: พิจารณาตัวที่โดดเด่น (บวก/ลบมากที่สุด) และใช้ `trading_price` เพื่อเจาะลึกรายละเอียดตัวนั้นๆ เสมอ
-   - ขั้นที่ 3: ห้ามสรุปทันทีหากข้อมูลยังไม่ลึกพอ ให้หาข้อมูลจนกว่าจะมั่นใจ
-2. การรายงานผล (IMPORTANT):
-   - สำหรับในแชท: คุณต้องใช้เครื่องมือ `analyze_and_display_report` เพื่อส่งบทวิเคราะห์ที่ละเอียด มีความหนา มีตาราง และการวิเคราะห์รายตัวที่ครบถ้วน (เหมือนในโหมด Chat)
-   - สำหรับเสียงพูด: ให้สรุปเฉพาะ "ใจความสำคัญ" และ "แนวโน้ม" (Key Takeaways) สั้นๆ 3-5 ประโยค ไม่ต้องอ่านข้อมูลในตารางทั้งหมด
-3. บุคลิก: ฉลาด มั่นใจ ตรงไปตรงมา มีความกระตือรือล้นที่จะหาคำตอบที่ดีที่สุดให้ผู้ใช้"""
+    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการเงินและการวิเคราะห์แบบ Real-time
+กฎหลัก (STRICT):
+1. การตอบสนอง: ทักทายผู้ใช้ทันทีเมื่อเริ่มการเชื่อมต่อและตอบโต้ด้วยเสียงอย่างเป็นธรรมชาติ
+2. ภาษา: พูดและตอบเป็น "ภาษาไทย" เท่านั้น ห้ามพูดภาษาอังกฤษเด็ดขาด
+3. การมองเห็น (VISION): ปกติดวงตาจะปิดอยู่ หากผู้ใช้ถามถึงสิ่งที่เห็น ให้เรียก `vision_activate` เพื่อเปิดกล้อง และเมื่อวิเคราะห์เสร็จให้เรียก `vision_deactivate` ทันที
+4. การเงิน: ใช้ `trading_market_snapshot` และ `trading_price` เพื่อดึงข้อมูลจริง ห้ามตอบจากความจำ
+5. รายงาน: ใช้ `analyze_and_display_report` เพื่อส่งผลลัพธ์ละเอียดเข้าหน้าแชท ส่วนเสียงพูดให้สรุปใจความสำคัญสั้นๆ"""
 
     private var selectedVoiceName: String = "Aoede" // Default
 
@@ -378,6 +387,7 @@ class LiveGeminiService(
                             is Frame.Binary -> frame.readBytes().decodeToString()
                             else -> continue
                         }
+                        // logDebug("LiveGemini", "⬇ RAW FRAME: $text")
                         handleServerFrame(text)
                     }
 
@@ -386,6 +396,7 @@ class LiveGeminiService(
                 }
                 break
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
                 attempt++
                 if (attempt > maxRetries) {
@@ -403,6 +414,7 @@ class LiveGeminiService(
     private suspend fun handleServerFrame(rawJson: String) {
         try {
             val msg = json.decodeFromString<LiveServerMessage>(rawJson)
+            // logDebug("LiveGemini", "⬇ Parsed from: $rawJson")
 
             msg.error?.let {
                 logError("LiveGemini", "API Error: ${it.message}")
@@ -434,34 +446,44 @@ class LiveGeminiService(
                 content.modelTurn?.parts?.forEach { part ->
                     part.inlineData?.let { data ->
                         if (data.mimeType.contains("audio")) {
+                            // SILENCED: Only log for deep debugging
+                            // logDebug("LiveGemini", "🔊 Received audio chunk (${data.data.length} chars)")
                             _audioOutputFlow.emit(data.data.decodeBase64Bytes())
                         }
                     }
-                    // DISALBED: Suppress model text/transcripts in Chat UI for Live Mode
-                    /*
+                    content.inputTranscription?.let { transcription ->
+                        transcription.text?.let { text ->
+                            if (text.isNotBlank()) {
+                                lastUserText = text
+                                logDebug("LiveGemini", "🎤 User (Transcribed): $text")
+                            }
+                        }
+                    }
                     part.text?.let { text ->
-                        _textOutputFlow.emit(text)
+                        // SILENCED: Keep logs clean
+                        // logDebug("LiveGemini", "🤖 Model text: $text")
+                        
+                        // DISABLED: Redundant text in Chat UI during Live Mode
+                        // _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = true))
+                        
                         if (isToolRequest(text)) {
                             logDebug("LiveGemini", "🔧 Bridge tool request detected")
                             _bridgeToolRequestFlow.emit(text)
                         }
                     }
-                    */
                 }
 
                 content.inputTranscription?.text?.let { text ->
-                    logDebug("LiveGemini", "🎤 User said: $text")
-                    // แสดงฝั่ง User (กล่องขวา) และขึ้นกล่องใหม่เสมอ (append = false)
-                    _textOutputFlow.emit(LiveTextUpdate("🎤 $text", role = "user", append = false))
+                    // logDebug("LiveGemini", "🎤 User said: $text")
+                    // DISABLED: Keep session clean
+                    // _textOutputFlow.emit(LiveTextUpdate("🎤 $text", role = "user", append = false))
                 }
                 
-                // DISABLED: Suppress output transcription in Chat UI
-                /*
                 content.outputTranscription?.text?.let { text ->
-                    logDebug("LiveGemini", "🤖 JARVIS: $text")
-                    _textOutputFlow.emit(text)
+                    // logDebug("LiveGemini", "🤖 JARVIS: $text")
+                    // DISABLED: Keep session clean
+                    // _textOutputFlow.emit(LiveTextUpdate("🤖 $text", role = "model", append = false))
                 }
-                */
             }
         } catch (e: Exception) {
             logError("LiveGemini", "Frame parse error: ${e.message}")
@@ -488,6 +510,7 @@ class LiveGeminiService(
     }
     
     suspend fun sendImageChunk(jpegBase64: String) {
+        logDebug("LiveGemini", "📹 Sending video chunk (${jpegBase64.length} chars)")
         sendIfReady {
             val msg = LiveRealtimeInputMessage(
                 realtimeInput = LiveRealtimeInputData(
@@ -501,7 +524,7 @@ class LiveGeminiService(
     suspend fun sendBridgeToolResult(toolName: String, result: String) {
         sendIfReady {
             logDebug("LiveGemini", "⚡ Sending bridge tool result for $toolName: ${result.take(50)}...")
-            val text = "Tool result for $toolName: $result. Please present the detailed data and lists to the user clearly. Do not over-summarize."
+            val text = "ผลลัพธ์จากเครื่องมือ $toolName: $result. โปรดนำเสนอข้อมูลและรายละเอียดแก่ผู้ใช้อย่างชัดเจนและครบถ้วน อย่าสรุปสั้นเกินไป และตอบเป็นภาษาไทยเท่านั้น"
             val msg = LiveClientContentMessage(
                 clientContent = LiveContentWrapper(
                     turns = listOf(LiveTurn(role = "user", parts = listOf(LivePart(text = text))))
@@ -538,7 +561,9 @@ class LiveGeminiService(
         val session = webSocketSession
         if (session == null || !session.isActive || !isSetupComplete) return
         try {
-            session.send(Frame.Text(buildJson()))
+            val jsonStr = buildJson()
+            // logDebug("LiveGemini", "⬆ SENDING: $jsonStr")
+            session.send(Frame.Text(jsonStr))
         } catch (e: Exception) {
             logError("LiveGemini", "Send failed", e)
         }

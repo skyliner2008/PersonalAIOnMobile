@@ -55,6 +55,14 @@ class JarvisOrchestrator(
         liveService.updateConfig(newApiKey, newLiveModelName, newVoiceName)
     }
 
+    fun setAiVisionToggle(onToggle: (Boolean) -> Unit) {
+        toolBridge.onAiVisionToggle = onToggle
+    }
+
+    fun setVoiceChangeHandler(onVoiceChange: (String) -> Unit) {
+        toolBridge.onVoiceChange = onVoiceChange
+    }
+
     suspend fun listAvailableModels(): List<GeminiModel> =
         geminiService.listModels()
 
