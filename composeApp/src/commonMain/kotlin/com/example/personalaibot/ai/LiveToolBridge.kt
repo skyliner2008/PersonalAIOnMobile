@@ -60,7 +60,7 @@ class LiveToolBridge(
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_EYES_OPEN. คุณเห็นภาพวิดีโอสดแล้ว $contextReminder โปรดวิเคราะห์สตรีมวิดีโอและตอบสิ่งที่เห็นหรือสรุปข้อมูลให้ผู้ใช้ฟังทันทีโดยไม่ถามซ้ำ"
+                    result   = "OK_EYES_OPEN. ระบบสตรีมมิ่งเริ่มแล้ว คุณเห็นภาพตอนนี้ทันที โปรดเริ่มการวิเคราะห์และเก็บข้อมูลที่จำเป็น 'เดี๋ยวนี้' และปิดกล้องทันทีที่ได้ข้อมูลครบถ้วน ห้ามถามผู้ใช้ขณะเครื่องมือกำลังทำงาน"
                 )
                 logDebug("LiveBridge", "👁️ Vision activated (Context: ${liveService.lastUserText})")
                 return
@@ -70,7 +70,7 @@ class LiveToolBridge(
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_SILENT"
+                    result   = "OK_EYES_CLOSED. กล้องถูกปิดใช้งานแล้ว คุณจะไม่เห็นภาพอีกต่อไปจนกว่าจะเปิดใหม่ โปรดเริ่มสรุปสิ่งที่เห็นให้ผู้ใช้ฟังเดี๋ยวนี้"
                 )
                 logDebug("LiveBridge", "🕶️ Vision deactivated by AI (Silenced)")
                 return

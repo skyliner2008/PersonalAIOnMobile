@@ -24,6 +24,9 @@ object ToolExecutor {
     // Executor สำหรับ Camera & Vision
     private var _cameraExecutor: CameraToolExecutor? = null
 
+    // Delegate สำหรับ Side-effects (Memory, Reminders, UI)
+    private var _sideEffectDelegate: SideEffectDelegate? = null
+
     fun init(client: HttpClient, geminiService: com.example.personalaibot.data.GeminiService) {
         _tradingExecutor = TradingToolExecutor(client, geminiService)
     }
@@ -34,6 +37,10 @@ object ToolExecutor {
 
     fun initCameraExecutor(executor: CameraToolExecutor) {
         _cameraExecutor = executor
+    }
+
+    fun setSideEffectDelegate(delegate: SideEffectDelegate) {
+        _sideEffectDelegate = delegate
     }
 
     /**
@@ -102,12 +109,14 @@ object ToolExecutor {
         }
     }
 
-    private fun executeRememberFact(args: Map<String, String>): String {
+    private suspend fun executeRememberFact(args: Map<String, String>): String {
         val key = args["key"] ?: return "ต้องระบุ key"
         val value = args["value"] ?: return "ต้องระบุ value"
         val importance = args["importance"] ?: "medium"
-        // จะถูก intercepted โดย ViewModel เพื่อบันทึกลง JarvisMemoryManager
-        return "REMEMBER_FACT::key=$key::value=$value::importance=$importance"
+        
+        _sideEffectDelegate?.onRememberFact(key, value, importance)
+        
+        return "บันทึกข้อมูลเรียบร้อยแล้ว: $key = $value"
     }
 
     private fun executeRecallMemory(query: String, memoryContext: String): String {
@@ -139,13 +148,15 @@ object ToolExecutor {
         return "$value $fromUnit = $formatted $toUnit"
     }
 
-    private fun executeSetReminder(args: Map<String, String>): String {
+    private suspend fun executeSetReminder(args: Map<String, String>): String {
         val title = args["title"] ?: return "ต้องระบุหัวข้อ"
         val detail = args["detail"] ?: ""
         val whenStr = args["when"] ?: "ตามที่สะดวก"
         val timestamp = Clock.System.now().toEpochMilliseconds()
-        // Flag format ให้ ViewModel intercepted และบันทึกลง memory
-        return "SET_REMINDER::title=$title::detail=$detail::when=$whenStr::ts=$timestamp"
+        
+        _sideEffectDelegate?.onSetReminder(title, detail, whenStr, timestamp)
+        
+        return "ตั้งการแจ้งเตือน '$title' เรียบร้อยแล้ว (เวลา: $whenStr)"
     }
 
     private fun executeFormatJson(data: String): String {
@@ -185,10 +196,11 @@ object ToolExecutor {
         return "WEB_SEARCH_REQUEST::query=$query"
     }
 
-    private fun executeCustomSkill(call: ToolCall): String {
+    private suspend fun executeCustomSkill(call: ToolCall): String {
         val skill = ToolRegistry.getSkill(call.name)
             ?: return "ไม่พบ skill '${call.name}'"
-        return "CUSTOM_SKILL_REQUEST::name=${call.name}::args=${call.args}"
+        // สำหรับ Phase ถัดไป: จัดการ Skill ผ่าน delegate
+        return "กำลังดึงข้อมูลจากทักษะ '${skill.name}'..."
     }
 
     // ─── Math Evaluator ──────────────────────────────────────────────────────

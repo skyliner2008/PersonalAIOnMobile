@@ -184,7 +184,7 @@ object ToolRegistry {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "duration_seconds" to ParameterProperty("NUMBER", "How long to keep the eyes open (default 60s).")
+                    "duration_seconds" to ParameterProperty("NUMBER", "How long to keep the eyes open (default 10s).")
                 ),
                 required = emptyList()
             )

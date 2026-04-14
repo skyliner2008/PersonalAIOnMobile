@@ -331,6 +331,7 @@ class GeminiService(
                 }.execute { httpResponse ->
                     if (!httpResponse.status.isSuccess()) {
                         val err = httpResponse.bodyAsText()
+                        logError("GeminiService", "API Error ${httpResponse.status.value}: $err")
                         emit("⚠️ API Error ${httpResponse.status.value}: $err")
                         return@execute
                     }
@@ -503,8 +504,15 @@ class GeminiService(
             if (res.status.isSuccess()) {
                 val resp: GeminiResponse = res.body()
                 extractAllTextFromResp(resp).ifBlank { "⚠️ No response" }
-            } else "⚠️ Error ${res.status}"
-        } catch (e: Exception) { "⚠️ Error: ${e.message}" }
+            } else {
+                val errBody = res.bodyAsText()
+                logError("GeminiService", "API Error ${res.status}: $errBody")
+                "⚠️ Error ${res.status}"
+            }
+        } catch (e: Exception) {
+            logError("GeminiService", "Generate response failed", e)
+            "⚠️ Error: ${e.message}"
+        }
     }
 
     fun generateResponseFlow(
@@ -538,7 +546,10 @@ class GeminiService(
                     }
                 }
             }
-        } catch (e: Exception) { emit("⚠️ Error: ${e.message}") }
+        } catch (e: Exception) {
+            logError("GeminiService", "Generate flow failed", e)
+            emit("⚠️ Error: ${e.message}")
+        }
     }
 
     /**

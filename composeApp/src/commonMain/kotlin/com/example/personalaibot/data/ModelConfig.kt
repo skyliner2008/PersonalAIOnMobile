@@ -15,7 +15,7 @@ object ModelConfig {
      * The default model used for Real-time Voice and Camera (Live mode).
      * This is used when no setting is found in the database.
      */
-    const val DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"
+    const val DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live"
 
     /**
      * Checks if a model name is intended for Live mode.
@@ -36,6 +36,7 @@ object ModelConfig {
                m.contains("2.5-flash") || 
                m.contains("2.5-pro") || 
                m.contains("native-audio") ||
-               m.contains("live")
+               m.contains("live") ||
+               m.contains("3.5-flash")
     }
 }

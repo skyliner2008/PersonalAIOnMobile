@@ -307,13 +307,15 @@ class LiveGeminiService(
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
-    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการเงินและการวิเคราะห์แบบ Real-time
-กฎหลัก (STRICT):
-1. การตอบสนอง: ทักทายผู้ใช้ทันทีเมื่อเริ่มการเชื่อมต่อและตอบโต้ด้วยเสียงอย่างเป็นธรรมชาติ
-2. ภาษา: พูดและตอบเป็น "ภาษาไทย" เท่านั้น ห้ามพูดภาษาอังกฤษเด็ดขาด
-3. การมองเห็น (VISION): ปกติดวงตาจะปิดอยู่ หากผู้ใช้ถามถึงสิ่งที่เห็น ให้เรียก `vision_activate` เพื่อเปิดกล้อง และเมื่อวิเคราะห์เสร็จให้เรียก `vision_deactivate` ทันที
-4. การเงิน: ใช้ `trading_market_snapshot` และ `trading_price` เพื่อดึงข้อมูลจริง ห้ามตอบจากความจำ
-5. รายงาน: ใช้ `analyze_and_display_report` เพื่อส่งผลลัพธ์ละเอียดเข้าหน้าแชท ส่วนเสียงพูดให้สรุปใจความสำคัญสั้นๆ"""
+    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการวิเคราะห์ข้อมูลและสายตาอัจฉริยะ (Vision Specialist) ปฏิบัติตามกฎอย่างเคร่งครัด:
+1. การตอบสนอง: ทักทายสั้นๆ และตอบเป็น "ภาษาไทย" เท่านั้น
+2. **กฎการใช้สายตา (STRICT ECONOMY)**: เพื่อประหยัด Token และรักษาความเป็นส่วนตัว ให้ทำตามลำดับนี้เสมอ:
+   - เมื่อผู้ใช้ถามเกี่ยวกับสิ่งที่เห็น: เรียก `vision_activate` ทันที
+   - เมื่อเปิดกล้องแล้ว: ให้สังเกตสตรีมวิดีโอ 'ทันที' เก็บข้อมูลวิเคราะห์ให้ครบถ้วนภายใน 1-3 วินาที
+   - **ปิดตาทันที**: เรียก `vision_deactivate` ทันทีที่ได้คำตอบ 'ก่อน' จะเริ่มพูดบรรยายให้ผู้ใช้ฟัง
+   - ห้ามถามผู้ใช้ขณะเครื่องมือกำลังทำงาน (No asking during streaming)
+3. การเงิน: ใช้เครื่องมือตลาดหุ้นจริงเสมอ ห้ามตอบจากความจำ
+4. รายงาน: พ่น Markdown รายละเอียดเข้าหน้าแชทด้วย `analyze_and_display_report` เสมอ"""
 
     private var selectedVoiceName: String = "Aoede" // Default
 
@@ -340,7 +342,9 @@ class LiveGeminiService(
                 _connectionState.value = ConnectionState.Connecting
             } else {
                 _connectionState.value = ConnectionState.Reconnecting(attempt, maxRetries)
-                val delayMs = baseRetryDelayMs * (1L shl (attempt - 1).coerceAtMost(4))
+                val baseDelay = baseRetryDelayMs * (1L shl (attempt - 1).coerceAtMost(4))
+                val jitter = (0..500).random() // Add 0-500ms jitter
+                val delayMs = baseDelay + jitter
                 logDebug("LiveGemini", "Reconnecting in ${delayMs}ms (attempt $attempt/$maxRetries)")
                 delay(delayMs)
             }

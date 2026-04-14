@@ -214,7 +214,7 @@ private fun yuvToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray
 
     val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
     val out = ByteArrayOutputStream()
-    yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 85, out)
+    yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 60, out)
 
     val rawJpeg = out.toByteArray()
 
@@ -226,10 +226,17 @@ private fun yuvToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray
     val matrix = Matrix().apply {
         if (rotation != 0) postRotate(rotation.toFloat())
         if (isFrontCamera) postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
+        
+        // Optimization: Scale down to max 640px to save data/tokens
+        val maxDim = maxOf(bitmap.width, bitmap.height)
+        if (maxDim > 640) {
+            val scale = 640f / maxDim
+            postScale(scale, scale)
+        }
     }
     val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     val transformedOut = ByteArrayOutputStream()
-    transformed.compress(Bitmap.CompressFormat.JPEG, 85, transformedOut)
+    transformed.compress(Bitmap.CompressFormat.JPEG, 60, transformedOut)
     if (transformed != bitmap) transformed.recycle()
     bitmap.recycle()
     return transformedOut.toByteArray()
@@ -245,11 +252,20 @@ private fun bitmapToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteAr
             }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         } else {
-            val matrix = Matrix().apply { postRotate(imageProxy.imageInfo.rotationDegrees.toFloat()) }
+            val matrix = Matrix().apply { 
+                postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+                
+                // Optimization: Scale down to max 640px
+                val maxDim = maxOf(bitmap.width, bitmap.height)
+                if (maxDim > 640) {
+                    val scale = 640f / maxDim
+                    postScale(scale, scale)
+                }
+            }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         }
         val out = ByteArrayOutputStream()
-        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 60, out)
         if (rotatedBitmap != bitmap) rotatedBitmap.recycle()
         bitmap.recycle()
         out.toByteArray()

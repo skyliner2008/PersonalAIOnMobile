@@ -313,120 +313,47 @@ class JarvisViewModel(
         if (text.isBlank()) return
 
         viewModelScope.launch {
-            _messages.value = _messages.value + Message("user", text)
-            memoryManager.storeMessage("user", text)
-            _isTyping.value = true
-            val historySnapshot = buildHistorySnapshot()
-            val coreContext = memoryManager.buildCoreMemoryContext()
-            _messages.value = _messages.value + Message("model", "")
-            var currentAiMessage = ""
-            val responseFlow = orchestrator.chatWithHistory(text, historySnapshot, coreContext)
+            try {
+                _messages.value = _messages.value + Message("user", text)
+                memoryManager.storeMessage("user", text)
+                _isTyping.value = true
+                val historySnapshot = buildHistorySnapshot()
+                val coreContext = memoryManager.buildCoreMemoryContext()
+                _messages.value = _messages.value + Message("model", "")
+                var currentAiMessage = ""
+                val responseFlow = orchestrator.chatWithHistory(text, historySnapshot, coreContext)
 
-            responseFlow.collect { chunk ->
-                // Log tool execution indicators
-                if (chunk.startsWith("⏳ กำลังดึงข้อมูล")) {
-                    logDebug("JarvisVM", "[Chat] Tool call detected: $chunk")
+                responseFlow.collect { chunk ->
+                    // Log tool execution indicators
+                    if (chunk.startsWith("⏳ กำลังดึงข้อมูล")) {
+                        logDebug("JarvisVM", "[Chat] Tool call detected: $chunk")
+                    }
+                    currentAiMessage += chunk
+                    val currentList = _messages.value.toMutableList()
+                    if (currentList.isNotEmpty()) {
+                        currentList[currentList.size - 1] = Message("model", currentAiMessage)
+                        _messages.value = currentList
+                    }
                 }
-                currentAiMessage += chunk
-                val currentList = _messages.value.toMutableList()
-                if (currentList.isNotEmpty()) {
-                    currentList[currentList.size - 1] = Message("model", currentAiMessage)
-                    _messages.value = currentList
+                logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)")
+
+                if (currentAiMessage.isNotBlank()) {
+                    memoryManager.storeMessage("model", currentAiMessage)
+                    memoryManager.updateKnowledgeGraph("User: $text\nJARVIS: $currentAiMessage")
+                    memoryManager.extractAndUpdateCoreMemory(text, currentAiMessage)
                 }
-            }
-            logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)")
-
-            // ── Intercept tool result flags ──
-            currentAiMessage = interceptToolResults(currentAiMessage)
-
-            if (currentAiMessage.isNotBlank()) {
-                memoryManager.storeMessage("model", currentAiMessage)
-                memoryManager.updateKnowledgeGraph("User: $text\nJARVIS: $currentAiMessage")
-                memoryManager.extractAndUpdateCoreMemory(text, currentAiMessage)
-            }
-            _isTyping.value = false
-            if (speakResponse && currentAiMessage.isNotBlank() && voiceManager.isAvailable()) {
-                voiceManager.speak(currentAiMessage, null)
+                _isTyping.value = false
+                if (speakResponse && currentAiMessage.isNotBlank() && voiceManager.isAvailable()) {
+                    voiceManager.speak(currentAiMessage, null)
+                }
+            } catch (e: Exception) {
+                logError("JarvisVM", "Error in sendMessage", e)
+                _isTyping.value = false
+                _messages.value = _messages.value + Message("model", "⚠️ ขออภัย เกิดข้อผิดพลาดทางเทคนิค: ${e.message}")
             }
         }
     }
 
-    /**
-     * ตรวจจับ flag patterns จาก ToolExecutor และดำเนินการตาม
-     * - REMEMBER_FACT::key=...::value=... → บันทึกลง core memory
-     * - SET_REMINDER::title=...          → บันทึกเป็น archival memory (importance สูง)
-     * - WEB_SEARCH_REQUEST::query=...    → ส่งค้นหาผ่าน Gemini (grounding)
-     * - TRANSLATE_REQUEST::text=...      → ส่งแปลผ่าน LLM
-     * - SUMMARIZE_REQUEST::text=...      → ส่งสรุปผ่าน LLM
-     */
-    private suspend fun interceptToolResults(response: String): String {
-        var result = response
-
-        // ── REMEMBER_FACT ──
-        val rememberRegex = Regex("REMEMBER_FACT::key=(.+?)::value=(.+?)::importance=(.+?)(?:\\s|$)")
-        rememberRegex.findAll(response).forEach { match ->
-            val key = match.groupValues[1]
-            val value = match.groupValues[2]
-            val importance = match.groupValues[3]
-            memoryManager.setCoreMemory(key, value)
-            val imp = when (importance.lowercase()) {
-                "high" -> 0.9f; "low" -> 0.3f; else -> 0.6f
-            }
-            memoryManager.archiveFact(value, "model", imp)
-            logDebug("ToolIntercept", "Remembered: $key = $value (importance=$importance)")
-        }
-
-        // ── SET_REMINDER ──
-        val reminderRegex = Regex("SET_REMINDER::title=(.+?)::detail=(.+?)::when=(.+?)::ts=(\\d+)")
-        reminderRegex.findAll(response).forEach { match ->
-            val title = match.groupValues[1]
-            val detail = match.groupValues[2]
-            val whenStr = match.groupValues[3]
-            val reminderContent = "📌 Reminder: $title — $detail (เมื่อ: $whenStr)"
-            memoryManager.archiveFact(reminderContent, "system", 0.95f)
-            logDebug("ToolIntercept", "Reminder set: $title")
-        }
-
-        // ── WEB_SEARCH_REQUEST → ส่งให้ Gemini ค้นหาจริง ──
-        val searchRegex = Regex("WEB_SEARCH_REQUEST::query=(.+?)(?:\\s|$)")
-        searchRegex.findAll(response).forEach { match ->
-            val query = match.groupValues[1].trim()
-            try {
-                val searchResult = orchestrator.searchWithGrounding(query)
-                result = result.replace(match.value, "[ผลการค้นหา] $searchResult")
-            } catch (e: Exception) {
-                logError("ToolIntercept", "Web search failed", e)
-            }
-        }
-
-        // ── TRANSLATE_REQUEST → ส่งแปลผ่าน LLM ──
-        val translateRegex = Regex("TRANSLATE_REQUEST::text=(.+?)::to=(.+?)(?:\\s|$)")
-        translateRegex.findAll(response).forEach { match ->
-            val text = match.groupValues[1].trim()
-            val targetLang = match.groupValues[2].trim()
-            try {
-                val translated = orchestrator.translateText(text, targetLang)
-                result = result.replace(match.value, translated)
-            } catch (e: Exception) {
-                logError("ToolIntercept", "Translation failed", e)
-            }
-        }
-
-        // ── SUMMARIZE_REQUEST → ส่งสรุปผ่าน LLM ──
-        val summarizeRegex = Regex("SUMMARIZE_REQUEST::length=(.+?)::text=(.+?)(?:\\s|$)")
-        summarizeRegex.findAll(response).forEach { match ->
-            val length = match.groupValues[1].trim()
-            val text = match.groupValues[2].trim()
-            try {
-                val summary = orchestrator.summarizeText(text, length)
-                result = result.replace(match.value, summary)
-            } catch (e: Exception) {
-                logError("ToolIntercept", "Summarization failed", e)
-            }
-        }
-
-        return result
-    }
 
     // ─── External API Keys (OpenAI, Claude) ────────────────────────────────
     private val _openaiApiKey = MutableStateFlow("")

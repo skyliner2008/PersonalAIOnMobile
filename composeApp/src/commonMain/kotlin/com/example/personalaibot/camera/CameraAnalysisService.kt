@@ -209,7 +209,7 @@ class CameraAnalysisService(
                 // Only transmit frames IF AND ONLY IF the AI or user explicitly enabled AI Vision (Eye Open 👁️)
                 
                 val interval = if (isAiVisionRequested) {
-                    300L // ~3 FPS
+                    fpsController.getFrameDelayMs()
                 } else {
                     Long.MAX_VALUE // 0 FPS (Blocked)
                 }

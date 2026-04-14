@@ -20,7 +20,7 @@ class JarvisOrchestrator(
     private var modelName: String,
     private var liveModelName: String,
     private val fileHandler: (suspend (String, Map<String, String>) -> String)? = null
-) {
+) : com.example.personalaibot.tools.SideEffectDelegate {
     private val geminiService = GeminiService(client, apiKey, modelName)
     private val liveService   = LiveGeminiService(client, apiKey, liveModelName)
     private val planner       = JarvisPlanner(geminiService)
@@ -30,6 +30,9 @@ class JarvisOrchestrator(
         com.example.personalaibot.tools.ToolExecutor.init(client, geminiService)
         // เชื่อม File handler (Platform specific)
         fileHandler?.let { com.example.personalaibot.tools.ToolExecutor.initFileHandler(it) }
+        
+        // เชื่อมต่อ Side-effect Delegate
+        com.example.personalaibot.tools.ToolExecutor.setSideEffectDelegate(this)
     }
 
     private val toolBridge = LiveToolBridge(
@@ -56,10 +59,12 @@ class JarvisOrchestrator(
     }
 
     fun setAiVisionToggle(onToggle: (Boolean) -> Unit) {
+        this.visionToggleCallback = onToggle
         toolBridge.onAiVisionToggle = onToggle
     }
 
     fun setVoiceChangeHandler(onVoiceChange: (String) -> Unit) {
+        this.voiceChangeCallback = onVoiceChange
         toolBridge.onVoiceChange = onVoiceChange
     }
 
@@ -151,4 +156,37 @@ class JarvisOrchestrator(
             intentAddon = "ให้สรุปเนื้อหาอย่างครบถ้วน ไม่ต้องใส่คำนำ ตอบเฉพาะสรุปเท่านั้น"
         )
     }
+
+    // ─── SideEffectDelegate Implementation ──────────────────────────────────────
+
+    override suspend fun onRememberFact(key: String, value: String, importance: String) {
+        memoryManager.setCoreMemory(key, value)
+        val imp = when (importance.lowercase()) {
+            "high" -> 0.9f; "low" -> 0.3f; else -> 0.6f
+        }
+        memoryManager.archiveFact(value, "model", imp)
+        com.example.personalaibot.logDebug("Orchestrator", "SideEffect: Remembered $key = $value")
+    }
+
+    override suspend fun onSetReminder(title: String, detail: String, whenStr: String, timestamp: Long) {
+        val reminderContent = "📌 Reminder: $title — $detail (เมื่อ: $whenStr)"
+        memoryManager.archiveFact(reminderContent, "system", 0.95f)
+        com.example.personalaibot.logDebug("Orchestrator", "SideEffect: Reminder set: $title")
+    }
+
+    override suspend fun onDisplayReport(markdown: String, voiceSummary: String) {
+        // จะถูกจัดการผ่าน textOutputFlow ของ liveService (ถ้าจำเป็น)
+        // หรือส่งผ่าน Event ไปที่ UI
+    }
+
+    override suspend fun onVisionToggle(active: Boolean) {
+        visionToggleCallback?.invoke(active)
+    }
+
+    override suspend fun onVoiceChange(newVoice: String) {
+        voiceChangeCallback?.invoke(newVoice)
+    }
+
+    private var visionToggleCallback: ((Boolean) -> Unit)? = null
+    private var voiceChangeCallback: ((String) -> Unit)? = null
 }
