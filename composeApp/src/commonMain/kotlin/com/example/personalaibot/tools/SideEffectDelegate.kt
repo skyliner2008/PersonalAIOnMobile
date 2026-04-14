@@ -19,4 +19,7 @@ interface SideEffectDelegate {
 
     /** ควบคุมการเปลี่ยนเสียง */
     suspend fun onVoiceChange(newVoice: String)
+
+    /** ค้นหาสิ่งที่จำได้จากความทรงจำระยะยาว */
+    suspend fun onRecallMemory(query: String): String
 }

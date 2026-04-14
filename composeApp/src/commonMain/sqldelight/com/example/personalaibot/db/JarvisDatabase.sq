@@ -143,6 +143,12 @@ SELECT * FROM ArchivalMemory ORDER BY importance DESC LIMIT :limit;
 updateArchivalAccess:
 UPDATE ArchivalMemory SET access_count = access_count + 1 WHERE id = ?;
 
+getArchivalWithEmbeddings:
+SELECT * FROM ArchivalMemory WHERE embedding_json IS NOT NULL ORDER BY importance DESC;
+
+updateArchivalEmbedding:
+UPDATE ArchivalMemory SET embedding_json = ? WHERE id = ?;
+
 -- ═══════════════════════════════════════════════════════════════
 -- Queries: KnowledgeNode
 -- ═══════════════════════════════════════════════════════════════

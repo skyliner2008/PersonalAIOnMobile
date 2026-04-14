@@ -15,12 +15,14 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class LiveToolBridge(
     private val liveService: LiveGeminiService,
     private val geminiService: GeminiService,
+    private val memoryManager: com.example.personalaibot.memory.JarvisMemoryManager? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
     var onAiVisionToggle: ((Boolean) -> Unit)? = null,
     var onVoiceChange: ((String) -> Unit)? = null
@@ -49,19 +51,24 @@ class LiveToolBridge(
         // --- UI Optimizations for Live Mode ---
         when {
             event.name == "vision_activate" -> {
-                onAiVisionToggle?.invoke(true)
-                
                 val contextReminder = if (liveService.lastUserText.isNotBlank()) {
                     "เพื่อตอบคำถามล่าสุดของคุณ: \"${liveService.lastUserText}\""
                 } else {
                     "เพื่อสังเกตสภาพแวดล้อมรอบตัว"
                 }
+                onAiVisionToggle?.invoke(true)
                 
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_EYES_OPEN. ระบบสตรีมมิ่งเริ่มแล้ว คุณเห็นภาพตอนนี้ทันที โปรดเริ่มการวิเคราะห์และเก็บข้อมูลที่จำเป็น 'เดี๋ยวนี้' และปิดกล้องทันทีที่ได้ข้อมูลครบถ้วน ห้ามถามผู้ใช้ขณะเครื่องมือกำลังทำงาน"
+                    result   = "OK_EYES_OPEN. ระบบสตรีมมิ่งเริ่มแล้ว คุณเห็นภาพตอนนี้ทันที **โปรดสังเกตวิดีโออย่างน้อย 1-2 วินาทีเพื่อให้ภาพชัดเจนก่อนเริ่มวิเคราะห์ ห้ามเดาสุ่ม** เมื่อได้ข้อมูลครบแล้วให้เรียก vision_deactivate ทันที"
                 )
+                
+                // Record to history
+                scope.launch {
+                    memoryManager?.storeMessage("system", "JARVIS activated eyes to observe environment.", metadata = "{\"event\": \"vision_on\"}")
+                }
+                
                 logDebug("LiveBridge", "👁️ Vision activated (Context: ${liveService.lastUserText})")
                 return
             }
@@ -70,7 +77,7 @@ class LiveToolBridge(
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_EYES_CLOSED. กล้องถูกปิดใช้งานแล้ว คุณจะไม่เห็นภาพอีกต่อไปจนกว่าจะเปิดใหม่ โปรดเริ่มสรุปสิ่งที่เห็นให้ผู้ใช้ฟังเดี๋ยวนี้"
+                    result   = "OK_EYES_CLOSED. กล้องปิดแล้ว โปรดสรุปสิ่งที่เห็นให้ผู้ใช้ฟังอย่างเป็นธรรมชาติและกระชับที่สุด"
                 )
                 logDebug("LiveBridge", "🕶️ Vision deactivated by AI (Silenced)")
                 return
@@ -96,7 +103,7 @@ class LiveToolBridge(
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "✅ รายงานการวิเคราะห์ถูกแสดงในหน้าแชทแล้ว โปรดพูดสรุปใจความสำคัญให้ผู้ใช้ฟังทันที"
+                    result   = "✅ รายงานถูกส่งเข้าแชทแล้ว โปรดพูดสรุปสั้นๆ และบอกให้ผู้ใช้ดูรายละเอียดในแชท ห้ามอ่านตารางซ้ำ"
                 )
                 logDebug("LiveBridge", "📊 Report tool executed")
                 return
@@ -116,15 +123,8 @@ class LiveToolBridge(
                 }
                 return
             }
-            event.name == "trading_market_snapshot" && finalResultText.startsWith("📊") -> {
-                // สำหรับตลาดภาพรวม ไม่ต้องพ่น 20 รายการลงแชท (มันอ่านยาก)
-                // พ่นแค่ข้อความสั้นๆ ว่าดึงข้อมูลสำเร็จ กำลังวิเคราะห์...
-                val sector = event.args["sector"] ?: "Market"
-                val market = event.args["market"] ?: "US"
-                liveService.emitTextToChat("✅ ดึงข้อมูล $sector ($market) สำเร็จแล้ว กำลังประมวลผลบทวิเคราะห์เชิงลึก...")
-            }
             else -> {
-                // เครื่องมือทั่วไป (เช่น trading_price) ให้พ่นลงแชทตามปกติ
+                // เครื่องมือทั่วไป ให้พ่นลงแชทตามปกติ (ใช้ระบบ isStatic อัตโนมัติ)
                 liveService.emitTextToChat(finalResultText)
             }
         }

@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class Message(val role: String, val content: String)
+data class Message(val role: String, val content: String, val isStatic: Boolean = false)
 
 class JarvisViewModel(
     driverFactory: DatabaseDriverFactory,
@@ -262,6 +262,14 @@ class JarvisViewModel(
 
         if (savedKey.isNotBlank()) {
             fetchModels()
+            
+            // Auto-backfill existing facts with embeddings for Semantic Search
+            viewModelScope.launch {
+                val count = memoryManager.backfillEmbeddings(orchestrator.getGeminiService())
+                if (count > 0) {
+                    logDebug("JarvisVM", "✅ Semantic backfill complete: Indexed $count facts")
+                }
+            }
         }
         loadHistory()
     }
@@ -515,13 +523,20 @@ class JarvisViewModel(
                     orchestrator.textOutputFlow.collect { update ->
                         withContext(Dispatchers.Main) {
                             val msgList = _messages.value.toMutableList()
-                            // ถ้าสั่งให้ append และข้อความล่าสุดคือบทบาทเดียวกัน ให้เขียนต่อที่เดิม
-                            if (update.append && msgList.isNotEmpty() && msgList.last().role == update.role) {
+                            
+                            if (update.replace && msgList.isNotEmpty() && 
+                                msgList.last().role == update.role && !msgList.last().isStatic) {
+                                // Replacement mode: update the last message content ONLY IF it's not static
                                 val last = msgList.last()
-                                msgList[msgList.size - 1] = last.copy(content = last.content + update.text)
+                                msgList[msgList.size - 1] = last.copy(content = update.text, isStatic = update.isStatic)
+                            } else if (update.append && msgList.isNotEmpty() && 
+                                       msgList.last().role == update.role && !msgList.last().isStatic) {
+                                // Append mode: add to last message content ONLY IF it's not static
+                                val last = msgList.last()
+                                msgList[msgList.size - 1] = last.copy(content = last.content + update.text, isStatic = update.isStatic)
                             } else {
-                                // ถ้าเป็นงานใหม่ (append = false) หรือบทบาทเปลี่ยน ให้ขึ้นกล่องใหม่ทันที
-                                msgList.add(Message(update.role, update.text))
+                                // New message box (for new role, or if last box was static/report)
+                                msgList.add(Message(update.role, update.text, isStatic = update.isStatic))
                             }
                             _messages.value = msgList
                         }

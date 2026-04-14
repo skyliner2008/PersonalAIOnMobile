@@ -2,225 +2,115 @@
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-orange.svg?style=flat)](https://www.jetbrains.com/lp/compose-multiplatform/)
-[![Gemini](https://img.shields.io/badge/AI-Gemini%20Flash-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/AI-Gemini%203.1%20Flash-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูงที่สร้างขึ้นด้วย **Kotlin Multiplatform (KMP)** ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์การเงินอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 2.0 / 2.5 / 3.x Flash**
+**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์ข้อมูลอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 3.1 Flash Live** และระบบความจำแบบ 4 ชั้น (GraphRAG)
 
 ---
 
-## 🚀 Key Features
+## 🚀 Verfied Features (ใช้งานได้จริง 100%)
 
-### 🎙️ 1. Live Voice Mode
-สั่งการด้วยเสียงแบบ Real-time ผ่าน **Gemini Live API**:
-- **Low Latency** — ตอบโต้ความเร็วสูงเหมือนคุยกับมนุษย์
-- **Native Audio Flow** — PCM Audio 16kHz พร้อม AEC + Noise Suppression
-- **Voice-First Design** — เน้นการพูดคุยเป็นหลัก ไม่ต้องพิมพ์
+### 🎙️ 1. Pro-Analyst Live Voice & UI
+ยกระดับการโต้ตอบด้วยเสียงแบบ Real-time ที่ฉลาดกว่าเดิม:
+- **Pro-Analyst Summarization** — AI ไม่เพียงแค่สรุป แต่จะวิเคราะห์แนวโน้มและจุดสำคัญ (Insights) ให้ฟังทันที
+- **Dynamic UI Separation** — ระบบแยกกล่องข้อความอัจฉริยะ: **Static Boxes** สำหรับข้อมูลเทคนิค/รายงานถาวร และ **Progress Boxes** สำหรับคำพูด AI ที่อัปเดตแบบ Real-time
+- **Low Latency Interaction** — ตอบโต้รวดเร็วด้วย WebSocket 60fps พร้อมระบบ AEC + Noise Suppression
 
-### 📸 2. Real-time Camera Vision (Multi-Provider)
-ระบบวิเคราะห์ภาพแบบ Real-time รองรับหลาย AI Provider:
-- **Gemini Live** — WebSocket streaming ความเร็วสูง (`gemini-3.1-flash-live-preview`)
-- **Gemini Flash** — REST snapshot analysis (`gemini-2.5-flash`)
-- **OpenAI GPT-4o / GPT-4.1** — Vision API snapshot analysis
-- **Claude Sonnet / Opus** — Anthropic Vision API snapshot analysis
-- **AI Adaptive Vision (On-Demand AI Eyes)** — ระบบวิสัยทัศน์อัจฉริยะที่ AI ควบคุมการเปิด/ปิด "ดวงตา" ได้ด้วยตัวเองผ่าน Tool Calling
-- **Token Saving Architecture** — ปรับความเร็วภาพอัตโนมัติ 0–3 FPS (0 FPS เมื่อเงียบ, 1 FPS เมื่อพูด, 3 FPS เมื่อ AI ร้องขอ)
-- **Safety Timeout** — ระบบตัดการส่งภาพอัตโนมัติหาก AI ลืมสั่งปิดตา เพื่อป้องกันการเสีย Token โดยไม่จำเป็น
-- **AR Overlay Engine** — Bounding box, labels, scan animation ทับภาพจริง
+### 📸 2. Real-time Camera Vision (Adaptive System)
+- **AI Adaptive Vision** — ระบบปรับความเร็วภาพอัตโนมัติ 0–3 FPS (0 FPS เมื่อนิ่ง, 3 FPS เมื่อ AI ร้องขอ) เพื่อประหยัด Token และแบตเตอรี่
+- **Vision Activate/Deactivate** — AI สามารถ "เปิด/ปิดตา" เองได้ตามบริบทความจำเป็น
+- **Multi-Provider Support** — สลับการใช้งานระหว่าง Gemini Live, Gemini Flash และ OpenAI GPT-4o เพื่อการวิเคราะห์ที่แม่นยำที่สุด
+- **AR Overlay Engine** — แสดง Bounding Box และคำอธิบายวัตถุบนภาพจริงแบบ Real-time
 
-### 🧠 3. 4-Layer Memory Engine
-- **Short-term** — บันทึก context การสนทนาปัจจุบัน
-- **Long-term** — จำข้อมูลข้ามเซสชันใน SQLite
-- **Vector + GraphRAG** — ค้นหาความหมายและความสัมพันธ์
-- **Embeddings** — เข้าใจบริบทเชิงความหมาย
+### 🧠 3. Advanced 4-Layer Memory Engine
+- **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้และสกัดความสนใจอัตโนมัติ
+- **Layer 2: Working Memory** — บันทึกประวัติการคุยปัจจุบันลง SQLite ทันที
+- **Layer 3: Archival Memory** — ระบบค้นหาความความจำด้วยความหมาย (Semantic Search / Vector Embeddings)
+- **Layer 4: GraphRAG Knowledge Graph** — เชื่อมโยงความสัมพันธ์ของแนวคิดต่างๆ เป็นโครงข่ายสมอง
 
-### 🤖 4. Multi-Agent Orchestration
-- วิเคราะห์ intent และ route งานซับซ้อนไปยัง Swarm of AI Agents
-- Skills system — เพิ่ม agent เฉพาะทางได้ไม่จำกัด
-
-### 📊 5. Trading Intelligence (SMC + TA)
-- **SMC** — Smart Money Concepts (Order Blocks, BOS/CHoCH, FVG, Liquidity)
-- **Technical Analysis** — RSI, MACD, Bollinger, EMA, Volume, ATR
-- **Sentiment** — Reddit + Financial News scraping
-- **Multi-Timeframe** — M1 → D1 sweep analysis
-
-
-### 📁 6. Advanced Android File Management
-- **Autonomous File Agent** — จัดการไฟล์ได้เหมือนมนุษย์ (List, Read, Write, Move, Delete)
-- **Native Document Processing** — วิเคราะห์เอกสาร (PDF, Word, Excel) และรูปภาพ (OCR) โดยส่งไฟล์ตรงให้สมองของ Gemini แบบ Base64 ไม่ต้องพึ่งพา Library ภายนอก
-- **Intelligent Path Resolution** — แปลง Virtual Path (`/sdcard/`) เป็น System Path (`/storage/emulated/0/`) อัตโนมัติ
-
-### 🔧 7. Floating Widget
-- ทำงานแบบพื้นหลัง — กดปุ่มลอยเพื่อ toggle Live Mode ได้ทุกที่
+### 📊 4. Trading & SMC Intelligence (V8.3)
+- **SMC Master** — วิเคราะห์ Market Structure (BOS/CHoCH), Order Blocks with FVG, Liquidity Zones
+- **Pro Scanners** — ค้นหาโอกาสจาก Bollinger Squeeze, RSI Oversold/Overbought และ Volume Breakout
+- **MTF Sweeps** — ตรวจจับการกวาดสภาพคล่องข้ามหลาย Timeframe (M1 → H4)
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠️ Tech Stack (v2026)
 
-| Layer | Technology |
-|-------|-----------|
-| Language | Kotlin 2.0 (KMP) |
-| UI | Jetpack Compose + Material3 |
-| AI Model | Google Gemini 2.0/2.5/3.x Flash |
-| Audio | Gemini Live API (WebSocket) |
-| HTTP | Ktor HttpClient |
-| Database | SQLDelight (SQLite) |
-| Market Data | Binance API v3 |
-
----
-
-## 🎨 Theme (JarvisTheme)
-
-| Color | Hex | Usage |
-|-------|-----|-------|
-| Cyan | `#00E5FF` | Primary accent, JARVIS title |
-| Dark | `#0A0A14` | Background |
-| Surface | `#141422` | TopBar, cards |
-| Card | `#1C1C2E` | Chat bubbles, panels |
-| Purple | `#7C4DFF` | AI messages, highlights |
-| Red | `#FF1744` | LIVE indicator |
+| Layer | Technology | Status |
+|-------|-----------|--------|
+| Language | Kotlin 2.0 (KMP) | Stable |
+| UI Framework | Jetpack Compose Multiplatform | Stable |
+| Primary Brain | Gemini 3.1 Flash Live Preview | Active |
+| Multimodal | Live Stream (PCM 16kHz + JPEG) | Active |
+| Database | SQLDelight + SQLite Persistence | Active |
+| Logic Controller | JarvisOrchestrator (Single-Agent) | Active |
 
 ---
 
-## 📦 Tool Catalogue
+## 📦 Tool Catalogue (Total: 44 Tools)
 
-ระบบมีเครื่องมือทั้งหมด **35 tools** แบ่งเป็น 5 หมวดหมู่ สามารถดูได้ผ่านปุ่ม **⊞** (Apps icon) ใน TopBar
+### 🧠 BUILT-IN TOOLS (10 tools)
+- `calculate`: คำนวณนิพจน์คณิตศาสตร์ซับซ้อน
+- `get_current_datetime`: ข้อมูลวันเวลาและปฏิทินปัจจุบัน
+- `remember_fact`: บันทึกข้อมูลสำคัญลงความจำระยะยาว
+- `recall_memory`: ดึงข้อมูลจากฐานความรู้เดิม
+- `convert_units`: แปลงหน่วยสากลทุกประเภท
+- `set_reminder`: ตั้งการแจ้งเตือน/TODO
+- `translate_text`: แปลภาษาแบบ Multilingual
+- `summarize_text`: สรุปข้อความยาวๆ พร้อมกำหนดระดับความละเอียด
+- `search_web`: ค้นหาข้อมูลล่าสุดจากโลกออนไลน์
+- `analyze_and_display_report`: แสดงรายงาน Markdown ขั้นสูงในแชท
 
----
+### 📊 TRADING TOOLS (13 tools)
+- `trading_price`: ราคา Real-time (Stocks/Crypto/Forex/Gold)
+- `trading_market_snapshot`: ภาพรวมตลาดเจาะตามกลุ่มอุตสาหกรรม
+- `trading_top_gainers`: หุ้น/Crypto ที่พุ่งแรงที่สุดในตลาด
+- `trading_top_losers`: หุ้น/Crypto ที่ดิ่งแรงที่สุดในตลาด
+- `trading_technical_analysis`: วิเคราะห์ TA (RSI, MACD, BB, EMA) พร้อม Signal
+- `trading_multi_timeframe`: วิเคราะห์ความสอดคล้องทุก TF (W → 15m)
+- `trading_bollinger_scan`: หาตัวที่กำลังจะระเบิด (Bollinger Squeeze)
+- `trading_oversold_scan`: หาตัวที่ราคาถูกเกินไป (RSI < 30)
+- `trading_overbought_scan`: หาตัวที่ราคาร้อนแรงเกินไป (RSI > 70)
+- `trading_volume_breakout`: หาตัวที่มีแรงซื้อขายผิดปกติพร้อมราคาพุ่ง
+- `trading_sentiment`: วิเคราะห์อารมณ์ตลาดจาก Reddit
+- `trading_news`: ข่าวการเงินล่าสุดแยกตาม Symbol
+- `trading_combined`: สุดยอดเครื่องมือวิเคราะห์ (TA + News + Sentiment)
 
-### 🔷 BUILT-IN TOOLS (6 tools)
+### 📈 SMC TOOLS (5 tools)
+- `trading_smc_analysis`: Full SMC Dashboard
+- `trading_smc_sweeps`: MTF Sweep Detection
+- `trading_smc_liquidity`: MTF Liquidity Zones & Stars
+- `trading_smc_orderblocks`: Order Blocks + FVG Confirmation
+- `trading_smc_structure`: Market Structure (BOS/CHoCH, Premium/Discount)
 
-#### 1. `calculator` — เครื่องคิดเลข
-คำนวณนิพจน์คณิตศาสตร์ทุกรูปแบบ
-- บวก ลบ คูณ หาร ยกกำลัง รากที่สอง
-- ตรีโกณมิติ (sin, cos, tan)
-- ลอการิทึม, เลขชี้กำลัง
-- **ตัวอย่าง**: "คำนวณ 15% ของ 8500", "sqrt(144) + 3^4"
+### 📁 FILE MANAGEMENT (7 tools)
+- `file_list`, `file_read`, `file_write`, `file_delete`, `file_analyze` (OCR/PDF Support), `file_move`, `file_search`
 
-#### 2. `unit_converter` — แปลงหน่วย
-แปลงหน่วยวัดทุกประเภทในระบบสากล
-- ความยาว, น้ำหนัก, อุณหภูมิ, พื้นที่, ปริมาตร
-- ความเร็ว, ข้อมูล (KB/MB/GB)
-- **ตัวอย่าง**: "100 กิโลเมตรเท่ากับกี่ไมล์", "แปลง 37°C เป็น Fahrenheit"
-
-#### 3. `datetime_info` — วันเวลาและปฏิทิน
-ข้อมูลวันที่ เวลา เขตเวลา ทั่วโลก
-- วันนี้คือวันอะไร, กี่วันถึง...
-- เปรียบเทียบ timezone ทั่วโลก
-- นับวันระหว่างสองวัน
-- **ตัวอย่าง**: "ตอนนี้กี่โมงที่ Tokyo", "เหลืออีกกี่วันถึงปีใหม่"
-
-#### 4. `random_generator` — สุ่มตัวเลขและข้อมูล
-สุ่มค่าต่างๆ ตามที่กำหนด
-- ตัวเลข UUID รหัสผ่าน
-- เลือกสุ่มจากรายการ (เช่น เมนูอาหาร)
-- **ตัวอย่าง**: "สุ่มเลข 1-100", "สุ่มเมนูอาหารเย็นให้หน่อย"
-
-#### 5. `web_search` — ค้นหาข้อมูลออนไลน์
-ค้นหาข้อมูล ข่าวสาร และเนื้อหาล่าสุดจากอินเทอร์เน็ต
-- ข่าวล่าสุด, ราคา, สภาพอากาศ
-- ความรู้ทั่วไป, คำนิยาม
-- **ตัวอย่าง**: "ข่าว BTC วันนี้", "นายกรัฐมนตรีไทยคนปัจจุบัน"
-
-#### 6. `memory_manager` — จัดการความจำ
-บันทึกและเรียกข้อมูลจากหน่วยความจำระยะยาว
-- จำข้อมูลสำคัญข้ามเซสชัน
-- ค้นหาบทสนทนาที่ผ่านมา
-- **ตัวอย่าง**: "จำไว้ว่าฉันชอบ timeframe 4h", "ฉันเคยบอกอะไรเกี่ยวกับ BTC?"
-
----
-
-### 📈 TRADING TOOLS (9 tools)
-
-#### 7. `trading_price` — ราคาคริปโตแบบ Real-time
-ราคา OHLCV + % เปลี่ยนแปลงใน 24h จาก Binance
-- ราคาปัจจุบัน, High/Low 24h, Volume
-- **ตัวอย่าง**: "ราคา BTC ตอนนี้", "ETH ขึ้นหรือลงวันนี้"
-
-#### 8. `trading_technical` — Technical Analysis
-วิเคราะห์เทคนิคครบถ้วนด้วย Indicator หลัก
-- RSI, MACD, Bollinger Bands
-- EMA 9/21/50, Volume analysis, ATR
-- Overall Signal: BUY / SELL / NEUTRAL
-- **ตัวอย่าง**: "TA BTC 4h", "RSI ETH ตอนนี้เท่าไหร่"
-
-#### 9. `trading_sentiment` — Reddit Sentiment
-วิเคราะห์ความรู้สึกของ community จาก Reddit
-- Bullish/Bearish/Neutral score
-- Top keywords, trending topics
-- **ตัวอย่าง**: "Reddit คิดยังไงกับ BTC", "sentiment SOL วันนี้"
-
-#### 10. `trading_news` — Financial News
-ดึงข่าวการเงินล่าสุดจากหลายแหล่ง
-- Sentiment ของข่าวแต่ละชิ้น
-- Impact assessment (HIGH/MEDIUM/LOW)
-- **ตัวอย่าง**: "ข่าว ETHUSDT ล่าสุด", "มีข่าวอะไรกระทบ BTC บ้าง"
-
-#### 11. `trading_portfolio` — Portfolio Tracker
-ติดตาม Portfolio คริปโตแบบ Real-time
-- คำนวณมูลค่ารวม, P&L แต่ละเหรียญ
-- สัดส่วน allocation
-- **ตัวอย่าง**: "portfolio ฉันเป็นยังไงบ้าง", "คำนวณกำไรขาดทุน"
-
-#### 12. `trading_alert` — Price Alert
-ตั้ง Alert เมื่อราคาถึง target ที่กำหนด
-- Trigger เมื่อ price >= หรือ <= target
-- แจ้งเตือนใน session ปัจจุบัน
-- **ตัวอย่าง**: "แจ้งเมื่อ BTC ถึง 100000", "set alert ETH ต่ำกว่า 3000"
-
-#### 13. `trading_scan` — Market Scanner
-สแกนหา trading opportunities จาก watchlist
-- ค้นหา oversold/overbought, breakout, volume spike
-- **ตัวอย่าง**: "scan crypto ที่น่าสนใจ", "หา coin ที่ RSI oversold"
-
-#### 14. `trading_backtest` — Strategy Backtester
-ทดสอบกลยุทธ์ด้วยข้อมูลย้อนหลัง
-- Simulated trades, Win rate, Max drawdown
-- Sharpe ratio, Profit factor
-- **ตัวอย่าง**: "backtest EMA cross BTC 1h", "ทดสอบ RSI strategy SOL"
-
-#### 15. `trading_combined` — Full Confluence Analysis
-วิเคราะห์ครบทุกด้านพร้อมกัน
-- TA + Reddit Sentiment + Financial News
-- Confluence Decision: BUY / SELL / MIXED
-- **ตัวอย่าง**: "วิเคราะห์ BTC ครบทุกด้าน", "combined analysis ETHUSDT 4h"
+### 📷 CAMERA & VISION (9 tools)
+- `vision_activate`/`deactivate`: ควบคุมการเปิด/ปิดดวงตา AI
+- `camera_analyze_scene`: วิเคราะห์ภาพ Snapshot
+- `camera_detect_objects`: ตรวจจับวัตถุ (AR Overlay)
+- `camera_read_text`: อ่านข้อความจากกล้อง (OCR)
+- `camera_switch_provider`: สลับสมองที่ใช้มอง (Gemini/OpenAI/Claude)
+- `camera_switch_mode`: เปลี่ยนโหมดกล้อง
+- `voice_get_profiles`: ดูรายการเสียงพูด 30 รูปแบบ
+- `voice_set_profile`: เปลี่ยนเสียง JARVIS
 
 ---
 
-### 🟣 SMC TOOLS — Smart Money Concepts (5 tools)
+## 🚀 Future Roadmap (Coming Soon)
 
-แปลงจาก TradingView indicator "SMC & Multi-TF Order Blocks Sweeps V8.3" (Pine Script v6)
+1.  **Multi-Agent Orchestration (Swarm Architecture)**: ระบบวิเคราะห์งานและกระจายงานให้ AI Agent เฉพาะทางทำงานพร้อมกัน
+2.  **Portfolio Hub**: ระบบติดตามพอร์ตการลงทุนแบบละเอียดและ P&L Analytics
+3.  **Strategy Backtester**: ระบบทดสอบกลยุทธ์การเทรดแบบครบวงจร
+4.  **Hardware Extension**: การเชื่อมต่อกับอุปกรณ์ Smart Home และ Wearables
+5.  **Offline Memory Layer**: ระบบความจำขนาดเล็กที่ทำงานได้โดยไม่ต้องพึ่งอินเทอร์เน็ต
 
-#### 16. `trading_smc_analysis` — Full SMC Dashboard
-วิเคราะห์ครบทุก Smart Money Concept
-- Market Structure (BOS/CHoCH)
-- Order Blocks + FVG Confirmation
-- Liquidity Zones (Equal H/L)
-- Premium/Discount zones
-- Confluence Stars (★★★★★)
-- **ตัวอย่าง**: "วิเคราะห์ SMC BTC", "Order blocks ETH 4h", "zone ไหน strong ที่สุด"
-
-#### 17. `trading_smc_sweeps` — Multi-TF Sweep Detection
-ตรวจจับ Liquidity Sweep signals ข้ามทุก Timeframe (M1→H4)
-- Sweep = ราคา wick ทะลุ OB แล้ว reclaim >50% (Reversal signal)
-- Bullish Sweep → สัญญาณ Long
-- Bearish Sweep → สัญญาณ Short
-- **ตัวอย่าง**: "sweep BTC ทุก TF", "MTF sweep ETHUSDT", "มี sweep ไหมวันนี้"
-
-#### 18. `trading_smc_liquidity` — MTF Liquidity Zones
-แสดง Liquidity Zones ข้ามหลาย Timeframe พร้อม Confluence Stars
-- Equal Highs = Sell-side Liquidity (ราคาจะ sweep ก่อนลง)
-- Equal Lows = Buy-side Liquidity (ราคาจะ sweep ก่อนขึ้น)
-- **ตัวอย่าง**: "liquidity BTC ทุก TF", "Equal highs ETH", "ราคาจะไป sweep ที่ไหน"
-
-#### 19. `trading_smc_orderblocks` — Order Blocks + FVG
-ตรวจจับ Bullish/Bearish Order Blocks พร้อม FVG Confirmation
-- Bullish OB 🟢 — แหล่ง demand, ราคามักเด้งขึ้น
-- Bearish OB 🔴 — แหล่ง supply, ราคามักร่วงลง
-- แสดง distance % จากราคาปัจจุบัน + ⚡NEAR tag
-- **ตัวอย่าง**: "Order blocks BTC 4h", "OB ที่ยังไม่โดน ETHUSDT", "demand zone SOL"
-
-#### 20. `trading_smc_structure` — Market Structure
+---
+© 2026 JARVIS PersonalAIBot Project. All rights reserved.
+ng_smc_structure` — Market Structure
 วิเคราะห์ Market Structure: BOS, CHoCH, Premium/Discount
 - BOS (Break of Structure) — breakout ต่อเนื่อง
 - CHoCH (Change of Character) — สัญญาณ trend reversal

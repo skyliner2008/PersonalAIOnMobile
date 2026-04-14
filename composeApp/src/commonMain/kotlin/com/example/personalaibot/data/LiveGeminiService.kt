@@ -7,18 +7,12 @@ import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.util.decodeBase64Bytes
 import io.ktor.websocket.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
 // ═══════════════════════════════════════════════════════════════════
 // v1beta BidiGenerateContent Wire Format (camelCase per API reference)
@@ -43,8 +37,6 @@ data class LiveSetup(
     @SerialName("system_instruction") val systemInstruction: LiveSystemInstruction? = null,
     val tools: List<GeminiTool>? = null
 )
-
-
 
 @Serializable
 data class LiveSystemInstruction(
@@ -242,7 +234,7 @@ object GeminiVoiceProfiles {
         VoiceProfile("Achird",         VoiceGender.MALE, "เสียงเป็นมิตร เข้าถึงง่าย", "Friendly"),
         VoiceProfile("Algenib",        VoiceGender.MALE, "เสียงทุ้ม มีเอกลักษณ์",   "Gravelly"),
         VoiceProfile("Algieba",        VoiceGender.MALE, "เสียงนุ่มนวล น่าฟัง",     "Smooth"),
-        VoiceProfile("Alnilam",        VoiceGender.MALE, "เสียงหนักแน่น แข็งแกร่ง", "Firm"),
+        VoiceProfile("Alnilam",        VoiceGender.MALE, "เสียงหนักแน่น แแข็งแรง", "Firm"),
         VoiceProfile("Enceladus",      VoiceGender.MALE, "เสียงเบาๆ นุ่มนวล",      "Breathy"),
         VoiceProfile("Iapetus",        VoiceGender.MALE, "เสียงชัดเจน ออกเสียงดี",  "Clear"),
         VoiceProfile("Rasalgethi",     VoiceGender.MALE, "เสียงให้ข้อมูล มืออาชีพ", "Informative"),
@@ -277,6 +269,7 @@ class LiveGeminiService(
     private val client: HttpClient,
     private var apiKey: String,
     private var liveModelName: String,
+    private val memoryManager: com.example.personalaibot.memory.JarvisMemoryManager? = null,
     private val maxRetries: Int = 3,
     private val baseRetryDelayMs: Long = 1000L
 ) {
@@ -286,6 +279,8 @@ class LiveGeminiService(
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
     // คลังความจำระยะสั้น: เก็บประโยคสุดท้ายที่ผู้ใช้พูด เพื่อใช้เตือนสมาธิ AI ตอนเปิดเครื่องมือ
     var lastUserText: String = ""
         private set
@@ -294,7 +289,13 @@ class LiveGeminiService(
     val audioOutputFlow: Flow<ByteArray> = _audioOutputFlow.asSharedFlow()
 
     /** อีเวนต์ข้อความจาก Live mode (ใช้สำหรับ UI ตรวจสอบว่าจะขึ้นกล่องใหม่หรือพิมพ์ต่อ) */
-    data class LiveTextUpdate(val text: String, val role: String = "model", val append: Boolean = true)
+    data class LiveTextUpdate(
+        val text: String, 
+        val role: String = "model", 
+        val append: Boolean = true,
+        val replace: Boolean = false,
+        val isStatic: Boolean = false // If true, this box won't be overwritten by subsequent 'replace' updates
+    )
 
     private val _textOutputFlow = MutableSharedFlow<LiveTextUpdate>(extraBufferCapacity = 10)
     val textOutputFlow: Flow<LiveTextUpdate> = _textOutputFlow.asSharedFlow()
@@ -305,17 +306,24 @@ class LiveGeminiService(
     private val _bridgeToolRequestFlow = MutableSharedFlow<String>()
     val toolRequestFlow: Flow<String> = _bridgeToolRequestFlow.asSharedFlow()
 
+    // Turn buffers to prevent progressive duplication in DB
+    private var pendingUserTurnText: String? = null
+    private var pendingModelTurnText: String? = null
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
-    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการวิเคราะห์ข้อมูลและสายตาอัจฉริยะ (Vision Specialist) ปฏิบัติตามกฎอย่างเคร่งครัด:
-1. การตอบสนอง: ทักทายสั้นๆ และตอบเป็น "ภาษาไทย" เท่านั้น
-2. **กฎการใช้สายตา (STRICT ECONOMY)**: เพื่อประหยัด Token และรักษาความเป็นส่วนตัว ให้ทำตามลำดับนี้เสมอ:
-   - เมื่อผู้ใช้ถามเกี่ยวกับสิ่งที่เห็น: เรียก `vision_activate` ทันที
-   - เมื่อเปิดกล้องแล้ว: ให้สังเกตสตรีมวิดีโอ 'ทันที' เก็บข้อมูลวิเคราะห์ให้ครบถ้วนภายใน 1-3 วินาที
-   - **ปิดตาทันที**: เรียก `vision_deactivate` ทันทีที่ได้คำตอบ 'ก่อน' จะเริ่มพูดบรรยายให้ผู้ใช้ฟัง
-   - ห้ามถามผู้ใช้ขณะเครื่องมือกำลังทำงาน (No asking during streaming)
-3. การเงิน: ใช้เครื่องมือตลาดหุ้นจริงเสมอ ห้ามตอบจากความจำ
-4. รายงาน: พ่น Markdown รายละเอียดเข้าหน้าแชทด้วย `analyze_and_display_report` เสมอ"""
+    private val LIVE_SYSTEM_PROMPT = """คุณคือ JARVIS ผู้เชี่ยวชาญด้านการวิเคราะห์ข้อมูลและสายตาอัจฉริยะ ปฏิบัติตามกฎอย่างเคร่งครัด:
+1. การตอบสนอง: ตอบเป็น "ภาษาไทย" เท่านั้น ทักทายสั้นๆ และเข้าประเด็นทันที
+2. **กฎการใช้สายตา (VISION RULES - ANTI-HALLUCINATION)**:
+   - เมื่อเปิดกล้อง (`vision_activate`): **ห้ามเดาสุ่มจากเฟรมแรกเด็ดขาด** ให้รอสังเกตสตรีมวิดีโออย่างน้อย 1-2 วินาทีเพื่อให้ภาพชัดเจนและโฟกัสก่อนจะเริ่มสรุป
+   - หากภาพยังไม่ชัด หรือไม่แน่ใจ: ให้สังเกตต่อไปอีกครู่หนึ่งก่อนจะรายงาน
+   - **ปิดตาทันที**: เรียก `vision_deactivate` ทันทีที่ข้อมูลครบถ้วน 'ก่อน' จะเริ่มบรรยายสรุปให้ผู้ใช้ฟัง
+ 3. **การแจ้งผล (REPORTING & PRO-ANALYST VOICE)**:
+   - **ห้ามพูดปัดภาระ**: ห้ามใช้ประโยค "ดูรายละเอียดในแชท" หรือ "รายละเอียดอยู่ในแชท" เป็นคำสรุปหลักเด็ดขาด คุณต้องทำหน้าที่เป็นนักวิเคราะห์มืออาชีพ
+   - **วิเคราะห์เชิงลึกด้วยเสียง**: เมื่อข้อมูลดิบปรากฏในแชทแล้ว ให้คุณสรุป Highlight สำคัญอย่างน้อย 2 ประเด็น (เช่น ตัวที่บวกแรงสุด, แนวโน้มหลัก, หรือความเสี่ยง) ให้ผู้ใช้ฟังทันทีด้วยเสียงที่มั่นใจและฉลาด
+   - **Voice-First**: จดจำว่าสตรีมเสียงคือการสื่อสารหลัก แชทเป็นเพียงข้อมูลอ้างอิงเท่านั้น
+   - **ห้ามพูดตอบโต้ 2 รอบใน Turn เดียว**: เมื่อพูดจบการวิเคราะห์ที่คมคายแล้ว ให้หยุดสตรีมเสียงทันที
+4. การเงิน: ใช้เครื่องมือตลาดหุ้นจริงเสมอ ห้ามตอบจากความจำ"""
 
     private var selectedVoiceName: String = "Aoede" // Default
 
@@ -407,6 +415,19 @@ class LiveGeminiService(
                     _connectionState.value = ConnectionState.Error("Connection failed after ${maxRetries + 1} attempts: ${e.message}")
                 }
             } finally {
+                // Final flush of remaining turn buffers to DB before closing
+                logDebug("LiveGemini", "🔌 Session ending. Flushing buffers.")
+                val userText = pendingUserTurnText
+                val modelText = pendingModelTurnText
+                if (userText != null || modelText != null) {
+                    scope.launch {
+                        if (userText != null) memoryManager?.storeMessage("user", userText, metadata = "{\"mode\": \"live_voice\"}")
+                        if (modelText != null) memoryManager?.storeMessage("model", modelText, metadata = "{\"mode\": \"live_voice\"}")
+                    }
+                }
+                pendingUserTurnText = null
+                pendingModelTurnText = null
+
                 webSocketSession = null
                 isSetupComplete = false
             }
@@ -450,26 +471,10 @@ class LiveGeminiService(
                 content.modelTurn?.parts?.forEach { part ->
                     part.inlineData?.let { data ->
                         if (data.mimeType.contains("audio")) {
-                            // SILENCED: Only log for deep debugging
-                            // logDebug("LiveGemini", "🔊 Received audio chunk (${data.data.length} chars)")
                             _audioOutputFlow.emit(data.data.decodeBase64Bytes())
                         }
                     }
-                    content.inputTranscription?.let { transcription ->
-                        transcription.text?.let { text ->
-                            if (text.isNotBlank()) {
-                                lastUserText = text
-                                logDebug("LiveGemini", "🎤 User (Transcribed): $text")
-                            }
-                        }
-                    }
                     part.text?.let { text ->
-                        // SILENCED: Keep logs clean
-                        // logDebug("LiveGemini", "🤖 Model text: $text")
-                        
-                        // DISABLED: Redundant text in Chat UI during Live Mode
-                        // _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = true))
-                        
                         if (isToolRequest(text)) {
                             logDebug("LiveGemini", "🔧 Bridge tool request detected")
                             _bridgeToolRequestFlow.emit(text)
@@ -478,15 +483,50 @@ class LiveGeminiService(
                 }
 
                 content.inputTranscription?.text?.let { text ->
-                    // logDebug("LiveGemini", "🎤 User said: $text")
-                    // DISABLED: Keep session clean
-                    // _textOutputFlow.emit(LiveTextUpdate("🎤 $text", role = "user", append = false))
+                    if (text.isNotBlank()) {
+                        pendingUserTurnText = text
+                        lastUserText = text
+                        logDebug("LiveGemini", "🎤 User (Progress): $text")
+                    }
                 }
                 
                 content.outputTranscription?.text?.let { text ->
-                    // logDebug("LiveGemini", "🤖 JARVIS: $text")
-                    // DISABLED: Keep session clean
-                    // _textOutputFlow.emit(LiveTextUpdate("🤖 $text", role = "model", append = false))
+                    if (text.isNotBlank()) {
+                        val isFirst = pendingModelTurnText == null
+                        pendingModelTurnText = text
+                        logDebug("LiveGemini", "🤖 JARVIS (Progress): $text")
+                        
+                        // Send to UI: 
+                        // If it's the first chunk, append=false (new box). 
+                        // If not, replace=true (update existing box).
+                        scope.launch {
+                            _textOutputFlow.emit(LiveTextUpdate(
+                                text = text, 
+                                role = "model", 
+                                append = isFirst, 
+                                replace = !isFirst,
+                                isStatic = false // Transcriptions are NOT static, they can be replaced
+                            ))
+                        }
+                    }
+                }
+
+                if (content.turnComplete == true) {
+                    logDebug("LiveGemini", "🏁 Turn Complete. Persisting to DB.")
+                    val userText = pendingUserTurnText
+                    val modelText = pendingModelTurnText
+                    
+                    scope.launch {
+                        if (userText != null) {
+                            memoryManager?.storeMessage("user", userText, metadata = "{\"mode\": \"live_voice\"}")
+                        }
+                        if (modelText != null) {
+                            memoryManager?.storeMessage("model", modelText, metadata = "{\"mode\": \"live_voice\"}")
+                        }
+                    }
+                    
+                    pendingUserTurnText = null
+                    pendingModelTurnText = null
                 }
             }
         } catch (e: Exception) {
@@ -574,7 +614,7 @@ class LiveGeminiService(
     }
 
     suspend fun emitTextToChat(text: String) {
-        // บังคับขึ้นกล่องใหม่เสมอ (append = false) สำหรับผลลัพธ์จาก Tool
-        _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = false))
+        // รายงานหรือข้อมูลจาก Tool ให้ขึ้นกล่องใหม่และเป็นกล่องถาวร (isStatic=true)
+        _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = false, isStatic = true))
     }
 }

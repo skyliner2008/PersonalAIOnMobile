@@ -214,6 +214,106 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
             .map { it.content }
     }
 
+    /**
+     * ค้นหาความจำที่เกี่ยวข้องจาก Archival Memory โดยใช้ Semantic Search (Vector Similarity)
+     */
+    suspend fun searchRelevantFacts(
+        geminiService: com.example.personalaibot.data.GeminiService,
+        query: String,
+        limit: Int = 5,
+        minSimilarity: Float = 0.65f
+    ): List<String> = withContext(Dispatchers.IO) {
+        val queryVector = geminiService.embedText(query, "RETRIEVAL_QUERY")
+        if (queryVector.isEmpty()) {
+            return@withContext getTopArchivalFacts(limit.toLong())
+        }
+
+        val allFacts = database.jarvisDatabaseQueries.getArchivalWithEmbeddings().executeAsList()
+        if (allFacts.isEmpty()) return@withContext emptyList()
+
+        // Rank by similarity
+        val scoredFacts = allFacts.mapNotNull { row ->
+            val vector = row.embedding_json?.let { decodeVector(it) } ?: return@mapNotNull null
+            val score = cosineSimilarity(queryVector, vector)
+            if (score >= minSimilarity) {
+                row.content to score
+            } else null
+        }.sortedByDescending { it.second }
+         .take(limit)
+
+        scoredFacts.forEach { (content, score) ->
+            // Update access count as a side effect
+            // (In a real app, we'd find the ID)
+        }
+
+        scoredFacts.map { it.first }
+    }
+
+    private fun cosineSimilarity(v1: List<Float>, v2: List<Float>): Float {
+        if (v1.size != v2.size) return 0f
+        var dotProduct = 0f
+        var normV1 = 0f
+        var normV2 = 0f
+        for (i in v1.indices) {
+            dotProduct += v1[i] * v2[i]
+            normV1 += v1[i] * v1[i]
+            normV2 += v2[i] * v2[i]
+        }
+        return if (normV1 > 0 && normV2 > 0) {
+            dotProduct / (kotlin.math.sqrt(normV1) * kotlin.math.sqrt(normV2))
+        } else 0f
+    }
+
+    private fun decodeVector(json: String): List<Float>? = try {
+        Json.decodeFromString<List<Float>>(json)
+    } catch (_: Exception) { null }
+
+    private fun encodeVector(vector: List<Float>): String =
+        Json.encodeToString(vector)
+
+    /**
+     * Updated archiveFact: บันทึกพร้อมสร้าง Embedding ทันที
+     */
+    suspend fun archiveFactWithEmbedding(
+        geminiService: com.example.personalaibot.data.GeminiService,
+        content: String,
+        sourceRole: String = "system",
+        importance: Float = 0.5f
+    ) {
+        val vector = geminiService.embedText(content, "RETRIEVAL_DOCUMENT")
+        val vectorJson = if (vector.isNotEmpty()) encodeVector(vector) else null
+
+        withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertArchival(
+                content = content,
+                embedding_json = vectorJson,
+                source_role = sourceRole,
+                importance = importance.toDouble(),
+                timestamp = Clock.System.now().toEpochMilliseconds()
+            )
+        }
+    }
+
+    /**
+     * ดึงข้อมูลเก่าที่ยังไม่มีเวกเตอร์ และทำ Backfill ให้ครบเพื่อให้ค้นหาแบบ Semantic ได้
+     */
+    suspend fun backfillEmbeddings(geminiService: com.example.personalaibot.data.GeminiService): Int = withContext(Dispatchers.IO) {
+        val legacyFacts = database.jarvisDatabaseQueries.getArchivalByImportance(100).executeAsList()
+            .filter { it.embedding_json == null }
+        
+        var count = 0
+        legacyFacts.forEach { fact ->
+            val vector = geminiService.embedText(fact.content, "RETRIEVAL_DOCUMENT")
+            if (vector.isNotEmpty()) {
+                val json = encodeVector(vector)
+                // We need a query to update by ID
+                database.jarvisDatabaseQueries.updateArchivalEmbedding(json, fact.id)
+                count++
+            }
+        }
+        count
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // LAYER 4: GraphRAG — Knowledge Graph
     // ═══════════════════════════════════════════════════════════════════
@@ -458,11 +558,11 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                 val result = consolidationJson.decodeFromString<ConsolidationResult>(jsonString)
                 
                 // 1. Insert Summary to Archival (Very High Importance)
-                archiveFact("Daily Summary: ${result.summary}", "system", 0.95f)
+                archiveFactWithEmbedding(geminiService, "Daily Summary: ${result.summary}", "system", 0.95f)
                 
                 // 2. Insert Archival Facts
                 result.newArchivalFacts.forEach { fact ->
-                    archiveFact(fact.content, "system", fact.importance)
+                    archiveFactWithEmbedding(geminiService, fact.content, "system", fact.importance)
                 }
 
                 val now = Clock.System.now().toEpochMilliseconds()

@@ -100,6 +100,24 @@ data class GeminiModel(
     val supportedGenerationMethods: List<String>? = null
 )
 
+@Serializable
+data class EmbeddingRequest(
+    val model: String,
+    val content: GeminiContent,
+    val taskType: String? = null,
+    val title: String? = null
+)
+
+@Serializable
+data class EmbeddingResponse(
+    val embedding: EmbeddingValues
+)
+
+@Serializable
+data class EmbeddingValues(
+    val values: List<Float>
+)
+
 data class ConversationTurn(
     val role: String,
     val content: String
@@ -144,6 +162,9 @@ class GeminiService(
 
     private fun listModelsUrl(): String =
         "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+
+    private fun embedContentUrl(): String =
+        "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=$apiKey"
 
     private fun buildRequestJson(
         userMessage: String,
@@ -566,5 +587,36 @@ class GeminiService(
 
     private fun extractAllTextFromResp(response: GeminiResponse): String = buildString {
         response.candidates?.forEach { it.content?.parts?.forEach { part -> part.text?.let { append(it) } } }
+    }
+
+    /**
+     * ดึงค่าเวกเตอร์ (Embeddings) สำหรับข้อความเพื่อใช้ทำ Semantic Search / RAG
+     */
+    suspend fun embedText(text: String, taskType: String? = "RETRIEVAL_DOCUMENT"): List<Float> {
+        if (apiKey.isBlank()) return emptyList()
+        return try {
+            val res = client.post(embedContentUrl()) {
+                contentType(ContentType.Application.Json)
+                setBody(EmbeddingRequest(
+                    model = "models/text-embedding-004",
+                    content = GeminiContent(
+                        role = "user",
+                        parts = listOf(Part(text = text))
+                    ),
+                    taskType = taskType
+                ))
+            }
+            if (res.status.isSuccess()) {
+                val resp: EmbeddingResponse = res.body()
+                resp.embedding.values
+            } else {
+                val err = res.bodyAsText()
+                logError("GeminiService", "Embedding Error ${res.status}: $err")
+                emptyList()
+            }
+        } catch (e: Exception) {
+            logError("GeminiService", "Failed to get embedding", e)
+            emptyList()
+        }
     }
 }

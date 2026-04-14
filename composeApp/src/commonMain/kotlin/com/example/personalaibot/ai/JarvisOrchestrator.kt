@@ -22,7 +22,7 @@ class JarvisOrchestrator(
     private val fileHandler: (suspend (String, Map<String, String>) -> String)? = null
 ) : com.example.personalaibot.tools.SideEffectDelegate {
     private val geminiService = GeminiService(client, apiKey, modelName)
-    private val liveService   = LiveGeminiService(client, apiKey, liveModelName)
+    private val liveService   = LiveGeminiService(client, apiKey, liveModelName, memoryManager)
     private val planner       = JarvisPlanner(geminiService)
 
     init {
@@ -38,12 +38,15 @@ class JarvisOrchestrator(
     private val toolBridge = LiveToolBridge(
         liveService    = liveService,
         geminiService  = geminiService,
+        memoryManager  = memoryManager,
         scope          = CoroutineScope(Dispatchers.IO)
     )
 
     val audioOutputFlow: Flow<ByteArray> = liveService.audioOutputFlow
     val textOutputFlow: Flow<com.example.personalaibot.data.LiveGeminiService.LiveTextUpdate> = liveService.textOutputFlow
     val activeToolName: StateFlow<String?> = toolBridge.activeToolName
+
+    fun getGeminiService() = geminiService
 
     fun updateConfig(
         newApiKey: String,
@@ -159,8 +162,25 @@ class JarvisOrchestrator(
 
     // ─── SideEffectDelegate Implementation ──────────────────────────────────────
 
+    override suspend fun onRecallMemory(query: String): String {
+        val facts = memoryManager.searchRelevantFacts(
+            geminiService = geminiService,
+            query = query,
+            limit = 5
+        )
+        if (facts.isEmpty()) return "ขออภัย ฉันยังไม่มีข้อมูลเกี่ยวกับเรื่องนี้ในความทรงจำ"
+        return "พบข้อมูลที่เกี่ยวข้องดังนี้:\n" + facts.joinToString("\n- ", prefix = "- ")
+    }
+
     override suspend fun onRememberFact(key: String, value: String, importance: String) {
         memoryManager.setCoreMemory(key, value)
+        // Also archive as a long-term fact with embeddings
+        memoryManager.archiveFactWithEmbedding(
+            geminiService = geminiService,
+            content = "$key: $value",
+            sourceRole = "system",
+            importance = if (importance.lowercase() == "high") 0.9f else 0.5f
+        )
         val imp = when (importance.lowercase()) {
             "high" -> 0.9f; "low" -> 0.3f; else -> 0.6f
         }
