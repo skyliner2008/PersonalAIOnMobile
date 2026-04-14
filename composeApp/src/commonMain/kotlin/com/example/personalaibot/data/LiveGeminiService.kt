@@ -616,5 +616,14 @@ class LiveGeminiService(
     suspend fun emitTextToChat(text: String) {
         // รายงานหรือข้อมูลจาก Tool ให้ขึ้นกล่องใหม่และเป็นกล่องถาวร (isStatic=true)
         _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = false, isStatic = true))
+
+        // --- NEW: Persistence to Knowledge Base & History ---
+        scope.launch {
+            memoryManager?.storeMessage(
+                role = "model", 
+                content = text, 
+                metadata = "{\"mode\": \"live_voice_tool_result\"}"
+            )
+        }
     }
 }
