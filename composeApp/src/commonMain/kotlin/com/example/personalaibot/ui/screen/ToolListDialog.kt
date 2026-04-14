@@ -43,7 +43,8 @@ enum class ToolCategory(val label: String, val color: Color) {
     TRADING("Trading",      Color(0xFF00C853)),
     SMC    ("SMC",          Color(0xFFFF6D00)),
     FILE   ("Files",        Color(0xFFFDD835)),
-    SYSTEM ("System",       Color(0xFF7C4DFF))
+    VISION ("Vision",       Color(0xFF7C4DFF)),
+    SYSTEM ("System",       Color(0xFF607D8B))
 }
 
 // ─── Tool Catalogue ───────────────────────────────────────────────────────────
@@ -231,6 +232,53 @@ private val ALL_TOOLS = listOf(
         "ค้นหาไฟล์ทั่วทั้งเครื่องด้วยชื่อหรือนามสกุล",
         listOf("ค้นหาด้วย Keyword", "กรองตามนามสกุลไฟล์", "ค้นในโฟลเดอร์มาตรฐานอัตโนมัติ"),
         listOf("ช่วยหาไฟล์ที่มีคำว่า 'invoice'", "ค้นหาไฟล์ .pdf ในเครื่องให้หน่อย")
+    ),
+
+    // ── Camera & Vision Tools ──────────────────────────────────────────────
+    ToolInfo("vision_activate", "Live Vision ON", ToolCategory.VISION, "👁️",
+        "เปิดดวงตา AI เพื่อวิเคราะห์วิดีโอแบบ Real-time",
+        listOf("สตรีมวิดีโอต่อเนื่อง", "ประมวลผล Multimodal", "ปิดอัตโนมัติเมื่อเสร็จ"),
+        listOf("ดูผ่านกล้องหน่อย", "นี่คืออะไร? (ถือของหน้ากล้อง)")
+    ),
+    ToolInfo("vision_deactivate", "Live Vision OFF", ToolCategory.VISION, "🙈",
+        "ปิดดวงตา AI ทันทีเพื่อประหยัด Token",
+        listOf("หยุดการส่งภาพ", "ประหยัดแบตเตอรี่", "เพิ่มความเป็นส่วนตัว"),
+        listOf("พอแล้ว ปิดกล้องได้")
+    ),
+    ToolInfo("camera_analyze_scene", "Scene Analysis", ToolCategory.VISION, "🖼️",
+        "วิเคราะห์ภาพ Snapshot (ภาพนิ่ง)",
+        listOf("วิเคราะห์องค์ประกอบภาพ", "อธิบายรายละเอียด", "สรุปสิ่งทื่เห็น"),
+        listOf("ในภาพนี้มีอะไรบ้าง?", "วิเคราะห์สถานการณ์หน้ากล้อง")
+    ),
+    ToolInfo("camera_detect_objects", "Object Detection", ToolCategory.VISION, "🎯",
+        "ตรวจจับและระบุตำแหน่งวัตถุ (AR)",
+        listOf("วาด Bounding Box", "คำนวณ Confidence %", "ระบุตำแหน่ง Real-time"),
+        listOf("หาแมวในห้องให้หน่อย", "มีขวดน้ำกี่ขวด?")
+    ),
+    ToolInfo("camera_read_text", "Visual OCR", ToolCategory.VISION, "🔤",
+        "อ่านข้อความจากกล้องโดยตรง",
+        listOf("อ่านป้ายทะเบียน/ฉลาก", " Extract ข้อความจากเอกสาร", "แปลป้ายบอกทาง"),
+        listOf("ป้ายนี้เขียนว่าอะไร?", "แกะข้อความในจดหมายนี้")
+    ),
+    ToolInfo("camera_switch_provider", "Vision Brain", ToolCategory.VISION, "🧠",
+        "สลับสมอง AI ที่ใช้มองภาพ",
+        listOf("Gemini Live/Flash", "OpenAI GPT-4o", "Claude 3.5 Sonnet"),
+        listOf("ใช้ GPT-4o วิเคราะห์ภาพนี้", "สลับไปใช้ Gemini Flash")
+    ),
+    ToolInfo("camera_switch_mode", "Camera Mode", ToolCategory.VISION, "⚙️",
+        "เปลี่ยนโหมดการทำงานของกล้อง",
+        listOf("Live Stream", "Snapshot", "AR Overlay"),
+        listOf("เปลี่ยนเป็นโหมด AR", "เข้าโหมดถ่ายภาพนิ่ง")
+    ),
+    ToolInfo("voice_get_profiles", "Voice Profiles", ToolCategory.VISION, "🗣️",
+        "ดูรายการเสียง JARVIS ทั้ง 30 แบบ",
+        listOf("เสียงชาย/หญิง", "โทนเสียงหลากหลาย", "Gemini Live Native"),
+        listOf("ขอดูเสียงทั้งหมดที่มีหน่อย", "มีเสียงผู้หญิงไหม?")
+    ),
+    ToolInfo("voice_set_profile", "Set Voice", ToolCategory.VISION, "🎤",
+        "เปลี่ยนบุคลิกเสียงของ JARVIS",
+        listOf("เปลี่ยนทันที", "รองรับ 10+ ภาษา", "Profile: Puck, Kore, Aoede..."),
+        listOf("เปลี่ยนเสียงเป็น Puck", "ขอเสียงผู้หญิงหวานๆ")
     )
 )
 
