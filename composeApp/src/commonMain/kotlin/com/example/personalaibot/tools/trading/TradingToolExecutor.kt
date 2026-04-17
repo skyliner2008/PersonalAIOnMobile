@@ -6,7 +6,7 @@ import com.example.personalaibot.data.GeminiService
 import com.example.personalaibot.logDebug
 
 /**
- * TradingToolExecutor — รัน trading tool calls และ format ผลลัพธ์เป็น text
+ * TradingToolExecutor — รับ trading tool calls และ format ผลลัพธ์เป็น text
  * สำหรับส่งกลับให้ Gemini อ่านและอธิบายให้ผู้ใช้
  *
  * รองรับทั้ง Classic Trading Tools และ SMC (Smart Money Concepts) Tools
@@ -34,31 +34,32 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "trading_sentiment"        -> executeSentiment(args)
             "trading_news"             -> executeNews(args)
             "trading_combined"         -> executeCombined(args)
-            // ─── SMC (Smart Money Concepts) Tools ─────────────────────────────
+            // ─── SMC (Smart Money Concepts) Tools ──────────────────────────────
             "trading_smc_analysis",
             "trading_smc_sweeps",
             "trading_smc_liquidity",
             "trading_smc_orderblocks",
             "trading_smc_structure"    -> smcExecutor.execute(toolName, args)
-            else -> "ไม่พบ trading tool: $toolName"
+            else -> "Unknown trading tool: $toolName"
         }
     }
 
-    // ─── Implementations ────────────────────────────────────────────────────
+    // ─── Implementations ──────────────────────────────────────────────────────
 
     private suspend fun executePrice(args: Map<String, String>): String {
-        val symbol = args["symbol"] ?: return "กรุณาระบุ symbol"
-        val data = api.getYahooPrice(symbol)
+        val symbol = args["symbol"] ?: return "Missing required argument: symbol"
+        val data = api.getBestEffortPrice(symbol)
 
-        if (data.containsKey("error")) return "❌ ดึงข้อมูลไม่ได้: ${data["error"]}"
+        if (data.containsKey("error")) return "Price fetch failed: ${data["error"]}"
 
         return buildString {
-            appendLine("💰 **${data["symbol"]}** — Real-time Price")
-            appendLine("ราคา: ${data["price"]} ${data["currency"]}")
-            appendLine("เปลี่ยนแปลง: ${data["direction"]} ${data["change"]} (${data["change_pct"]})")
-            appendLine("ปิดเมื่อวาน: ${data["prev_close"]}")
+            appendLine("**${symbol.uppercase()}** - Real-time Price")
+            appendLine("Price: ${data["price"]} ${data["currency"]}")
+            appendLine("Change: ${data["direction"]} ${data["change"]} (${data["change_pct"]})")
+            appendLine("Prev Close: ${data["prev_close"]}")
             appendLine("52W High: ${data["high_52w"]} | Low: ${data["low_52w"]}")
-            appendLine("ตลาด: ${data["market_state"]}")
+            appendLine("Market: ${data["market_state"]}")
+            data["source"]?.let { appendLine("Source: $it") }
         }
     }
 
@@ -79,7 +80,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             if (result is Map<*, *>) {
                 // Yahoo Finance Snapshot (Global Indices)
                 appendLine("🌍 **Global Market Snapshot**")
-                appendLine("=" .repeat(40))
+                appendLine("=".repeat(40))
                 @Suppress("UNCHECKED_CAST")
                 val snapshot = result as Map<String, Map<String, String>>
                 snapshot.forEach { (name, data) ->
@@ -94,7 +95,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 // TradingView Sector Snapshot
                 val title = buildString {
                     append("📊 **Market Snapshot")
-                    if (!sector.isNullOrBlank()) append(" — กลุ่ม $sector")
+                    if (!sector.isNullOrBlank()) append(" — กลุ่มหุ้น $sector")
                     if (!market.isNullOrBlank()) append(" ($market)")
                     append("**")
                 }
@@ -109,7 +110,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getTopGainers(exchange, limit.coerceAtMost(50))
-        return formatScanResults("📈 Top Gainers — $exchange", results)
+        return formatScanResults("🚀 Top Gainers — $exchange", results)
     }
 
     private suspend fun executeTopLosers(args: Map<String, String>): String {
@@ -120,59 +121,59 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     }
 
     private suspend fun executeTechnicalAnalysis(args: Map<String, String>): String {
-        val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol"
+        val symbol   = args["symbol"]   ?: return "Missing required argument: symbol"
         val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
         val interval = args["interval"] ?: "1h"
         val data = api.getTechnicalAnalysis(symbol, resolvedExchange, interval)
 
-        if (data.containsKey("error")) return "❌ TA error: ${data["error"]}"
+        if (data.containsKey("error")) return "TA error: ${data["error"]}"
 
         val signal = data["signal"] ?: "N/A"
         val score  = data["recommend_score"] ?: "N/A"
 
         val signalEmoji = when (signal) {
-            "STRONG BUY"  -> "🟢🟢"
-            "BUY"         -> "🟢"
-            "HOLD"        -> "🟡"
-            "SELL"        -> "🔴"
-            "STRONG SELL" -> "🔴🔴"
-            else          -> "⚪"
+            "STRONG BUY"  -> "++"
+            "BUY"         -> "+"
+            "HOLD"        -> "="
+            "SELL"        -> "-"
+            "STRONG SELL" -> "--"
+            else          -> "?"
         }
 
         return buildString {
-            appendLine("📊 **Technical Analysis — ${symbol.uppercase()} ($interval)**")
-            appendLine("สัญญาณ: $signalEmoji $signal (score: $score)")
-            appendLine("─".repeat(35))
-            appendLine("💵 ราคา: ${data["close"]} | เปลี่ยน: ${data["change"]}%")
+            appendLine("Technical Analysis - ${symbol.uppercase()} ($interval)")
+            appendLine("Signal: $signalEmoji $signal (score: $score)")
+            appendLine("-".repeat(35))
+            appendLine("Price: ${data["close"]} | Change: ${data["change"]}%")
             appendLine("")
-            appendLine("**Momentum**")
+            appendLine("Momentum")
             appendLine("  RSI: ${data["RSI"]} (prev: ${data["RSI[1]"]})")
             appendLine("  MACD: ${data["MACD.macd"]} | Signal: ${data["MACD.signal"]} | Hist: ${data["MACD.hist"]}")
             appendLine("  Stoch K/D: ${data["Stoch.K"]} / ${data["Stoch.D"]}")
             appendLine("  CCI: ${data["CCI20"]} | AO: ${data["AO"]}")
             appendLine("")
-            appendLine("**Trend**")
+            appendLine("Trend")
             appendLine("  EMA20: ${data["EMA20"]} | EMA50: ${data["EMA50"]} | EMA200: ${data["EMA200"]}")
             appendLine("  ADX: ${data["ADX"]} (+DI: ${data["ADX+DI"]} / -DI: ${data["ADX-DI"]})")
             appendLine("")
-            appendLine("**Volatility**")
+            appendLine("Volatility")
             appendLine("  BB Upper: ${data["BB.upper"]}")
             appendLine("  BB Basis: ${data["BB.basis"]}")
             appendLine("  BB Lower: ${data["BB.lower"]}")
             appendLine("  BB Width: ${data["BB.width"]} | ATR: ${data["ATR"]}")
             appendLine("")
-            appendLine("**Summary** — Buy: ${data["buy_signals"]} | Sell: ${data["sell_signals"]} | Neutral: ${data["neutral_signals"]}")
+            appendLine("Summary - Buy: ${data["buy_signals"]} | Sell: ${data["sell_signals"]} | Neutral: ${data["neutral_signals"]}")
         }
     }
 
     private suspend fun executeMultiTimeframe(args: Map<String, String>): String {
-        val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol"
+        val symbol   = args["symbol"]   ?: return "Missing required argument: symbol"
         val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
         val data = api.getMultiTimeframeAnalysis(symbol, resolvedExchange)
 
         return buildString {
-            appendLine("⏱ **Multi-Timeframe Analysis — ${symbol.uppercase()}**")
-            appendLine("─".repeat(40))
+            appendLine("Multi-Timeframe Analysis - ${symbol.uppercase()}")
+            appendLine("-".repeat(40))
 
             val signals = mutableListOf<String>()
             for (entry in data) {
@@ -182,7 +183,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 val rsi    = taData["RSI"]    ?: "N/A"
                 val score  = taData["recommend_score"] ?: "N/A"
                 val emoji  = signalEmoji(signal)
-                appendLine("$emoji **$tf**: $signal | RSI: $rsi | Score: $score")
+                appendLine("$emoji $tf: $signal | RSI: $rsi | Score: $score")
                 signals.add(signal)
             }
 
@@ -191,13 +192,13 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val buyCount  = signals.count { it.contains("BUY") }
             val sellCount = signals.count { it.contains("SELL") }
             val alignment = when {
-                buyCount >= 4  -> "🟢 Strong Alignment — สัญญาณ BUY หลาย timeframe"
-                sellCount >= 4 -> "🔴 Strong Alignment — สัญญาณ SELL หลาย timeframe"
-                buyCount > sellCount -> "🟡 Mostly Bullish — แต่ยังมี timeframe ที่ขัดแย้ง"
-                sellCount > buyCount -> "🟡 Mostly Bearish — แต่ยังมี timeframe ที่ขัดแย้ง"
-                else -> "⚪ Mixed Signals — timeframe ขัดแย้งกัน ควรระวัง"
+                buyCount >= 4  -> "Strong alignment (BUY)"
+                sellCount >= 4 -> "Strong alignment (SELL)"
+                buyCount > sellCount -> "Mostly bullish"
+                sellCount > buyCount -> "Mostly bearish"
+                else -> "Mixed signals"
             }
-            appendLine("**Alignment: $alignment**")
+            appendLine("Alignment: $alignment")
         }
     }
 
@@ -212,7 +213,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getOversoldSymbols(exchange, limit)
-        return formatScanResults("🔵 Oversold Scan (RSI < 30) — $exchange", results, extraKey = "RSI")
+        return formatScanResults("🟢 Oversold Scan (RSI < 30) — $exchange", results, extraKey = "RSI")
     }
 
     private suspend fun executeOverboughtScan(args: Map<String, String>): String {
@@ -226,26 +227,26 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getVolumeBreakout(exchange, limit)
-        return formatScanResults("💥 Volume Breakout — $exchange", results, extraKey = "volume")
+        return formatScanResults("🌋 Volume Breakout — $exchange", results, extraKey = "volume")
     }
 
     private suspend fun executeSentiment(args: Map<String, String>): String {
-        val symbol = args["symbol"] ?: return "กรุณาระบุ symbol"
+        val symbol = args["symbol"] ?: return "Missing required argument: symbol"
         val data = api.getRedditSentiment(symbol)
 
         @Suppress("UNCHECKED_CAST")
         val topPosts = data["top_posts"] as? List<String> ?: emptyList()
 
         return buildString {
-            appendLine("🧠 **Reddit Sentiment — ${data["symbol"]}**")
-            appendLine("─".repeat(35))
-            appendLine("สรุป: **${data["sentiment_label"]}**")
+            appendLine("Reddit Sentiment - ${symbol.uppercase()}")
+            appendLine("-".repeat(35))
+            appendLine("Label: ${data["sentiment_label"]}")
             appendLine("Score: ${data["sentiment_score"]}")
-            appendLine("โพสต์ที่วิเคราะห์: ${data["posts_analyzed"]}")
+            appendLine("Posts analyzed: ${data["posts_analyzed"]}")
             appendLine("Bullish posts: ${data["bullish_posts"]} | Bearish: ${data["bearish_posts"]}")
             if (topPosts.isNotEmpty()) {
                 appendLine("")
-                appendLine("**Top Posts (Hot):**")
+                appendLine("Top Posts:")
                 topPosts.forEachIndexed { i, post -> appendLine("${i+1}. $post") }
             }
         }
@@ -260,15 +261,15 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val items = data["news"] as? List<Map<String, String>> ?: emptyList()
 
         return buildString {
-            val header = if (symbol != null) "📰 **ข่าว — $symbol**" else "📰 **Financial News**"
+            val header = if (symbol != null) "News - $symbol" else "Financial News"
             appendLine(header)
-            appendLine("─".repeat(35))
+            appendLine("-".repeat(35))
             if (items.isEmpty()) {
-                appendLine("ไม่พบข่าวในขณะนี้")
+                appendLine("No news found.")
             } else {
                 items.forEachIndexed { i, item ->
                     appendLine("${i+1}. [${item["source"]}] ${item["title"]}")
-                    if (!item["date"].isNullOrBlank()) appendLine("   📅 ${item["date"]}")
+                    if (!item["date"].isNullOrBlank()) appendLine("   Date: ${item["date"]}")
                     appendLine("")
                 }
             }
@@ -276,7 +277,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     }
 
     private suspend fun executeCombined(args: Map<String, String>): String {
-        val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol"
+        val symbol   = args["symbol"]   ?: return "Missing required argument: symbol"
         val exchange = args["exchange"] ?: "BINANCE"
         val interval = args["interval"] ?: "1h"
 
@@ -295,46 +296,49 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val confluenceMatch = taBullish == sentBullish
 
         val finalCall = when {
-            taBullish && sentBullish && confluenceMatch -> "🟢 **STRONG BUY** — TA และ Sentiment ตรงกัน"
-            taBullish && confluenceMatch -> "🟢 **BUY** — TA ยืนยัน Bullish"
-            !taBullish && !sentBullish   -> "🔴 **SELL** — ทั้ง TA และ Sentiment Bearish"
-            else                          -> "🟡 **MIXED** — TA และ Sentiment ขัดแย้งกัน ควรระวัง"
+            taBullish && sentBullish && confluenceMatch -> "STRONG BUY"
+            taBullish && confluenceMatch -> "BUY"
+            !taBullish && !sentBullish   -> "SELL"
+            else                          -> "MIXED"
         }
 
         @Suppress("UNCHECKED_CAST")
         val newsItems = news["news"] as? List<Map<String, String>> ?: emptyList()
 
         return buildString {
-            appendLine("⚡ **Combined Analysis — ${symbol.uppercase()} ($interval)**")
-            appendLine("=" .repeat(45))
+            appendLine("Combined Analysis - ${symbol.uppercase()} ($interval)")
+            appendLine("=".repeat(29))
             appendLine("")
-            appendLine("**📊 Technical:** $taSignal (score: ${ta["recommend_score"]})")
+            appendLine("Technical: $taSignal (score: ${ta["recommend_score"]})")
             appendLine("  RSI: ${ta["RSI"]} | MACD hist: ${ta["MACD.hist"]}")
             appendLine("  EMA20: ${ta["EMA20"]} vs EMA50: ${ta["EMA50"]}")
             appendLine("")
-            appendLine("**🧠 Sentiment:** $sentLabel (${sentiment["sentiment_score"]})")
-            appendLine("  ${sentiment["posts_analyzed"]} posts — Bull: ${sentiment["bullish_posts"]} Bear: ${sentiment["bearish_posts"]}")
+            appendLine("Sentiment: $sentLabel (${sentiment["sentiment_score"]})")
+            appendLine("  ${sentiment["posts_analyzed"]} posts - Bull: ${sentiment["bullish_posts"]} Bear: ${sentiment["bearish_posts"]}")
             appendLine("")
-            appendLine("**📰 Latest News:**")
+            appendLine("Latest News:")
             newsItems.take(3).forEach { item ->
-                appendLine("  • ${item["title"]}")
+                appendLine("  - ${item["title"]}")
             }
             appendLine("")
-            appendLine("─".repeat(45))
-            appendLine("**🎯 Confluence Decision: $finalCall**")
-            appendLine(if (confluenceMatch) "✅ TA และ Sentiment ยืนยันทิศทางเดียวกัน" else "⚠️ TA กับ Sentiment ขัดแย้งกัน — ใช้ความระวัง")
+            appendLine("-".repeat(29))
+            appendLine("Confluence Decision: $finalCall")
+            appendLine(
+                if (confluenceMatch) "TA and Sentiment are aligned."
+                else "TA and Sentiment conflict; wait for confirmation."
+            )
         }
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private fun signalEmoji(signal: String) = when (signal) {
-        "STRONG BUY"  -> "🟢🟢"
-        "BUY"         -> "🟢"
-        "HOLD"        -> "🟡"
-        "SELL"        -> "🔴"
-        "STRONG SELL" -> "🔴🔴"
-        else          -> "⚪"
+        "STRONG BUY"  -> "++"
+        "BUY"         -> "+"
+        "HOLD"        -> "="
+        "SELL"        -> "-"
+        "STRONG SELL" -> "--"
+        else          -> "?"
     }
 
     private fun formatScanResults(
@@ -343,9 +347,9 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         extraKey: String? = null
     ): String = buildString {
         appendLine(title)
-        appendLine("─".repeat(title.length.coerceAtMost(40)))
+        appendLine("-".repeat(title.length.coerceAtMost(40)))
         if (results.isEmpty()) {
-            appendLine("ไม่พบข้อมูล")
+            appendLine("No data.")
             return@buildString
         }
         results.forEachIndexed { i, row ->
@@ -353,7 +357,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val change  = row["change_pct"] ?: row["change"] ?: ""
             val price   = row["price"] ?: row["close"] ?: ""
             val extra   = if (extraKey != null) row[extraKey]?.let { " | $extraKey: $it" } ?: "" else ""
-            appendLine("${i + 1}. **$symbol** — $price $change$extra")
+            appendLine("${i + 1}. $symbol - $price $change$extra")
         }
     }
 }

@@ -16,13 +16,17 @@ class SmcToolExecutor(private val client: HttpClient) {
      * Execute SMC tool call
      */
     suspend fun execute(toolName: String, args: Map<String, String>): String {
-        return when (toolName) {
-            "trading_smc_analysis"    -> executeSmcAnalysis(args)
-            "trading_smc_sweeps"      -> executeSmcSweeps(args)
-            "trading_smc_liquidity"   -> executeSmcLiquidity(args)
-            "trading_smc_orderblocks" -> executeSmcOrderBlocks(args)
-            "trading_smc_structure"   -> executeSmcStructure(args)
-            else                      -> "ไม่พบ SMC tool: $toolName"
+        return try {
+            when (toolName) {
+                "trading_smc_analysis"    -> executeSmcAnalysis(args)
+                "trading_smc_sweeps"      -> executeSmcSweeps(args)
+                "trading_smc_liquidity"   -> executeSmcLiquidity(args)
+                "trading_smc_orderblocks" -> executeSmcOrderBlocks(args)
+                "trading_smc_structure"   -> executeSmcStructure(args)
+                else                      -> "ไม่พบ SMC tool: $toolName"
+            }
+        } catch (e: StrictSourceMismatchException) {
+            "❌ ${e.message}"
         }
     }
 
@@ -31,8 +35,9 @@ class SmcToolExecutor(private val client: HttpClient) {
     private suspend fun executeSmcAnalysis(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
         val interval = args["interval"] ?: "1h"
+        val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
 
-        val result = api.getSmcAnalysis(symbol, interval)
+        val result = api.getSmcAnalysis(symbol, interval, strictTvSource = strictTv)
             ?: return "❌ ดึงข้อมูล SMC ไม่ได้สำหรับ ${symbol.uppercase()} — กรุณาตรวจสอบ symbol"
 
         val priceStr = formatPrice(result.currentPrice)
@@ -45,10 +50,10 @@ class SmcToolExecutor(private val client: HttpClient) {
         }
 
         val eventStr = when (result.lastStructureEvent) {
-            "BOS_UP"    -> "📈 BOS ขึ้น (Break of Structure Bullish)"
-            "BOS_DOWN"  -> "📉 BOS ลง (Break of Structure Bearish)"
-            "CHOCH_UP"  -> "🔄 CHoCH ขึ้น (Trend Flip → Bullish)"
-            "CHOCH_DOWN"-> "🔄 CHoCH ลง (Trend Flip → Bearish)"
+            "BOS_UP"    -> "📈 BOS ขึ้น (ฺBoS Bullish)"
+            "BOS_DOWN"  -> "📉 BOS ลง (BoS Bearish)"
+            "CHOCH_UP"  -> "🔄 CHoCH ขึ้น (CHoCH → Bullish)"
+            "CHOCH_DOWN"-> "🔄 CHoCH ลง (CHoCH → Bearish)"
             else        -> "— ไม่มี event ล่าสุด"
         }
 
@@ -59,10 +64,9 @@ class SmcToolExecutor(private val client: HttpClient) {
         }
 
         return buildString {
+            appendLine("=".repeat(29))
             appendLine("🧠 **SMC Analysis — ${result.symbol} ($interval)**")
-            appendLine("=".repeat(48))
-            appendLine("")
-            appendLine("💰 ราคาปัจจุบัน: **$priceStr**  |  ATR: $atrStr")
+            appendLine("💰 ราคาปัจจุบัน: **$priceStr**|ATR: $atrStr")
             if (result.attackForce) appendLine("⚡ **Attack Force!** — Momentum สูงผิดปกติ (>2x ATR)")
             appendLine("")
 
@@ -83,7 +87,7 @@ class SmcToolExecutor(private val client: HttpClient) {
             appendLine("")
 
             // Order Blocks
-            appendLine("**🟢 Bullish Order Blocks (Demand Zones)**")
+            appendLine("**🟢 Bullish OB (Demand Zones)**")
             if (result.bullishOBs.isEmpty()) {
                 appendLine("  — ไม่พบ Active Bullish OB")
             } else {
@@ -92,8 +96,7 @@ class SmcToolExecutor(private val client: HttpClient) {
                     appendLine("  🟢 ${formatPrice(ob.top)} — ${formatPrice(ob.bottom)}  (mid: ${formatPrice(mid)})${if (ob.hasFVG) " ✅FVG" else ""}")
                 }
             }
-            appendLine("")
-            appendLine("**🔴 Bearish Order Blocks (Supply Zones)**")
+            appendLine("**🔴 Bearish OB (Supply Zones)**")
             if (result.bearishOBs.isEmpty()) {
                 appendLine("  — ไม่พบ Active Bearish OB")
             } else {
@@ -102,9 +105,9 @@ class SmcToolExecutor(private val client: HttpClient) {
                     appendLine("  🔴 ${formatPrice(ob.top)} — ${formatPrice(ob.bottom)}  (mid: ${formatPrice(mid)})${if (ob.hasFVG) " ✅FVG" else ""}")
                 }
             }
-            appendLine("")
 
             // Fair Value Gaps
+            appendLine("")
             appendLine("**⬛ Fair Value Gaps (FVG)**")
             val recentFVGs = result.fvgs.takeLast(5)
             if (recentFVGs.isEmpty()) {
@@ -115,9 +118,9 @@ class SmcToolExecutor(private val client: HttpClient) {
                     appendLine("  $icon FVG: ${formatPrice(fvg.bottom)} — ${formatPrice(fvg.top)}  (size: ${formatPrice(fvg.size)})")
                 }
             }
-            appendLine("")
 
             // Liquidity Zones
+            appendLine("")
             appendLine("**💧 Liquidity Zones (Pending Sweeps)**")
             val topZones = result.liquidityZones.sortedByDescending { it.confluenceScore }.take(6)
             if (topZones.isEmpty()) {
@@ -129,8 +132,7 @@ class SmcToolExecutor(private val client: HttpClient) {
                     appendLine("  $icon ${formatPrice(z.price)}  $stars (touches: ${z.strength})")
                 }
             }
-            appendLine("")
-            appendLine("─".repeat(48))
+            appendLine("=".repeat(29))
 
             // Trading Bias Summary
             val bullOBNearPrice = result.bullishOBs.any {
@@ -156,7 +158,9 @@ class SmcToolExecutor(private val client: HttpClient) {
                 else ->
                     "⚪ **NEUTRAL** — รอ structure break หรือ OB retest ที่ชัดเจนกว่านี้"
             }
+            appendLine("")
             appendLine("**🎯 SMC Bias: $bias**")
+            appendLine("[Data] candle_source=${result.candleSource} | price_source=${result.priceSource} | bars=${result.candlesCount} | strict_tv=$strictTv")
         }
     }
 
@@ -164,15 +168,14 @@ class SmcToolExecutor(private val client: HttpClient) {
 
     private suspend fun executeSmcSweeps(args: Map<String, String>): String {
         val symbol = args["symbol"] ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
-        val sweepsMap = api.getMTFSweeps(symbol)
+        val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
+        val sweepsMap = api.getMTFSweeps(symbol, strictTvSource = strictTv)
 
         return buildString {
             appendLine("🌊 **MTF Sweeps — ${symbol.uppercase()}**")
-            appendLine("=".repeat(45))
-            appendLine("")
+            appendLine("=".repeat(29))
             appendLine("Sweep = ราคา wick ทะลุ OB แล้ว reclaim กลับ >50%")
-            appendLine("─".repeat(45))
-            appendLine("")
+            appendLine("=".repeat(29))
 
             if (sweepsMap.isEmpty()) {
                 appendLine("✅ ไม่พบ Sweep signal ล่าสุดในทุก Timeframe")
@@ -188,7 +191,7 @@ class SmcToolExecutor(private val client: HttpClient) {
                             totalBull++
                             appendLine("  🟢 Bullish Sweep — ราคา: ${formatPrice(sweep.price)}")
                             appendLine("     OB Zone: ${formatPrice(sweep.obBottom)} — ${formatPrice(sweep.obTop)}")
-                            appendLine("     📌 ราค wick ลงใต้ Bearish OB แล้ว close กลับขึ้น → Long opportunity")
+                            appendLine("     📌 ราคา wick ลงใต้ Bearish OB แล้ว close กลับขึ้น → Long opportunity")
                         } else {
                             totalBear++
                             appendLine("  🔴 Bearish Sweep — ราคา: ${formatPrice(sweep.price)}")
@@ -196,10 +199,9 @@ class SmcToolExecutor(private val client: HttpClient) {
                             appendLine("     📌 ราคา wick ขึ้นเหนือ Bullish OB แล้ว close ลง → Short opportunity")
                         }
                     }
-                    appendLine("")
                 }
 
-                appendLine("─".repeat(45))
+                appendLine("=".repeat(29))
                 val sweepBias = when {
                     totalBull > totalBear -> "🟢 Bullish Sweep Dominant ($totalBull bull vs $totalBear bear)"
                     totalBear > totalBull -> "🔴 Bearish Sweep Dominant ($totalBear bear vs $totalBull bull)"
@@ -214,7 +216,8 @@ class SmcToolExecutor(private val client: HttpClient) {
 
     private suspend fun executeSmcLiquidity(args: Map<String, String>): String {
         val symbol = args["symbol"] ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
-        val liqMap = api.getMTFLiquidity(symbol)
+        val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
+        val liqMap = api.getMTFLiquidity(symbol, strictTvSource = strictTv)
 
         // Collect all zones with tags for merging
         val allHighs = mutableListOf<Pair<Double, String>>()
@@ -233,14 +236,12 @@ class SmcToolExecutor(private val client: HttpClient) {
 
         return buildString {
             appendLine("💧 **MTF Liquidity Zones — ${symbol.uppercase()}**")
-            appendLine("=".repeat(48))
-            appendLine("")
+            appendLine("=".repeat(29))
             appendLine("★★★★★ = OB + Structure + Premium/Discount + Trend")
             appendLine("EQH = Equal High (Sell-side Liquidity)")
             appendLine("EQL = Equal Low  (Buy-side Liquidity)")
-            appendLine("─".repeat(48))
+            appendLine("=".repeat(29))
             appendLine("")
-
             appendLine("**🔺 Equal Highs (Resistance / Sell Liquidity):**")
             if (mergedHighs.isEmpty()) {
                 appendLine("  — ไม่พบ Equal Highs ที่มีนัยสำคัญ")
@@ -250,7 +251,6 @@ class SmcToolExecutor(private val client: HttpClient) {
                 }
             }
             appendLine("")
-
             appendLine("**🔻 Equal Lows (Support / Buy Liquidity):**")
             if (mergedLows.isEmpty()) {
                 appendLine("  — ไม่พบ Equal Lows ที่มีนัยสำคัญ")
@@ -260,7 +260,6 @@ class SmcToolExecutor(private val client: HttpClient) {
                 }
             }
             appendLine("")
-            appendLine("─".repeat(48))
             appendLine("📌 Liquidity ที่ถูก tag หลาย TF = Strong level — มีโอกาสสูงที่ราคาจะไป sweep ก่อนกลับทิศ")
         }
     }
@@ -270,21 +269,21 @@ class SmcToolExecutor(private val client: HttpClient) {
     private suspend fun executeSmcOrderBlocks(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
         val interval = args["interval"] ?: "1h"
+        val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
 
-        val result = api.getSmcAnalysis(symbol, interval)
+        val result = api.getSmcAnalysis(symbol, interval, strictTvSource = strictTv)
             ?: return "❌ ดึงข้อมูล OB ไม่ได้สำหรับ ${symbol.uppercase()}"
 
         val currentPrice = result.currentPrice
 
         return buildString {
             appendLine("📦 **Order Blocks — ${result.symbol} ($interval)**")
-            appendLine("=".repeat(45))
+            appendLine("=".repeat(29))
             appendLine("💰 ราคาปัจจุบัน: ${formatPrice(currentPrice)}")
             appendLine("✅ FVG = มี Fair Value Gap ยืนยัน (Displacement สูง)")
-            appendLine("─".repeat(45))
-            appendLine("")
+            appendLine("=".repeat(29))
 
-            appendLine("**🟢 Bullish Order Blocks (Demand Zones):**")
+            appendLine("**🟢 Bullish OB (Demand Zones):**")
             if (result.bullishOBs.isEmpty()) {
                 appendLine("  — ไม่พบ Active Bullish OB (อาจถูก mitigate ไปแล้ว)")
             } else {
@@ -300,11 +299,10 @@ class SmcToolExecutor(private val client: HttpClient) {
                     val dist = if (distPct >= 0) "+${"%.2f".format(distPct)}% จากราคาปัจจุบัน"
                                else "${"%.2f".format(distPct)}% จากราคาปัจจุบัน"
                     appendLine("     Distance: $dist")
-                    appendLine("")
                 }
             }
 
-            appendLine("**🔴 Bearish Order Blocks (Supply Zones):**")
+            appendLine("**🔴 Bearish OB (Supply Zones):**")
             if (result.bearishOBs.isEmpty()) {
                 appendLine("  — ไม่พบ Active Bearish OB")
             } else {
@@ -320,11 +318,10 @@ class SmcToolExecutor(private val client: HttpClient) {
                     val dist = if (distPct >= 0) "+${"%.2f".format(distPct)}% จากราคาปัจจุบัน"
                                else "${"%.2f".format(distPct)}% จากราคาปัจจุบัน"
                     appendLine("     Distance: $dist")
-                    appendLine("")
                 }
             }
 
-            appendLine("─".repeat(45))
+            appendLine("=".repeat(29))
             appendLine("📌 OB ที่มี ✅FVG = strong zone (ราคามักเด้งจากจุดนี้)")
             appendLine("📌 OB ที่มี ⚡NEAR = ราคาใกล้ถึงแล้ว ควรระวัง/รอ entry")
         }
@@ -335,8 +332,9 @@ class SmcToolExecutor(private val client: HttpClient) {
     private suspend fun executeSmcStructure(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
         val interval = args["interval"] ?: "1h"
+        val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
 
-        val result = api.getSmcAnalysis(symbol, interval)
+        val result = api.getSmcAnalysis(symbol, interval, strictTvSource = strictTv)
             ?: return "❌ ดึงข้อมูล Structure ไม่ได้สำหรับ ${symbol.uppercase()}"
 
         val dirEmoji = when (result.structureDirection) {
@@ -364,10 +362,9 @@ class SmcToolExecutor(private val client: HttpClient) {
         }
 
         return buildString {
+            appendLine("=".repeat(29))
             appendLine("📐 **Market Structure — ${result.symbol} ($interval)**")
-            appendLine("=".repeat(48))
             appendLine("💰 ราคาปัจจุบัน: ${formatPrice(currentPrice)}")
-            appendLine("")
             appendLine("**Structure Direction: $dirEmoji ${result.structureDirection}**")
             appendLine("")
             appendLine("**Last Event:**")
@@ -385,7 +382,7 @@ class SmcToolExecutor(private val client: HttpClient) {
             appendLine("")
             appendLine("  📍 ราคาอยู่ที่: $zoneEmoji (${"%.1f".format(rangePercent)}% ของ range)")
             appendLine("")
-            appendLine("─".repeat(48))
+            appendLine("=".repeat(29))
 
             val advice = when {
                 result.structureDirection == "BULLISH" && result.priceZone == "DISCOUNT" ->

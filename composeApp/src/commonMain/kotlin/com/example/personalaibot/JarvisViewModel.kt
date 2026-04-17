@@ -8,6 +8,7 @@ import com.example.personalaibot.camera.CameraMode
 import com.example.personalaibot.camera.CameraProviderType
 import com.example.personalaibot.data.GeminiModel
 import com.example.personalaibot.db.DatabaseDriverFactory
+import com.example.personalaibot.db.JarvisDatabaseHolder
 import com.example.personalaibot.db.createDatabase
 import com.example.personalaibot.memory.JarvisMemoryManager
 import com.example.personalaibot.voice.PcmAudioEngine
@@ -93,7 +94,7 @@ class JarvisViewModel(
 
     private val maxContextTurns = 10
     
-    // 鈹€鈹€鈹€ Camera Analysis System 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── Camera Analysis System ──────────────────────────────────────────────────
     val cameraService = CameraAnalysisService(client)
 
     private val _isCameraActive = MutableStateFlow(false)
@@ -102,7 +103,7 @@ class JarvisViewModel(
     private val _isFrontCamera = MutableStateFlow(false)
     val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
 
-    // 鈹€鈹€鈹€ Automation System 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── Automation System ───────────────────────────────────────────────────────
     val activeJobs = automationManager.activeJobs
 
     private val _isMuted = MutableStateFlow(false)
@@ -119,7 +120,7 @@ class JarvisViewModel(
     private val _isAiVisionRequested = MutableStateFlow(false)
     val isAiVisionRequested: StateFlow<Boolean> = _isAiVisionRequested.asStateFlow()
 
-    // 鈹€鈹€鈹€ Charting System (V15.0) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── Charting System (V15.0) ─────────────────────────────────────────────────
     private val _showChart = MutableStateFlow(false)
     val showChart: StateFlow<Boolean> = _showChart.asStateFlow()
 
@@ -146,7 +147,7 @@ class JarvisViewModel(
 
     private var visionTimeoutJob: Job? = null
     
-    /** 喙€喔佮箛喔氞竸喔赤釜喔编箞喔囙釜喔膏笖喔椸箟喔侧涪喔傕腑喔囙笢喔灌箟喙冟笂喙夃笚喔掂箞喔⑧副喔囙笚喔赤箘喔∴箞喙€喔福喙囙笀喔曕腑喔權箑喔涏弗喔掂箞喔⑧笝喙€喔傅喔⑧竾 喙€喔炧阜喙堗腑喔權赋喙勦笡喔副喙堗竾 AI 喔曕箞喔笚喔编笝喔椸傅喔椸傅喙堗箑喔娻阜喙堗腑喔∴笗喙堗腑喙冟斧喔∴箞 */
+    /** เก็บข้อความสั่งสุดท้ายของผู้ใช้ที่ยังทำไม่เสร็จตอนเปลี่ยนเสียง เพื่อนำไปสั่ง AI ต่อทันทีที่เชื่อมต่อใหม่ */
     private var pendingCommandAfterVoiceChange: String? = null
 
     private val pcmAudioEngine = PcmAudioEngine()
@@ -154,6 +155,8 @@ class JarvisViewModel(
     private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
 
     init {
+        JarvisDatabaseHolder.install(database)
+
         // Bridge camera frames to the unified Live session in the orchestrator
         cameraService.onLiveFrameReady = { jpegBase64 ->
             orchestrator.sendLiveCameraFrame(jpegBase64)
@@ -203,11 +206,11 @@ class JarvisViewModel(
         // --- AI-Controlled Voice Change ---
         orchestrator.setVoiceChangeHandler { newVoice ->
             viewModelScope.launch {
-                // 喙€喔佮箛喔氞竸喔赤笘喔侧浮喔ム箞喔侧釜喔膏笖喔傕腑喔囙笢喔灌箟喙冟笂喙夃箘喔о箟 (喔栢箟喔侧浮喔? 喙€喔炧阜喙堗腑喔權赋喙勦笡喔涏箟喔笝喙冟斧喙?session 喙冟斧喔∴箞
+                // เก็บคำถามล่าสุดของผู้ใช้ไว้ (ถ้ามี) เพื่อนำไปป้อนให้ session ใหม่
                 val lastMsg = _messages.value.lastOrNull { it.role == "user" }?.content
                 pendingCommandAfterVoiceChange = lastMsg
                 
-                logDebug("JarvisVM", "馃攧 Voice change requested: $newVoice. Task cached: $lastMsg")
+                logDebug("JarvisVM", "🔔 Voice change requested: $newVoice. Task cached: $lastMsg")
                 
                 _voiceName.value = newVoice
                 updateSettings(_apiKey.value, _selectedModel.value, _liveModelName.value, newVoice)
@@ -215,7 +218,7 @@ class JarvisViewModel(
                 // Immediate Apply: Restart session if active
                 if (_isListening.value) {
                     stopVoiceInput()
-                    delay(800) // 喙€喔炧复喙堗浮 delay 喙€喔ム箛喔佮笝喙夃腑喔⑧箑喔炧阜喙堗腑喙冟斧喙夃福喔班笟喔氞箑喔勦弗喔掂涪喔｀箤 resources 喙佮弗喔班笟喔编笝喔椸付喔佮竸喔о覆喔∴笀喔赤箘喔斷箟喔椸副喔?
+                    delay(800) // เพิ่ม delay เล็กน้อยเพื่อให้ระบบเคลียร์ resources และบันทึกความจำได้ทัน
                     startVoiceInput()
                 }
             }
@@ -231,7 +234,7 @@ class JarvisViewModel(
             }
         }
 
-        // 鈹€鈹€鈹€ Charting Sync (V15.0) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+        // ─── Charting Sync (V15.0) ───────────────────────────────────────────────────
         viewModelScope.launch {
             com.example.personalaibot.tools.trading.ChartStateManager.currentSymbol.collect { 
                 _chartSymbol.value = it 
@@ -315,7 +318,7 @@ class JarvisViewModel(
             viewModelScope.launch {
                 val count = memoryManager.backfillEmbeddings(orchestrator.getGeminiService())
                 if (count > 0) {
-                    logDebug("JarvisVM", "鉁?Semantic backfill complete: Indexed $count facts")
+                    logDebug("JarvisVM", "✅ Semantic backfill complete: Indexed $count facts")
                 }
             }
         }
@@ -380,9 +383,15 @@ class JarvisViewModel(
                 val responseFlow = orchestrator.chatWithHistory(text, historySnapshot, coreContext)
 
                 responseFlow.collect { chunk ->
-                    // Log tool execution indicators
-                    if (chunk.startsWith("鈴?喔佮赋喔ム副喔囙笖喔多竾喔傕箟喔浮喔灌弗")) {
-                        logDebug("JarvisVM", "[Chat] Tool call detected: $chunk")
+                    // Hide tool-request/progress traces from chat; keep only user-facing content.
+                    val isToolRequestNoise =
+                        chunk.contains("กำลังดึงข้อมูล") ||
+                        chunk.contains("[TOOL_REQUEST]") ||
+                        chunk.contains("Tool call detected") ||
+                        chunk.contains("🔔")
+                    if (isToolRequestNoise) {
+                        logDebug("JarvisVM", "[Chat] Suppressed tool-request chunk: $chunk")
+                        return@collect
                     }
                     currentAiMessage += chunk
                     val currentList = _messages.value.toMutableList()
@@ -405,13 +414,13 @@ class JarvisViewModel(
             } catch (e: Exception) {
                 logError("JarvisVM", "Error in sendMessage", e)
                 _isTyping.value = false
-                _messages.value = _messages.value + Message("model", "鈿狅笍 喔傕腑喔笭喔编涪 喙€喔佮复喔斷競喙夃腑喔溹复喔斷笧喔ム覆喔斷笚喔侧竾喙€喔椸竸喔權复喔? ${e.message}")
+                _messages.value = _messages.value + Message("model", "⚠️ ขออภัย เกิดข้อผิดพลาดทางเทคนิค: ${e.message}")
             }
         }
     }
 
 
-    // 鈹€鈹€鈹€ External API Keys (OpenAI, Claude) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── External API Keys (OpenAI, Claude) ──────────────────────────────────────
     private val _openaiApiKey = MutableStateFlow("")
     val openaiApiKey: StateFlow<String> = _openaiApiKey.asStateFlow()
 
@@ -498,9 +507,9 @@ class JarvisViewModel(
     }
 
     /**
-     * 喙€喔｀傅喔⑧竵喔堗覆喔?platform-specific camera callback 喙€喔∴阜喙堗腑喙勦笖喙夃箑喔熰福喔∴箖喔浮喙?
-     * @param jpegBase64 喔犩覆喔?JPEG 喙冟笝喔｀腹喔?base64
-     * @param rawBytes raw JPEG bytes 喔赋喔福喔编笟 motion detection
+     * เรียกจาก platform-specific camera callback เมื่อได้รับเฟรมใหม่
+     * @param jpegBase64 ภาพ JPEG ในรูป base64
+     * @param rawBytes raw JPEG bytes สำหรับ motion detection
      */
     fun onCameraFrame(jpegBase64: String, rawBytes: ByteArray? = null) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -509,7 +518,7 @@ class JarvisViewModel(
     }
 
     /**
-     * 喔栢箞喔侧涪喔犩覆喔?Snapshot 喙佮弗喙夃抚喔о复喙€喔勦福喔侧赴喔箤喔椸副喔權笚喔?
+     * ถ่ายภาพ Snapshot แล้ววิเคราะห์ทันที
      */
     fun captureAndAnalyze(jpegBase64: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -517,10 +526,10 @@ class JarvisViewModel(
         }
     }
 
-    // 鈹€鈹€鈹€ Live Voice (Gemini Multimodal Live) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── Live Voice (Gemini Multimodal Live) ───────────────────────────
 
 
-    /** 喔娻阜喙堗腑 tool 喔椸傅喙堗竵喔赤弗喔编竾 execute 喔涪喔灌箞 鈥?expose 喙勦笡喔⑧副喔?UI */
+    /** ชื่อ tool ที่กำลัง execute อยู่ — expose ไปยัง UI */
     val activeToolName: StateFlow<String?> = orchestrator.activeToolName
 
     private var liveSessionJob: kotlinx.coroutines.Job? = null
@@ -535,23 +544,23 @@ class JarvisViewModel(
         liveSessionJob?.cancel()
         liveSessionJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 1. 喔斷付喔?core memory context 喙€喔炧阜喙堗腑喙冟斧喙?tool bridge 喙冟笂喙?
+                // 1. Build core memory context for live session/tool bridge
                 val coreContext = memoryManager.buildCoreMemoryContext()
                 
-                // 2. 喔斷付喔囙笡喔｀赴喔о副喔曕复喔佮覆喔｀釜喔權笚喔權覆喔副喙夃笝喙?喙€喔炧阜喙堗腑喔箞喔囙箖喔箟 Live Session 喔｀腹喙夃笟喔｀复喔氞笚
+                // 2. ดึงประวัติการสนทนาสั้นๆ เพื่อส่งให้ Live Session รู้บริบท
                 val historySnapshot = messages.value.takeLast(10).joinToString("\n") { 
                     "${if (it.role == "user") "User" else "JARVIS"}: ${it.content}" 
                 }
 
-                    // 3. 喙€喔涏复喔?Live session 喔炧福喙夃腑喔?tool bridge (Path A + Path B auto-detected)
+                    // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
                 launch {
                     logDebug("JARVIS_VM", "Connecting Live session (with memory context)...")
                     
-                    // 喔覆喔佮浮喔掂竾喔侧笝喔勦箟喔侧竾喔堗覆喔佮竵喔侧福喙€喔涏弗喔掂箞喔⑧笝喙€喔傅喔⑧竾 喙冟斧喙夃笁喔掂笖 Prompt 喙€喔傕箟喔侧箘喔涏笟喔竵 AI 喙冟笝喔氞福喔｀笚喔编笖喙佮福喔佮競喔竾喔涏福喔班抚喔编笗喔?
+                    // If we just changed voice, send cached user task as startup context.
                     val contextToSubmit = if (!pendingCommandAfterVoiceChange.isNullOrBlank()) {
                         val task = pendingCommandAfterVoiceChange
-                        pendingCommandAfterVoiceChange = null // Clear 喔椸副喔權笚喔掂箑喔炧阜喙堗腑喔涏箟喔竾喔佮副喔權竵喔侧福 loop
-                        "SYSTEM_INFO: 喔勦父喔撪箑喔炧复喙堗竾喙€喔涏弗喔掂箞喔⑧笝喙€喔傅喔⑧竾喔赋喙€喔｀箛喔?喔囙覆喔權笗喙堗腑喙勦笡喔椸傅喙堗竸喔膏笓喔曕箟喔竾喔椸赋喔椸副喔權笚喔掂竸喔粪腑: $task. 喙傕笡喔｀笖喔斷赋喙€喔權复喔權竵喔侧福喔曕箞喔箒喔ム赴喙佮笀喙夃竾喔溹腹喙夃箖喔娻箟喔斷箟喔о涪喙€喔傅喔⑧竾喙冟斧喔∴箞喔傕腑喔囙竸喔膏笓."
+                        pendingCommandAfterVoiceChange = null // Clear to avoid loop
+                        "SYSTEM_INFO: คุณแจ้งเปลี่ยนเสียงสำเร็จแล้ว งานต่อไปที่คุณต้องทำทันทีคือ: $task. โปรดดำเนินการต่อและแจ้งผู้ใช้ด้วยเสียงใหม่ของคุณ."
                     } else {
                         historySnapshot
                     }
@@ -559,14 +568,14 @@ class JarvisViewModel(
                     orchestrator.startLiveVoiceSessionWithMemory(coreContext, contextToSubmit)
                 }
 
-                // 4. Collect audio output 鈫?speaker
+                // 4. Collect audio output -> speaker
                 launch {
                     orchestrator.audioOutputFlow.collect { pcmBytes ->
                         pcmAudioEngine.playAudio(pcmBytes)
                     }
                 }
 
-                // 5. Collect text output 鈫?Chat UI
+                // 5. Collect text output -> Chat UI
                 launch {
                     orchestrator.textOutputFlow.collect { update ->
                         withContext(Dispatchers.Main) {
@@ -591,7 +600,7 @@ class JarvisViewModel(
                     }
                 }
 
-                // 6. Start mic recording 鈫?stream to Live model
+                // 6. Start mic recording -> stream to Live model
                 logDebug("JARVIS_VM", "Microphone starting...")
                 var frameCount = 0
                 pcmAudioEngine.startRecording { bytes ->
@@ -599,7 +608,7 @@ class JarvisViewModel(
                         frameCount++
                         // SILENCED: Heavy log
                         // if (frameCount % 50 == 0) {
-                        //    logDebug("JARVIS_VM", "馃帣锔?Transmitting audio chunk #$frameCount (${bytes.size} bytes)")
+                        //    logDebug("JARVIS_VM", "🎤 Transmitting audio chunk #$frameCount (${bytes.size} bytes)")
                         // }
                         val base64 = bytes.encodeBase64()
                         viewModelScope.launch(Dispatchers.IO) {
@@ -641,7 +650,7 @@ class JarvisViewModel(
         }
     }
 
-    // 鈹€鈹€鈹€ Charting Actions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ─── Charting Actions ─────────────────────────────────────────────────────────────
     
     fun openChart(symbol: String, candles: List<com.example.personalaibot.tools.trading.Candle>, smc: com.example.personalaibot.tools.trading.SmcAnalysisResult? = null) {
         _chartSymbol.value = symbol
@@ -691,7 +700,7 @@ class JarvisViewModel(
     fun handleChartCapture(base64Image: String) {
         logDebug("JarvisVM", "Chart captured! Processing with Gemini Vision...")
         // Phase 4 logic will go here: submit to orchestrator for visual analysis
-        sendMessage("喔о复喙€喔勦福喔侧赴喔箤喔犩覆喔炧竵喔｀覆喔熰笝喔掂箟喙冟斧喙夃斧喔權箞喔涪喔勦福喔编笟 (Capture 喔堗覆喔佮福喔班笟喔氞笀喔侧福喙屶抚喔脆釜)")
+        sendMessage("วิเคราะห์ภาพกราฟนี้ให้หน่อยครับ (Capture จากระบบจาร์วิส)")
         viewModelScope.launch {
             cameraService.onLiveFrameReady?.invoke(base64Image) // Wrap in launch for suspend call
         }
@@ -719,7 +728,7 @@ class JarvisViewModel(
         viewModelScope.launch {
             val success = orchestrator.performSleepCycle()
             if (success) {
-                // 喙傕斧喔ム笖喔涏福喔班抚喔编笗喔脆箖喔浮喙?喙€喔炧福喔侧赴喔傕箟喔竸喔о覆喔∴箑喔佮箞喔侧笘喔灌竵喔ム笟喙勦笡喔｀抚喔∴涪喔笖喙佮弗喙夃抚
+                // โหลดประวัติใหม่เพราะข้อความเก่าถูกลบไปรวมยอดแล้ว
                 loadHistory()
             }
             _isSleeping.value = false

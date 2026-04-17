@@ -31,10 +31,10 @@
 - **Layer 5: Memory Consolidation** — ระบบ "Sleep Cycle" สรุปและย้ายความจำจากระยะสั้นไประยะยาวอัตโนมัติ
 - **Layer 6: LLM-Wiki (Obsidian)** — ระบบ "สมองส่วนนอก" ที่ AI และมนุษย์จัดการร่วมกันผ่าน Markdown (Persistent Knowledge Hub)
 
-### 📊 4. JARVIS Advanced Trading Intelligence V14.4
+### 📊 4. JARVIS Advanced Trading Intelligence V14.4 (Institutional Resilience Patch)
 
-> **Status: 🟢 Stable (Institutional Resilience Patch)**  
-> **Last Update: 2026-04-17**  
+> **Status: 🟢 Stable (Institutional Resilience & Health Restore)**  
+> **Last Update: 2026-04-17 (V14.4 Maintenance)**  
 - **OANDA Price Unity Architecture** — ระบบรวมศูนย์ราคา (`getUnifiedPrice`) ที่เชื่อมโยงทุกเครื่องมือวิเคราะห์ (TA, SMC, Deep Analysis) ให้ใช้ราคาสปอต OANDA เสมอ 100%
 - **Zero-Filtering & Full Transparency** — แผ่กางข้อมูลดิบในรายงาน Deep Analysis (แสดง Fibonacci ทุกระดับ) และ SMC Metadata (Fresh/Mitigated Status)
 - **Universal Asset Success** — รองรับ หุ้นไทย (.BK), หุ้นนอก, คริปโต, Spot และ Forex อย่างสมบูรณ์และเสถียร 100% 

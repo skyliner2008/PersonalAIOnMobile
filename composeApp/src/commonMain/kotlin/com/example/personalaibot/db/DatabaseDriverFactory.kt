@@ -71,8 +71,24 @@ private fun ensureNewTablesExist(driver: SqlDriver) {
             confidence REAL NOT NULL DEFAULT 0.8,
             updated_at INTEGER NOT NULL
         )""",
+        // TV OHLCV candle cache
+        """CREATE TABLE IF NOT EXISTS TvCandle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            source TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume REAL NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(symbol, interval, ts)
+        )""",
         // Migration: add unique index for KnowledgeNode.name (idempotent)
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_node_name ON KnowledgeNode(name)"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_node_name ON KnowledgeNode(name)",
+        "CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts ON TvCandle(symbol, interval, ts)"
     )
 
     statements.forEach { sql ->

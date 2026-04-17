@@ -15,6 +15,7 @@ import kotlinx.serialization.json.*
 class TradingApiService(private val client: HttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private val smcApi = SmcApiService(client)
 
     /**
      * Resolve the best exchange for a given symbol if not specified by the user.
@@ -42,18 +43,18 @@ class TradingApiService(private val client: HttpClient) {
         }
     }
 
-    // ─── Yahoo Finance ──────────────────────────────────────────────────────
+    // ─── Yahoo Finance ────────────────────────────────────────────────────────
 
     suspend fun getYahooPrice(symbol: String): Map<String, String> {
-        return try {
-            val raw = symbol.uppercase().replace("/", "").replace("-", "")
-            val yahooSymbol = when {
-                raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD=X"
-                raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD=X"
-                raw.length == 6 && raw.all { it.isLetter() } -> "${raw}=X"
-                else -> symbol.uppercase()
-            }
+        val raw = symbol.uppercase().replace("/", "").replace("-", "")
+        val yahooSymbol = when {
+            raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD=X"
+            raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD=X"
+            raw.length == 6 && raw.all { it.isLetter() } -> "${raw}=X"
+            else -> symbol.uppercase()
+        }
 
+        return try {
             val url = "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSymbol"
             val response = client.get(url) {
                 parameter("interval", "1d")
@@ -61,13 +62,13 @@ class TradingApiService(private val client: HttpClient) {
                 header("User-Agent", "Mozilla/5.0")
                 timeout { requestTimeoutMillis = 15_000 }
             }
-            if (!response.status.isSuccess()) return mapOf("error" to "HTTP ${response.status.value}")
+            if (!response.status.isSuccess()) return getYahooQuoteFallback(yahooSymbol)
 
             val body = response.bodyAsText()
             val root = json.parseToJsonElement(body).jsonObject
             val meta = root["chart"]?.jsonObject?.get("result")?.jsonArray
                 ?.firstOrNull()?.jsonObject?.get("meta")?.jsonObject
-                ?: return mapOf("error" to "ไม่พบข้อมูล symbol: $symbol")
+                ?: return getYahooQuoteFallback(yahooSymbol)
 
             fun metaStr(key: String) = meta[key]?.jsonPrimitive?.contentOrNull ?: "N/A"
             fun metaDbl(key: String) = meta[key]?.jsonPrimitive?.doubleOrNull
@@ -90,15 +91,137 @@ class TradingApiService(private val client: HttpClient) {
                 "high_52w"     to "%.4f".format(high52w),
                 "low_52w"      to "%.4f".format(low52w),
                 "currency"     to currency,
-                "market_state" to marketState,
-                "direction"    to if (change >= 0) "▲" else "▼"
+                "market_state" to "$marketState | YAHOO_CHART",
+                "direction"    to if (change >= 0) "UP" else "DOWN",
+                "source"       to "YAHOO_CHART"
+            )
+        } catch (e: Exception) {
+            getYahooQuoteFallback(yahooSymbol)
+        }
+    }
+
+    suspend fun getBestEffortPrice(symbol: String): Map<String, String> {
+        val raw = symbol.uppercase().replace("/", "").replace("-", "")
+        val canonical = when {
+            raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD"
+            raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD"
+            raw.endsWith("=X") -> raw.removeSuffix("=X")
+            else -> raw
+        }
+
+        val exchanges = when {
+            canonical == "XAUUSD" || canonical == "XAGUSD" -> listOf("OANDA", "FX_IDC", "TVC")
+            canonical.length == 6 && canonical.all { it.isLetter() } -> listOf("OANDA", "FX_IDC")
+            else -> listOf(resolveExchange(canonical, null))
+        }
+
+        for (ex in exchanges.distinct()) {
+            val ta = getTechnicalAnalysis(canonical, ex, "1m")
+            val close = ta["close"]?.toDoubleOrNull()
+            if (close != null && close > 0.0) {
+                val change = ta["change"]?.toDoubleOrNull() ?: 0.0
+                val prevClose = close - change
+                return mapOf(
+                    "symbol" to symbol.uppercase(),
+                    "canonical_symbol" to canonical,
+                    "price" to "%.4f".format(close),
+                    "change" to "%.4f".format(change),
+                    "change_pct" to "%.2f%%".format(change),
+                    "prev_close" to "%.4f".format(prevClose),
+                    "high_52w" to "N/A",
+                    "low_52w" to "N/A",
+                    "currency" to "USD",
+                    "market_state" to "LIVE | TV:$ex",
+                    "direction" to if (change >= 0.0) "UP" else "DOWN",
+                    "source" to "TV:$ex"
+                )
+            }
+        }
+
+        val requestedSymbol = symbol.uppercase()
+        val yahoo = getYahooPrice(symbol).toMutableMap()
+        if (!yahoo.containsKey("error")) {
+            val resolvedSymbol = yahoo["symbol"] ?: canonical
+            yahoo["canonical_symbol"] = resolvedSymbol
+            yahoo["symbol"] = requestedSymbol
+            return yahoo
+        }
+
+        getSmcPriceFallback(canonical, requestedSymbol)?.let { return it }
+        return yahoo
+    }
+
+    private suspend fun getSmcPriceFallback(canonical: String, requestedSymbol: String): Map<String, String>? {
+        for (tf in listOf("1m", "5m", "15m")) {
+            val fetch = smcApi.fetchCandlesWithSource(canonical, tf, 120)
+            val candles = fetch.candles
+            if (fetch.source == "NONE" || candles.size < 2) continue
+
+            val last = candles.last()
+            val prev = candles[candles.lastIndex - 1]
+            val change = last.close - prev.close
+            val changePct = if (prev.close != 0.0) (change / prev.close) * 100.0 else 0.0
+
+            return mapOf(
+                "symbol" to requestedSymbol,
+                "canonical_symbol" to canonical,
+                "price" to "%.4f".format(last.close),
+                "change" to "%.4f".format(change),
+                "change_pct" to "%.2f%%".format(changePct),
+                "prev_close" to "%.4f".format(prev.close),
+                "high_52w" to "N/A",
+                "low_52w" to "N/A",
+                "currency" to "USD",
+                "market_state" to "LIVE | ${fetch.source} | TF:$tf",
+                "direction" to if (change >= 0.0) "UP" else "DOWN",
+                "source" to "SMC_FALLBACK:${fetch.source}"
+            )
+        }
+        return null
+    }
+
+    private suspend fun getYahooQuoteFallback(yahooSymbol: String): Map<String, String> {
+        return try {
+            val response = client.get("https://query1.finance.yahoo.com/v7/finance/quote") {
+                parameter("symbols", yahooSymbol)
+                header("User-Agent", "Mozilla/5.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!response.status.isSuccess()) return mapOf("error" to "HTTP ${response.status.value}")
+
+            val body = response.bodyAsText()
+            val root = json.parseToJsonElement(body).jsonObject
+            val quote = root["quoteResponse"]?.jsonObject?.get("result")?.jsonArray
+                ?.firstOrNull()?.jsonObject
+                ?: return mapOf("error" to "No quote for symbol: $yahooSymbol")
+
+            fun qStr(key: String) = quote[key]?.jsonPrimitive?.contentOrNull ?: "N/A"
+            fun qDbl(key: String) = quote[key]?.jsonPrimitive?.doubleOrNull
+
+            val price = qDbl("regularMarketPrice") ?: 0.0
+            val prevClose = qDbl("regularMarketPreviousClose") ?: qDbl("regularMarketOpen") ?: price
+            val change = price - prevClose
+            val changePct = if (prevClose != 0.0) (change / prevClose * 100) else 0.0
+
+            mapOf(
+                "symbol" to (qStr("symbol").takeIf { it.isNotBlank() && it != "N/A" } ?: yahooSymbol),
+                "price" to "%.4f".format(price),
+                "change" to "%.4f".format(change),
+                "change_pct" to "%.2f%%".format(changePct),
+                "prev_close" to "%.4f".format(prevClose),
+                "high_52w" to "%.4f".format(qDbl("fiftyTwoWeekHigh") ?: 0.0),
+                "low_52w" to "%.4f".format(qDbl("fiftyTwoWeekLow") ?: 0.0),
+                "currency" to qStr("currency"),
+                "market_state" to "${qStr("marketState")} | YAHOO_QUOTE",
+                "direction" to if (change >= 0) "UP" else "DOWN",
+                "source" to "YAHOO_QUOTE"
             )
         } catch (e: Exception) {
             mapOf("error" to "Yahoo Finance error: ${e.message}")
         }
     }
 
-    // ─── AI Sector Resolver ────────────────────────────────────────────────
+    // ─── AI Sector Resolver ───────────────────────────────────────────────────
 
     val TV_US_SECTORS = listOf(
         "Technology Services", "Electronic Technology", "Finance", "Health Technology", 
@@ -240,13 +363,20 @@ class TradingApiService(private val client: HttpClient) {
         val s = sector.lowercase()
         val isTh = market.uppercase() == "TH"
         return when {
-            s.contains("energy") || s.contains("พลังงาน") -> listOf("Energy Minerals", "Utilities")
-            s.contains("tech") || s.contains("เทคโนโลยี") -> listOf("Electronic Technology", "Technology Services")
-            s.contains("finance") || s.contains("การเงิน") || s.contains("bank") || s.contains("property") || s.contains("estate") || s.contains("อสังหา") -> listOf("Finance")
-            s.contains("retail") || s.contains("ค้าปลีก") || s.contains("commerce") -> listOf("Retail Trade", "Consumer Services")
-            s.contains("health") || s.contains("hospital") || s.contains("สุขภาพ") || s.contains("โรงพยาบาล") -> listOf("Health Services", "Health Technology")
-            s.contains("transport") || s.contains("logistics") || s.contains("ขนส่ง") -> listOf("Transportation", "Industrial Services")
-            s.contains("industrial") || s.contains("อุตสาหกรรม") || s.contains("manufactur") -> listOf("Producer Manufacturing", "Industrial Services", "Process Industries")
+            s.contains("energy") || s.contains("oil") || s.contains("gas") ->
+                listOf("Energy Minerals", "Utilities")
+            s.contains("tech") || s.contains("ai") || s.contains("semiconductor") ->
+                listOf("Electronic Technology", "Technology Services")
+            s.contains("finance") || s.contains("bank") || s.contains("property") || s.contains("estate") ->
+                listOf("Finance")
+            s.contains("retail") || s.contains("commerce") || s.contains("consumer") ->
+                listOf("Retail Trade", "Consumer Services")
+            s.contains("health") || s.contains("hospital") || s.contains("medical") ->
+                listOf("Health Services", "Health Technology")
+            s.contains("transport") || s.contains("logistics") ->
+                listOf("Transportation", "Industrial Services")
+            s.contains("industrial") || s.contains("manufactur") ->
+                listOf("Producer Manufacturing", "Industrial Services", "Process Industries")
             else -> listOf(sector)
         }
     }
@@ -369,7 +499,14 @@ class TradingApiService(private val client: HttpClient) {
             } catch (_: Exception) {}
         }
         val score = if (total > 0) (bull - bear).toDouble() / total else 0.0
-        return mapOf("symbol" to query, "sentiment_score" to score, "sentiment_label" to if (score > 0.1) "Bullish 📈" else if (score < -0.1) "Bearish 📉" else "Neutral ➡️", "posts_analyzed" to total)
+        return mapOf(
+            "symbol" to query,
+            "sentiment_score" to score,
+            "sentiment_label" to if (score > 0.1) "Bullish" else if (score < -0.1) "Bearish" else "Neutral",
+            "posts_analyzed" to total,
+            "bullish_posts" to bull,
+            "bearish_posts" to bear
+        )
     }
 
     suspend fun getFinancialNews(symbol: String? = null, limit: Int = 10): Map<String, Any> {

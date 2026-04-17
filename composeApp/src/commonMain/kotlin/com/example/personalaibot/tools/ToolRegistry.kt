@@ -5,6 +5,7 @@ import com.example.personalaibot.tools.trading.SmcToolDefinitions
 import com.example.personalaibot.tools.file.FileToolDefinitions
 
 object ToolRegistry {
+    private const val STRICT_TV_ONLY_TRADING_MODE = true
 
     private val _builtinTools: Map<String, FunctionDeclaration> = buildMap {
         put("get_current_datetime", FunctionDeclaration(
@@ -125,8 +126,31 @@ object ToolRegistry {
     private val _skills = mutableMapOf<String, SkillDescriptor>()
 
     // ─── Trading Tools (Real-time, TA, Sentiment, News) ──────────────────────
+    private val supportedTradingToolNames = setOf(
+        "trading_price",
+        "trading_market_snapshot",
+        "trading_top_gainers",
+        "trading_top_losers",
+        "trading_technical_analysis",
+        "trading_multi_timeframe",
+        "trading_bollinger_scan",
+        "trading_oversold_scan",
+        "trading_overbought_scan",
+        "trading_volume_breakout",
+        "trading_sentiment",
+        "trading_news",
+        "trading_combined"
+    )
+
+    private val tvOnlyTradingToolNames = setOf("trading_price")
+
+    private val activeTradingToolNames: Set<String> =
+        if (STRICT_TV_ONLY_TRADING_MODE) tvOnlyTradingToolNames else supportedTradingToolNames
+
     private val _tradingTools: Map<String, FunctionDeclaration> =
-        TradingToolDefinitions.allDefinitions.associateBy { it.name }
+        TradingToolDefinitions.allDefinitions
+            .filter { it.name in activeTradingToolNames }
+            .associateBy { it.name }
 
     // ─── SMC (Smart Money Concepts) Tools ────────────────────────────────────
     private val _smcTools: Map<String, FunctionDeclaration> =

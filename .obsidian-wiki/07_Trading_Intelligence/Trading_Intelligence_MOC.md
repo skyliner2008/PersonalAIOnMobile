@@ -13,7 +13,7 @@
 - [[07_Advanced_Analysis_V12.5]] - ระบบวิเคราะห์เชิงลึก (Deep Analysis Suite)
 
 ## 💎 นวัตกรรมล่าสุด (Latest Innovations)
-- [[08_Universal_Trading_Unity_V14.1]] - ความโปร่งใสของข้อมูลราคาและ Metadata รันไทม์
+- [[08_Universal_Trading_Unity_V14.4]] - ความโปร่งใสของข้อมูลราคาและการกู้คืนสุขภาพระบบ (Resilience)
 
 ---
 **Links**: [[index]] | [[catalogue]] | [[Current_Tasks]]

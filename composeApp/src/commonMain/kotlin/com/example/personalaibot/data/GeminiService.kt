@@ -1,9 +1,9 @@
-﻿package com.example.personalaibot.data
+package com.example.personalaibot.data
 
+import com.example.personalaibot.tools.ToolExecutor
+import com.example.personalaibot.tools.ToolCall
 import com.example.personalaibot.logDebug
 import com.example.personalaibot.logError
-import com.example.personalaibot.tools.ToolCall
-import com.example.personalaibot.tools.ToolExecutor
 import com.example.personalaibot.tools.ToolRegistry
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -12,57 +12,72 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
-// 鈹€鈹€鈹€ Request / Response Models 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ─── Request / Response Models ──────────────────────────────────────────────
 
 @Serializable
 data class GeminiRequest(
     val contents: List<GeminiContent>,
-    val systemInstruction: GeminiContent? = null,
-    val generationConfig: GenerationConfig? = null,
-    val tools: List<GeminiToolConfig>? = null
-)
-
-@Serializable
-data class GeminiToolConfig(
-    val googleSearch: JsonObject
+    val system_instruction: GeminiContent? = null,
+    val tools: List<JsonObject>? = null,
+    val tool_config: JsonObject? = null,
+    val generationConfig: GenerationConfig? = null
 )
 
 @Serializable
 data class GeminiContent(
-    val role: String,
-    val parts: List<Part>
+    val parts: List<Part>,
+    val role: String? = null
 )
 
 @Serializable
 data class Part(
     val text: String? = null,
-    val functionCall: JsonObject? = null,
-    val functionResponse: JsonObject? = null,
-    val inlineData: InlineData? = null
+    val inline_data: InlineData? = null,
+    val function_call: FunctionCall? = null,
+    val function_response: FunctionResponse? = null
 )
 
 @Serializable
 data class InlineData(
-    val mimeType: String,
-    val data: String // Base64
+    val mime_type: String,
+    val data: String
+)
+
+@Serializable
+data class FunctionCall(
+    val name: String,
+    val args: JsonObject
+)
+
+@Serializable
+data class FunctionResponse(
+    val name: String,
+    val response: JsonObject
 )
 
 @Serializable
 data class GenerationConfig(
-    val temperature: Float = 0.9f,
-    val maxOutputTokens: Int = 2048,
-    val topP: Float = 0.95f
+    val temperature: Float? = null,
+    val maxOutputTokens: Int? = null,
+    val stopSequences: List<String>? = null
 )
 
 @Serializable
 data class GeminiResponse(
-    val candidates: List<Candidate>? = null
+    val candidates: List<Candidate>? = null,
+    val usageMetadata: UsageMetadata? = null
+)
+
+@Serializable
+data class UsageMetadata(
+    val promptTokenCount: Int? = null,
+    val candidatesTokenCount: Int? = null,
+    val totalTokenCount: Int? = null
 )
 
 @Serializable
@@ -79,7 +94,7 @@ data class SafetyRating(
     val blocked: Boolean? = null
 )
 
-// 鈹€鈹€鈹€ Function Calling Models (Chat mode) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ─── Function Calling Models (Chat mode) ───────────────────────────────────
 
 private data class DetectedFunctionCall(
     val name: String,
@@ -87,16 +102,17 @@ private data class DetectedFunctionCall(
 )
 
 @Serializable
-data class ModelListResponse(
-    val models: List<GeminiModel>
-)
+data class ModelListResponse(val models: List<GeminiModel>)
 
 @Serializable
 data class GeminiModel(
     val name: String,
+    val baseModelId: String? = null,
     val version: String? = null,
     val displayName: String? = null,
     val description: String? = null,
+    val inputTokenLimit: Int? = null,
+    val outputTokenLimit: Int? = null,
     val supportedGenerationMethods: List<String>? = null
 )
 
@@ -104,44 +120,39 @@ data class GeminiModel(
 data class EmbeddingRequest(
     val model: String,
     val content: GeminiContent,
-    val taskType: String? = null,
-    val title: String? = null
+    val taskType: String? = null
 )
 
 @Serializable
-data class EmbeddingResponse(
-    val embedding: EmbeddingValues
-)
+data class EmbeddingResponse(val embedding: EmbeddingValue)
 
 @Serializable
-data class EmbeddingValues(
-    val values: List<Float>
-)
+data class EmbeddingValue(val values: List<Float>)
 
 data class ConversationTurn(
     val role: String,
     val content: String
 )
 
-// 鈹€鈹€鈹€ Jarvis System Prompt 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ─── Jarvis System Prompt ──────────────────────────────────────────────────
 
-private const val JARVIS_SYSTEM_PROMPT = """喔勦父喔撪竸喔粪腑 JARVIS (Ultimate Trading Brain) 鈥?AI 喔箞喔о笝喔曕副喔о福喔班笖喔编笟喔腹喔?
-喔氞笚喔氞覆喔? 喔勦父喔撪竸喔粪腑喙€喔椸福喔斷箑喔斷腑喔｀箤喔副喔堗笁喔｀复喔⑧赴喔椸傅喙堗箑喔娻傅喙堗涪喔о笂喔侧笉喔斷箟喔侧笝 Confluence Trading 喙傕笖喔⑧箖喔娻箟喔佮福喔班笟喔о笝喔佮覆喔｀抚喔脆箑喔勦福喔侧赴喔箤 5 喔｀赴喔斷副喔?(5-Phase Planning):
+private const val JARVIS_SYSTEM_PROMPT = """คุณคือ JARVIS (Ultimate Trading Brain) — AI ส่วนตัวระดับสูง
+บทบาท: คุณคือเทรดเดอร์อัจฉริยะที่เชี่ยวชาญด้าน Confluence Trading โดยใช้กระบวนการวิเคราะห์ 5 ระดับ (5-Phase Planning):
 
-Phase 1: Market Sentiment & News 鈥?喔曕福喔о笀喔腑喔氞競喙堗覆喔о釜喔侧福喙佮弗喔班竸喔о覆喔∴福喔灌箟喔付喔佮競喔竾喔曕弗喔侧笖 (trading_sentiment, trading_news, trading_fear_greed)
-Phase 2: HTF Wyckoff & Marco 鈥?喔覆 Bias 喔椸复喔ㄠ笭喔侧笧喔堗覆喔佮箘喔椸浮喙屶箑喔熰福喔∴箖喔笉喙堗箒喔ム赴喔涏副喔堗笀喔编涪喔∴斧喔犩覆喔?(trading_macro_calendar, trading_multi_timeframe)
-Phase 3: Smart Scanning 鈥?喔勦箟喔權斧喔侧笗喔编抚喙€喔斷箞喔權笚喔掂箞喔佮赋喔ム副喔囙笀喔班福喔班箑喔氞复喔斷斧喔｀阜喔竵喔ム副喔氞笗喔编抚 (trading_bollinger_scan, trading_volume_breakout, trading_oversold_scan)
-Phase 4: SMC & Institutional Entry 鈥?喔覆喔堗父喔斷箑喔傕箟喔侧笚喔掂箞喔勦浮喔椸傅喙堗釜喔膏笖喔斷箟喔о涪 ICT/SMC 喙佮弗喔?Deep Suite (trading_smc_analysis, trading_deep_analysis_suite, trading_smc_liquidity)
-Phase 5: Jarvis Automation 鈥?喔曕副喙夃竾喔勦箞喔侧福喔班笟喔氞箑喔澿箟喔侧笗喔脆笖喔曕覆喔?(automation_manage_alerts) 喙€喔炧阜喙堗腑喙佮笀喙夃竾喙€喔曕阜喔笝喙傕腑喔佮覆喔竵喔侧福喙€喔椸福喔斷箓喔斷涪喔副喔曕箓喔權浮喔编笗喔?
+Phase 1: Market Sentiment & News — ตรวจสอบข่าวสารและความรู้สึกของตลาด (trading_sentiment, trading_news, trading_fear_greed)
+Phase 2: HTF Wyckoff & Marco — หา Bias ทิศทางจากไทม์เฟรมใหญ่และปัจจัยมหภาค (trading_macro_calendar, trading_multi_timeframe)
+Phase 3: Smart Scanning — ค้นหาตัวเด่นที่กำลังจะระเบิดหรือกลับตัว (trading_bollinger_scan, trading_volume_breakout, trading_oversold_scan)
+Phase 4: SMC & Institutional Entry — หาจุดเข้าที่คมที่สุดด้วย ICT/SMC และ Deep Suite (trading_smc_analysis, trading_deep_analysis_suite, trading_smc_liquidity)
+Phase 5: Jarvis Automation — ตั้งค่าระบบเฝ้าติดตาม (automation_manage_alerts) เพื่อแจ้งเตือนโอกาสการเทรดโดยอัตโนมัติ
 
-喔佮笌喔佮覆喔｀笚喔赤竾喔侧笝 (STRICT):
-1. [SOURCE OF TRUTH]: 喔箟喔侧浮喔勦覆喔斷箑喔斷覆喔｀覆喔勦覆喔福喔粪腑喔笭喔侧抚喔班笗喔ム覆喔斷箑喔竾喙€喔斷箛喔斷競喔侧笖 喔曕箟喔竾喙冟笂喙?Trading Tools 喔斷付喔囙競喙夃腑喔∴腹喔ム笡喔编笀喔堗父喔氞副喔權箑喔浮喔?
-2. [CONFLUENCE]: 喔涪喙堗覆喔斷箞喔о笝喔福喔膏笡喔堗覆喔佮箑喔勦福喔粪箞喔竾喔∴阜喔箑喔斷傅喔⑧抚 喙冟斧喙夃斧喔侧竸喔о覆喔∴釜喔笖喔勦弗喙夃腑喔?(Confluence) 喔｀赴喔抚喙堗覆喔?Sentiment + TA + SMC + Deep Suite (V12.5)
-3. [AUTOMATION]: 喙€喔∴阜喙堗腑喙€喔箛喔權箓喔竵喔侧釜喔佮覆喔｀箑喔椸福喔斷笚喔掂箞喔⑧副喔囙箘喔∴箞喔栢付喔囙笀喔膏笖喙€喔傕箟喔?喙冟斧喙夃箒喔權赴喔權赋喔溹腹喙夃箖喔娻箟喔曕副喙夃竾喔勦箞喔?'automation_manage_alerts' 喙€喔炧阜喙堗腑喙€喔澿箟喔侧福喔侧竸喔?
-4. [AESTHETICS]: 喙佮釜喔斷竾喔溹弗喔佮覆喔｀抚喔脆箑喔勦福喔侧赴喔箤喔斷箟喔о涪喔曕覆喔｀覆喔?(Table), 喙佮笢喔權笭喔侧笧喔傕副喙夃笝喔曕腑喔?(Workflow) 喙佮弗喔班釜喔｀父喔涏竸喔о覆喔∴箑喔傅喙堗涪喔?(Position Sizing)
-5. [PERSONA]: 喔父喔犩覆喔?喔∴副喙堗笝喙冟笀 喔曕福喔囙箘喔涏笗喔｀竾喔∴覆喙佮笟喔氞笢喔灌箟喔娻箞喔о涪喔副喔堗笁喔｀复喔⑧赴 (British Butler Style)"""
+กฎการทำงาน (STRICT):
+1. [SOURCE OF TRUTH]: ห้ามคาดเดาราคาหรือสภาวะตลาดเองเด็ดขาด ต้องใช้ Trading Tools ดึงข้อมูลปัจจุบันเสมอ
+2. [CONFLUENCE]: อย่าด่วนสรุปจากเครื่องมือเดียว ให้หาความสอดคล้อง (Confluence) ระหว่าง Sentiment + TA + SMC + Deep Suite (V12.5)
+3. [AUTOMATION]: เมื่อเห็นโอกาสการเทรดที่ยังไม่ถึงจุดเข้า ให้แนะนำผู้ใช้ตั้งค่า 'automation_manage_alerts' เพื่อเฝ้าราคา
+4. [AESTHETICS]: แสดงผลการวิเคราะห์ด้วยตาราง (Table), แผนภาพขั้นตอน (Workflow) และสรุปความเสี่ยง (Position Sizing)
+5. [PERSONA]: สุภาพ มั่นใจ ตรงไปตรงมาแบบผู้ช่วยอัจฉริยะ (British Butler Style)"""
 
-// 鈹€鈹€鈹€ GeminiService 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ─── GeminiService ──────────────────────────────────────────────────────────
 
 class GeminiService(
     private val client: HttpClient,
@@ -149,7 +160,17 @@ class GeminiService(
     private var modelName: String
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    // Show raw tool outputs in chat, but hide internal tool-call traces.
+    private val showToolRequestInChat = false
     private val showToolResultInChat = true
+    private val tvOnlyTradingFunctionNames = setOf(
+        "trading_price",
+        "trading_smc_analysis",
+        "trading_smc_sweeps",
+        "trading_smc_liquidity",
+        "trading_smc_orderblocks",
+        "trading_smc_structure"
+    )
 
     fun updateConfig(newApiKey: String, newModelName: String) {
         apiKey = newApiKey
@@ -159,6 +180,25 @@ class GeminiService(
     private fun cleanModelName(): String =
         if (modelName.startsWith("models/")) modelName else "models/$modelName"
 
+    private fun isTradingPrompt(prompt: String, intentAddon: String): Boolean {
+        val text = "$prompt $intentAddon".lowercase()
+        val keywords = listOf(
+            "trading", "trade", "xau", "xauusd", "gold", "forex", "smc",
+            "liquidity", "sweep", "order block", "orderblock", "bos", "choch",
+            "premium", "discount", "fvg", "price", "gc=f", "oanda", "tv:"
+        )
+        return keywords.any { text.contains(it) }
+    }
+    private fun isSmcPrompt(prompt: String, intentAddon: String): Boolean {
+        val text = "$prompt $intentAddon".lowercase()
+        val keywords = listOf(
+            "smc", "sweep", "liquidity", "order block", "orderblock",
+            "bos", "choch", "fvg", "premium", "discount", "ict",
+            "trading_smc", "market structure",
+            "สภาพคล่อง", "ออเดอร์บล็อก", "โครงสร้าง", "สวีป", "สมาร์ทมันนี่"
+        )
+        return keywords.any { text.contains(it) }
+    }
     private fun generateContentUrl(): String {
         val model = cleanModelName()
         return "https://generativelanguage.googleapis.com/v1beta/$model:generateContent?key=$apiKey"
@@ -184,14 +224,21 @@ class GeminiService(
         includeFunctionTools: Boolean = false,
         extraContents: List<JsonObject> = emptyList(),
         forceTool: Boolean = false,
-        fileData: List<InlineData> = emptyList()
+        fileData: List<InlineData> = emptyList(),
+        allowedFunctionNames: Set<String>? = null
     ): JsonObject {
         val systemPrompt = buildString {
             append(JARVIS_SYSTEM_PROMPT)
             if (coreContext.isNotBlank()) { append("\n\n"); append(coreContext) }
             if (intentAddon.isNotBlank()) { append("\n\n"); append(intentAddon) }
             if (includeFunctionTools) {
-                append("\n\n[REMINDER] 喔佮福喔膏笓喔侧箖喔娻箟 Tool 喔赋喔福喔编笟喔傕箟喔浮喔灌弗喔椸傅喙堗笗喙夃腑喔囙竵喔侧福喔勦抚喔侧浮喙佮浮喙堗笝喔⑧赋喙佮弗喔班箑喔涏箛喔權笡喔编笀喔堗父喔氞副喔?喔箟喔侧浮喔曕腑喔氞笀喔侧竵喔勦抚喔侧浮喔堗赋喙€喔勦福喔粪箞喔竾 (Internal Memory) 喙€喔斷箛喔斷競喔侧笖")
+                append("\n\n[REMINDER] กรุณาใช้ Tool สำหรับข้อมูลที่ต้องการความแม่นยำและเป็นปัจจุบัน ห้ามตอบจากความจำเครื่อง (Internal Memory) เด็ดขาด")
+            }
+            if (!allowedFunctionNames.isNullOrEmpty()) {
+                append("\n\n[TRADING TOOL POLICY]")
+                append("\n- If this is a trading task, use only these function names: ${allowedFunctionNames.joinToString(", ")}.")
+                append("\n- Do not call trading_macro_calendar, trading_deep_analysis_suite, or any undefined function.")
+                append("\n- Keep analysis in TV-only SMC flow with strict source consistency.")
             }
         }
 
@@ -209,7 +256,7 @@ class GeminiService(
                     fileData.forEach { file ->
                         add(buildJsonObject {
                             put("inline_data", buildJsonObject {
-                                put("mime_type", file.mimeType)
+                                put("mime_type", file.mime_type)
                                 put("data", file.data)
                             })
                         })
@@ -223,7 +270,12 @@ class GeminiService(
 
         val toolsArray: JsonArray? = when {
             includeFunctionTools -> buildJsonArray {
-                val decls = ToolRegistry.getGeminiTool().functionDeclarations
+                val allDecls = ToolRegistry.getGeminiTool().functionDeclarations
+                val decls = if (allowedFunctionNames.isNullOrEmpty()) {
+                    allDecls
+                } else {
+                    allDecls.filter { it.name in allowedFunctionNames }
+                }
                 if (decls.isNotEmpty()) {
                     add(buildJsonObject {
                         put("function_declarations", buildJsonArray {
@@ -284,7 +336,7 @@ class GeminiService(
     }
 
     /**
-     * 喔斷付喔囙競喙夃腑喔∴腹喔?functionCall 喔椸副喙夃竾喔浮喔斷笀喔侧竵 JSON Response
+     * ดึงค่าจาก functionCall ทั้งหมดจาก JSON Response
      */
     private fun extractFunctionCallsFromParts(parts: JsonArray): List<DetectedFunctionCall> {
         val results = mutableListOf<DetectedFunctionCall>()
@@ -309,7 +361,7 @@ class GeminiService(
     }
 
     /**
-     * generateResponseWithTools 鈥?Multi-turn Tool Orchestration (Recursive Loop)
+     * generateResponseWithTools — Multi-turn Tool Orchestration (Recursive Loop)
      */
     fun generateResponseWithTools(
         prompt: String,
@@ -319,7 +371,7 @@ class GeminiService(
         enableGrounding: Boolean = false
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
-            emit("鈿狅笍 喔佮福喔膏笓喔侧笗喔编箟喔囙竸喙堗覆 API Key 喙冟笝 Settings 喔佮箞喔笝喙冟笂喙夃竾喔侧笝")
+            emit("⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน")
             return@flow
         }
 
@@ -329,6 +381,12 @@ class GeminiService(
         val maxRounds = 5
 
         try {
+            val tradingPrompt = isTradingPrompt(prompt, intentAddon)
+            val smcPrompt = isSmcPrompt(prompt, intentAddon)
+            val allowedTradingFunctions = if (tradingPrompt) {
+                if (smcPrompt) tvOnlyTradingFunctionNames - "trading_price" else tvOnlyTradingFunctionNames
+            } else null
+
             while (round <= maxRounds) {
                 logDebug("GeminiService", "Tool Loop: Round $round")
                 
@@ -345,9 +403,10 @@ class GeminiService(
                     coreContext = coreContext,
                     enableGrounding = enableGrounding,
                     includeFunctionTools = true,
-                    forceTool = forceTool && round == 1, // 喔氞副喔囙竸喔编笟喙€喔夃笧喔侧赴喔｀腑喔氞箒喔｀竵
+                    forceTool = forceTool && round == 1, // บังคับเฉพาะรอบแรก
                     extraContents = toolHistory,
-                    fileData = pendingFiles
+                    fileData = pendingFiles,
+                    allowedFunctionNames = allowedTradingFunctions
                 )
                 
                 // Clear pending files after sending them
@@ -365,7 +424,7 @@ class GeminiService(
                     if (!httpResponse.status.isSuccess()) {
                         val err = httpResponse.bodyAsText()
                         logError("GeminiService", "API Error ${httpResponse.status.value}: $err")
-                        emit("鈿狅笍 API Error ${httpResponse.status.value}: $err")
+                        emit("⚠️ API Error ${httpResponse.status.value}: $err")
                         return@execute
                     }
 
@@ -403,12 +462,12 @@ class GeminiService(
                                 if (content == null) {
                                     candidates?.firstOrNull()?.jsonObject?.get("finishReason")?.jsonPrimitive?.content?.let { reason ->
                                         if (reason != "STOP" && reason != "NONE") {
-                                            emit("\n鈿狅笍 Response interrupted: $reason")
+                                            emit("\n⚠️ Response interrupted: $reason")
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
-                                logDebug("GeminiService", "鈿狅笍 SSE Parsing skip: ${e.message}")
+                                logDebug("GeminiService", "⚠️ SSE Parsing skip: ${e.message}")
                             }
                         }
                     }
@@ -418,16 +477,16 @@ class GeminiService(
                     // Extract all calls from the accumulated parts
                     val fcs = extractFunctionCallsFromParts(JsonArray(accumulatedModelParts))
                     currentRoundFunctionCalls.addAll(fcs)
+                    if (smcPrompt || currentRoundFunctionCalls.any { it.name.startsWith("trading_smc_") }) {
+                        currentRoundFunctionCalls.removeAll { it.name == "trading_price" }
+                    }
 
                     // Execute tools
                     val toolResponseParts = mutableListOf<JsonElement>()
                     for (fc in currentRoundFunctionCalls) {
                         logDebug("GeminiService", "Tool Request: ${fc.name}(${fc.args})")
-                        if (showToolResultInChat) {
-                            emit("\n\n[TOOL_REQUEST] ${fc.name} ${fc.args}\n")
+                        if (showToolRequestInChat) {
                         }
-                        // emit("鈴?喔佮赋喔ム副喔囙笖喔多竾喔傕箟喔浮喔灌弗 ${fc.name}...\n")
-                        
                         val toolResult = try {
                             ToolExecutor.execute(ToolCall(fc.name, fc.args), coreContext)
                         } catch (e: Exception) {
@@ -436,7 +495,7 @@ class GeminiService(
                         
                         logDebug("GeminiService", "Tool Result: ${toolResult.result}")
                         if (showToolResultInChat) {
-                            emit("[TOOL_RESULT:${fc.name}]\n${toolResult.result}\n")
+                            emit("\n\n${toolResult.result}\n")
                         }
 
                         // Intercept Binary Files for Native Processing
@@ -519,7 +578,7 @@ class GeminiService(
         coreContext: String = "",
         enableGrounding: Boolean = false
     ): String {
-        if (apiKey.isBlank()) return "鈿狅笍 喔佮福喔膏笓喔侧笗喔编箟喔囙竸喙堗覆 API Key 喙冟笝 Settings 喔佮箞喔笝喙冟笂喙夃竾喔侧笝"
+        if (apiKey.isBlank()) return "⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน"
         return try {
             val res = client.post(generateContentUrl()) {
                 contentType(ContentType.Application.Json)
@@ -542,15 +601,15 @@ class GeminiService(
             }
             if (res.status.isSuccess()) {
                 val resp: GeminiResponse = res.body()
-                extractAllTextFromResp(resp).ifBlank { "鈿狅笍 No response" }
+                extractAllTextFromResp(resp).ifBlank { "⚠️ No response" }
             } else {
                 val errBody = res.bodyAsText()
                 logError("GeminiService", "API Error ${res.status}: $errBody")
-                "鈿狅笍 Error ${res.status}"
+                "⚠️ Error ${res.status}"
             }
         } catch (e: Exception) {
             logError("GeminiService", "Generate response failed", e)
-            "鈿狅笍 Error: ${e.message}"
+            "⚠️ Error: ${e.message}"
         }
     }
 
@@ -563,7 +622,7 @@ class GeminiService(
         fileData: List<InlineData> = emptyList()
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
-            emit("鈿狅笍 喔佮福喔膏笓喔侧笗喔编箟喔囙竸喙堗覆 API Key 喙冟笝 Settings 喔佮箞喔笝喙冟笂喙夃竾喔侧笝")
+            emit("⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน")
             return@flow
         }
         try {
@@ -587,12 +646,12 @@ class GeminiService(
             }
         } catch (e: Exception) {
             logError("GeminiService", "Generate flow failed", e)
-            emit("鈿狅笍 Error: ${e.message}")
+            emit("⚠️ Error: ${e.message}")
         }
     }
 
     /**
-     * 喔о复喙€喔勦福喔侧赴喔箤喙勦笩喔ム箤喙佮笟喔?Native 喔溹箞喔侧笝 Gemini API
+     * วิเคราะห์ไฟล์แบบ Native ผ่าน Gemini API
      */
     fun generateResponseWithFile(
         prompt: String,
@@ -608,7 +667,7 @@ class GeminiService(
     }
 
     /**
-     * 喔斷付喔囙竸喙堗覆喙€喔о竵喙€喔曕腑喔｀箤 (Embeddings) 喔赋喔福喔编笟喔傕箟喔竸喔о覆喔∴箑喔炧阜喙堗腑喙冟笂喙夃笚喔?Semantic Search / RAG
+     * ดึงค่าเวกเตอร์ (Embeddings) สำหรับข้อความเพื่อใช้ทำ Semantic Search / RAG
      */
     suspend fun embedText(text: String, taskType: String? = "RETRIEVAL_DOCUMENT"): List<Float> {
         if (apiKey.isBlank()) return emptyList()
