@@ -1,0 +1,1600 @@
+//@version=6
+indicator("SMC & Multi-TF Order Blocks Sweeps V8.3", overlay=true, max_bars_back=3000, max_labels_count=500, max_lines_count=500)
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+getLineStyle(lineOption) =>
+    switch lineOption
+        "─" => line.style_solid
+        "┈" => line.style_dotted
+        "╌" => line.style_dashed
+        => line.style_solid
+// ============================================================================
+// STRUCTURE DETECTION FUNCTIONS
+// ============================================================================
+// Utility functions removed (replaced by inline state-based logic)
+// ============================================================================
+// STRUCTURES SETTINGS
+// ============================================================================
+isStructBodyCandleBreak = input.bool(true, title='Break with candle body', group="Structures")
+isCurrentStructToShow = input.bool(true, title='Display current structure', group="Structures")
+bullishBosColor = color.silver //Bullish BOS Color
+bearishBosColor = color.silver //Bearish BOS Color
+bosLineStyle = line.style_solid
+bosLineWidth = 1
+bullishChochColor = color.yellow //Bullish CHoCH Colo
+bearishChochColor = color.yellow //Bearish CHoCH Color
+chochLineStyle = line.style_solid
+chochLineWidth = 1
+currentStructColor = color.blue //Current structure Color
+currentStructLineStyle = line.style_dotted
+currentStructLineWidth = 1
+structHistoryNbr = input.int(10, 'Number of breaks to show', minval=1, maxval=50, group="Structures")
+enableIDM = input.bool(true, title='Enable IDM filter', group="IDM", tooltip="Reduces false signals by requiring Inducement sweep before valid structure break.")
+idmLen = input.int(3, title='IDM Swing Length', minval=1, maxval=20, group="IDM")
+idmApplyTo = input.string("CHoCH", title="IDM Apply To", options=["CHoCH", "CHoCH+BOS"], group="IDM")
+continuationLabelMode = input.string("SMS/BMS", title="Continuation Label", options=["BOS", "SMS/BMS"], group="IDM")
+// ============================================================================
+// DYNAMIC ORDER BLOCKS SETTINGS
+// ============================================================================
+showOrderBlocks = input.bool(true, 'Show Order Blocks', group='Order Blocks')
+length = input.int(5, 'Swing Lookback', minval=3, group='Order Blocks', tooltip="Lower value (5) detects more recent OBs; Higher value (10+) finds major structure.")
+useBody = input.bool(true, 'Use Candle Body', group='Order Blocks')
+filterOBTrend = input.bool(true, 'Filter OB by Structure Trend', group='Order Blocks', tooltip="Only show Bullish OBs in Uptrend and Bearish OBs in Downtrend.")
+showBullSweep = input.bool(false, 'Dynamic Bullish Sweeps', inline='inline1', group='Dynamic Sweeps')
+bullSweepCss = input.color(#089981, '', inline='inline1', group='Dynamic Sweeps')
+showBearSweep = input.bool(false, 'Dynamic Bearish Sweeps', inline='inline2', group='Dynamic Sweeps')
+bearSweepCss = input.color(#f23645, '', inline='inline2', group='Dynamic Sweeps')
+// ============================================================================
+// LIQUIDITY ZONES SETTINGS (SWEEP PREDICTION)
+// ============================================================================
+showLiquidityZones = input.bool(true, 'Show Liquidity Zones', group='Liquidity Prediction')
+liquidityLookback = input.int(10, 'Lookback Period', minval=2, maxval=100, group='Liquidity Prediction')
+showEqualHighs = input.bool(true, 'Equal Highs', group='Liquidity Prediction')
+equalHighsColor = color.new(#ff0000, 30)
+showEqualLows = input.bool(true, 'Equal Lows', group='Liquidity Prediction')
+equalLowsColor = color.new(#00ff00, 30)
+equalThreshold = 0.1
+showSwingLiquidity = input.bool(true, 'Swing High/Low Liquidity', group='Liquidity Prediction', tooltip="Shows pending liquidity at major Swing Highs/Lows.")
+swingLiquidityLength = 10 //Swing Length
+showUntestedOB = input.bool(true, 'Untested OB Alert', group='Liquidity Prediction')
+showDistanceToLiquidity = input.bool(true, 'Show Distance/Tags', group='Liquidity Prediction')
+liqLineRightBars = input.int(2, 'Liquidity Line Right Extension (bars)', minval=1, maxval=500, group='Liquidity Zone')
+liqLabelYATRMult = input.float(0.0, 'Liquidity Label Y Offset (ATR x)', minval=0.0, maxval=5.0, step=0.1, group='Liquidity Zone')
+liqLineRightPadBars = input.int(1, 'Liquidity Line Right Pad (bars)', minval=0, maxval=50, group='Liquidity Zone')
+enableMTFLiquidity = input.bool(true, 'MTF Liquidity Zones (m15 overlay)', group='Liquidity Zone')
+enableMTFLiquidityMerge = input.bool(true, 'Merge MTF Liquidity Zones', group='Liquidity Zone')
+mtfLaneGapBars = input.int(5, 'MTF Lane X Offset (bars)', minval=0, maxval=100, group='Liquidity Zone')
+mtfEqualLookback = input.int(5, 'MTF Equal HL Lookback', minval=2, maxval=100, group='Liquidity Zone')
+mtfliqLineRightPadBars = input.int(10, 'MTF Liquidity Line Right Pad (bars)', minval=0, maxval=200, group='Liquidity Zone')
+mtfliqLineRightBars = input.int(2, 'MTF Liquidity Line Right Extension (bars)', minval=1, maxval=500, group='Liquidity Zone')
+// ============================================================================
+// MOMENTUM & CONFLUENCE SETTINGS
+// ============================================================================
+showAttackForce = input.bool(true, 'Show Attack Force (High Momentum)', group='Momentum & Confluence')
+attackATRMult = input.float(2.0, 'Attack Force Threshold (ATR x)', minval=1.0, step=0.1, group='Momentum & Confluence')
+showZoneStars = input.bool(true, 'Show Zone Confidence Stars', group='Momentum & Confluence')
+atrValue = ta.atr(14)
+// ============================================================================
+// FAIR VALUE GAPS (FVG) SETTINGS
+// ============================================================================
+fvgTog = input.bool(true, title = "Show FVGs on Chart", group = "Fair Value Gaps")
+lb = input.int(30, title = "FVG Lookback", tooltip = "Determines how many FVGs to consider for calculating the averages.", group = "Fair Value Gaps")
+lbType = input.string("Bar Count", title = "Lookback Type", options = ["Bar Count","FVG Count"], tooltip = "Bar Count => Uses any FVGs within this Bar Lookback\nFVG Count => Uses only this amount of recent FVGs", group = "Fair Value Gaps")
+atrMulti = 0.25 //ATR Multiplier
+green =  #089981 //Bullish Color
+red = #f23645 //Bearish Color
+showFill = false //Show Gradient Areas
+invis = color.rgb(0,0,0,100)
+// ============================================================================
+// Multi-Timeframe Sweeps SETTINGS
+// ============================================================================
+showMTFSweeps = true //Enable Multi-Timeframe Sweeps
+aggregateMTF = true //Aggregate M1/M5/M15
+const float reclaimFactor = 0.50
+const float minWickATRMult = 0.30
+const bool filterByPD = false
+showM1 = true //Show M1 Sweeps
+showM5 = true //Show M5 Sweeps
+showM15 = true //Show M15 Sweeps
+showM30 = true //Show M30 Sweeps
+showM45 = true //Show M45 Sweeps
+showH1 = true //Show H1 Sweeps
+showH4 = true //Show H4 Sweeps
+bullSweepColorM1 = color.new(#056656, 0)
+bullSweepColorM5 = color.new(#056656, 0)
+bullSweepColorM15 = color.new(#056656, 0)
+bullSweepColorM30 = color.new(#056656, 0)
+bullSweepColorM45 = color.new(#056656, 0)
+bullSweepColorH1 = color.new(#056656, 0)
+bullSweepColorH4 = color.new(#056656, 0)
+bearSweepColorM1 = color.new(#b22833, 0)
+bearSweepColorM5 = color.new(#b22833, 0)
+bearSweepColorM15 = color.new(#b22833, 0)
+bearSweepColorM30 = color.new(#b22833, 0)
+bearSweepColorM45 = color.new(#b22833, 0)
+bearSweepColorH1 = color.new(#b22833, 0)
+bearSweepColorH4 = color.new(#b22833, 0)
+// ============================================================================
+// MARKET STRUCTURE PROBABILITY (SMS/BMS) - Moved Up for Dependency
+// ============================================================================
+prd = 20 //Structure Period
+s1 = true //Structure Response
+resp = 7 //Structure Response
+bullStruct = input.bool(true, "Bullish Structure", inline="Bullish", group="Market Structure")
+bullStructColor = color.rgb(8, 236, 126) //Bullish
+bullStructLineColor = color.rgb(8, 236, 126) //Bullish
+bearStruct = input.bool(true, "Bearish Structure", inline="Bearish", group="Market Structure")
+bearStructColor = color.rgb(255, 34, 34) //Bearish
+bearStructLineColor = color.rgb(255, 34, 34) //Bearish
+showPremiumDiscount = input.bool(true, "Premium & Discount", inline="pd", group="Market Structure")
+premiumColor = color.new(color.rgb(255, 34, 34), 80)
+discountColor = color.new(color.rgb(8, 236, 126), 80)
+pdLocation = "Right" //Left", "Right
+pdWidthBars = 1 //PD Width (bars)
+// ============================================================================
+// ORDER BLOCKS UDT
+// ============================================================================
+
+type ob
+    float top = na
+    float btm = na
+    bool mitigated = false
+
+type swing
+    float y = na
+    int x = na
+    bool crossed = false
+
+// ============================================================================
+// MARKET STRUCTURE VARIABLES
+// ============================================================================
+
+var array<line> structureLines = array.new_line(0)
+var array<label> structureLabels = array.new_label(0)
+
+var float structureHigh = 0.0
+var float structureLow = 0.0
+
+var int structureHighStartIndex = 0
+var int structureLowStartIndex = 0
+var int structureDirection = 0 // 0: Init, 1: Bearish, 2: Bullish
+
+var line structureHighLine = na
+var line structureLowLine = na
+
+var bool isBOSAlert = false
+var bool isCHOCHAlert = false
+var bool isSMSAlert = false
+var bool isBMSAlert = false
+var int continuationCount = 0
+
+var float idmHigh = na
+var float idmLow = na
+var bool idmHighSwept = false
+var bool idmLowSwept = false
+
+// ============================================================================
+// SWING DETECTION
+// ============================================================================
+
+swings(len) =>
+    var os = 0
+    var swing top = swing.new(na, na)
+    var swing btm = swing.new(na, na)
+    
+    upper = ta.highest(len)
+    lower = ta.lowest(len)
+    
+    os := high[len] > upper ? 0 : low[len] < lower ? 1 : os
+    
+    if os == 0 and os[1] != 0
+        top := swing.new(high[len], bar_index[len])
+    
+    if os == 1 and os[1] != 1
+        btm := swing.new(low[len], bar_index[len])
+    
+    [top, btm]
+
+// ============================================================================
+// FAIR VALUE GAPS DETECTION
+// ============================================================================
+
+//ATR
+atr = nz(ta.atr(200)*atrMulti, ta.cum(high - low) / (bar_index+1))
+
+//FVG Detection
+fvg_up = low > high[2] and close[1] > high[2] and (low-high[2]) > atr
+fvg_down = high < low[2] and close[1] < low[2] and (low[2]-high) > atr
+
+//Highest/Lowest
+hst = ta.highest(high,5)
+lst = ta.lowest(low,5)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Calculations
+//---------------------------------------------------------------------------------------------------------------------{
+
+var up_ary = array.new_box()
+var down_ary = array.new_box()
+
+if fvg_up
+    up_ary.push(
+      box.new(bar_index[2], low, bar_index, high[2]
+      , border_color = fvgTog?color.new(green,50):na
+      , bgcolor = fvgTog?color.new(green,50):na))
+
+if fvg_down
+    down_ary.push(
+      box.new(bar_index[2],  low[2], bar_index, high
+      , border_color = fvgTog?color.new(red,50):na
+      , bgcolor = fvgTog?color.new(red,50):na))
+
+//Array Size Management
+if lbType == "FVG Count"
+    if up_ary.size() > lb
+        box.delete(up_ary.shift())
+    if down_ary.size() > lb 
+        box.delete(down_ary.shift())
+
+if lbType == "Bar Count"
+    if up_ary.size() > 0
+        for i = up_ary.size() - 1 to 0
+            bx = up_ary.get(i)
+            left = bx.get_left()
+            if left < bar_index - lb
+                bx.delete()
+                up_ary.remove(i)
+
+    if down_ary.size() > 0
+        for i = down_ary.size() - 1 to 0
+            bx = down_ary.get(i)
+            left = bx.get_left()
+            if left < bar_index - lb
+                bx.delete()
+                down_ary.remove(i)
+
+
+//Value Accumulation
+float[] up_vals = array.new_float()
+float[] down_vals = array.new_float()
+
+for bx in up_ary
+    up_vals.push(bx.get_bottom())
+for bx in down_ary
+    down_vals.push(bx.get_top())
+
+//Averages
+up_avg = array.avg(up_vals)
+down_avg = array.avg(down_vals)
+
+//Points to use for gradients
+c_mid_h = math.max(math.avg(open,close),up_avg)
+c_mid_l = math.min(math.avg(open,close),down_avg)
+
+//---------------------------------------------------------------------------------------------------------------------}
+//Display 
+//---------------------------------------------------------------------------------------------------------------------{
+
+//Up & Down Averages, only displaying if the highest/lowest is above/below the value.
+ua = plot(up_avg
+  , style = plot.style_linebr
+  , color = (hst<up_avg?invis:green)
+  , title = "Bull Average")
+
+da = plot(down_avg
+  , style = plot.style_linebr
+  , color = (lst>down_avg?invis:red)
+  , title = "Bear Average")
+
+ul = plot(c_mid_h,display = display.none, editable = false)
+dl = plot(c_mid_l,display = display.none, editable = false)
+
+fill(ua, ul
+  , c_mid_h
+  , math.min(ta.sma(up_avg,10),up_avg)
+  , color.new(chart.bg_color,100)
+  , c_mid_h<=up_avg?invis:color.new(green,50)
+  , display = showFill ? display.all : display.none)
+
+fill(da, dl
+  , math.max(ta.sma(down_avg,10),down_avg)
+  , c_mid_l 
+  , c_mid_l>=down_avg?invis:color.new(red,50)
+  , color.new(chart.bg_color,100)
+  , display = showFill ? display.all : display.none)
+
+
+// ============================================================================
+// ORDER BLOCKS DETECTION (With FVG Filter)
+// ============================================================================
+
+n = bar_index
+[top, btm] = swings(length)
+max = useBody ? math.max(close, open) : high
+min = useBody ? math.min(close, open) : low
+
+// Bullish Order Block
+var bullish_ob = array.new<ob>(0)
+
+if close > top.y and not top.crossed
+    top.crossed := true
+    float minima = max[1]
+    float maxima = min[1]
+    
+    // Find the Lowest Low (Swing Low) first
+    float lowestLow = min[1]
+    int lowestIdx = 1
+
+    for i = 1 to (n - top.x) - 1
+        if min[i] < lowestLow
+            lowestLow := min[i]
+            lowestIdx := i
+        else if min[i] == lowestLow
+            lowestIdx := i
+
+    // Strict SMC: Find Last Opposing Candle (Bearish Candle) at or before the Low
+    int obIdx = lowestIdx
+    bool foundBearish = false
+    int loopSafety = 0
+    
+    for k = lowestIdx to (n - top.x) + 5
+        loopSafety += 1
+        if loopSafety > 300
+            break
+            
+        if close[k] < open[k] // Found Bearish Candle
+            obIdx := k
+            foundBearish := true
+            break
+            
+    // STRICT SMC: Use dimensions based on useBody setting (stored in max/min)
+    maxima := max[obIdx]
+    minima := min[obIdx]
+    
+    // Check for FVG Confirmation (Immediate Displacement)
+    bool hasFVG = false
+    int scanStart = math.max(1, obIdx - 5)
+    int scanEnd = obIdx - 1
+    if scanEnd >= scanStart
+        for k = scanStart to scanEnd
+            if fvg_up[k]
+                hasFVG := true
+                break
+    
+    // Add if Trend Filter OK AND FVG present (and found a bearish candle)
+    if (not filterOBTrend or structureDirection == 2) and hasFVG and foundBearish
+        bullish_ob.unshift(ob.new(maxima, minima, false))
+
+if bullish_ob.size() > 0
+    for i = bullish_ob.size() - 1 to 0
+        ob locOb = bullish_ob.get(i)
+        
+        // Mitigation Check
+        if not locOb.mitigated and low <= locOb.top and high >= locOb.btm
+            locOb.mitigated := true
+             
+        // Invalidation Check
+        if math.min(close, open) < locOb.btm
+            bullish_ob.remove(i)
+
+// Optimization: Limit OB count
+if bullish_ob.size() > 30
+    bullish_ob.pop()
+
+bull_top = bullish_ob.size() > 0 ? bullish_ob.get(0).top : na
+bull_btm = bullish_ob.size() > 0 ? bullish_ob.get(0).btm : na
+
+// Bearish Order Block
+var bearish_ob = array.new<ob>(0)
+
+if close < btm.y and not btm.crossed
+    btm.crossed := true
+    
+    // Find the Highest High (Swing High) first
+    float highestHigh = max[1]
+    int highestIdx = 1
+    
+    for i = 1 to (n - btm.x) - 1
+        if max[i] > highestHigh
+            highestHigh := max[i]
+            highestIdx := i
+        else if max[i] == highestHigh
+            highestIdx := i
+            
+    // Strict SMC: Find Last Opposing Candle (Bullish Candle) at or before the High
+    int obIdx = highestIdx
+    bool foundBullish = false
+    int loopSafety = 0
+    
+    for k = highestIdx to (n - btm.x) + 5
+        loopSafety += 1
+        if loopSafety > 300
+            break
+            
+        if close[k] > open[k] // Found Bullish Candle
+            obIdx := k
+            foundBullish := true
+            break
+            
+    float maxima = max[obIdx]
+    float minima = min[obIdx]
+            
+    // Check for FVG Confirmation
+    bool hasFVG = false
+    int scanStart = math.max(1, obIdx - 5)
+    int scanEnd = obIdx - 1
+    if scanEnd >= scanStart
+        for k = scanStart to scanEnd
+            if fvg_down[k]
+                hasFVG := true
+                break
+    
+    if (not filterOBTrend or structureDirection == 1) and hasFVG and foundBullish
+        bearish_ob.unshift(ob.new(maxima, minima, false))
+
+if bearish_ob.size() > 0
+    for i = bearish_ob.size() - 1 to 0
+        ob locOb = bearish_ob.get(i)
+        
+        // Mitigation Check
+        if not locOb.mitigated and high >= locOb.btm and low <= locOb.top
+            locOb.mitigated := true
+            
+        // Invalidation Check
+        if math.max(close, open) > locOb.top
+            bearish_ob.remove(i)
+
+// Optimization: Limit OB count
+if bearish_ob.size() > 30
+    bearish_ob.pop()
+
+bear_top = bearish_ob.size() > 0 ? bearish_ob.get(0).top : na
+bear_btm = bearish_ob.size() > 0 ? bearish_ob.get(0).btm : na
+
+avg = math.avg(bear_top, bull_btm)
+
+// FVG Logic moved up for OB filtering
+
+// ============================================================================
+// MARKET STRUCTURE PROBABILITY (SMS/BMS) - Moved Up for Dependency
+// ============================================================================
+
+
+b = bar_index
+var structUp = float(na)
+var structDn = float(na)
+structUp := na(structUp[1]) ? high : math.max(structUp[1], high)
+structDn := na(structDn[1]) ? low : math.min(structDn[1], low)
+pvtHi = ta.pivothigh(high, prd, prd)
+pvtLo = ta.pivotlow(low, prd, prd)
+
+if not na(pvtHi)
+    structUp := pvtHi
+if not na(pvtLo)
+    structDn := pvtLo
+
+// Premium & Discount zones
+var pdHi = line.new(na, na, na, na, color=bearStructLineColor)
+var pdLo = line.new(na, na, na, na, color=bullStructLineColor)
+var pdFill = linefill.new(pdHi, pdLo, na)
+var premiumBox = box.new(na, na, na, na, na, bgcolor=premiumColor)
+var discountBox = box.new(na, na, na, na, na, bgcolor=discountColor)
+var midBox = box.new(na, na, na, na, na, bgcolor=color.new(color.gray, 80))
+
+var float PremiumTop = na
+var float PremiumBot = na
+var float DiscountTop = na
+var float DiscountBot = na
+var float MidTop = na
+var float MidBot = na
+
+PremiumTop := structUp - (structUp - structDn) * 0.1
+PremiumBot := structUp - (structUp - structDn) * 0.25
+DiscountTop := structDn + (structUp - structDn) * 0.25
+DiscountBot := structDn + (structUp - structDn) * 0.1
+MidTop := structUp - (structUp - structDn) * 0.45
+MidBot := structDn + (structUp - structDn) * 0.45
+
+if barstate.islast and showPremiumDiscount
+    leftX = pdLocation == "Left" ? math.max(0, b - pdWidthBars) : b
+    rightX = pdLocation == "Left" ? b : b + pdWidthBars
+    
+    line.set_xy1(pdHi, leftX, structUp)
+    line.set_xy2(pdHi, rightX, structUp)
+    line.set_xy1(pdLo, leftX, structDn)
+    line.set_xy2(pdLo, rightX, structDn)
+    linefill.set_color(pdFill, color.new(color.gray, 90))
+    
+    box.set_lefttop(premiumBox, leftX, PremiumTop)
+    box.set_rightbottom(premiumBox, rightX, PremiumBot)
+    box.set_lefttop(discountBox, leftX, DiscountTop)
+    box.set_rightbottom(discountBox, rightX, DiscountBot)
+    box.set_lefttop(midBox, leftX, MidTop)
+    box.set_rightbottom(midBox, rightX, MidBot)
+
+// ==========================================================================
+// LIQUIDITY ZONES DETECTION (SWEEP PREDICTION)
+// ==========================================================================
+
+float swingHighLiq = ta.pivothigh(high, swingLiquidityLength, swingLiquidityLength)
+float swingLowLiq = ta.pivotlow(low, swingLiquidityLength, swingLiquidityLength)
+
+type liquidityZone
+    float price
+    int barIndex
+    bool isHigh
+    bool swept = false
+    int strength = 0
+
+var array<liquidityZone> liquidityZones = array.new<liquidityZone>()
+
+// Detect Equal Highs
+if barstate.isconfirmed and showLiquidityZones and showEqualHighs and bar_index > liquidityLookback
+    for i = 1 to liquidityLookback
+        currentHigh = high[i]
+        threshold = currentHigh * (equalThreshold / 100)
+        
+        // Count equal highs
+        equalCount = 0
+        for j = i + 1 to math.min(i + liquidityLookback, bar_index)
+            if math.abs(high[j] - currentHigh) <= threshold
+                equalCount += 1
+        
+        // If found 2+ equal highs, mark as liquidity zone
+        if equalCount >= 1
+            // Check if not already added
+            alreadyExists = false
+            if liquidityZones.size() > 0
+                for k = 0 to liquidityZones.size() - 1
+                    existingZone = liquidityZones.get(k)
+                    if math.abs(existingZone.price - currentHigh) <= threshold and existingZone.isHigh
+                        alreadyExists := true
+                        break
+            
+            if not alreadyExists
+                newZone = liquidityZone.new(currentHigh, bar_index - i, true, false, equalCount)
+                liquidityZones.unshift(newZone)
+
+// Detect Equal Lows
+if barstate.isconfirmed and showLiquidityZones and showEqualLows and bar_index > liquidityLookback
+    for i = 1 to liquidityLookback
+        currentLow = low[i]
+        threshold = currentLow * (equalThreshold / 100)
+        
+        // Count equal lows
+        equalCount = 0
+        for j = i + 1 to math.min(i + liquidityLookback, bar_index)
+            if math.abs(low[j] - currentLow) <= threshold
+                equalCount += 1
+        
+        // If found 2+ equal lows, mark as liquidity zone
+        if equalCount >= 1
+            // Check if not already added
+            alreadyExists = false
+            if liquidityZones.size() > 0
+                for k = 0 to liquidityZones.size() - 1
+                    existingZone = liquidityZones.get(k)
+                    if math.abs(existingZone.price - currentLow) <= threshold and not existingZone.isHigh
+                        alreadyExists := true
+                        break
+            
+            if not alreadyExists
+                newZone = liquidityZone.new(currentLow, bar_index - i, false, false, equalCount)
+                liquidityZones.unshift(newZone)
+
+// Detect Swing High/Low Liquidity
+if barstate.isconfirmed and showLiquidityZones and showSwingLiquidity
+    if not na(swingHighLiq)
+        newZone = liquidityZone.new(swingHighLiq, bar_index - swingLiquidityLength, true, false, 2)
+        liquidityZones.unshift(newZone)
+    
+    if not na(swingLowLiq)
+        newZone = liquidityZone.new(swingLowLiq, bar_index - swingLiquidityLength, false, false, 2)
+        liquidityZones.unshift(newZone)
+
+// Check for swept liquidity and remove
+if liquidityZones.size() > 0
+    for i = liquidityZones.size() - 1 to 0
+        zone = liquidityZones.get(i)
+        
+        if zone.isHigh and high > zone.price and not zone.swept
+            zone.swept := true
+            liquidityZones.remove(i)
+        else if not zone.isHigh and low < zone.price and not zone.swept
+            zone.swept := true
+            liquidityZones.remove(i)
+
+// Limit array size
+if liquidityZones.size() > 50
+    liquidityZones.pop()
+
+// Draw Liquidity Zones
+var array<line> liquidityLines = array.new<line>()
+var array<label> liquidityLabels = array.new<label>()
+
+if barstate.islast and showLiquidityZones
+    // Clear old drawings
+    if liquidityLines.size() > 0
+        for i = liquidityLines.size() - 1 to 0
+            line.delete(liquidityLines.get(i))
+        liquidityLines.clear()
+    
+    if liquidityLabels.size() > 0
+        for i = liquidityLabels.size() - 1 to 0
+            label.delete(liquidityLabels.get(i))
+        liquidityLabels.clear()
+    
+    // Draw liquidity zones
+    if liquidityZones.size() > 0
+        for i = 0 to math.min(liquidityZones.size() - 1, 19)
+            zone = liquidityZones.get(i)
+            
+            if not zone.swept
+                lineColor = zone.isHigh ? equalHighsColor : equalLowsColor
+                lineStyle = zone.strength > 1 ? line.style_solid : line.style_dashed
+                lineWidth = zone.strength > 1 ? 1 : 1
+                
+                leftX = bar_index + liqLineRightPadBars
+                rightX = leftX + liqLineRightBars
+                liqLine = line.new(leftX, zone.price, rightX, zone.price, 
+                  color=lineColor, 
+                  style=lineStyle, 
+                  width=lineWidth)
+                liquidityLines.push(liqLine)
+                
+                // Calculate Defense Strength (Confluence)
+                int confluenceScore = 0
+                string starLabel = ""
+                
+                if showZoneStars
+                    // 1. Timeframe Score (Base)
+                    // (Assuming current TF is significant if manually plotted, +1 base)
+                    confluenceScore += 1
+                    
+                    // 2. OB Confluence
+                    // Check overlap with active Order Blocks
+                    bool obOverlap = false
+                    if zone.isHigh // Resistance Zone -> Check Bearish OBs
+                        if bearish_ob.size() > 0
+                            for k = 0 to bearish_ob.size() - 1
+                                ob_chk = bearish_ob.get(k)
+                                // Allow small margin of error (0.1% of price)
+                                if zone.price <= ob_chk.top * 1.001 and zone.price >= ob_chk.btm * 0.999
+                                    obOverlap := true
+                                    break
+                    else // Support Zone -> Check Bullish OBs
+                        if bullish_ob.size() > 0
+                            for k = 0 to bullish_ob.size() - 1
+                                ob_chk = bullish_ob.get(k)
+                                if zone.price <= ob_chk.top * 1.001 and zone.price >= ob_chk.btm * 0.999
+                                    obOverlap := true
+                                    break
+                    if obOverlap
+                        confluenceScore += 2 // OB is a strong factor
+                    
+                    // 3. Structure Confluence (S/R)
+                    if math.abs(zone.price - structureHigh) < (atrValue * 0.5) or math.abs(zone.price - structureLow) < (atrValue * 0.5)
+                        confluenceScore += 1
+
+                    // 4. Premium/Discount Confluence
+                    // High (Sell) Zone should be in Premium
+                    if zone.isHigh and not na(PremiumBot) and zone.price > PremiumBot
+                        confluenceScore += 1
+                    // Low (Buy) Zone should be in Discount
+                    if not zone.isHigh and not na(DiscountTop) and zone.price < DiscountTop
+                        confluenceScore += 1
+
+                    // 5. Trend Alignment
+                    // Resistance in Bearish Trend or Support in Bullish Trend
+                    if (zone.isHigh and structureDirection == 1) or (not zone.isHigh and structureDirection == 2)
+                        confluenceScore += 1
+
+                    // Generate Stars
+                    if confluenceScore > 0
+                        for s = 1 to math.min(confluenceScore, 5)
+                            starLabel := starLabel + "★"
+
+                // Add label showing distance and stars
+                if showDistanceToLiquidity or showZoneStars
+                    labelText = str.tostring(zone.price, "#.##") + (showZoneStars ? " " + starLabel : "")
+                    yPad = atrValue * liqLabelYATRMult
+                    yPos = zone.isHigh ? zone.price + yPad : zone.price - yPad
+                    liqLabel = label.new(rightX, yPos, labelText, 
+                      color=color.new(lineColor, 80), 
+                      textcolor=zone.isHigh ? #ffffff : color.rgb(252, 252, 252),
+                      style=label.style_label_left,
+                      size=size.normal)
+                    liquidityLabels.push(liqLabel)
+
+// Alert for untested OB near liquidity
+var bool nearLiquidityAlert = false
+nearLiquidityAlert := false  // Reset each bar
+if showUntestedOB and liquidityZones.size() > 0
+    for i = 0 to liquidityZones.size() - 1
+        zone = liquidityZones.get(i)
+        
+        // Check if price is approaching liquidity zone
+        if zone.isHigh
+            distanceToZone = (zone.price - close) / close * 100
+            if distanceToZone > 0 and distanceToZone < 0.5 and not zone.swept
+                nearLiquidityAlert := true
+        else
+            distanceToZone = (close - zone.price) / close * 100
+            if distanceToZone > 0 and distanceToZone < 0.5 and not zone.swept
+                nearLiquidityAlert := true
+
+alertcondition(nearLiquidityAlert, title="Near Liquidity Zone", message="Price approaching liquidity zone - potential sweep incoming!")
+
+ 
+
+var array<line> mtfLiquidityLines = array.new<line>()
+var array<label> mtfLiquidityLabels = array.new<label>()
+
+f_joinTags(string[] tagsArr) =>
+    string out = ""
+    int sz = array.size(tagsArr)
+    if sz > 0
+        for i = 0 to sz - 1
+            out := out + (i > 0 ? "+" : "") + array.get(tagsArr, i)
+    out
+
+f_tfRank(string tf) =>
+    int r = switch tf
+        "M1" => 0
+        "M5" => 1
+        "M15" => 2
+        "M30" => 3
+        "M45" => 4
+        "H1" => 5
+        "H4" => 6
+        => 999
+    r
+
+f_minLaneFromTagString(string tagStr) =>
+    string[] parts = str.split(tagStr, "+")
+    int sz = array.size(parts)
+    int minR = 999
+    if sz > 0
+        for i = 0 to sz - 1
+            int r = f_tfRank(array.get(parts, i))
+            minR := math.min(minR, r)
+    minR
+
+f_collectLevels(float[] src, string tag, float[] dstPrices, string[] dstTags) =>
+    int sz = array.size(src)
+    if sz > 0
+        for i = 0 to sz - 1
+            float v = array.get(src, i)
+            if not na(v) and v > 0
+                array.push(dstPrices, v)
+                array.push(dstTags, tag)
+
+f_mergeLevels(float[] prices, string[] tags, float thrPercent, int maxOut) =>
+    float[] outPrices = array.new_float()
+    string[] outTags = array.new_string()
+    int nPrices = array.size(prices)
+    if nPrices > 0 and array.size(tags) == nPrices
+        int[] idx = array.new_int()
+        for i = 0 to nPrices - 1
+            array.push(idx, i)
+
+        if nPrices > 1
+            for i = 0 to nPrices - 2
+                int minPos = i
+                float minV = array.get(prices, array.get(idx, i))
+                for j = i + 1 to nPrices - 1
+                    float v = array.get(prices, array.get(idx, j))
+                    if v < minV
+                        minV := v
+                        minPos := j
+                if minPos != i
+                    int tmp = array.get(idx, i)
+                    array.set(idx, i, array.get(idx, minPos))
+                    array.set(idx, minPos, tmp)
+
+        float clusterSum = na
+        int clusterCount = 0
+        string[] clusterTags = array.new_string()
+
+        for t = 0 to nPrices - 1
+            int k = array.get(idx, t)
+            float p = array.get(prices, k)
+            string tg = array.get(tags, k)
+
+            if clusterCount == 0
+                clusterSum := p
+                clusterCount := 1
+                clusterTags := array.new_string()
+                array.push(clusterTags, tg)
+            else
+                float clusterPrice = clusterSum / clusterCount
+                float tol = clusterPrice * (thrPercent / 100.0)
+                if math.abs(p - clusterPrice) <= tol
+                    clusterSum += p
+                    clusterCount += 1
+                    bool exists = false
+                    int tsz = array.size(clusterTags)
+                    if tsz > 0
+                        for x = 0 to tsz - 1
+                            if array.get(clusterTags, x) == tg
+                                exists := true
+                                break
+                    if not exists
+                        array.push(clusterTags, tg)
+                else
+                    float finalPrice = clusterSum / clusterCount
+                    array.push(outPrices, finalPrice)
+                    array.push(outTags, f_joinTags(clusterTags))
+                    if array.size(outPrices) >= maxOut
+                        break
+                    clusterSum := p
+                    clusterCount := 1
+                    clusterTags := array.new_string()
+                    array.push(clusterTags, tg)
+
+        if clusterCount > 0 and array.size(outPrices) < maxOut
+            float finalPrice = clusterSum / clusterCount
+            array.push(outPrices, finalPrice)
+            array.push(outTags, f_joinTags(clusterTags))
+
+    [outPrices, outTags]
+
+drawLevelsTagged(float[] highsArr, string[] highsTags, float[] lowsArr, string[] lowsTags, int xOffsetBars) =>
+    int leftXLocal = bar_index + mtfliqLineRightPadBars + xOffsetBars
+    int rightXLocal = leftXLocal + mtfliqLineRightBars
+    int hsz = math.min(array.size(highsArr), array.size(highsTags))
+    int lsz = math.min(array.size(lowsArr), array.size(lowsTags))
+    if hsz > 0
+        for hi = 0 to hsz - 1
+            float lvl = array.get(highsArr, hi)
+            string tg = array.get(highsTags, hi)
+            line ln = line.new(leftXLocal, lvl, rightXLocal, lvl, color=equalHighsColor, style=line.style_solid, width=1)
+            array.push(mtfLiquidityLines, ln)
+            label lbl = label.new(rightXLocal, lvl, str.tostring(lvl, "#.##") + "  " + tg, style=label.style_label_left, size=size.small, color=color.new(equalHighsColor, 80), textcolor=color.white)
+            array.push(mtfLiquidityLabels, lbl)
+
+    if lsz > 0
+        for li = 0 to lsz - 1
+            float lvl = array.get(lowsArr, li)
+            string tg = array.get(lowsTags, li)
+            line ln = line.new(leftXLocal, lvl, rightXLocal, lvl, color=equalLowsColor, style=line.style_solid, width=1)
+            array.push(mtfLiquidityLines, ln)
+            label lbl = label.new(rightXLocal, lvl, str.tostring(lvl, "#.##") + "  " + tg, style=label.style_label_left, size=size.small, color=color.new(equalLowsColor, 80), textcolor=color.white)
+            array.push(mtfLiquidityLabels, lbl)
+
+drawLevels(float[] highsArr, float[] lowsArr, string tag, int xOffsetBars) =>
+    int leftXLocal = bar_index + mtfliqLineRightPadBars + xOffsetBars
+    int rightXLocal = leftXLocal + mtfliqLineRightBars
+    int hsz = array.size(highsArr)
+    int lsz = array.size(lowsArr)
+    int hmax = hsz > 3 ? 3 : hsz
+    int lmax = lsz > 3 ? 3 : lsz
+    if hmax > 0
+        for hi = 0 to hmax - 1
+            float lvl = array.get(highsArr, hi)
+            line ln = line.new(leftXLocal, lvl, rightXLocal, lvl, color=equalHighsColor, style=line.style_solid, width=1)
+            array.push(mtfLiquidityLines, ln)
+            label lbl = label.new(rightXLocal, lvl, str.tostring(lvl, "#.##") + "  " + tag, style=label.style_label_left, size=size.small, color=color.new(equalHighsColor, 80), textcolor=color.white)
+            array.push(mtfLiquidityLabels, lbl)
+    if lmax > 0
+        for li = 0 to lmax - 1
+            float lvl = array.get(lowsArr, li)
+            line ln = line.new(leftXLocal, lvl, rightXLocal, lvl, color=equalLowsColor, style=line.style_solid, width=1)
+            array.push(mtfLiquidityLines, ln)
+            label lbl = label.new(rightXLocal, lvl, str.tostring(lvl, "#.##") + "  " + tag, style=label.style_label_left, size=size.small, color=color.new(equalLowsColor, 80), textcolor=color.white)
+            array.push(mtfLiquidityLabels, lbl)
+
+f_pickEqualFromSeries(float h, float l, bool wantHighs, int lookbackLen, float thrPercent, int maxN) =>
+    float[] picked = array.new_float()
+    int lbEff = math.min(lookbackLen, bar_index)
+    if lbEff > 1
+        for i = 1 to lbEff
+            float cur = wantHighs ? h[i] : l[i]
+            float thr = cur * (thrPercent / 100.0)
+            int eq = 0
+            for j = i + 1 to math.min(i + lbEff, bar_index)
+                float tgt = wantHighs ? h[j] : l[j]
+                if math.abs(tgt - cur) <= thr
+                    eq += 1
+            if eq >= 1
+                bool dup = false
+                int psz = array.size(picked)
+                if psz > 0
+                    for k = 0 to psz - 1
+                        if math.abs(array.get(picked, k) - cur) <= thr
+                            dup := true
+                if not dup
+                    array.unshift(picked, cur)
+                    if array.size(picked) >= maxN
+                        break
+    picked
+extractLevelsFromLiqZones(bool wantHighs, float thrPercent, int maxN) =>
+    float[] picked2 = array.new_float()
+    int sz = array.size(liquidityZones)
+    if sz > 0
+        for i = 0 to sz - 1
+            zone = liquidityZones.get(i)
+            if not zone.swept and zone.isHigh == wantHighs
+                float thr = zone.price * (thrPercent / 100.0)
+                bool dup = false
+                int psz = array.size(picked2)
+                if psz > 0
+                    for k = 0 to psz - 1
+                        if math.abs(array.get(picked2, k) - zone.price) <= thr
+                            dup := true
+                if not dup
+                    array.unshift(picked2, zone.price)
+                    if array.size(picked2) >= maxN
+                        break
+    picked2
+
+tfEqualLevels(int lookbackLen, float thrPercent, int maxN) =>
+    float[] ph = array.new_float()
+    float[] pl = array.new_float()
+    int lbEff = lookbackLen
+    if lbEff > 1
+        for i = 1 to lbEff
+            float curH = high[i]
+            if not na(curH)
+                float thrH = curH * (thrPercent / 100.0)
+                int eqH = 0
+                for j = i + 1 to lbEff
+                    float tgtH = high[j]
+                    if not na(tgtH) and math.abs(tgtH - curH) <= thrH
+                        eqH += 1
+                if eqH >= 1
+                    bool dupH = false
+                    int pszH = array.size(ph)
+                    if pszH > 0
+                        for k = 0 to pszH - 1
+                            if math.abs(array.get(ph, k) - curH) <= thrH
+                                dupH := true
+                    if not dupH and array.size(ph) < maxN
+                        array.unshift(ph, curH)
+
+            float curL = low[i]
+            if not na(curL)
+                float thrL = curL * (thrPercent / 100.0)
+                int eqL = 0
+                for j = i + 1 to lbEff
+                    float tgtL = low[j]
+                    if not na(tgtL) and math.abs(tgtL - curL) <= thrL
+                        eqL += 1
+                if eqL >= 1
+                    bool dupL = false
+                    int pszL = array.size(pl)
+                    if pszL > 0
+                        for k = 0 to pszL - 1
+                            if math.abs(array.get(pl, k) - curL) <= thrL
+                                dupL := true
+                    if not dupL and array.size(pl) < maxN
+                        array.unshift(pl, curL)
+    float eh1 = array.size(ph) > 0 ? array.get(ph, 0) : na
+    float eh2 = array.size(ph) > 1 ? array.get(ph, 1) : na
+    float eh3 = array.size(ph) > 2 ? array.get(ph, 2) : na
+    float el1 = array.size(pl) > 0 ? array.get(pl, 0) : na
+    float el2 = array.size(pl) > 1 ? array.get(pl, 1) : na
+    float el3 = array.size(pl) > 2 ? array.get(pl, 2) : na
+    [eh1, eh2, eh3, el1, el2, el3]
+
+tfLegacyLiqSnapshot(bool enabled, int lookbackLen, float thrPercent, bool eqHighsOn, bool eqLowsOn, bool swingOn, int swingLen, int maxN) =>
+    var array<liquidityZone> zones = array.new<liquidityZone>()
+    float swingHigh = ta.pivothigh(high, swingLen, swingLen)
+    float swingLow = ta.pivotlow(low, swingLen, swingLen)
+    if enabled
+        if eqHighsOn
+            for i = 1 to lookbackLen
+                float currentHigh = high[i]
+                float threshold = currentHigh * (thrPercent / 100)
+                int equalCount = 0
+                for j = i + 1 to math.min(i + lookbackLen, bar_index)
+                    if math.abs(high[j] - currentHigh) <= threshold
+                        equalCount += 1
+                if equalCount >= 1
+                    bool alreadyExists = false
+                    if array.size(zones) > 0
+                        for k = 0 to array.size(zones) - 1
+                            liquidityZone existingZone = array.get(zones, k)
+                            if math.abs(existingZone.price - currentHigh) <= threshold and existingZone.isHigh
+                                alreadyExists := true
+                                break
+                    if not alreadyExists
+                        array.unshift(zones, liquidityZone.new(currentHigh, bar_index - i, true, false, equalCount))
+
+        if eqLowsOn
+            for i = 1 to lookbackLen
+                float currentLow = low[i]
+                float threshold = currentLow * (thrPercent / 100)
+                int equalCount = 0
+                for j = i + 1 to math.min(i + lookbackLen, bar_index)
+                    if math.abs(low[j] - currentLow) <= threshold
+                        equalCount += 1
+                if equalCount >= 1
+                    bool alreadyExists = false
+                    if array.size(zones) > 0
+                        for k = 0 to array.size(zones) - 1
+                            liquidityZone existingZone = array.get(zones, k)
+                            if math.abs(existingZone.price - currentLow) <= threshold and not existingZone.isHigh
+                                alreadyExists := true
+                                break
+                    if not alreadyExists
+                        array.unshift(zones, liquidityZone.new(currentLow, bar_index - i, false, false, equalCount))
+
+        if swingOn
+            if not na(swingHigh)
+                array.unshift(zones, liquidityZone.new(swingHigh, bar_index - swingLen, true, false, 2))
+            if not na(swingLow)
+                array.unshift(zones, liquidityZone.new(swingLow, bar_index - swingLen, false, false, 2))
+
+        if array.size(zones) > 0
+            for i = array.size(zones) - 1 to 0
+                liquidityZone zone = array.get(zones, i)
+                if zone.isHigh and high > zone.price and not zone.swept
+                    zone.swept := true
+                    array.remove(zones, i)
+                else if not zone.isHigh and low < zone.price and not zone.swept
+                    zone.swept := true
+                    array.remove(zones, i)
+
+        if array.size(zones) > 50
+            array.pop(zones)
+
+    float eh1 = na
+    float eh2 = na
+    float eh3 = na
+    float el1 = na
+    float el2 = na
+    float el3 = na
+    if enabled and array.size(zones) > 0
+        int hc = 0
+        int lc = 0
+        for i = 0 to array.size(zones) - 1
+            liquidityZone zone = array.get(zones, i)
+            if not zone.swept
+                if zone.isHigh and hc < maxN
+                    if hc == 0
+                        eh1 := zone.price
+                    else if hc == 1
+                        eh2 := zone.price
+                    else if hc == 2
+                        eh3 := zone.price
+                    hc += 1
+                else if not zone.isHigh and lc < maxN
+                    if lc == 0
+                        el1 := zone.price
+                    else if lc == 1
+                        el2 := zone.price
+                    else if lc == 2
+                        el3 := zone.price
+                    lc += 1
+            if hc >= maxN and lc >= maxN
+                break
+    [eh1, eh2, eh3, el1, el2, el3]
+
+filterHighs(float[] arr, float tfCloseCur) =>
+    float[] out = array.new_float()
+    int sz = array.size(arr)
+    if sz > 0
+        for i = 0 to sz - 1
+            float v = array.get(arr, i)
+            if v > tfCloseCur
+                array.push(out, v)
+    out
+
+filterLows(float[] arr, float tfCloseCur) =>
+    float[] out = array.new_float()
+    int sz = array.size(arr)
+    if sz > 0
+        for i = 0 to sz - 1
+            float v = array.get(arr, i)
+            if v < tfCloseCur
+                array.push(out, v)
+    out
+
+// snapshot Liquidity Zones inside target TF context to match legacy logic 1:1
+bool mtfLiqEnabled = showLiquidityZones and enableMTFLiquidity
+[m1Eh1, m1Eh2, m1Eh3, m1El1, m1El2, m1El3] = request.security(syminfo.tickerid, "1", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[m5Eh1, m5Eh2, m5Eh3, m5El1, m5El2, m5El3] = request.security(syminfo.tickerid, "5", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[m15Eh1, m15Eh2, m15Eh3, m15El1, m15El2, m15El3] = request.security(syminfo.tickerid, "15", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[m30Eh1, m30Eh2, m30Eh3, m30El1, m30El2, m30El3] = request.security(syminfo.tickerid, "30", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[m45Eh1, m45Eh2, m45Eh3, m45El1, m45El2, m45El3] = request.security(syminfo.tickerid, "45", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[h1Eh1, h1Eh2, h1Eh3, h1El1, h1El2, h1El3] = request.security(syminfo.tickerid, "60", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+[h4Eh1, h4Eh2, h4Eh3, h4El1, h4El2, h4El3] = request.security(syminfo.tickerid, "240", tfLegacyLiqSnapshot(mtfLiqEnabled, mtfEqualLookback, equalThreshold, showEqualHighs, showEqualLows, showSwingLiquidity, swingLiquidityLength, 3), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+
+f_fillEp(float v1, float v2, float v3) =>
+    arr = array.new_float()
+    if not na(v1)
+        array.push(arr, v1)
+    if not na(v2)
+        array.push(arr, v2)
+    if not na(v3)
+        array.push(arr, v3)
+    arr
+
+float[] m1HighsEp = f_fillEp(m1Eh1, m1Eh2, m1Eh3)
+float[] m1LowsEp = f_fillEp(m1El1, m1El2, m1El3)
+
+float[] m5HighsEp = f_fillEp(m5Eh1, m5Eh2, m5Eh3)
+float[] m5LowsEp = f_fillEp(m5El1, m5El2, m5El3)
+
+float[] m15HighsEp = f_fillEp(m15Eh1, m15Eh2, m15Eh3)
+float[] m15LowsEp = f_fillEp(m15El1, m15El2, m15El3)
+
+float[] m30HighsEp = f_fillEp(m30Eh1, m30Eh2, m30Eh3)
+float[] m30LowsEp = f_fillEp(m30El1, m30El2, m30El3)
+
+float[] m45HighsEp = f_fillEp(m45Eh1, m45Eh2, m45Eh3)
+float[] m45LowsEp = f_fillEp(m45El1, m45El2, m45El3)
+
+float[] h1HighsEp = f_fillEp(h1Eh1, h1Eh2, h1Eh3)
+float[] h1LowsEp = f_fillEp(h1El1, h1El2, h1El3)
+
+float[] h4HighsEp = f_fillEp(h4Eh1, h4Eh2, h4Eh3)
+float[] h4LowsEp = f_fillEp(h4El1, h4El2, h4El3)
+
+float[] m1HighsEpF = m1HighsEp
+float[] m1LowsEpF  = m1LowsEp
+float[] m5HighsEpF = m5HighsEp
+float[] m5LowsEpF  = m5LowsEp
+float[] m15HighsEpF = m15HighsEp
+float[] m15LowsEpF  = m15LowsEp
+float[] m30HighsEpF = m30HighsEp
+float[] m30LowsEpF  = m30LowsEp
+float[] m45HighsEpF = m45HighsEp
+float[] m45LowsEpF  = m45LowsEp
+float[] h1HighsEpF = h1HighsEp
+float[] h1LowsEpF  = h1LowsEp
+float[] h4HighsEpF = h4HighsEp
+float[] h4LowsEpF  = h4LowsEp
+
+if barstate.islast and showLiquidityZones and enableMTFLiquidity
+    if array.size(mtfLiquidityLines) > 0
+        for i = array.size(mtfLiquidityLines) - 1 to 0
+            line.delete(array.get(mtfLiquidityLines, i))
+        array.clear(mtfLiquidityLines)
+    if array.size(mtfLiquidityLabels) > 0
+        for i = array.size(mtfLiquidityLabels) - 1 to 0
+            label.delete(array.get(mtfLiquidityLabels, i))
+        array.clear(mtfLiquidityLabels)
+
+    if enableMTFLiquidityMerge
+        float[] allHighPrices = array.new_float()
+        string[] allHighTags = array.new_string()
+        float[] allLowPrices = array.new_float()
+        string[] allLowTags = array.new_string()
+
+        f_collectLevels(m1HighsEpF, "M1", allHighPrices, allHighTags)
+        f_collectLevels(m5HighsEpF, "M5", allHighPrices, allHighTags)
+        f_collectLevels(m15HighsEpF, "M15", allHighPrices, allHighTags)
+        f_collectLevels(m30HighsEpF, "M30", allHighPrices, allHighTags)
+        f_collectLevels(m45HighsEpF, "M45", allHighPrices, allHighTags)
+        f_collectLevels(h1HighsEpF, "H1", allHighPrices, allHighTags)
+        f_collectLevels(h4HighsEpF, "H4", allHighPrices, allHighTags)
+
+        f_collectLevels(m1LowsEpF, "M1", allLowPrices, allLowTags)
+        f_collectLevels(m5LowsEpF, "M5", allLowPrices, allLowTags)
+        f_collectLevels(m15LowsEpF, "M15", allLowPrices, allLowTags)
+        f_collectLevels(m30LowsEpF, "M30", allLowPrices, allLowTags)
+        f_collectLevels(m45LowsEpF, "M45", allLowPrices, allLowTags)
+        f_collectLevels(h1LowsEpF, "H1", allLowPrices, allLowTags)
+        f_collectLevels(h4LowsEpF, "H4", allLowPrices, allLowTags)
+
+        [mergedHighs, mergedHighTags] = f_mergeLevels(allHighPrices, allHighTags, equalThreshold, 20)
+        [mergedLows, mergedLowTags] = f_mergeLevels(allLowPrices, allLowTags, equalThreshold, 20)
+
+        drawLevelsTagged(mergedHighs, mergedHighTags, mergedLows, mergedLowTags, 0)
+    else
+        drawLevels(m1HighsEpF, m1LowsEpF, "M1", mtfLaneGapBars * 0)
+
+        drawLevels(m5HighsEpF, m5LowsEpF, "M5", mtfLaneGapBars * 1)
+
+        drawLevels(m15HighsEpF, m15LowsEpF, "M15", mtfLaneGapBars * 2)
+
+        drawLevels(m30HighsEpF, m30LowsEpF, "M30", mtfLaneGapBars * 3)
+
+        drawLevels(m45HighsEpF, m45LowsEpF, "M45", mtfLaneGapBars * 4)
+
+        drawLevels(h1HighsEpF, h1LowsEpF, "H1", mtfLaneGapBars * 5)
+
+        drawLevels(h4HighsEpF, h4LowsEpF, "H4", mtfLaneGapBars * 6)
+
+// =========================================================================
+// MULTI-TF SWEEP DETECTION FUNCTION (IMPROVED - NO REPAINT)
+// =========================================================================
+
+obLevelsSimple(useBody) =>
+    int bsBear = ta.barssince(close < open)
+    int bsBull = ta.barssince(close > open)
+    float bTop = na
+    float bBtm = na
+    float sTop = na
+    float sBtm = na
+    if not na(bsBear)
+        bTop := useBody ? math.max(open[bsBear], close[bsBear]) : high[bsBear]
+        bBtm := useBody ? math.min(open[bsBear], close[bsBear]) : low[bsBear]
+    if not na(bsBull)
+        sTop := useBody ? math.max(open[bsBull], close[bsBull]) : high[bsBull]
+        sBtm := useBody ? math.min(open[bsBull], close[bsBull]) : low[bsBull]
+    [bTop, bBtm, sTop, sBtm]
+
+f_sweepSignals() =>
+    int bsBear = ta.barssince(close < open)
+    int bsBull = ta.barssince(close > open)
+    float atrVal = ta.atr(14)
+    float bullTop = not na(bsBear) ? (useBody ? math.max(open[bsBear], close[bsBear]) : high[bsBear]) : na
+    float bullBtm = not na(bsBear) ? (useBody ? math.min(open[bsBear], close[bsBear]) : low[bsBear]) : na
+    float bearTop = not na(bsBull) ? (useBody ? math.max(open[bsBull], close[bsBull]) : high[bsBull]) : na
+    float bearBtm = not na(bsBull) ? (useBody ? math.min(open[bsBull], close[bsBull]) : low[bsBull]) : na
+
+    float bullWidth = math.abs(bullTop - bullBtm)
+    float bearWidth = math.abs(bearTop - bearBtm)
+    float bullReclaim = bullBtm + reclaimFactor * bullWidth
+    float bearReclaim = bearTop - reclaimFactor * bearWidth
+    float wickBull = bullBtm - low
+    float wickBear = high - bearTop
+    float mid = math.avg(high, low)
+
+    bool bull = not na(bullBtm) and bullWidth > 0 and low < bullBtm and close > bullReclaim and wickBull > (minWickATRMult * atrVal)
+    bool bear = not na(bearTop) and bearWidth > 0 and high > bearTop and close < bearReclaim and wickBear > (minWickATRMult * atrVal)
+    bull := bull and (not filterByPD or close <= mid)
+    bear := bear and (not filterByPD or close >= mid)
+
+    [bull and barstate.isconfirmed, bear and barstate.isconfirmed]
+
+detectSweeps(string tf) =>
+    request.security(syminfo.tickerid, tf, f_sweepSignals(), lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+
+// ============================================================================
+// PLOT ORDER BLOCKS
+// ============================================================================
+
+plot_bull_top = plot(showOrderBlocks ? bull_top : na, 'Bullish OB Top', 
+  bull_btm != bull_btm[1] ? na : color.new(#089981, 100), 
+  style=plot.style_linebr)
+
+plot_bull_btm = plot(showOrderBlocks ? bull_btm : na, 'Bullish OB Bottom', 
+  bull_btm != bull_btm[1] ? na : #089981, 
+  style=plot.style_linebr)
+
+plot_bear_top = plot(showOrderBlocks ? bear_top : na, 'Bearish OB Top', 
+  bear_top != bear_top[1] ? na : #f23645, 
+  style=plot.style_linebr)
+
+plot_bear_btm = plot(showOrderBlocks ? bear_btm : na, 'Bearish OB Bottom', 
+  bear_top != bear_top[1] ? na : color.new(#f23645, 100), 
+  style=plot.style_linebr)
+
+//plot(showOrderBlocks ? avg : na, 'Average', #ff5d00, style=plot.style_linebr)
+
+fill(plot_bull_top, plot_bull_btm, title='Bullish OB Area', 
+  color=showOrderBlocks and bull_btm != bull_btm[1] ? na : (bullish_ob.size() > 0 and bullish_ob.get(0).mitigated ? color.new(#089981, 90) : color.new(#089981, 80)))
+
+fill(plot_bear_top, plot_bear_btm, title='Bearish OB Area', 
+  color=showOrderBlocks and bear_top != bear_top[1] ? na : (bearish_ob.size() > 0 and bearish_ob.get(0).mitigated ? color.new(#f23645, 90) : color.new(#f23645, 80)))
+
+// Current TF Sweeps
+plotcandle(bull_btm, bull_btm, low, low, 
+  color=color(na), 
+  wickcolor=color(na), 
+  bordercolor=low < bull_btm and close > bull_btm ? bullSweepCss : color(na), 
+  display=showBullSweep ? display.all - display.status_line : display.none)
+
+plotcandle(bear_top, bear_top, high, high, 
+  color=color(na), 
+  wickcolor=color(na), 
+  bordercolor=high > bear_top and close < bear_top ? bearSweepCss : color(na), 
+  display=showBearSweep ? display.all - display.status_line : display.none)
+
+// ============================================================================
+// MULTI-TIMEFRAME SWEEPS DETECTION & DISPLAY
+// ============================================================================
+
+baseYPad = atrValue * 0.2
+
+var array<label> sweepLabels = array.new_label()
+int maxSweepLabels = 200
+
+f_addSweepLabel(float y, string txt, color bg, st) =>
+    label lbl = label.new(bar_index, y, txt, color=color.new(bg, 0), textcolor=color.white, style=st, size=size.small)
+    array.push(sweepLabels, lbl)
+    if array.size(sweepLabels) > maxSweepLabels
+        label.delete(array.shift(sweepLabels))
+
+if showMTFSweeps and not aggregateMTF
+    if showM1
+        [m1Bull, m1Bear] = detectSweeps("1")
+        if m1Bull
+            f_addSweepLabel(low - baseYPad, "M1↑", bullSweepColorM1, label.style_label_up)
+        else if m1Bear
+            f_addSweepLabel(high + baseYPad, "M1↓", bearSweepColorM1, label.style_label_down)
+
+    if showM5
+        [m5Bull, m5Bear] = detectSweeps("5")
+        if m5Bull
+            f_addSweepLabel(low - (baseYPad * 1.5), "M5↑", bullSweepColorM5, label.style_label_up)
+        else if m5Bear
+            f_addSweepLabel(high + (baseYPad * 1.5), "M5↓", bearSweepColorM5, label.style_label_down)
+
+    if showM15
+        [m15Bull, m15Bear] = detectSweeps("15")
+        if m15Bull
+            f_addSweepLabel(low - (baseYPad * 2), "M15↑", bullSweepColorM15, label.style_label_up)
+        else if m15Bear
+            f_addSweepLabel(high + (baseYPad * 2), "M15↓", bearSweepColorM15, label.style_label_down)
+
+    if showM30
+        [m30Bull, m30Bear] = detectSweeps("30")
+        if m30Bull
+            f_addSweepLabel(low - (baseYPad * 2.5), "M30↑", bullSweepColorM30, label.style_label_up)
+        else if m30Bear
+            f_addSweepLabel(high + (baseYPad * 2.5), "M30↓", bearSweepColorM30, label.style_label_down)
+
+    if showM45
+        [m45Bull, m45Bear] = detectSweeps("45")
+        if m45Bull
+            f_addSweepLabel(low - (baseYPad * 3), "M45↑", bullSweepColorM45, label.style_label_up)
+        else if m45Bear
+            f_addSweepLabel(high + (baseYPad * 3), "M45↓", bearSweepColorM45, label.style_label_down)
+
+    if showH1
+        [h1Bull, h1Bear] = detectSweeps("60")
+        if h1Bull
+            f_addSweepLabel(low - (baseYPad * 3.5), "H1↑", bullSweepColorH1, label.style_label_up)
+        else if h1Bear
+            f_addSweepLabel(high + (baseYPad * 3.5), "H1↓", bearSweepColorH1, label.style_label_down)
+
+    if showH4
+        [h4Bull, h4Bear] = detectSweeps("240")
+        if h4Bull
+            f_addSweepLabel(low - (baseYPad * 4), "H4↑", bullSweepColorH4, label.style_label_up)
+        else if h4Bear
+            f_addSweepLabel(high + (baseYPad * 4), "H4↓", bearSweepColorH4, label.style_label_down)
+
+if showMTFSweeps and aggregateMTF
+    [m1Bull, m1Bear] = detectSweeps("1")
+    [m5Bull, m5Bear] = detectSweeps("5")
+    [m15Bull, m15Bear] = detectSweeps("15")
+    int bullScore = (m1Bull ? 1 : 0) + (m5Bull ? 1 : 0) + (m15Bull ? 1 : 0)
+    int bearScore = (m1Bear ? 1 : 0) + (m5Bear ? 1 : 0) + (m15Bear ? 1 : 0)
+    if bullScore >= 2 and bullScore > bearScore
+        f_addSweepLabel(low - (baseYPad * 2), "MTF ↑", bullSweepColorM15, label.style_label_up)
+    else if bearScore >= 2 and bearScore > bullScore
+        f_addSweepLabel(high + (baseYPad * 2), "MTF ↓", bearSweepColorM15, label.style_label_down)
+
+// Structure Variables moved to top
+
+// ============================================================================
+// STRUCTURE PROCESSING (OPTIMIZED STATE-BASED)
+// ============================================================================
+
+if bar_index == 0
+    structureHighStartIndex := bar_index
+    structureLowStartIndex := bar_index
+    structureHigh := high
+    structureLow := low
+
+// Dynamic Lookback for Structure Extremes
+int lbHigh = bar_index - structureLowStartIndex
+int lbLow = bar_index - structureHighStartIndex
+lbHigh := lbHigh < 1 ? 1 : (lbHigh > 2999 ? 2999 : lbHigh)
+lbLow := lbLow < 1 ? 1 : (lbLow > 2999 ? 2999 : lbLow)
+
+int highestIdx = bar_index + ta.highestbars(high, lbHigh)
+int lowestIdx = bar_index + ta.lowestbars(low, lbLow)
+
+lowStructBreakPrice = isStructBodyCandleBreak ? close : low
+highStructBreakPrice = isStructBodyCandleBreak ? close : high
+
+// IDM Processing
+if enableIDM
+    float idmPH = ta.pivothigh(high, idmLen, idmLen)
+    float idmPL = ta.pivotlow(low, idmLen, idmLen)
+
+    if not na(idmPH)
+        idmHigh := idmPH
+        idmHighSwept := false
+
+    if not na(idmPL)
+        idmLow := idmPL
+        idmLowSwept := false
+
+    // Relaxed IDM logic: allow sweep confirmation over 2 bars
+    if not idmHighSwept and not na(idmHigh)
+        bool sweptNow = barstate.isconfirmed and high > idmHigh and close < idmHigh
+        bool sweptPrev = high[1] > idmHigh and close[1] < idmHigh
+        idmHighSwept := sweptNow or sweptPrev
+
+    if not idmLowSwept and not na(idmLow)
+        bool sweptNow = barstate.isconfirmed and low < idmLow and close > idmLow
+        bool sweptPrev = low[1] < idmLow and close[1] > idmLow
+        idmLowSwept := sweptNow or sweptPrev
+
+// Break Detection
+isStuctureLowBroken = (barstate.isconfirmed and lowStructBreakPrice < structureLow and 
+  bar_index > structureLowStartIndex)
+
+isStructureHighBroken = (barstate.isconfirmed and highStructBreakPrice > structureHigh and 
+  bar_index > structureHighStartIndex)
+
+if isStuctureLowBroken
+    int priorDir = structureDirection
+    bool isReversal = priorDir != 1 // If prev was UP (2) or Init (0), this is Reversal
+    
+    // Validate with IDM if required
+    bool needIDM = enableIDM and ((idmApplyTo == "CHoCH" and isReversal) or (idmApplyTo == "CHoCH+BOS"))
+    bool idmOk = not needIDM or idmHighSwept
+    
+    if idmOk
+        int nextCount = isReversal ? 0 : continuationCount + 1
+        string contText = continuationLabelMode == "SMS/BMS" ? (nextCount == 1 ? "SMS" : "BMS") : "BOS"
+        string breakText = isReversal ? "CHoCH" : contText
+        
+        if array.size(structureLines) >= structHistoryNbr
+            line.delete(array.shift(structureLines))
+            label.delete(array.shift(structureLabels))
+
+        array.push(structureLines, line.new(structureLowStartIndex, structureLow, bar_index, structureLow,
+          color=isReversal ? bearishChochColor : bearishBosColor,
+          style=isReversal ? chochLineStyle : bosLineStyle,
+          width=isReversal ? chochLineWidth : bosLineWidth))
+        array.push(structureLabels, label.new(int(math.avg(bar_index, structureLowStartIndex)), structureLow,
+          text=breakText, style=label.style_none, textcolor=isReversal ? bearishChochColor : bearishBosColor))
+
+        isCHOCHAlert := isReversal
+        isBOSAlert := not isReversal and continuationLabelMode == "BOS"
+        isSMSAlert := not isReversal and continuationLabelMode == "SMS/BMS" and nextCount == 1
+        isBMSAlert := not isReversal and continuationLabelMode == "SMS/BMS" and nextCount > 1
+
+        continuationCount := isReversal ? 0 : nextCount
+        structureDirection := 1
+        
+        // Update Extremes
+        structureHighStartIndex := highestIdx
+        structureHigh := high[bar_index - highestIdx]
+        
+        // Reset Low Tracker
+        structureLowStartIndex := bar_index
+        structureLow := low
+    else
+        isBOSAlert := false
+        isCHOCHAlert := false
+        isSMSAlert := false
+        isBMSAlert := false
+
+else if isStructureHighBroken
+    int priorDir = structureDirection
+    bool isReversal = priorDir != 2
+    
+    bool needIDM = enableIDM and ((idmApplyTo == "CHoCH" and isReversal) or (idmApplyTo == "CHoCH+BOS"))
+    bool idmOk = not needIDM or idmLowSwept
+    
+    if idmOk
+        int nextCount = isReversal ? 0 : continuationCount + 1
+        string contText = continuationLabelMode == "SMS/BMS" ? (nextCount == 1 ? "SMS" : "BMS") : "BOS"
+        string breakText = isReversal ? "CHoCH" : contText
+        
+        if array.size(structureLines) >= structHistoryNbr
+            line.delete(array.shift(structureLines))
+            label.delete(array.shift(structureLabels))
+
+        array.push(structureLines, line.new(structureHighStartIndex, structureHigh, bar_index, structureHigh,
+          color=isReversal ? bullishChochColor : bullishBosColor,
+          style=isReversal ? chochLineStyle : bosLineStyle,
+          width=isReversal ? chochLineWidth : bosLineWidth))
+        array.push(structureLabels, label.new(int(math.avg(bar_index, structureHighStartIndex)), structureHigh,
+          text=breakText, style=label.style_none, textcolor=isReversal ? bullishChochColor : bullishBosColor))
+
+        isCHOCHAlert := isReversal
+        isBOSAlert := not isReversal and continuationLabelMode == "BOS"
+        isSMSAlert := not isReversal and continuationLabelMode == "SMS/BMS" and nextCount == 1
+        isBMSAlert := not isReversal and continuationLabelMode == "SMS/BMS" and nextCount > 1
+
+        continuationCount := isReversal ? 0 : nextCount
+        structureDirection := 2
+        
+        // Update Extremes
+        structureLowStartIndex := lowestIdx
+        structureLow := low[bar_index - lowestIdx]
+        
+        // Reset High Tracker
+        structureHighStartIndex := bar_index
+        structureHigh := high
+    else
+        isBOSAlert := false
+        isCHOCHAlert := false
+        isSMSAlert := false
+        isBMSAlert := false
+
+else
+    isBOSAlert := false
+    isCHOCHAlert := false
+    isSMSAlert := false
+    isBMSAlert := false
+    
+    // Trail the Extreme Points
+    if structureDirection == 2 // Bullish
+        if high > structureHigh
+            structureHigh := high
+            structureHighStartIndex := bar_index
+    
+    else if structureDirection == 1 // Bearish
+        if low < structureLow
+            structureLow := low
+            structureLowStartIndex := bar_index
+    
+    else // Init
+        if high > structureHigh
+            structureHigh := high
+            structureHighStartIndex := bar_index
+        if low < structureLow
+            structureLow := low
+            structureLowStartIndex := bar_index
+
+// Display current structure (end of file)
+
+// ============================================================================
+// ATTACK FORCE DISPLAY (MOMENTUM) - GLOBAL SCOPE
+// ============================================================================
+
+// Calculate Candle Body Size
+float attackBodySize = math.abs(close - open)
+float avgBodySize = ta.sma(attackBodySize, 10)
+float avgVol = ta.sma(volume, 10)
+
+// Check if Attack Force is strong (Smart Momentum)
+// 1. Body must be significantly larger than recent average (2x)
+// 2. Volume must be higher than average (1.5x) - if volume exists
+// 3. Still use ATR threshold as minimum baseline
+bool volCondition = na(volume) or volume > (avgVol * 1.5)
+bool bodyCondition = attackBodySize > (avgBodySize * 2.0)
+bool isHighMomentum = showAttackForce and bodyCondition and volCondition and (attackBodySize > (atrValue * attackATRMult))
+
+// Plot visual marker
+plotshape(isHighMomentum, title="High Momentum Attack", 
+  style=shape.circle, 
+  location=location.abovebar, 
+  color=color.new(color.orange, 20), 
+  size=size.tiny, 
+  offset=0,
+  text="💥",
+  textcolor=color.orange)
+
+if isCurrentStructToShow
+    if na(structureHighLine)
+        structureHighLine := line.new(structureHighStartIndex, structureHigh, bar_index, structureHigh, color=currentStructColor, style=currentStructLineStyle, width=currentStructLineWidth)
+    else
+        line.set_xy1(structureHighLine, structureHighStartIndex, structureHigh)
+        line.set_xy2(structureHighLine, bar_index, structureHigh)
+        line.set_color(structureHighLine, currentStructColor)
+        line.set_style(structureHighLine, currentStructLineStyle)
+        line.set_width(structureHighLine, currentStructLineWidth)
+
+    if na(structureLowLine)
+        structureLowLine := line.new(structureLowStartIndex, structureLow, bar_index, structureLow, color=currentStructColor, style=currentStructLineStyle, width=currentStructLineWidth)
+    else
+        line.set_xy1(structureLowLine, structureLowStartIndex, structureLow)
+        line.set_xy2(structureLowLine, bar_index, structureLow)
+        line.set_color(structureLowLine, currentStructColor)
+        line.set_style(structureLowLine, currentStructLineStyle)
+        line.set_width(structureLowLine, currentStructLineWidth)
+else
+    if not na(structureHighLine)
+        line.delete(structureHighLine)
+        structureHighLine := na
+    if not na(structureLowLine)
+        line.delete(structureLowLine)
+        structureLowLine := na
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(isBOSAlert, title="BOS", message="Break of Structure detected")
+alertcondition(isCHOCHAlert, title="CHoCH", message="Change of Character detected")
+alertcondition(isSMSAlert, title="SMS", message="Shift in Market Structure detected")
+alertcondition(isBMSAlert, title="BMS", message="Break in Market Structure detected")
+
+// (Duplicate Attack Force logic removed)
+
+// Premium/Discount logic moved up

@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import com.example.personalaibot.db.DatabaseDriverFactory
 import com.example.personalaibot.service.FloatingWidgetService
 import com.example.personalaibot.service.JarvisService
+import com.example.personalaibot.service.JarvisAutomationService
 import com.example.personalaibot.voice.VoiceManager
 import com.example.personalaibot.tools.file.FileToolExecutor
 
@@ -155,6 +156,9 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
@@ -171,11 +175,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startJarvisService() {
-        val intent = Intent(this, JarvisService::class.java)
+        // Main Jarvis Service (Voice/Vision)
+        val mainIntent = Intent(this, JarvisService::class.java)
+        // Automation Engine Service (1-60 min Polling)
+        val autoIntent = Intent(this, JarvisAutomationService::class.java)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
+            startForegroundService(mainIntent)
+            startForegroundService(autoIntent)
         } else {
-            startService(intent)
+            startService(mainIntent)
+            startService(autoIntent)
         }
     }
 

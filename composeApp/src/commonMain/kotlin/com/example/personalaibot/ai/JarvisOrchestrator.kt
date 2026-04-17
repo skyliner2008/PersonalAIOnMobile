@@ -19,14 +19,19 @@ class JarvisOrchestrator(
     private var apiKey: String,
     private var modelName: String,
     private var liveModelName: String,
+    private val automationManager: com.example.personalaibot.automation.AutomationManager,
     private val fileHandler: (suspend (String, Map<String, String>) -> String)? = null
 ) : com.example.personalaibot.tools.SideEffectDelegate {
     private val geminiService = GeminiService(client, apiKey, modelName)
     private val liveService   = LiveGeminiService(client, apiKey, liveModelName, memoryManager)
     private val planner       = JarvisPlanner(geminiService)
+    
+    // Trading API for Diagnostic
+    private val tradingApi    = com.example.personalaibot.tools.trading.TradingApiService(client)
+    private val diagnosticManager = com.example.personalaibot.diagnostic.DiagnosticManager(client, tradingApi, automationManager)
 
     init {
-        // เชื่อม HttpClient + GeminiService เข้ากับ TradingToolExecutor
+        // เชื่อม HttpClient + GeminiService + AutomationManager เข้ากับ TradingToolExecutor
         com.example.personalaibot.tools.ToolExecutor.init(client, geminiService)
         // เชื่อม File handler (Platform specific)
         fileHandler?.let { com.example.personalaibot.tools.ToolExecutor.initFileHandler(it) }
@@ -205,6 +210,13 @@ class JarvisOrchestrator(
 
     override suspend fun onVoiceChange(newVoice: String) {
         voiceChangeCallback?.invoke(newVoice)
+    }
+
+    override suspend fun onSaveDiagnosticReport(filename: String, content: String) {
+        // บันทึกรายงานลงในโฟลเดอร์ Obsidian Wiki สำหรับการตรวจสอบย้อนหลัง
+        val path = ".obsidian-wiki/Diagnostic/$filename"
+        fileHandler?.invoke("file_write", mapOf("path" to path, "content" to content))
+        com.example.personalaibot.logDebug("Orchestrator", "Diagnostic report saved: $path")
     }
 
     private var visionToggleCallback: ((Boolean) -> Unit)? = null

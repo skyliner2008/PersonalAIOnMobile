@@ -22,4 +22,7 @@ interface SideEffectDelegate {
 
     /** ค้นหาสิ่งที่จำได้จากความทรงจำระยะยาว */
     suspend fun onRecallMemory(query: String): String
+
+    /** บันทึกรายงานการตรวจสอบระบบ (Diagnostic) */
+    suspend fun onSaveDiagnosticReport(filename: String, content: String)
 }

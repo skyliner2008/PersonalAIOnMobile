@@ -26,7 +26,8 @@ data class SmcOrderBlock(
     val bottom: Double,
     val isBullish: Boolean,
     val mitigated: Boolean = false,
-    val hasFVG: Boolean = false
+    val hasFVG: Boolean = false,
+    val timestamp: Long = 0L // Added for visualization
 )
 
 data class SmcLiquidityZone(
@@ -40,7 +41,8 @@ data class SmcFairValueGap(
     val top: Double,
     val bottom: Double,
     val isBullish: Boolean,
-    val size: Double             // Gap size in price
+    val size: Double,             // Gap size in price
+    val timestamp: Long = 0L      // Added for visualization
 )
 
 data class SmcSweepSignal(
@@ -48,7 +50,10 @@ data class SmcSweepSignal(
     val direction: String,       // "BULLISH" or "BEARISH"
     val price: Double,
     val obTop: Double,
-    val obBottom: Double
+    val obBottom: Double,
+    val barsAgo: Int = 0,
+    val timestamp: Long = 0L,
+    val dataSource: String = "UNKNOWN"
 )
 
 data class SmcAnalysisResult(
@@ -72,8 +77,34 @@ data class SmcAnalysisResult(
     val priceZone: String,              // "PREMIUM", "DISCOUNT", "EQUILIBRIUM"
     // Technical
     val atr: Double,
-    val attackForce: Boolean            // High-momentum candle detected
+    val attackForce: Boolean,           // High-momentum candle detected
+    // Provenance
+    val candleSource: String,
+    val priceSource: String,
+    val overrideAccepted: Boolean,
+    val candlesCount: Int
 )
+
+data class CandleFetchResult(
+    val candles: List<Candle>,
+    val source: String
+)
+
+data class SmcMtfSweepFrame(
+    val timeframe: String,
+    val source: String,
+    val barsCount: Int,
+    val signals: List<SmcSweepSignal>
+)
+
+data class SmcMtfLiquidityFrame(
+    val timeframe: String,
+    val source: String,
+    val barsCount: Int,
+    val zones: List<SmcLiquidityZone>
+)
+
+class StrictSourceMismatchException(message: String) : IllegalStateException(message)
 
 // ============================================================================
 // SMC API SERVICE
@@ -109,19 +140,83 @@ class SmcApiService(private val client: HttpClient) {
         "1h" to "1h", "4h" to "1h", "1d" to "1d", "1w" to "1wk"
     )
 
+    private data class YahooRequestPlan(
+        val baseInterval: String,
+        val range: String,
+        val aggregateToMillis: Long?
+    )
+
+    fun expectedPrimarySource(symbol: String): String {
+        val normalized = normalizeSymbol(symbol)
+        return if (isPossibleBinanceSymbol(normalized)) "BINANCE" else "YAHOO"
+    }
+
+    private fun expectedSourceSet(symbol: String): Set<String> {
+        val normalized = normalizeSymbol(symbol)
+        return when {
+            isPossibleBinanceSymbol(normalized) -> setOf("BINANCE")
+            normalized.contains("XAU") || normalized.contains("GOLD") || normalized == "GCF" ->
+                setOf("YAHOO", "BINANCE_PAXG")
+            else -> setOf("YAHOO")
+        }
+    }
+
     // ─── Data Fetching ────────────────────────────────────────────────────────
 
     suspend fun fetchCandles(symbol: String, interval: String, limit: Int = 300): List<Candle> {
+        return fetchCandlesWithSource(symbol, interval, limit).candles
+    }
+
+    suspend fun fetchCandlesWithSource(symbol: String, interval: String, limit: Int = 300): CandleFetchResult {
+        val minBars = recommendedMinBars(interval)
+        val targetBars = max(limit, minBars)
         val sym = normalizeSymbol(symbol)
+        val cached = OhlcvCentralStore.getAny(sym, interval, targetBars)
+        var bestFallback = if (cached != null) {
+            CandleFetchResult(cached.second, cached.first)
+        } else {
+            CandleFetchResult(emptyList(), "NONE")
+        }
         
         // 1. Try Binance first if it looks like a crypto pair (standard Binance format or ends with USDT/BTC/ETH)
         if (isPossibleBinanceSymbol(sym)) {
-            val candles = fetchCandlesFromBinance(sym, interval, limit)
-            if (candles.isNotEmpty()) return candles
+            val candles = fetchCandlesFromBinance(sym, interval, targetBars)
+            if (candles.size >= minBars) {
+                val result = CandleFetchResult(candles.takeLast(targetBars), "BINANCE")
+                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
+                return result
+            }
+            if (candles.isNotEmpty()) bestFallback = CandleFetchResult(candles, "BINANCE")
         }
 
         // 2. Fallback to Yahoo Finance (Good for Gold, Forex, Stocks)
-        return fetchCandlesFromYahoo(symbol, interval)
+        val candles = fetchCandlesFromYahoo(symbol, interval, targetBars)
+        if (candles.size >= minBars) {
+            val result = CandleFetchResult(candles.takeLast(targetBars), "YAHOO")
+            OhlcvCentralStore.put(sym, interval, result.source, result.candles)
+            return result
+        }
+        if (candles.isNotEmpty() && candles.size > bestFallback.candles.size) {
+            bestFallback = CandleFetchResult(candles, "YAHOO")
+        }
+
+        // 3. Last Resort for Gold: Fallback to Binance (PAXGUSDT) if Yahoo is insufficient
+        if (sym.contains("XAU") || sym.contains("GOLD") || sym == "GCF") {
+            val paxgCandles = fetchCandlesFromBinance("PAXGUSDT", interval, targetBars)
+            if (paxgCandles.size >= minBars) {
+                val result = CandleFetchResult(paxgCandles.takeLast(targetBars), "BINANCE_PAXG")
+                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
+                return result
+            }
+            if (paxgCandles.isNotEmpty() && paxgCandles.size > bestFallback.candles.size) {
+                bestFallback = CandleFetchResult(paxgCandles, "BINANCE_PAXG")
+            }
+        }
+        val fallbackResult = CandleFetchResult(bestFallback.candles.takeLast(targetBars), bestFallback.source)
+        if (fallbackResult.candles.isNotEmpty() && fallbackResult.source != "NONE") {
+            OhlcvCentralStore.put(sym, interval, fallbackResult.source, fallbackResult.candles)
+        }
+        return fallbackResult
     }
 
     private suspend fun fetchCandlesFromBinance(symbol: String, interval: String, limit: Int): List<Candle> {
@@ -149,22 +244,16 @@ class SmcApiService(private val client: HttpClient) {
         } catch (e: Exception) { emptyList() }
     }
 
-    private suspend fun fetchCandlesFromYahoo(symbol: String, interval: String): List<Candle> {
+    private suspend fun fetchCandlesFromYahoo(symbol: String, interval: String, targetBars: Int): List<Candle> {
         return try {
             val ySym = normalizeYahooSymbol(symbol)
-            val tf = yahooIntervalMap[interval] ?: "1h"
-            val range = when(tf) {
-                "1m", "5m" -> "1d"
-                "15m", "30m" -> "5d"
-                "1h" -> "1mo"
-                "1d" -> "6mo"
-                else -> "1y"
-            }
+            val plan = buildYahooRequestPlan(interval, targetBars)
+            val tf = plan.baseInterval
 
             val url = "https://query1.finance.yahoo.com/v8/finance/chart/$ySym"
             val response = client.get(url) {
                 parameter("interval", tf)
-                parameter("range", range)
+                parameter("range", plan.range)
                 header("User-Agent", "Mozilla/5.0")
                 timeout { requestTimeoutMillis = 15_000 }
             }
@@ -181,10 +270,10 @@ class SmcApiService(private val client: HttpClient) {
             val c = indicators["close"]?.jsonArray ?: return emptyList()
             val v = indicators["volume"]?.jsonArray ?: return emptyList()
 
-            val candles = mutableListOf<Candle>()
+            val rawCandles = mutableListOf<Candle>()
             for (i in 0 until timestamp.size) {
                 val closeVal = c[i].jsonPrimitive.doubleOrNull ?: continue
-                candles.add(Candle(
+                rawCandles.add(Candle(
                     open  = o[i].jsonPrimitive.doubleOrNull ?: closeVal,
                     high  = h[i].jsonPrimitive.doubleOrNull ?: closeVal,
                     low   = l[i].jsonPrimitive.doubleOrNull ?: closeVal,
@@ -193,33 +282,138 @@ class SmcApiService(private val client: HttpClient) {
                     timestamp = timestamp[i].jsonPrimitive.long * 1000
                 ))
             }
-            candles
+            val candles = if (plan.aggregateToMillis != null) {
+                aggregateCandlesByBucket(rawCandles, plan.aggregateToMillis)
+            } else {
+                rawCandles
+            }
+            candles.takeLast(targetBars)
         } catch (e: Exception) { emptyList() }
     }
 
+    private fun buildYahooRequestPlan(interval: String, targetBars: Int): YahooRequestPlan {
+        val normalized = interval.lowercase()
+        val baseTf = yahooIntervalMap[normalized] ?: "1h"
+        val targetMillis = intervalToMillis(normalized)
+        val baseMillis = intervalToMillis(baseTf)
+        val aggregateToMillis = if (targetMillis > baseMillis) targetMillis else null
+        val requiredBaseBars = if (aggregateToMillis != null) {
+            val factor = max(1L, aggregateToMillis / baseMillis)
+            (targetBars.toLong() * factor).toInt()
+        } else {
+            targetBars
+        }
+        val range = chooseYahooRange(baseTf, requiredBaseBars)
+        return YahooRequestPlan(baseTf, range, aggregateToMillis)
+    }
+
+    private fun chooseYahooRange(baseTf: String, requiredBars: Int): String {
+        val minutesPerBar = when (baseTf) {
+            "1m" -> 1
+            "5m" -> 5
+            "15m" -> 15
+            "30m" -> 30
+            "1h" -> 60
+            "1d" -> 1440
+            "1wk" -> 10080
+            else -> 60
+        }
+        val requiredDays = ceil((requiredBars * minutesPerBar) / 1440.0).toInt()
+        return when {
+            requiredDays <= 5 -> "5d"
+            requiredDays <= 30 -> "1mo"
+            requiredDays <= 90 -> "3mo"
+            requiredDays <= 180 -> "6mo"
+            requiredDays <= 365 -> "1y"
+            requiredDays <= 730 -> "2y"
+            requiredDays <= 1825 -> "5y"
+            else -> "max"
+        }
+    }
+
+    private fun aggregateCandlesByBucket(candles: List<Candle>, bucketMillis: Long): List<Candle> {
+        if (candles.isEmpty()) return emptyList()
+        val grouped = candles.sortedBy { it.timestamp }
+            .groupBy { it.timestamp / bucketMillis }
+            .toSortedMap()
+
+        val aggregated = mutableListOf<Candle>()
+        for (group in grouped.values) {
+            if (group.isEmpty()) continue
+            aggregated.add(
+                Candle(
+                    open = group.first().open,
+                    high = group.maxOf { it.high },
+                    low = group.minOf { it.low },
+                    close = group.last().close,
+                    volume = group.sumOf { it.volume },
+                    timestamp = group.first().timestamp
+                )
+            )
+        }
+        return aggregated
+    }
+
+    private fun intervalToMillis(interval: String): Long {
+        return when (interval.lowercase()) {
+            "1m" -> 60_000L
+            "3m" -> 180_000L
+            "5m" -> 300_000L
+            "15m" -> 900_000L
+            "30m" -> 1_800_000L
+            "1h" -> 3_600_000L
+            "2h" -> 7_200_000L
+            "4h" -> 14_400_000L
+            "6h" -> 21_600_000L
+            "12h" -> 43_200_000L
+            "1d", "d" -> 86_400_000L
+            "1w", "w", "1wk" -> 604_800_000L
+            else -> 3_600_000L
+        }
+    }
+
+    private fun recommendedMinBars(interval: String): Int {
+        return when (interval.lowercase()) {
+            "4h", "1d", "1w" -> 300
+            else -> 150
+        }
+    }
+
     private fun isPossibleBinanceSymbol(s: String): Boolean {
-        // Binance symbols are usually uppercase alpha-only or trailing USDT/BTC/ETH
-        return s.all { it.isLetter() || it.isDigit() } && 
-               (s.endsWith("USDT") || s.endsWith("BTC") || s.endsWith("ETH") || s.endsWith("BNB") || s.length <= 6)
+        // Strict crypto-like detection only, to avoid routing Forex/Gold to Binance accidentally.
+        val upper = s.uppercase()
+        if (upper.contains("XAU") || upper.contains("XAG") || upper.contains("GOLD")) return false
+        if (upper.length == 6 && upper.all { it.isLetter() }) return false // likely FX pair
+        return upper.all { it.isLetterOrDigit() } &&
+            (upper.endsWith("USDT") || upper.endsWith("BTC") || upper.endsWith("ETH") || upper.endsWith("BNB"))
     }
 
     private fun normalizeYahooSymbol(symbol: String): String {
-        val s = symbol.uppercase()
+        val s = symbol.uppercase().replace("/", "").replace("-", "")
         return when {
-            s == "XAUUSD" || s == "GOLD" -> "GC=F"
-            s == "XAGUSD" || s == "SILVER" -> "SI=F"
-            s == "USOIL" || s == "WTI" -> "CL=F"
-            s == "UKOIL" || s == "BRENT" -> "BZ=F"
-            // Forex pairs in Yahoo are usually EURUSD=X
-            s.length == 6 && !s.contains("=") && !s.contains("-") -> "$s=X"
+            // 1. Gold/Silver/Commodity (Highest Priority)
+            s.contains("XAU") || s.contains("GOLD") || s == "GCF" || s == "GC=F" -> "XAUUSD=X" 
+            s.contains("XAG") || s.contains("SILVER") -> "XAGUSD=X"
+            s == "USOIL" || s == "WTI" || s == "CL=F" || s == "CLF" -> "CL=F"
+            
+            // 2. Forex (6 letters) -> Always =X
+            s.length == 6 && s.all { it.isLetter() } -> "$s=X"
+            
+            // 3. Thai Stocks (Usually 3-5 letters) -> .BK
+            // We only tag .BK if it's NOT a 6-letter forex pair
+            s.length in 3..5 && s.all { it.isLetter() } && !s.contains(".") && !s.contains("=") -> "$s.BK"
+            
             else -> s
         }
     }
 
     private fun normalizeSymbol(symbol: String): String {
-        val s = symbol.uppercase().replace("-", "").replace("/", "")
+        var s = symbol.uppercase().replace("-", "").replace("/", "")
         // If it looks like a Yahoo symbol (contains = or ^), don't touch it
         if (s.contains("=") || s.contains("^")) return s
+
+        // Normalize Gold
+        if (s.contains("XAU") || s.contains("GOLD") || s == "GCF" || s == "PAXG") s = "XAUUSD"
         
         // Auto-append USDT if no quote currency detected AND it's not a known commodity
         val commodities = listOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "CLF", "GCF")
@@ -235,7 +429,7 @@ class SmcApiService(private val client: HttpClient) {
      * ATR (Average True Range) — ใช้ period=14 เหมือน indicator ต้นฉบับ
      */
     fun calcATR(candles: List<Candle>, period: Int = 14): Double {
-        if (candles.size < period + 1) return 0.0
+        if (candles.size < 15) return 0.0
         val trs = candles.zipWithNext { prev, curr ->
             maxOf(
                 curr.high - curr.low,
@@ -349,13 +543,13 @@ class SmcApiService(private val client: HttpClient) {
             // Bullish FVG: low[i] > high[i-2] and close[i-1] > high[i-2]
             val bullGap = c0.low - c2.high
             if (bullGap > threshold && c1.close > c2.high) {
-                fvgs.add(SmcFairValueGap(c0.low, c2.high, true, bullGap))
+                fvgs.add(SmcFairValueGap(c0.low, c2.high, true, bullGap, c1.timestamp))
             }
 
             // Bearish FVG: high[i] < low[i-2] and close[i-1] < low[i-2]
             val bearGap = c2.low - c0.high
             if (bearGap > threshold && c1.close < c2.low) {
-                fvgs.add(SmcFairValueGap(c2.low, c0.high, false, bearGap))
+                fvgs.add(SmcFairValueGap(c2.low, c0.high, false, bearGap, c1.timestamp))
             }
         }
         return fvgs.takeLast(10)
@@ -419,7 +613,7 @@ class SmcApiService(private val client: HttpClient) {
             if (filterOk && hasFVG) {
                 val mitigated = candles.drop(obIdx + 1).any { c -> c.low <= obTop && c.high >= obBtm }
                 if (!mitigated) {
-                    bullishOBs.add(SmcOrderBlock(obTop, obBtm, true, false, true))
+                    bullishOBs.add(SmcOrderBlock(obTop, obBtm, true, false, true, candles[obIdx].timestamp))
                 }
             }
         }
@@ -459,7 +653,7 @@ class SmcApiService(private val client: HttpClient) {
             if (filterOk && hasFVG) {
                 val mitigated = candles.drop(obIdx + 1).any { c -> c.high >= obBtm && c.low <= obTop }
                 if (!mitigated) {
-                    bearishOBs.add(SmcOrderBlock(obTop, obBtm, false, false, true))
+                    bearishOBs.add(SmcOrderBlock(obTop, obBtm, false, false, true, candles[obIdx].timestamp))
                 }
             }
         }
@@ -591,7 +785,10 @@ class SmcApiService(private val client: HttpClient) {
         candles: List<Candle>,
         timeframeLabel: String,
         reclaimFactor: Double = 0.50,
-        minWickATRMult: Double = 0.30
+        minWickATRMult: Double = 0.30,
+        dataSource: String = "UNKNOWN",
+        strictRecent: Boolean = true,
+        maxBarsAgo: Int = 5
     ): List<SmcSweepSignal> {
         if (candles.size < 10) return emptyList()
         val sweeps = mutableListOf<SmcSweepSignal>()
@@ -615,7 +812,18 @@ class SmcApiService(private val client: HttpClient) {
                     val bullReclaim = bullBtm + reclaimFactor * bullWidth
                     val wickBull = bullBtm - c.low
                     if (c.low < bullBtm && c.close > bullReclaim && wickBull > minWickATRMult * atr) {
-                        sweeps.add(SmcSweepSignal(timeframeLabel, "BULLISH", c.close, bullTop, bullBtm))
+                        sweeps.add(
+                            SmcSweepSignal(
+                                timeframe = timeframeLabel,
+                                direction = "BULLISH",
+                                price = c.close,
+                                obTop = bullTop,
+                                obBottom = bullBtm,
+                                barsAgo = candles.lastIndex - i,
+                                timestamp = c.timestamp,
+                                dataSource = dataSource
+                            )
+                        )
                     }
                 }
             }
@@ -632,12 +840,24 @@ class SmcApiService(private val client: HttpClient) {
                     val bearReclaim = bearTop - reclaimFactor * bearWidth
                     val wickBear = c.high - bearTop
                     if (c.high > bearTop && c.close < bearReclaim && wickBear > minWickATRMult * atr) {
-                        sweeps.add(SmcSweepSignal(timeframeLabel, "BEARISH", c.close, bearTop, bearBtm))
+                        sweeps.add(
+                            SmcSweepSignal(
+                                timeframe = timeframeLabel,
+                                direction = "BEARISH",
+                                price = c.close,
+                                obTop = bearTop,
+                                obBottom = bearBtm,
+                                barsAgo = candles.lastIndex - i,
+                                timestamp = c.timestamp,
+                                dataSource = dataSource
+                            )
+                        )
                     }
                 }
             }
         }
-        return sweeps.takeLast(3)
+        val filtered = if (strictRecent) sweeps.filter { it.barsAgo <= maxBarsAgo } else sweeps
+        return filtered.takeLast(3)
     }
 
     // ─── High-Level API ───────────────────────────────────────────────────────
@@ -645,11 +865,63 @@ class SmcApiService(private val client: HttpClient) {
     /**
      * Full SMC Analysis for a single symbol + interval
      */
-    suspend fun getSmcAnalysis(symbol: String, interval: String, limit: Int = 300): SmcAnalysisResult? {
-        val candles = fetchCandles(symbol, interval, limit)
-        if (candles.size < 50) return null
+    suspend fun getSmcAnalysis(
+        symbol: String, 
+        interval: String, 
+        limit: Int = 300, 
+        overridePrice: Double? = null,
+        strictSource: Boolean = false
+    ): SmcAnalysisResult? {
+        val expectedSource = expectedPrimarySource(symbol)
+        val expectedSources = expectedSourceSet(symbol)
+        val fetch = fetchCandlesWithSource(symbol, interval, limit)
+        if (strictSource && fetch.source !in expectedSources) {
+            throw StrictSourceMismatchException(
+                "Strict source violation: expected=${expectedSources.joinToString("|")}, actual=${fetch.source}, symbol=${symbol.uppercase()}, tf=$interval"
+            )
+        }
+        val candles = fetch.candles
+        if (candles.size < 150) return null
 
-        val atr                       = calcATR(candles)
+        val atr = calcATR(candles)
+        val lastClose = candles.last().close
+        val maxAllowedDrift = max(lastClose * 0.004, atr * 1.5) // 0.4% or 1.5 ATR
+        val overrideAccepted = overridePrice != null && abs(overridePrice - lastClose) <= maxAllowedDrift
+        val currentPrice = if (overrideAccepted) {
+            overridePrice!!
+        } else {
+            lastClose
+        }
+        
+        val result = executeSmcCalculation(
+            symbol = symbol,
+            interval = interval,
+            candles = candles,
+            currentPrice = currentPrice,
+            atr = atr,
+            candleSource = fetch.source,
+            priceSource = if (overrideAccepted) "OVERRIDE_PRICE" else fetch.source,
+            overrideAccepted = overrideAccepted
+        )
+        
+        // Auto-update Chart State for Visualization (V15.0)
+        result?.let {
+            ChartStateManager.updateData(symbol, candles, it)
+        }
+        
+        return result
+    }
+
+    private fun executeSmcCalculation(
+        symbol: String,
+        interval: String,
+        candles: List<Candle>,
+        currentPrice: Double,
+        atr: Double,
+        candleSource: String,
+        priceSource: String,
+        overrideAccepted: Boolean
+    ): SmcAnalysisResult? {
         val (dir, sHigh, sLow, event) = detectMarketStructure(candles)
         val fvgs                      = detectFVGs(candles, atr)
         val (bullOBs, bearOBs)        = detectOrderBlocks(candles, structureDir = dir, fvgs = fvgs)
@@ -666,7 +938,6 @@ class SmcApiService(private val client: HttpClient) {
             premiumBot = premiumBot, discountTop = discountTop, structureDir = dir
         )
 
-        val currentPrice = candles.last().close
         val priceZone = when {
             currentPrice >= premiumBot  -> "PREMIUM"
             currentPrice <= discountTop -> "DISCOUNT"
@@ -675,12 +946,13 @@ class SmcApiService(private val client: HttpClient) {
 
         // Attack Force: last candle body > 2x ATR
         val lastCandle = candles.last()
-        val attackForce = abs(lastCandle.close - lastCandle.open) > atr * 2.0
+        val finalPrice = currentPrice
+        val attackForce = abs(finalPrice - lastCandle.open) > atr * 2.0
 
         return SmcAnalysisResult(
             symbol           = normalizeSymbol(symbol),
             interval         = interval,
-            currentPrice     = currentPrice,
+            currentPrice     = finalPrice,
             structureDirection = dir,
             structureHigh    = sHigh,
             structureLow     = sLow,
@@ -694,14 +966,25 @@ class SmcApiService(private val client: HttpClient) {
             equilibrium      = equilibrium,
             priceZone        = priceZone,
             atr              = atr,
-            attackForce      = attackForce
+            attackForce      = attackForce,
+            candleSource     = candleSource,
+            priceSource      = priceSource,
+            overrideAccepted = overrideAccepted,
+            candlesCount     = candles.size
         )
     }
 
     /**
      * MTF Sweeps Analysis — ตรวจ sweep ข้ามทุก timeframe (M1, M5, M15, M30, H1, H4)
      */
-    suspend fun getMTFSweeps(symbol: String): Map<String, List<SmcSweepSignal>> {
+    suspend fun getMTFSweepsDetailed(
+        symbol: String,
+        strictRecent: Boolean = true,
+        maxBarsAgo: Int = 5,
+        strictSource: Boolean = false
+    ): List<SmcMtfSweepFrame> {
+        val expectedSource = expectedPrimarySource(symbol)
+        val expectedSources = expectedSourceSet(symbol)
         val timeframes = mapOf(
             "M1"  to "1m",
             "M5"  to "5m",
@@ -710,21 +993,53 @@ class SmcApiService(private val client: HttpClient) {
             "H1"  to "1h",
             "H4"  to "4h"
         )
-        val results = mutableMapOf<String, List<SmcSweepSignal>>()
+        val results = mutableListOf<SmcMtfSweepFrame>()
         for ((label, tf) in timeframes) {
-            val candles = fetchCandles(symbol, tf, 100)
+            val fetch = fetchCandlesWithSource(symbol, tf, 100)
+            val candles = fetch.candles
+            if (strictSource && fetch.source !in expectedSources) {
+                continue
+            }
             if (candles.isNotEmpty()) {
-                val sweeps = detectSweeps(candles, label)
-                if (sweeps.isNotEmpty()) results[label] = sweeps
+                val sweeps = detectSweeps(
+                    candles = candles,
+                    timeframeLabel = label,
+                    dataSource = fetch.source,
+                    strictRecent = strictRecent,
+                    maxBarsAgo = maxBarsAgo
+                )
+                if (sweeps.isNotEmpty()) {
+                    results.add(
+                        SmcMtfSweepFrame(
+                            timeframe = label,
+                            source = fetch.source,
+                            barsCount = candles.size,
+                            signals = sweeps
+                        )
+                    )
+                }
             }
         }
-        return results
+        return results.sortedBy { tfOrder(it.timeframe) }
+    }
+
+    suspend fun getMTFSweeps(
+        symbol: String,
+        strictSource: Boolean = false
+    ): Map<String, List<SmcSweepSignal>> {
+        return getMTFSweepsDetailed(symbol = symbol, strictSource = strictSource)
+            .associate { it.timeframe to it.signals }
     }
 
     /**
      * MTF Liquidity Levels — Equal Highs/Lows จากหลาย timeframe (M5, M15, M30, H1, H4)
      */
-    suspend fun getMTFLiquidity(symbol: String): Map<String, List<SmcLiquidityZone>> {
+    suspend fun getMTFLiquidityDetailed(
+        symbol: String,
+        strictSource: Boolean = false
+    ): List<SmcMtfLiquidityFrame> {
+        val expectedSource = expectedPrimarySource(symbol)
+        val expectedSources = expectedSourceSet(symbol)
         val timeframes = mapOf(
             "M5"  to "5m",
             "M15" to "15m",
@@ -732,15 +1047,46 @@ class SmcApiService(private val client: HttpClient) {
             "H1"  to "1h",
             "H4"  to "4h"
         )
-        val results = mutableMapOf<String, List<SmcLiquidityZone>>()
+        val results = mutableListOf<SmcMtfLiquidityFrame>()
         for ((label, tf) in timeframes) {
-            val candles = fetchCandles(symbol, tf, 150)
+            val fetch = fetchCandlesWithSource(symbol, tf, 150)
+            val candles = fetch.candles
+            if (strictSource && fetch.source !in expectedSources) {
+                continue
+            }
             if (candles.isNotEmpty()) {
                 val zones = detectLiquidityZones(candles, lookback = 10)
-                if (zones.isNotEmpty()) results[label] = zones
+                if (zones.isNotEmpty()) {
+                    results.add(
+                        SmcMtfLiquidityFrame(
+                            timeframe = label,
+                            source = fetch.source,
+                            barsCount = candles.size,
+                            zones = zones
+                        )
+                    )
+                }
             }
         }
-        return results
+        return results.sortedBy { tfOrder(it.timeframe) }
+    }
+
+    suspend fun getMTFLiquidity(
+        symbol: String,
+        strictSource: Boolean = false
+    ): Map<String, List<SmcLiquidityZone>> {
+        return getMTFLiquidityDetailed(symbol)
+            .associate { it.timeframe to it.zones }
+    }
+
+    private fun tfOrder(tf: String): Int = when (tf.uppercase()) {
+        "M1" -> 0
+        "M5" -> 1
+        "M15" -> 2
+        "M30" -> 3
+        "H1" -> 4
+        "H4" -> 5
+        else -> 99
     }
 }
 

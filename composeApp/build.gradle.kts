@@ -68,6 +68,8 @@ kotlin {
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.ktor.client.websockets)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.multiplatform.webview)
+            implementation(kotlin("reflect"))
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.native.driver)

@@ -46,7 +46,15 @@ class TradingApiService(private val client: HttpClient) {
 
     suspend fun getYahooPrice(symbol: String): Map<String, String> {
         return try {
-            val url = "https://query1.finance.yahoo.com/v8/finance/chart/${symbol.uppercase()}"
+            val raw = symbol.uppercase().replace("/", "").replace("-", "")
+            val yahooSymbol = when {
+                raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD=X"
+                raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD=X"
+                raw.length == 6 && raw.all { it.isLetter() } -> "${raw}=X"
+                else -> symbol.uppercase()
+            }
+
+            val url = "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSymbol"
             val response = client.get(url) {
                 parameter("interval", "1d")
                 parameter("range", "1d")
@@ -74,7 +82,7 @@ class TradingApiService(private val client: HttpClient) {
             val marketState = metaStr("marketState")
 
             mapOf(
-                "symbol"       to symbol.uppercase(),
+                "symbol"       to yahooSymbol,
                 "price"        to "%.4f".format(price),
                 "change"       to "%.4f".format(change),
                 "change_pct"   to "%.2f%%".format(changePct),

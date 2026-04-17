@@ -2,14 +2,14 @@
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-orange.svg?style=flat)](https://www.jetbrains.com/lp/compose-multiplatform/)
-[![Gemini](https://img.shields.io/badge/AI-Gemini%203.1%20Flash-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/AI-Gemini%202.0%20Flash-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์ข้อมูลอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 3.1 Flash Live** และระบบความจำแบบ 4 ชั้น (GraphRAG)
+**JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์ข้อมูลอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 2.0 Flash Live** และระบบความจำแบบ 6 ชั้น (GraphRAG & Obsidian Wiki)
 
 ---
 
-## 🚀 Verfied Features (ใช้งานได้จริง 100%)
+## 🚀 Verified Features (ใช้งานได้จริง 100%)
 
 ### 🎙️ 1. Pro-Analyst Live Voice & UI
 ยกระดับการโต้ตอบด้วยเสียงแบบ Real-time ที่ฉลาดกว่าเดิม:
@@ -23,16 +23,40 @@
 - **Multi-Provider Support** — สลับการใช้งานระหว่าง Gemini Live, Gemini Flash และ OpenAI GPT-4o เพื่อการวิเคราะห์ที่แม่นยำที่สุด
 - **AR Overlay Engine** — แสดง Bounding Box และคำอธิบายวัตถุบนภาพจริงแบบ Real-time
 
-### 🧠 3. Advanced 4-Layer Memory Engine
-- **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้และสกัดความสนใจอัตโนมัติ
-- **Layer 2: Working Memory** — บันทึกประวัติการคุยปัจจุบันลง SQLite ทันที
+### 🧠 3. Advanced 6-Layer Memory Engine
+- **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้และสกัดความสนใจอัตโนมัติ (Profile Persistence)
+- **Layer 2: Working Memory** — บันทึกประวัติการคุยปัจจุบันลง SQLite ทันที (Context Tracking)
 - **Layer 3: Archival Memory** — ระบบค้นหาความความจำด้วยความหมาย (Semantic Search / Vector Embeddings)
-- **Layer 4: GraphRAG Knowledge Graph** — เชื่อมโยงความสัมพันธ์ของแนวคิดต่างๆ เป็นโครงข่ายสมอง
+- **Layer 4: GraphRAG Knowledge Graph** — เชื่อมโยงความสัมพันธ์ของแนวคิดต่างๆ เป็นโครงข่ายสมอง (Entities & Edges)
+- **Layer 5: Memory Consolidation** — ระบบ "Sleep Cycle" สรุปและย้ายความจำจากระยะสั้นไประยะยาวอัตโนมัติ
+- **Layer 6: LLM-Wiki (Obsidian)** — ระบบ "สมองส่วนนอก" ที่ AI และมนุษย์จัดการร่วมกันผ่าน Markdown (Persistent Knowledge Hub)
 
-### 📊 4. Trading & SMC Intelligence (V8.3)
-- **SMC Master** — วิเคราะห์ Market Structure (BOS/CHoCH), Order Blocks with FVG, Liquidity Zones
-- **Pro Scanners** — ค้นหาโอกาสจาก Bollinger Squeeze, RSI Oversold/Overbought และ Volume Breakout
-- **MTF Sweeps** — ตรวจจับการกวาดสภาพคล่องข้ามหลาย Timeframe (M1 → H4)
+### 📊 4. JARVIS Advanced Trading Intelligence V14.4
+
+> **Status: 🟢 Stable (Institutional Resilience Patch)**  
+> **Last Update: 2026-04-17**  
+- **OANDA Price Unity Architecture** — ระบบรวมศูนย์ราคา (`getUnifiedPrice`) ที่เชื่อมโยงทุกเครื่องมือวิเคราะห์ (TA, SMC, Deep Analysis) ให้ใช้ราคาสปอต OANDA เสมอ 100%
+- **Zero-Filtering & Full Transparency** — แผ่กางข้อมูลดิบในรายงาน Deep Analysis (แสดง Fibonacci ทุกระดับ) และ SMC Metadata (Fresh/Mitigated Status)
+- **Universal Asset Success** — รองรับ หุ้นไทย (.BK), หุ้นนอก, คริปโต, Spot และ Forex อย่างสมบูรณ์และเสถียร 100% 
+- **Institutional SMC Integrity** — ขยายฐานข้อมูลย้อนหลังเป็น 3-6 เดือน เพื่อประกันความแม่นยำของ Smart Money Concepts (ต้องมี >150-200 แท่งเสมอ)
+- **Advanced SMC Metadata** — รายงาน SMC แสดงระดับความน่าเชื่อถือ (Stars), จำนวน Touches และขนาดของ FVG อย่างละเอียด
+
+### 🤖 5. Automation & Monitoring Dashboard
+- **Real-time Alert Management** — หน้าจอ Dashboard ระดับพรีเมียมสำหรับจัดการงานเฝ้าติดตามตลาด
+- **Autonomous Triggering** — JARVIS สามารถตัดสินใจและตั้งค่าการแจ้งเตือนได้เองเมื่อเห็นจังหวะที่ "เกือบ" จะมาถึง
+- **Once-Only Notification** — ระบบแจ้งเตือนอัจฉริยะ (Notification) แจ้งเพียงครั้งเดียวเมื่อเงื่อนไขเป็นจริง เพื่อป้องกันความรำคาญ
+
+### 🏥 6. JARVIS Diagnostic Engine (Self-Healing)
+- **Autonomous Health Verification** — ระบบตรวจสอบตนเองอัตโนมัติ (API Connectivity, Data Accuracy, Database Integrity)
+- **Price Source Sync** — ระบบเปรียบเทียบราคาจากหลายแหล่ง (Yahoo, OANDA, TV) เพื่อระบุความเหลื่อมล่วง (Discrepancy) และ Delay
+- **Obsidian Wiki Reporting** — สรุปผลการตรวจสอบระบบเป็นไฟล์ Markdown บันทึกลงในไดเรกทอรีส่วนตัวโดยอัตโนมัติ
+
+### 🏗️ 7. Smart Money Concepts (SMC) V14.4
+ระบบ SMC ได้ถูกอัปเกรดเป็นระดับสถาบัน (Institutional Grade):
+- **Multi-Source Data Hub**: ระบบดึงข้อมูลอัจฉริยะ (Yahoo Finance + Binance Fallback) ประกันข้อมูล OHLCV 100%
+- **Threshold Resilience**: ปรับปรุงเกณฑ์การคำนวณขั้นต่ำ (150 Bars) เพื่อความเสถียรสูงสุด
+- **Automated Structure**: ตรวจจับ BOS/CHoCH และ Liquidity Zones อัตโนมัติ
+- **Premium/Discount Mapping**: แบ่งโซนราคาเพื่อความได้เปรียบในการเข้าเทรด
 
 ---
 
@@ -42,16 +66,17 @@
 |-------|-----------|--------|
 | Language | Kotlin 2.0 (KMP) | Stable |
 | UI Framework | Jetpack Compose Multiplatform | Stable |
-| Primary Brain | Gemini 3.1 Flash Live Preview | Active |
+| Primary Brain | Gemini 2.0 Flash Live Preview | Active |
 | Multimodal | Live Stream (PCM 16kHz + JPEG) | Active |
 | Database | SQLDelight + SQLite Persistence | Active |
+| Background Service | Android Foreground (DataSync) | Active |
 | Logic Controller | JarvisOrchestrator (Single-Agent) | Active |
 
 ---
 
-## 📦 Tool Catalogue (Total: 44 Tools)
+## 📦 Tool Catalogue (Total: 52 Tools)
 
-### 🧠 BUILT-IN TOOLS (10 tools)
+### 🧠 BUILT-IN & SYSTEM TOOLS (11 tools)
 - `calculate`: คำนวณนิพจน์คณิตศาสตร์ซับซ้อน
 - `get_current_datetime`: ข้อมูลวันเวลาและปฏิทินปัจจุบัน
 - `remember_fact`: บันทึกข้อมูลสำคัญลงความจำระยะยาว
@@ -61,9 +86,10 @@
 - `translate_text`: แปลภาษาแบบ Multilingual
 - `summarize_text`: สรุปข้อความยาวๆ พร้อมกำหนดระดับความละเอียด
 - `search_web`: ค้นหาข้อมูลล่าสุดจากโลกออนไลน์
-- `analyze_and_display_report`: แสดงรายงาน Markdown ขั้นสูงในแชท
+- `system_run_diagnostics`: ตรวจสอบสุขภาพระบบ (Self-healing)
+- `system_check_connectivity`: ตรวจสอบการเชื่อมต่อ API ทั้งหมด
 
-### 📊 TRADING TOOLS (13 tools)
+### 📊 TRADING TOOLS (20 tools)
 - `trading_price`: ราคา Real-time (Stocks/Crypto/Forex/Gold)
 - `trading_market_snapshot`: ภาพรวมตลาดเจาะตามกลุ่มอุตสาหกรรม
 - `trading_top_gainers`: หุ้น/Crypto ที่พุ่งแรงที่สุดในตลาด
@@ -77,6 +103,13 @@
 - `trading_sentiment`: วิเคราะห์อารมณ์ตลาดจาก Reddit
 - `trading_news`: ข่าวการเงินล่าสุดแยกตาม Symbol
 - `trading_combined`: สุดยอดเครื่องมือวิเคราะห์ (TA + News + Sentiment)
+- `trading_fundamental_analysis`: วิเคราะห์ปัจจัยพื้นฐาน (Fundamental)
+- `trading_fear_greed`: ดัชนีความกลัวและความโลภ (Crypto)
+- `trading_macro_calendar`: ปฏิทินเหตุการณ์เศรษฐกิจโลก
+- `trading_correlation_matrix`: คำนวณความสัมพันธ์ระหว่างสินทรัพย์
+- `trading_position_sizing`: ช่วยคำนวณขนาดไม้ที่เหมาะสม
+- `automation_manage_alerts`: ระบบสร้าง/ลบงานเฝ้าติดตามอัตโนมัติ
+- `trading_deep_analysis_suite`: วิเคราะห์ 5 มิติ (LSD, Orderflow, Fibo Score) - **Institutional Grade** 
 
 ### 📈 SMC TOOLS (5 tools)
 - `trading_smc_analysis`: Full SMC Dashboard
@@ -109,151 +142,13 @@
 5.  **Offline Memory Layer**: ระบบความจำขนาดเล็กที่ทำงานได้โดยไม่ต้องพึ่งอินเทอร์เน็ต
 
 ---
-© 2026 JARVIS PersonalAIBot Project. All rights reserved.
-ng_smc_structure` — Market Structure
-วิเคราะห์ Market Structure: BOS, CHoCH, Premium/Discount
-- BOS (Break of Structure) — breakout ต่อเนื่อง
-- CHoCH (Change of Character) — สัญญาณ trend reversal
-- Premium zone (>75%) — แพง → Short
-- Discount zone (<25%) — ถูก → Long
-- Equilibrium (50%) — จุดสมดุล
-- **ตัวอย่าง**: "structure BTC 4h", "BOS หรือ CHoCH ETHUSDT", "ราคาอยู่ใน premium หรือ discount"
 
+## 📊 สรุปจำนวน Tools ทั้งหมด: **52 Tools** (5 หมวดหมู่หลัก)
 
----
-
-### 📂 FILE MANAGEMENT TOOLS (7 tools)
-
-#### 21. `file_list` — เลือกดูรายการไฟล์
-เรียกดูรายชื่อไฟล์และโฟลเดอร์ในตำแหน่งที่กำหนด
-- แยกประเภทโฟลเดอร์ และไฟล์ชัดเจน พร้อมระบุขนาด
-- **ตัวอย่าง**: "ดูไฟล์ในโฟลเดอร์ Download", "มีอะไรอยู่ใน Documents"
-
-#### 22. `file_read` — อ่านไฟล์ข้อความ
-เปิดอ่านเนื้อหาในไฟล์ (txt, md, csv, json, log)
-- **ตัวอย่าง**: "อ่านไฟล์ note.txt", "ขอเนื้อหาในไฟล์ logs.csv"
-
-#### 23. `file_write` — สร้าง/แก้ไขไฟล์
-สร้างไฟล์ใหม่ หรือเขียนทับข้อมูลลงในไฟล์เดิม
-- **ตัวอย่าง**: "สร้างไฟล์ memo.txt", "เขียนสรุปงานลง summary.md"
-
-#### 24. `file_delete` — ลบไฟล์/โฟลเดอร์
-ลบข้อมูลที่ไม่ต้องการออกจากเครื่อง (Recursive delete สำหรับโฟลเดอร์)
-- **ตัวอย่าง**: "ลบไฟล์ temp.txt", "ลบโฟลเดอร์ junk_folder"
-
-#### 25. `file_analyze` — วิเคราะห์เอกสารเชิงลึก
-ส่งไฟล์ PDF, Word หรือรูปภาพให้ Gemini วิเคราะห์แบบ Native (Multimodal)
-- **ตัวอย่าง**: "สรุปไฟล์รายงาน.pdf", "แกะข้อความจากรูปนี้ให้หน่อย"
-
-#### 26. `file_move` — จัดระเบียบไฟล์
-ย้านตำแหน่งไฟล์ หรือใช้สำหรับ Rename เปลี่ยนชื่อไฟล์
-- **ตัวอย่าง**: "ย้ายไฟล์งานไปที่ Documents", "เปลี่ยนชื่อ old.txt เป็น new.txt"
-
-#### 27. `file_search` — ค้นหาไฟล์อัจฉริยะ
-ค้นหาไฟล์ทั่วเครื่องด้วย Keyword หรือนามสกุลไฟล์
-- **ตัวอย่าง**: "หาไฟล์ที่มีคำว่า invoice", "หาไฟล์ .pdf ทั้งหมด"
-
----
-
-### ⚙️ SYSTEM TOOLS (8 tools)
-
-#### 28. `system_status` — System Monitor
-ตรวจสอบสถานะระบบและการตั้งค่าทั้งหมด
-- Model ที่ใช้งาน, Memory usage
-- Tools ที่ active, Session info
-- **ตัวอย่าง**: "สถานะระบบตอนนี้", "ใช้โมเดลอะไรอยู่"
-
-#### 29. `skill_manager` — Skill Manager
-จัดการ Skills (Custom AI agents) ในระบบ
-- ดู Skills ที่มีอยู่, เปิด/ปิด Skill
-- ดู trigger keywords, system prompt addon
-- **ตัวอย่าง**: "Skills ที่มีอยู่มีอะไรบ้าง", "เปิด skill trading"
-
-#### 30. `image_analyzer` — Image Analyzer
-วิเคราะห์รูปภาพด้วย Gemini Vision
-- อธิบายภาพ, อ่านข้อความในรูป (OCR)
-- วิเคราะห์กราฟ chart จากภาพ
-- **ตัวอย่าง**: "อธิบายรูปนี้", "อ่านข้อความในภาพ", "วิเคราะห์ chart นี้"
-
-#### 31. `code_executor` — Code Runner
-รันโค้ด Python/JavaScript ได้โดยตรง
-- คำนวณ, data processing
-- ทดสอบ algorithm, script อัตโนมัติ
-- **ตัวอย่าง**: "รันโค้ด Python นี้", "คำนวณ fibonacci 20 ตัว"
-
-
-#### 32. `app_controller` — App Controller
-ควบคุม app และระบบ Android
-- เปิด/ปิด app, ปรับ settings
-- ส่ง notification, ดู app list
-- **ตัวอย่าง**: "เปิด Spotify", "ลด volume ลง 20%"
-
-#### 33. `reminder_scheduler` — Reminder & Scheduler
-ตั้งการแจ้งเตือนและกำหนดการ
-- Reminder แบบครั้งเดียว/ซ้ำ
-- Calendar event, deadline tracker
-- **ตัวอย่าง**: "เตือนฉันทุกเช้า 8 โมง", "ตั้ง reminder ประชุม พรุ่งนี้ 14:00"
-
-#### 34. `custom_skill_trigger` — Custom Skill Trigger
-เรียกใช้ Custom Skills ที่ผู้ใช้สร้างเอง
-- Trigger ด้วย keyword หรือชื่อ skill โดยตรง
-- รองรับ skill แบบ chain (multi-step)
-- **ตัวอย่าง**: "เรียกใช้ skill ของฉัน", "รัน MyTradingSkill"
-
----
-
-### 📷 Camera & Vision Tools (5 tools)
-
-#### 35. `camera_analyze_scene` — Scene Analyzer
-วิเคราะห์ภาพจากกล้องแบบ Real-time
-- อธิบายวัตถุ, บริบท, ข้อความที่เห็นในกล้อง
-- รองรับ Gemini Live, OpenAI GPT-4o, Claude Vision
-- **ตัวอย่าง**: "ดูกล้องแล้วบอกว่าเห็นอะไร", "อ่านข้อความที่กล้องเห็น"
-
-#### 36. `camera_detect_objects` — Object Detector
-ตรวจจับวัตถุพร้อม bounding box และ confidence score
-- AR Overlay แสดงกรอบวัตถุบนภาพจริง
-- รองรับ multi-object detection
-- **ตัวอย่าง**: "หาวัตถุในกล้อง", "หาแมวในภาพ"
-
-#### 37. `camera_read_text` — Camera OCR
-อ่านและดึงข้อความ (OCR) จากกล้อง
-- อ่านป้าย, เอกสาร, หน้าจอ, ฉลาก
-- **ตัวอย่าง**: "อ่านข้อความจากป้ายนี้", "อ่านเอกสารหน้ากล้อง"
-
-#### 38. `camera_switch_provider` — Provider Switcher
-สลับ AI Provider สำหรับวิเคราะห์ภาพ
-- Gemini Live / Flash, OpenAI GPT-4o / GPT-4.1, Claude Sonnet / Opus
-- **ตัวอย่าง**: "สลับไปใช้ OpenAI", "ใช้ Claude วิเคราะห์"
-
-#### 39. `camera_switch_mode` — Mode Switcher
-เปลี่ยนโหมดกล้อง
-- Live Stream, Snapshot, Object Detection, AR Overlay
-- **ตัวอย่าง**: "เปลี่ยนเป็น AR mode", "ใช้โหมด snapshot"
-
-#### 40. `vision_activate` — เปิดดวงตา (AI-Managed)
-สั่งให้แอปเริ่มส่งสตรีมภาพความละเอียดสูงให้ AI แบบ Real-time
-- **ตัวอย่าง**: จาร์วิสเรียกใช้เองเมื่อคุณถามว่า "นี่คืออะไร"
-
-#### 41. `vision_deactivate` — ปิดดวงตา (Token Saving)
-สั่งหยุดส่งสตรีมภาพทันทีเพื่อประหยัด Token และแบตเตอรี่
-- **ตัวอย่าง**: จาร์วิสเรียกใช้เองหลังจากตอบคำถามด้านสายตาเสร็จ
-
-#### 42. `vision_adaptive_logic` — AI Adaptive Vision
-ระบบวิเคราะห์ความสำคัญของภาพอัตโนมัติ
-- ปรับความละเอียด (Resolution) ตามความซับซ้อนของสิ่งที่เห็น
-- ลดการส่งภาพซ้ำหากไม่มีการเคลื่อนไหว (Motion Detection)
-- **ตัวอย่าง**: "เปิดโหมดประหยัดพลังงานสายตา"
-
----
-
-## 📊 สรุปจำนวน Tools ทั้งหมด: **41 Tools** (6 หมวดหมู่)
-
-| หมวด | จำนวน |
-|------|-------|
-| 🧠 Built-in Tools | 10 |
-| 📊 Trading Tools | 10 |
-| 📈 SMC Tools | 5 |
-| 📁 File Management | 7 |
-| 🎯 System Tools | 2 |
-| 📷 Camera & Vision | 7 |
+| หมวดหมู่ | จำนวน | ความสามารถหลัก |
+| :--- | :---: | :--- |
+| **Trading & Finance** | 20 | ราคา Real-time, TA, Scanner, **Institutional Stability V14.4** |
+| **SMC (Smart Money)** | 5 | Market Structure, Order Blocks, Liquidity Sweeps, Premium/Discount |
+| **Files & Documents** | 7 | จัดการไฟล์ในเครื่อง, อ่าน/เขียน, วิเคราะห์ PDF/Word, ค้นหาข้อมูล |
+| **Vision & Camera** | 9 | Gemini Live Vision, Object Detection, Scan QR/Barcode, Text OCR |
+| **Core & Intelligence** | 11 | ค้นหาเว็บ, แปลภาษา, สรุปความ, คำนวณ, บันทึกความจำระยะยาว, Diagnostic |

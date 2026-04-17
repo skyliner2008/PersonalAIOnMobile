@@ -4,8 +4,6 @@ import android.content.Context
 import android.os.Environment
 import com.example.personalaibot.service.FileAnalyzer
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 
 /**
  * FileToolExecutor — ตัวรัน Tool จัดการไฟล์สำหรับ Android
@@ -152,6 +150,7 @@ class FileToolExecutor(private val context: Context) {
         val path = args["path"] ?: return "ต้องระบุ path"
         val file = File(path)
         if (!file.exists()) return "ไม่พบไฟล์ที่ต้องการลบ: $path"
+        if (!canMutatePath(file)) return "Error: mutation blocked for unsafe path '$path'"
         
         val success = if (file.isDirectory) file.deleteRecursively() else file.delete()
         return if (success) "ลบสำเร็จ: $path" else "ไม่สามารถลบได้ (อาจติด Permission)"
@@ -173,6 +172,9 @@ class FileToolExecutor(private val context: Context) {
         val dstFile = File(target)
         
         if (!srcFile.exists()) return "ไม่พบไฟล์ต้นทาง: $source"
+        if (!canMutatePath(srcFile) || !isPathInAllowedRoots(dstFile)) {
+            return "Error: move blocked for unsafe path(s)"
+        }
         
         dstFile.parentFile?.mkdirs()
         
@@ -223,5 +225,38 @@ class FileToolExecutor(private val context: Context) {
         val exp = (Math.log(bytes.toDouble()) / Math.log(1024.0)).toInt()
         val pre = "KMGTPE"[exp - 1]
         return "%.1f %sB".format(bytes / Math.pow(1024.0, exp.toDouble()), pre)
+    }
+
+    private fun canMutatePath(file: File): Boolean {
+        if (!isPathInAllowedRoots(file)) return false
+        val normalized = normalizePath(file)
+        val rootNormalized = normalizePath(File(rootPath))
+        return normalized != rootNormalized
+    }
+
+    private fun isPathInAllowedRoots(file: File): Boolean {
+        val normalized = normalizePath(file)
+        return allowedRoots().any { root ->
+            val rootNormalized = normalizePath(root)
+            normalized == rootNormalized || normalized.startsWith("$rootNormalized/")
+        }
+    }
+
+    private fun normalizePath(file: File): String {
+        return try {
+            file.canonicalFile.absolutePath.replace("\\", "/").trimEnd('/')
+        } catch (_: Exception) {
+            file.absolutePath.replace("\\", "/").trimEnd('/')
+        }
+    }
+
+    private fun allowedRoots(): List<File> {
+        val roots = mutableListOf<File>()
+        roots.add(File(rootPath))
+        roots.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS))
+        roots.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS))
+        roots.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES))
+        roots.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM))
+        return roots.filter { it.exists() }.distinctBy { normalizePath(it) }
     }
 }

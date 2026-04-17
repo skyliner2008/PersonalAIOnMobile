@@ -109,17 +109,15 @@ object ToolRegistry {
                 required = listOf("query")
             )
         ))
-        put("analyze_and_display_report", FunctionDeclaration(
-            name = "analyze_and_display_report",
-            description = "Displays a high-quality Markdown analysis report to the Chat UI. Use this when you have gathered enough data to provide a comprehensive analysis.",
-            parameters = FunctionParameters(
-                type = "OBJECT",
-                properties = mapOf(
-                    "detailed_markdown" to ParameterProperty("STRING", "The full, detailed report for the Chat UI (like in Chat mode). Include tables and analysis."),
-                    "voice_summary_hint" to ParameterProperty("STRING", "A short summary of what you will say to the user via voice (3-5 sentences).")
-                ),
-                required = listOf("detailed_markdown", "voice_summary_hint")
-            )
+        put("system_run_diagnostics", FunctionDeclaration(
+            name = "system_run_diagnostics",
+            description = "Runs a comprehensive system health check and generates a diagnostic report. Use this to troubleshoot price discrepancies, connection issues, or automation failures.",
+            parameters = null
+        ))
+        put("system_check_connectivity", FunctionDeclaration(
+            name = "system_check_connectivity",
+            description = "Checks the internet connection and connectivity to key financial APIs (Yahoo, TradingView).",
+            parameters = null
         ))
     }
 
@@ -165,6 +163,9 @@ object ToolRegistry {
 
     fun isCameraTool(name: String): Boolean =
         name in _cameraTools
+
+    fun isSystemTool(name: String): Boolean =
+        name.startsWith("system_")
 
     fun registerCustomTool(decl: FunctionDeclaration) {
         _customTools[decl.name] = decl
@@ -284,7 +285,8 @@ object ToolRegistry {
         ToolCategory("📊 Trading Tools", "📊", _tradingTools.values.toList()),
         ToolCategory("📈 SMC Tools", "📈", _smcTools.values.toList()),
         ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
-        ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList())
+        ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList()),
+        ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList())
     )
 
     fun totalToolCount(): Int =

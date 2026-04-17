@@ -7,20 +7,10 @@ import com.example.personalaibot.tools.ParameterProperty
 /**
  * TradingToolDefinitions — รายการ Tool definitions ทั้งหมดสำหรับ Gemini Function Calling
  *
- * Tools ที่รองรับ:
- *  1. trading_price           — ราคา real-time จาก Yahoo Finance
- *  2. trading_market_snapshot — ภาพรวมตลาดโลก
- *  3. trading_top_gainers     — หุ้น/Crypto ที่ขึ้นมากที่สุด
- *  4. trading_top_losers      — หุ้น/Crypto ที่ลงมากที่สุด
- *  5. trading_technical_analysis — TA ครบถ้วนสำหรับ symbol เดี่ยว
- *  6. trading_multi_timeframe — วิเคราะห์หลาย timeframe (W→D→4H→1H→15m)
- *  7. trading_bollinger_scan  — Bollinger squeeze scanner
- *  8. trading_oversold_scan   — RSI < 30 scanner
- *  9. trading_overbought_scan — RSI > 70 scanner
- * 10. trading_volume_breakout — Volume breakout scanner
- * 11. trading_sentiment       — Reddit sentiment analysis
- * 12. trading_news            — Financial news จาก RSS
- * 13. trading_combined        — TA + Sentiment + News รวมกัน (Power Tool)
+ * [CRITICAL GUIDELINES FOR AI]
+ * 1. ห้ามสร้างหรือสมมติชื่อ Tool (Function Name) ขึ้นมาเองเด็ดขาด แม้ชื่อนั้นจะดูสมเหตุสมผล (เช่น analyze_and_display_report)
+ * 2. หากเรียกใช้ Tool แล้วเกิด Error หรือไม่มีข้อมูล (Empty Result) ให้รายงานผู้ใช้ตามตรง ห้าม "แต่ง" ข้อมูลปลอมขึ้นมาทดแทน
+ * 3. ใช้เฉพาะชื่อสัญลักษณ์ที่ระบุใน Tool Parameter เท่านั้น
  */
 object TradingToolDefinitions {
 
@@ -38,7 +28,7 @@ object TradingToolDefinitions {
                 properties = mapOf(
                     "symbol" to ParameterProperty(
                         type = "STRING",
-                        description = "Yahoo Finance symbol เช่น AAPL, BTC-USD, ETH-USD, ^GSPC, GC=F, EURUSD=X"
+                        description = "Yahoo Finance symbol เช่น AAPL, BTC-USD, ETH-USD, ^GSPC, XAUUSD=X (Gold Spot), GC=F (Gold Futures), EURUSD=X"
                     )
                 ),
                 required = listOf("symbol")
@@ -106,8 +96,8 @@ object TradingToolDefinitions {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD (Gold), EURUSD, AAPL, THYAO"),
-                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, NYSE, OANDA (FX), TVC (Gold)"),
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD, EURUSD, AAPL, DELTA (หุ้นไทย)"),
+                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE (Crypto), NASDAQ (US), SET (หุ้นไทย), OANDA (บังคับสำหรับ Gold/Forex เสมอ)"),
                     "interval" to ParameterProperty(
                         type = "STRING",
                         description = "Timeframe: 15m, 1h, 4h, 1D, 1W",
@@ -128,7 +118,7 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
-                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA, TVC ฯลฯ")
+                    "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA (สำหรับ XAU/FX) เสมอ")
                 ),
                 required = listOf("symbol", "exchange")
             )
@@ -246,6 +236,119 @@ object TradingToolDefinitions {
                     )
                 ),
                 required = listOf("symbol", "exchange")
+            )
+        ),
+
+        // ── Phase 1: Advanced Analysis Suite ─────────────────────────────
+        
+        FunctionDeclaration(
+            name = "trading_fundamental_analysis",
+            description = """วิเคราะห์ปัจจัยพื้นฐาน (Fundamental) ของหุ้นรายตัว
+                |แสดง Revenue Growth, Profit Margins, P/E Ratio, Debt/Equity, ราคาเป้าหมาย (Target Price)
+                |และข้อเสนอแนะ (Recommendation) จากนักวิเคราะห์
+                |ใช้เมื่อผู้ใช้ถาม: "ดูปัจจัยพื้นฐาน AAPL", "หุ้น NVDA พื้นฐานเป็นยังไง" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Symbol เช่น AAPL, TSLA, NVDA")
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_fear_greed",
+            description = """ดึงดัชนีความกลัวและความโลภ (Crypto Fear & Greed Index)
+                |ใช้เพื่อดู Sentiment ภาพรวมของตลาด Crypto ว่าอยู่ในจุดที่กลัวสุดขีด (ซื้อ) หรือโลภสุดขีด (ขาย)
+                |ใช้เมื่อผู้ใช้ถาม: "ตลาดคริปโตตอนนี้เป็นยังไง", "กลัวหรือโลภแล้วตอนนี้" """.trimMargin(),
+            parameters = null
+        ),
+
+        FunctionDeclaration(
+            name = "trading_macro_calendar",
+            description = """ดึงปฏิทินเศรษฐกิจและเหตุการณ์ Macro สำคัญ
+                |แสดงวันที่, เหตุการณ์ (เช่น Fed Meeting, CPI), และระดับผลกระทบ (Impact)
+                |ใช้เมื่อผู้ใช้ถาม: "สัปดาห์นี้มีข่าวเศรษฐกิจอะไรบ้าง", "Fed ประชุมวันไหน" """.trimMargin(),
+            parameters = null
+        ),
+
+        FunctionDeclaration(
+            name = "trading_correlation_matrix",
+            description = """วิเคราะห์ความสัมพันธ์ (Correlation) ระหว่างสินทรัพย์หลายรายการ
+                |แสดงว่าสินทรัพย์เหล่านั้นเคลื่อนที่ไปในทิศทางเดียวกัน (1.0) หรือสวนทางกัน (-1.0) หรือไม่เกี่ยวกัน (0)
+                |ใช้เมื่อผู้ใช้ถาม: "ทองกับเงินสัมพันธ์กันแค่ไหน", "เทียบ correlation BTC กับ S&P500" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbols" to ParameterProperty("STRING", "รายชื่อ symbol คั่นด้วย comma เช่น BTC-USD,GC=F,^GSPC,EURUSD=X"),
+                    "days"    to ParameterProperty("NUMBER", "จำนวนวันย้อนหลัง (Default 30)")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_position_sizing",
+            description = """คำนวณขนาดไม้ (Position Sizing) ตามความเสี่ยงที่กำหนด
+                |ช่วยคำนวณว่าควรเปิดกี่ Units, มูลค่าสัญญาเท่าไหร่ และใช้ Leverage เท่าไหร่
+                |ใช้เมื่อผู้ใช้ถาม: "คำนวณไม้ให้หน่อย", "ถ้าเสี่ยง 2% ต้องเข้ากี่ BTC" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "balance"   to ParameterProperty("NUMBER", "เงินทุนในพอร์ต (Default 10000)"),
+                    "risk_pct"  to ParameterProperty("NUMBER", "ความเสี่ยงที่รับได้เป็น % (Default 1)"),
+                    "entry"     to ParameterProperty("NUMBER", "ราคาจุดเข้าซื้อ"),
+                    "stop_loss" to ParameterProperty("NUMBER", "ราคาจุดตัดขาดทุน")
+                ),
+                required = listOf("entry", "stop_loss")
+            )
+        ),
+
+        // ── Phase 5: Automation & Alerts ─────────────────────────────────
+
+        FunctionDeclaration(
+            name = "automation_manage_alerts",
+            description = """สร้างหรือลบการแจ้งเตือน (Alert) และการเฝ้าติดตามตลาดอัตโนมัติในเบื้องหลัง
+                |JARVIS จะทำการดึงข้อมูลมาตรวจสอบเงื่อนไขทุกๆ N นาที และส่ง Notification เมื่อพบจังหวะที่กำหนด
+                |Action: 'create' เพื่อสร้างใหม่, 'delete' เพื่อลบ (ระบุ alert_id)
+                |Tool Name: ชื่อ tool ที่จะใช้ดึงข้อมูล (เช่น trading_price, trading_sentiment)
+                |Condition: ฟิลด์ที่ต้องการตรวจ เช่น 'price', 'rsi', 'bias_score'
+                |Operator: >=, <=, ==, >, <
+                |ใช้เมื่อผู้ใช้สั่ง: "ช่วยเฝ้าดูทองให้หน่อย ถ้าถึง 4800 บอกฉันด้วย", "ลบการแจ้งเตือน ID 5" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action"   to ParameterProperty("STRING", "การกระทำ: create หรือ delete", enum = listOf("create", "delete")),
+                    "alert_id" to ParameterProperty("NUMBER", "ID ของการแจ้งเตือนที่ต้องการลบ (เฉพาะ action=delete)"),
+                    "name"     to ParameterProperty("STRING", "ชื่อเรียกของงานแจ้งเตือนนี้ (เช่น 'Gold Alert')"),
+                    "symbol"   to ParameterProperty("STRING", "Symbol ที่ต้องการเฝ้าดู เช่น XAUUSD, BTCUSDT"),
+                    "tool_name" to ParameterProperty("STRING", "Tool ที่จะใช้ดึงข้อมูล (default: trading_price)"),
+                    "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่จะตรวจสอบ (เช่น price)"),
+                    "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <)"),
+                    "condition_value"    to ParameterProperty("STRING", "ค่าเปรียบเทียบ (เช่น 4800, 30, bullish)"),
+                    "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการดึงข้อมูล (1-1440 นาที, default 15)")
+                ),
+                required = listOf("action")
+            )
+        ),
+        
+        // ── 14. Advanced Strategy Suite (LSD/Orderflow/Fibo) ───────────────
+        FunctionDeclaration(
+            name = "trading_deep_analysis_suite",
+            description = """วิเคราะห์ตลาดเชิงลึก 5 มิติ (LSD Trend, Orderflow Delta, Fibo Strength, Momentum Squeeze)
+                |เหมาะสำหรับการหาจุดกลับตัวและความต่อเนื่องของแนวโน้มระดับสถาบัน
+                |ใช้เมื่อผู้ใช้ต้องการการวิเคราะห์ที่แม่นยำที่สุด หรือถามหา "Institutional Analysis" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe: 15m, 1h, 4h, 1D",
+                        enum = listOf("15m", "1h", "4h", "1D")
+                    )
+                ),
+                required = listOf("symbol")
             )
         )
     )

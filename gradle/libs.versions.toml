@@ -19,6 +19,7 @@ coroutines = "1.10.1"
 kotlinx-datetime = "0.6.2"
 kotlinx-serialization = "1.8.0"
 camerax = "1.4.1"
+webview = "1.9.40"
 # File analysis is now handled natively via Gemini API
 
 [libraries]
@@ -57,6 +58,7 @@ camerax-core = { module = "androidx.camera:camera-core", version.ref = "camerax"
 camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+multiplatform-webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "webview" }
 # Native Gemini processing used instead
 
 [plugins]
