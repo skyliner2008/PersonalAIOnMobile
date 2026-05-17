@@ -1,0 +1,21 @@
+# Memory Index
+
+- [Project: PersonalAIBot](project_personalaibot.md) — โปรเจก KMP (Kotlin Multiplatform) — Jarvis-like AI Bot มี Trading Tools + SMC
+- [SMC Tools Added](project_smc_tools.md) — เพิ่ม SMC indicator tools เข้าระบบ (5 tools, 3 files ใหม่)
+- [Bugfix 2026-04-14](project_bugfix_2026_04_14.md) — แก้ 10 บัค: tool routing, resource leak, JSON parse safety
+- [mt5-core-server fixes 2026-04-20](project_mt5_core_fixes_2026_04_20.md) — แก้ 8 บัค: schema mismatch Kotlin↔Node, `/candles` endpoint, filling-mode fallback, side normalization, mt5 init cache
+- [MT5 UI redesign 2026-04-20](project_mt5_ui_redesign_2026_04_20.md) — รีดีไซน์ TradingTerminalScreen.kt (Overview/Trade/History/Settings/Connection), hero PnL, margin bar, symbol chips, volume stepper — signature คงเดิม
+- [MT5 Modify/Break-Even 2026-04-21](project_mt5_modify_break_even_2026_04_21.md) — เพิ่ม endpoint `/modify` (TRADE_ACTION_SLTP) ครบ 3-ชั้น: bridge + Node + Kotlin tool + UI dialog
+- [AutoTradingEngine 2026-04-21](project_auto_trading_engine_2026_04_21.md) — แก้ 3 บัค (token/race/prompt) + สร้าง AutoTradingEngine.kt (6-phase loop: analyze→strategize→execute→manage→record→learn)
+- [AutoTrading Modular 2026-04-21](project_auto_trading_modular_2026_04_21.md) — Modular Auto-Trading ครบ: Engine + ViewModel + ConfigStore + UI Tab ใน TradingTerminalScreen + inject App.kt
+- [AutoTrading Thresholds 2026-04-21](project_auto_trading_thresholds_2026_04_21.md) — ลด thresholds (minConfluence 60→45, bias diff 2→1) + เพิ่ม SKIP rationale วินิจฉัยได้
+- [Embedding Fix 2026-04-22](project_embedding_fix_2026_04_22.md) — สลับ cascade → `gemini-embedding-001` + Matryoshka truncate 3072→768 + L2 norm (แก้ 404 zero-vector)
+- [Auto-trade Audit 2026-04-22](project_auto_trading_audit_2026_04_22.md) — 7 fixes: extractTicket(order/deal), SL/TP tick-snap, actualRrr recompute, config hot-reload, BE direction guard, trade_outcome embeddings
+- [Auto-trade Hedge Guard 2026-04-23](project_auto_trading_hedge_guard_2026_04_23.md) — 5 fixes: hedge/scale-in cooldown, hard cap, ticket parser + SKIP-branch close, TF-downgrade guard, Manager audit log
+- [Auto-trade Fast & Cheap 2026-04-24](project_auto_trading_fast_cheap_2026_04_24.md) — 7 changes: deterministic pre-analysis + LLM cache (~70% token cut), parallel manage/cycle + 500ms snapshot TTL, new hedge rules (protect/scale-winner/close-BE), counter-trend H4 allowed, anti-hedge gate rewrite, orphan-backfill race guard
+- [V20.0 Compile Fixes 2026-05-01](project_v20_compile_fixes.md) — แก้ compile errors หลัง V20.0: duplicate smc export, missing autoTradingService methods, maxOutputTokens, safeJsonParse fallback, unicode comment crash
+- [Tool/Provider Audit 2026-05-03](project_tool_provider_audit_2026_05_03.md) — ลงทะเบียน trading_mt5_analyze + Claude streaming tool_use parsing + tools ใน OpenAI/Claude/OpenRouter/LiteLLM non-stream + per-round message sanitizer + assistant tool_calls/tool_result serialization
+- [Embedding Audit 2026-05-03](project_embedding_audit_2026_05_03.md) — ตรวจ Local Embedding ทั้ง mobile+server: drop embedding-001, cascade gemini-embedding-001+text-embedding-004, fit-to-768 ทุก provider, vectorStore reject wrong-dim/zero, ลด memory leak Onnx
+- [Local Model UI Bugfix 2026-05-03](project_local_model_ui_bugfix_2026_05_03.md) — แก้ปุ่ม Download Local Model: fire-and-forget ใน MainActivity, init ไม่ persist Ready, ตั้ง 2f โดยไม่ verify isAvailable
+- [V24.0 Fade-the-Level 2026-05-07](project_v24_fade_the_level.md) — รื้อ entry: BREAKOUT chasing → FADE THE LEVEL (Proximity Gate ใกล้ S/R 50-100 pip) + Sequential Entry (1ไม้/symbol) + Basket BE Guard + RRR float-fix
+- [V25.0 Real-Time Wall Engine 2026-05-10](project_v25_real_time_wall_engine.md) — Phase A+B+C+D ✅ all committed (~2,486 LOC + hotfix, shadow mode opt-in `V25_SHADOW=true`): tick gateway + bar-close bus + micro-wall + WallStateMachine 7-state + 5 playbooks (PB1 default + PB2 OB+FVG + PB3 sweep + PB4 range + PB5 retest) + cascade selector + 4 diagnostic endpoints. **Hotfix 2026-05-10:** TickGateway throttle V25_STALE_TICK 1/30s + adaptive back-off ×30 (cap 60s) + WallStateMachine dedup frozen-log. Pending: LLM gating + ExecutionService handoff + V24 sunset

@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse FGS = no time limit; required for long-running market monitoring -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -27,6 +29,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:largeHeap="true"
         android:requestLegacyExternalStorage="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
@@ -44,12 +47,21 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Background automation/monitoring service -->
+        <!-- Background automation/monitoring service.
+             foregroundServiceType MUST be `specialUse` (NOT `dataSync`).
+             dataSync FGS has a 6h time limit on Android 14+ (API 34); when the
+             system kills it, START_STICKY tries to restart and hits
+             ForegroundServiceStartNotAllowedException → app crash.
+             specialUse has no time limit but requires this property tag. -->
         <service
             android:name=".service.JarvisAutomationService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="market_monitoring_alerts" />
+        </service>
 
         <activity
             android:exported="true"

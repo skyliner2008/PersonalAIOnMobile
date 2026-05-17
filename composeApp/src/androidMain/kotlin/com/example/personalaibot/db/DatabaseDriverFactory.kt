@@ -8,4 +8,7 @@ actual class DatabaseDriverFactory(private val context: Context) {
     actual fun createDriver(): SqlDriver {
         return AndroidSqliteDriver(JarvisDatabase.Schema, context, "jarvis.db")
     }
+    actual fun getAppDir(): String {
+        return context.filesDir.absolutePath
+    }
 }

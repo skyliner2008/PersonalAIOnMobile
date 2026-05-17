@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.sqlDelight)
     alias(libs.plugins.kotlinx.serialization)
+    alias(libs.plugins.googleServices)
 }
 
 kotlin {
@@ -45,8 +46,17 @@ kotlin {
             implementation(libs.camerax.camera2)
             implementation(libs.camerax.lifecycle)
             implementation(libs.camerax.view)
+            
+            // ONNX Runtime for Local Embeddings (Android only)
+            // Upgraded from 1.19.2 → 1.23.0 for 16 KB page size alignment (Google Play requirement Nov 2025)
+            implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.0")
 
-            // File Analysis is now handled natively by Gemini API
+            // Ktor Android Client for downloading large files
+            implementation(libs.ktor.client.android)
+
+            // Firebase
+            implementation(platform(libs.firebase.bom.get().toString()))
+            implementation(libs.firebase.vertexai.get().toString())
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

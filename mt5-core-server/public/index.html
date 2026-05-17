@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS MT5 - Professional Trader</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <!-- Google Fonts: Inter & Fira Code -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">J</div>
+        <div class="brand-text">
+          <h2>JARVIS MT5</h2>
+          <p>Professional Trader</p>
+        </div>
+      </div>
+      
+      <nav class="nav-links">
+        <button class="nav-item active" data-view="overview">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Overview
+        </button>
+        <button class="nav-item" data-view="terminal">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"></path><path d="M17 20V4"></path><path d="m3 8 4-4 4 4"></path><path d="M7 4v16"></path></svg>
+          Terminal
+        </button>
+        <button class="nav-item" data-view="settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          Auto Trade
+        </button>
+        <button class="nav-item" data-view="system">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          System
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-status">
+          <div class="status-dot online" id="wsStateDot"></div>
+          <span id="wsStateText">Connected</span>
+        </div>
+        <button id="logoutBtn" class="btn-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Auth Lock Overlay -->
+      <div id="authOverlay" class="auth-overlay show">
+        <div class="auth-card">
+          <h2>Access Restricted</h2>
+          <p>Please enter your ID and Password to unlock the dashboard.</p>
+          <div class="form-group" style="text-align: left;">
+            <label>User ID</label>
+            <input type="text" id="adminIdInput" placeholder="Enter ID" value="admin">
+          </div>
+          <div class="form-group" style="text-align: left;">
+            <label>Password</label>
+            <input type="password" id="adminPasswordInput" placeholder="Enter Password">
+          </div>
+          <div id="loginError" style="color: #ff4d4d; margin-top: 10px; font-size: 0.9rem; display: none; background: rgba(255,77,77,0.1); padding: 10px; border-radius: 4px; text-align: left;"></div>
+          <button id="unlockBtn" class="btn-primary" style="width: 100%; margin-top: 15px;">Unlock</button>
+        </div>
+      </div>
+
+      <!-- Header -->
+      <header class="top-header">
+        <div class="header-title">
+          <h1 id="viewTitle">Overview</h1>
+        </div>
+        <div class="header-actions">
+          <button id="refreshBtn" class="btn-secondary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"></path><path d="M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+            Refresh
+          </button>
+          <div class="account-selector">
+            <span id="accountLabel">Live Account</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="content-area">
+        
+        <!-- VIEW: Overview -->
+        <section class="view active" id="view-overview">
+          <!-- Bento Grid -->
+          <div class="bento-grid">
+            <!-- Account Summary -->
+            <div class="bento-item span-2">
+              <div class="card-header">
+                <h3>Account Summary</h3>
+                <span class="badge" id="engineStatus">IDLE</span>
+              </div>
+              <div class="metric-grid">
+                <div class="metric-box">
+                  <span>Balance</span>
+                  <strong id="balanceText">$0.00</strong>
+                </div>
+                <div class="metric-box">
+                  <span>Equity</span>
+                  <strong id="equityText">$0.00</strong>
+                </div>
+                <div class="metric-box">
+                  <span>Free Margin</span>
+                  <strong id="marginText">$0.00</strong>
+                </div>
+                <div class="metric-box">
+                  <span>Total PnL</span>
+                  <strong id="pnlText" class="neutral">$0.00</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Engine Controls -->
+            <div class="bento-item">
+              <div class="card-header">
+                <h3>Engine Controls</h3>
+              </div>
+              <div class="controls-grid">
+                <button id="startBtn" class="btn-success">Start</button>
+                <button id="stopBtn" class="btn-danger">Stop</button>
+                <button id="runOnceBtn" class="btn-secondary">Run Once</button>
+                <button id="learnBtn" class="btn-secondary">Learn</button>
+                <button id="haltBtn" class="btn-danger span-2">Emergency Halt</button>
+              </div>
+            </div>
+
+            <!-- Open Positions -->
+            <div class="bento-item span-2 large">
+              <div class="card-header">
+                <h3>Open Positions</h3>
+                <div class="actions">
+                  <button id="bulkBeBtn" class="btn-sm btn-secondary">Break Even</button>
+                  <button id="bulkCloseAllBtn" class="btn-sm btn-danger">Close All</button>
+                </div>
+              </div>
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Volume</th>
+                      <th>Open</th>
+                      <th>Current</th>
+                      <th>PnL</th>
+                      <th>SL/TP</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="positionsBody">
+                    <tr><td colspan="8" class="text-center">No open positions</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Decision Feed -->
+            <div class="bento-item large">
+              <div class="card-header">
+                <h3>Decision Feed</h3>
+                <span class="badge" id="cycleCount">0 Cycles</span>
+              </div>
+              <div class="feed-container" id="decisionFeed">
+                <div class="feed-item empty">No recent signals</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW: Terminal -->
+        <section class="view" id="view-terminal">
+          <div class="bento-grid">
+            <!-- Dual List Symbol Manager -->
+            <div class="bento-item span-2 large">
+              <div class="card-header">
+                <h3>Symbol Manager</h3>
+                <div class="search-box">
+                  <input type="text" id="symbolSearch" placeholder="Search symbol...">
+                </div>
+              </div>
+              <div class="dual-list-container">
+                <!-- Left: Broker Symbols -->
+                <div class="list-panel">
+                  <h4>Broker Symbols</h4>
+                  <div class="list-scroll" id="brokerSymbolsList">
+                    <!-- Dynamic Items -->
+                  </div>
+                </div>
+                <!-- Middle: Arrows (Implicit by layout or click) -->
+                <!-- Right: Auto Trade Watchlist -->
+                <div class="list-panel">
+                  <h4>Auto Trade Watchlist</h4>
+                  <div class="list-scroll" id="autoWatchlist">
+                    <!-- Dynamic Items -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Manual Order Form -->
+            <div class="bento-item">
+              <div class="card-header">
+                <h3>Manual Order</h3>
+              </div>
+              <form class="order-form" id="manualOrderForm" onsubmit="return false;">
+                <div class="form-group">
+                  <label>Symbol</label>
+                  <input type="text" id="orderSymbol" placeholder="XAUUSD">
+                </div>
+                <div class="form-group">
+                  <label>Volume</label>
+                  <input type="number" id="orderVolume" step="0.01" value="0.01">
+                </div>
+                <div class="form-group">
+                  <label>Type</label>
+                  <select id="orderType">
+                    <option value="buy">BUY</option>
+                    <option value="sell">SELL</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>SL (Optional)</label>
+                  <input type="number" id="orderSL" step="0.01" placeholder="0.00">
+                </div>
+                <div class="form-group">
+                  <label>TP (Optional)</label>
+                  <input type="number" id="orderTP" step="0.01" placeholder="0.00">
+                </div>
+                <button id="placeOrderBtn" class="btn-primary span-2">Place Order</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW: Settings (Auto Trade) -->
+        <section class="view" id="view-settings">
+          <div class="bento-grid">
+            <!-- Agent Models -->
+            <div class="bento-item span-2">
+              <div class="card-header">
+                <h3>AI Agent Configuration</h3>
+                <button id="refreshProvidersBtn" class="btn-secondary">Load Models</button>
+              </div>
+              <div class="settings-grid">
+                <div class="form-group">
+                  <label>Analyst Model</label>
+                  <select id="analystModelSelect"><option>Loading...</option></select>
+                </div>
+                <div class="form-group">
+                  <label>Risk Officer Model</label>
+                  <select id="riskOfficerModelSelect"><option>Loading...</option></select>
+                </div>
+                <div class="form-group">
+                  <label>Execution Model</label>
+                  <select id="executionModelSelect"><option>Loading...</option></select>
+                </div>
+                <div class="form-group">
+                  <label>SL/TP Agent</label>
+                  <select id="slTpAgentSelect"><option>Loading...</option></select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Risk Settings -->
+            <div class="bento-item">
+              <div class="card-header">
+                <h3>Risk Management</h3>
+              </div>
+              <div class="settings-grid single">
+                <div class="form-group">
+                  <label>Max Risk Per Trade (%)</label>
+                  <input type="number" id="maxRiskPct" step="0.1" value="1.0">
+                </div>
+                <div class="form-group">
+                  <label>Default SL (Pips/ATR)</label>
+                  <input type="number" id="defaultSL" value="50">
+                </div>
+                <div class="form-group">
+                  <label>Default TP (RRR)</label>
+                  <input type="number" id="defaultTP" value="2.0">
+                </div>
+              </div>
+            </div>
+
+            <!-- Toggle Settings -->
+            <div class="bento-item span-3">
+              <div class="card-header">
+                <h3>System Modes</h3>
+              </div>
+              <div class="toggles-row">
+                <div class="toggle-box">
+                  <span>Live Trading</span>
+                  <label class="switch danger-switch"><input id="liveToggle" type="checkbox"><i></i></label>
+                </div>
+                <div class="toggle-box">
+                  <span>AI Mode (Auto)</span>
+                  <label class="switch"><input id="aiToggle" type="checkbox"><i></i></label>
+                </div>
+                <div class="toggle-box">
+                  <span>V25 Adaptive</span>
+                  <label class="switch"><input id="v25Toggle" type="checkbox"><i></i></label>
+                </div>
+                <div class="toggle-box">
+                  <span>V25 Only</span>
+                  <label class="switch"><input id="v25OnlyToggle" type="checkbox"><i></i></label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- VIEW: System -->
+        <section class="view" id="view-system">
+          <div class="bento-grid">
+            <!-- MT5 Clients -->
+            <div class="bento-item span-2">
+              <div class="card-header">
+                <h3>MT5 Terminal Clients</h3>
+                <button id="refreshClientsBtn" class="btn-secondary">Refresh</button>
+              </div>
+              <div class="list-scroll" id="mt5ClientsList">
+                <!-- Dynamic Items -->
+              </div>
+              <div class="input-row" style="margin-top: 15px;">
+                <input type="text" id="newClientPath" placeholder="C:\Path\To\terminal64.exe">
+                <button id="startClientBtn" class="btn-success">Start New</button>
+              </div>
+            </div>
+
+            <!-- Pairing -->
+            <div class="bento-item">
+              <div class="card-header">
+                <h3>Device Pairing</h3>
+                <button id="refreshPairBtn" class="btn-secondary">Refresh</button>
+              </div>
+              <div class="list-scroll" id="pairRequests">
+                <!-- Dynamic Items -->
+              </div>
+            </div>
+
+            <!-- System Log -->
+            <div class="bento-item span-3">
+              <div class="card-header">
+                <h3>System Log</h3>
+              </div>
+              <div id="eventLog" class="log-container">
+                <!-- Log lines -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">Message</div>
+
+  <!-- Dashboard Logic -->
+  <script src="dashboard.js?v=11"></script>
+</body>
+</html>

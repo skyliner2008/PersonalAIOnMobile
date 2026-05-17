@@ -11,6 +11,8 @@ object JarvisTheme {
     val Surface = Color(0xFF141422)
     val Card    = Color(0xFF1C1C2E)
     val Purple  = Color(0xFF7C4DFF)
+    val Amber   = Color(0xFFFFB300)   // 2026-04-30 — offline / stale banner
+    val Green   = Color(0xFF22C55E)   // 2026-04-30 — success indicators
 
     val ColorScheme = darkColorScheme(
         primary          = Cyan,

@@ -2,6 +2,7 @@ package com.example.personalaibot.data
 
 import com.example.personalaibot.tools.ToolExecutor
 import com.example.personalaibot.tools.ToolCall
+import com.example.personalaibot.data.embedding.fitToTargetDimension
 import com.example.personalaibot.logDebug
 import com.example.personalaibot.logError
 import com.example.personalaibot.tools.ToolRegistry
@@ -30,7 +31,7 @@ data class GeminiRequest(
 
 @Serializable
 data class GeminiContent(
-    val parts: List<Part>,
+    val parts: List<Part> = emptyList(),
     val role: String? = null
 )
 
@@ -118,9 +119,9 @@ data class GeminiModel(
 
 @Serializable
 data class EmbeddingRequest(
-    val model: String,
     val content: GeminiContent,
-    val taskType: String? = null
+    val taskType: String? = null,
+    val title: String? = null
 )
 
 @Serializable
@@ -145,12 +146,18 @@ Phase 3: Smart Scanning — ค้นหาตัวเด่นที่กำ�
 Phase 4: SMC & Institutional Entry — หาจุดเข้าที่คมที่สุดด้วย ICT/SMC และ Deep Suite (trading_smc_analysis, trading_deep_analysis_suite, trading_smc_liquidity)
 Phase 5: Jarvis Automation — ตั้งค่าระบบเฝ้าติดตาม (automation_manage_alerts) เพื่อแจ้งเตือนโอกาสการเทรดโดยอัตโนมัติ
 
+[IMPORTANT]: เมื่อผู้ใช้สั่งให้ "วิเคราะห์เชิงลึก", "Deep Analysis", หรือ "วิเคราะห์ Confluence" ให้เรียกใช้ 'trading_deep_analysis_suite' เป็นเครื่องมือหลักเสมอ เพราะเป็นเครื่องมือที่รวบรวม Multi-Agent Consensus และ SMC ไว้ในที่เดียว
+
 กฎการทำงาน (STRICT):
 1. [SOURCE OF TRUTH]: ห้ามคาดเดาราคาหรือสภาวะตลาดเองเด็ดขาด ต้องใช้ Trading Tools ดึงข้อมูลปัจจุบันเสมอ
 2. [CONFLUENCE]: อย่าด่วนสรุปจากเครื่องมือเดียว ให้หาความสอดคล้อง (Confluence) ระหว่าง Sentiment + TA + SMC + Deep Suite (V12.5)
 3. [AUTOMATION]: เมื่อเห็นโอกาสการเทรดที่ยังไม่ถึงจุดเข้า ให้แนะนำผู้ใช้ตั้งค่า 'automation_manage_alerts' เพื่อเฝ้าราคา
 4. [AESTHETICS]: แสดงผลการวิเคราะห์ด้วยตาราง (Table), แผนภาพขั้นตอน (Workflow) และสรุปความเสี่ยง (Position Sizing)
-5. [PERSONA]: สุภาพ มั่นใจ ตรงไปตรงมาแบบผู้ช่วยอัจฉริยะ (British Butler Style)"""
+5. [PERSONA]: สุภาพ มั่นใจ ตรงไปตรงมาแบบผู้ช่วยอัจฉริยะ (British Butler Style)
+6. [ANTI-HALLUCINATION]: เมื่อได้รับผลลัพธ์จาก Tool ห้ามแต่งเติมตัวเลข ราคา หรือ indicator ที่ไม่ได้อยู่ใน Tool Result อ้างอิงเฉพาะข้อมูลที่ Tool คืนมาเท่านั้น ถ้าข้อมูลไม่ครบให้บอกตรงๆ ว่า "ไม่มีข้อมูล" แทนการคาดเดา
+7. [TOOL DATA INTEGRITY]: เมื่อรายงานราคา ตัวเลข หรือ indicator ต้องคัดลอกค่าจาก Tool Result ตรงๆ ห้ามปัดเศษ ห้ามเปลี่ยนแปลง ห้ามใช้ค่าจาก memory หรือ training data มาแทน
+8. [MULTI-TIMEFRAME]: เมื่อวิเคราะห์ MT5 ให้เรียก trading_mt5_analyze หลาย timeframe เสมอ (อย่างน้อย H4, H1, M15) ในรอบเดียวกัน เพื่อหา confluence ข้าม timeframe แล้วสรุปเป็นตาราง
+9. [COMPLETE ANALYSIS]: การวิเคราะห์ต้องครบถ้วน ประกอบด้วย: ภาพรวม Regime/Bias ทุก TF, ตาราง Indicator, Confluence Score, แนวรับ-แนวต้าน, จุดเข้า/SL/TP ที่แนะนำ, และ Risk Assessment"""
 
 // ─── GeminiService ──────────────────────────────────────────────────────────
 
@@ -160,19 +167,20 @@ class GeminiService(
     private var modelName: String
 ) {
     private val json = Json { ignoreUnknownKeys = true }
-    // Show raw tool outputs in chat, but hide internal tool-call traces.
+    // Keep tool-call traces out of the visible chat; tool outputs should go back to the model, not the user.
     private val showToolRequestInChat = false
-    private val showToolResultInChat = true
-    private val tvOnlyTradingFunctionNames = setOf(
-        "trading_price",
-        "trading_smc_analysis",
-        "trading_smc_sweeps",
-        "trading_smc_liquidity",
-        "trading_smc_orderblocks",
-        "trading_smc_structure"
-    )
+    private val showToolResultInChat = false
+    // Tool set constants moved to ToolRegistry for cross-provider reuse
 
     fun updateConfig(newApiKey: String, newModelName: String) {
+        if (newModelName.contains("gemini", ignoreCase = true) || !newModelName.contains("/")) {
+            val masked = if (newApiKey.length > 8) {
+                newApiKey.take(4) + "..." + newApiKey.takeLast(4)
+            } else if (newApiKey.isNotBlank()) {
+                "****"
+            } else "BLANK"
+            com.example.personalaibot.logDebug("GeminiService", "Updating Gemini config: model=$newModelName, key=$masked")
+        }
         apiKey = newApiKey
         modelName = newModelName
     }
@@ -180,25 +188,7 @@ class GeminiService(
     private fun cleanModelName(): String =
         if (modelName.startsWith("models/")) modelName else "models/$modelName"
 
-    private fun isTradingPrompt(prompt: String, intentAddon: String): Boolean {
-        val text = "$prompt $intentAddon".lowercase()
-        val keywords = listOf(
-            "trading", "trade", "xau", "xauusd", "gold", "forex", "smc",
-            "liquidity", "sweep", "order block", "orderblock", "bos", "choch",
-            "premium", "discount", "fvg", "price", "gc=f", "oanda", "tv:"
-        )
-        return keywords.any { text.contains(it) }
-    }
-    private fun isSmcPrompt(prompt: String, intentAddon: String): Boolean {
-        val text = "$prompt $intentAddon".lowercase()
-        val keywords = listOf(
-            "smc", "sweep", "liquidity", "order block", "orderblock",
-            "bos", "choch", "fvg", "premium", "discount", "ict",
-            "trading_smc", "market structure",
-            "สภาพคล่อง", "ออเดอร์บล็อก", "โครงสร้าง", "สวีป", "สมาร์ทมันนี่"
-        )
-        return keywords.any { text.contains(it) }
-    }
+    // Moved to TradingIntentUtility for cross-provider consistency
     private fun generateContentUrl(): String {
         val model = cleanModelName()
         return "https://generativelanguage.googleapis.com/v1beta/$model:generateContent?key=$apiKey"
@@ -212,8 +202,14 @@ class GeminiService(
     private fun listModelsUrl(): String =
         "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
 
-    private fun embedContentUrl(): String =
-        "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=$apiKey"
+    /**
+     * Cascade-aware embedding URL builder.
+     * `embedding-001` is deprecated and 404s on most projects since 2026-04;
+     * `gemini-embedding-001` (3072 dim) and `text-embedding-004` (768 dim)
+     * are the supported v1beta models.
+     */
+    private fun embedContentUrl(model: String = "gemini-embedding-001"): String =
+        "https://generativelanguage.googleapis.com/v1beta/models/$model:embedContent?key=$apiKey"
 
     private fun buildRequestJson(
         userMessage: String,
@@ -225,25 +221,42 @@ class GeminiService(
         extraContents: List<JsonObject> = emptyList(),
         forceTool: Boolean = false,
         fileData: List<InlineData> = emptyList(),
-        allowedFunctionNames: Set<String>? = null
+        allowedFunctionNames: Set<String>? = null,
+        toolPolicyLabel: String? = null,
+        temperature: Float = 0.7f
     ): JsonObject {
+        // --- Context Pruning (Token Saving) ---
+        val maxCoreContextChars = 15000
+        val prunedCoreContext = if (coreContext.length > maxCoreContextChars) {
+            coreContext.take(maxCoreContextChars) + "\n...[Memories truncated to save tokens]..."
+        } else coreContext
+
         val systemPrompt = buildString {
             append(JARVIS_SYSTEM_PROMPT)
-            if (coreContext.isNotBlank()) { append("\n\n"); append(coreContext) }
+            if (prunedCoreContext.isNotBlank()) { append("\n\n"); append(prunedCoreContext) }
             if (intentAddon.isNotBlank()) { append("\n\n"); append(intentAddon) }
             if (includeFunctionTools) {
                 append("\n\n[REMINDER] กรุณาใช้ Tool สำหรับข้อมูลที่ต้องการความแม่นยำและเป็นปัจจุบัน ห้ามตอบจากความจำเครื่อง (Internal Memory) เด็ดขาด")
             }
             if (!allowedFunctionNames.isNullOrEmpty()) {
                 append("\n\n[TRADING TOOL POLICY]")
+                toolPolicyLabel?.let { append("\n- Active mode: $it.") }
                 append("\n- If this is a trading task, use only these function names: ${allowedFunctionNames.joinToString(", ")}.")
-                append("\n- Do not call trading_macro_calendar, trading_deep_analysis_suite, or any undefined function.")
-                append("\n- Keep analysis in TV-only SMC flow with strict source consistency.")
+                if (toolPolicyLabel == "MT5-only broker mode") {
+                    append("\n- Use broker data ONLY. Do not call TradingView (TV) derived tools (e.g., trading_price, trading_smc_analysis).")
+                    append("\n- Use 'trading_mt5_analyze' for all technical and SMC analysis from the broker.")
+                } else if (toolPolicyLabel == "Deep Confluence Suite mode") {
+                    append("\n- Use Deep Analysis Suite to combine Multi-Agent and SMC analysis.")
+                } else {
+                    append("\n- Default to TV-only SMC flow for high-level technical analysis.")
+                }
             }
         }
 
         val contentsArray = buildJsonArray {
-            history.forEach { turn ->
+            // Prune history to last 20 turns
+            val prunedHistory = if (history.size > 20) history.takeLast(20) else history
+            prunedHistory.forEach { turn ->
                 add(buildJsonObject {
                     put("role", turn.role)
                     put("parts", buildJsonArray { add(buildJsonObject { put("text", turn.content) }) })
@@ -274,7 +287,8 @@ class GeminiService(
                 val decls = if (allowedFunctionNames.isNullOrEmpty()) {
                     allDecls
                 } else {
-                    allDecls.filter { it.name in allowedFunctionNames }
+                    // Include non-trading tools + allowed trading tools
+                    allDecls.filter { !com.example.personalaibot.tools.ToolRegistry.isTradingTool(it.name) || it.name in allowedFunctionNames }
                 }
                 if (decls.isNotEmpty()) {
                     add(buildJsonObject {
@@ -321,8 +335,8 @@ class GeminiService(
                 put("parts", buildJsonArray { add(buildJsonObject { put("text", systemPrompt) }) })
             })
             put("generationConfig", buildJsonObject {
-                put("temperature", 0.7)
-                put("maxOutputTokens", 2048)
+                put("temperature", temperature)
+                put("maxOutputTokens", 8192)
             })
             if (forceTool && includeFunctionTools) {
                 put("tool_config", buildJsonObject {
@@ -371,30 +385,48 @@ class GeminiService(
         enableGrounding: Boolean = false
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
-            emit("⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน")
+            logError("GeminiService", "Chat failed: API Key is blank")
+            emit("⚠️ ไม่สามารถเชื่อมต่อ Gemini ได้: กรุณาตรวจสอบ API Key ใน Settings และกด 'บันทึกการตั้งค่า' ก่อนใช้งาน")
             return@flow
         }
 
         val toolHistory = mutableListOf<JsonObject>()
         val pendingFiles = mutableListOf<InlineData>()
         var round = 1
-        val maxRounds = 5
+        val maxRounds = 10
+        var lastToolCallDetected = false
 
         try {
-            val tradingPrompt = isTradingPrompt(prompt, intentAddon)
-            val smcPrompt = isSmcPrompt(prompt, intentAddon)
-            val allowedTradingFunctions = if (tradingPrompt) {
-                if (smcPrompt) tvOnlyTradingFunctionNames - "trading_price" else tvOnlyTradingFunctionNames
+            val tradingPrompt = com.example.personalaibot.ai.TradingIntentUtility.isTradingPrompt(prompt, intentAddon)
+            val smcPrompt     = com.example.personalaibot.ai.TradingIntentUtility.isSmcPrompt(prompt, intentAddon)
+            val mt5Prompt     = com.example.personalaibot.ai.TradingIntentUtility.isMt5Prompt(prompt, intentAddon)
+            val deepPrompt    = com.example.personalaibot.ai.TradingIntentUtility.isDeepAnalysisPrompt(prompt, intentAddon)
+
+            val allowedTradingFunctions = if (tradingPrompt || mt5Prompt || deepPrompt || smcPrompt) {
+                // สำหรับ Trading ทุกกรณี ให้ส่งทั้ง TV และ MT5 เพื่อให้ Model ตัดสินใจได้เอง
+                // และป้องกันกรณี Filter พลาดทำให้ Tool หาย
+                ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
             } else null
+
+            val toolPolicyLabel = when {
+                deepPrompt -> "Deep Confluence Suite mode"
+                mt5Prompt -> "MT5-only broker mode"
+                !allowedTradingFunctions.isNullOrEmpty() -> "TV-only SMC mode"
+                else -> null
+            }
 
             while (round <= maxRounds) {
                 logDebug("GeminiService", "Tool Loop: Round $round")
-                
+
                 val financialKeywords = listOf(
                     "market", "sector", "crypto", "btc", "aapl", "gold",
                     "xau", "forex", "stock", "trading", "price"
                 )
                 val forceTool = financialKeywords.any { prompt.contains(it, ignoreCase = true) }
+
+                // ลด temperature ในรอบที่ 2+ เพื่อป้องกัน hallucination
+                // รอบแรก (tool selection) ใช้ 0.7, รอบหลัง (สรุปผล) ใช้ 0.4
+                val roundTemperature = if (round == 1) 0.7f else 0.4f
 
                 val requestBody = buildRequestJson(
                     userMessage = prompt,
@@ -406,15 +438,20 @@ class GeminiService(
                     forceTool = forceTool && round == 1, // บังคับเฉพาะรอบแรก
                     extraContents = toolHistory,
                     fileData = pendingFiles,
-                    allowedFunctionNames = allowedTradingFunctions
+                    allowedFunctionNames = allowedTradingFunctions,
+                    toolPolicyLabel = toolPolicyLabel,
+                    temperature = roundTemperature
                 )
-                
+
                 // Clear pending files after sending them
                 pendingFiles.clear()
 
                 var foundFunctionCall = false
                 val currentRoundFunctionCalls = mutableListOf<DetectedFunctionCall>()
                 val accumulatedModelParts = mutableListOf<JsonElement>()
+                // Buffer text ระหว่าง streaming — ถ้ามี function call ในรอบนี้ ข้อความจะถูกทิ้ง
+                // เพราะเป็น "ความคิด" ของ model ก่อนได้ข้อมูลจริง (อาจ hallucinate ตัวเลข)
+                val textBuffer = StringBuilder()
 
                 client.preparePost(streamGenerateContentUrl()) {
                     contentType(ContentType.Application.Json)
@@ -435,7 +472,7 @@ class GeminiService(
                         if (trimmed.startsWith("data: ")) {
                             val jsonStr = trimmed.removePrefix("data: ").trim()
                             if (jsonStr.isBlank() || jsonStr == "[DONE]") continue
-                            
+
                             try {
                                 val root = json.parseToJsonElement(jsonStr).jsonObject
                                 val candidates = root["candidates"]?.jsonArray
@@ -445,19 +482,24 @@ class GeminiService(
                                 parts?.forEach { part ->
                                     val partObj = part.jsonObject
                                     accumulatedModelParts.add(part)
-                                    
-                                    // 1. Text extraction
+
+                                    // 1. Buffer text (จะ emit ต่อเมื่อไม่มี function call ในรอบนี้)
+                                    // แต่ถ้าอยู่ใน Round 2+ (มี toolHistory) ให้ stream ทันที เพื่อไม่ให้ UI ดูเหมือนค้าง (Dead UI)
                                     val text = partObj["text"]?.jsonPrimitive?.content
                                     if (!text.isNullOrEmpty()) {
-                                        emit(text)
+                                        if (toolHistory.isNotEmpty()) {
+                                            emit(text)
+                                        } else {
+                                            textBuffer.append(text)
+                                        }
                                     }
-                                    
+
                                     // 2. Function call detection
                                     if (partObj.containsKey("functionCall") || partObj.containsKey("function_call")) {
                                         foundFunctionCall = true
                                     }
                                 }
-                                
+
                                 // Check for safety/finish reasons
                                 if (content == null) {
                                     candidates?.firstOrNull()?.jsonObject?.get("finishReason")?.jsonPrimitive?.content?.let { reason ->
@@ -473,13 +515,28 @@ class GeminiService(
                     }
                 }
 
+                // Emit buffered text เฉพาะเมื่อไม่มี function call (= final answer)
+                // ถ้ามี function call → text เป็นแค่ "thinking" ที่อาจมีตัวเลขหลอน → ทิ้ง
+                if (!foundFunctionCall && textBuffer.isNotEmpty()) {
+                    emit(textBuffer.toString())
+                } else if (foundFunctionCall && textBuffer.isNotEmpty()) {
+                    logDebug("GeminiService", "Discarded pre-tool text (${textBuffer.length} chars) to prevent hallucination")
+                }
+
                 if (foundFunctionCall) {
+                    lastToolCallDetected = true
                     // Extract all calls from the accumulated parts
                     val fcs = extractFunctionCallsFromParts(JsonArray(accumulatedModelParts))
                     currentRoundFunctionCalls.addAll(fcs)
-                    if (smcPrompt || currentRoundFunctionCalls.any { it.name.startsWith("trading_smc_") }) {
-                        currentRoundFunctionCalls.removeAll { it.name == "trading_price" }
+                    if (mt5Prompt && !deepPrompt) {
+                        // In MT5 mode, prefer MT5 tools but allow some cross-over if explicitly called
+                        val toRemove = currentRoundFunctionCalls.filter { it.name in ToolRegistry.tvOnlyTradingFunctionNames && it.name !in allowedTradingFunctions!! }
+                        if (toRemove.isNotEmpty()) {
+                            logDebug("GeminiService", "Filtering out non-MT5 tools in MT5 mode: ${toRemove.map { it.name }}")
+                            currentRoundFunctionCalls.removeAll(toRemove.toSet())
+                        }
                     }
+                    logDebug("GeminiService", "Final tools to execute in Round $round: ${currentRoundFunctionCalls.map { it.name }}")
 
                     // Execute tools
                     val toolResponseParts = mutableListOf<JsonElement>()
@@ -492,10 +549,10 @@ class GeminiService(
                         } catch (e: Exception) {
                             com.example.personalaibot.tools.ToolResult(fc.name, "Error: ${e.message}", true)
                         }
-                        
-                        logDebug("GeminiService", "Tool Result: ${toolResult.result}")
+
+                        logDebug("GeminiService", "Tool Result: ${sanitizeToolResultForLog(toolResult.result)}")
                         if (showToolResultInChat) {
-                            emit("\n\n${toolResult.result}\n")
+                            emit("\n\n${sanitizeToolResultForChat(toolResult.result)}\n")
                         }
 
                         // Intercept Binary Files for Native Processing
@@ -504,7 +561,7 @@ class GeminiService(
                                 val mime = toolResult.result.substringAfter("mime=").substringBefore("::data=")
                                 val base64 = toolResult.result.substringAfter("::data=")
                                 pendingFiles.add(InlineData(mime, base64))
-                                
+
                                 toolResponseParts.add(buildJsonObject {
                                     put("functionResponse", buildJsonObject {
                                         put("name", fc.name)
@@ -524,11 +581,13 @@ class GeminiService(
                                 })
                             }
                         } else {
+                            // Truncate large tool results to prevent "Request Entity Too Large"
+                            val truncatedResult = truncateToolResult(toolResult.result)
                             toolResponseParts.add(buildJsonObject {
                                 put("functionResponse", buildJsonObject {
                                     put("name", fc.name)
                                     put("response", buildJsonObject {
-                                        put("result", toolResult.result)
+                                        put("result", truncatedResult)
                                     })
                                 })
                             })
@@ -545,10 +604,60 @@ class GeminiService(
                         put("parts", JsonArray(toolResponseParts))
                     })
 
+                    if (currentRoundFunctionCalls.isEmpty()) {
+                        logDebug("GeminiService", "Warning: Function call detected but no valid tools remained after filtering. Breaking loop.")
+                        break
+                    }
                     round++
                 } else {
+                    lastToolCallDetected = false
                     // No more function calls, exit loop
                     break
+                }
+            }
+
+            // Force Final Summary if max rounds reached
+            if (round > maxRounds && lastToolCallDetected) {
+                logDebug("GeminiService", "Max rounds reached. Forcing final summary.")
+                emit("\n\n(ระบบ: วิเคราะห์ข้อมูลครบถ้วนแล้ว กำลังสรุปผล...)\n")
+
+                val finalRequestBody = buildRequestJson(
+                    userMessage = prompt,
+                    history = history,
+                    intentAddon = intentAddon,
+                    coreContext = coreContext,
+                    enableGrounding = enableGrounding,
+                    includeFunctionTools = false, // Disable tools to force text response
+                    extraContents = toolHistory,
+                    fileData = pendingFiles,
+                    allowedFunctionNames = null
+                )
+
+                client.preparePost(streamGenerateContentUrl()) {
+                    contentType(ContentType.Application.Json)
+                    setBody(finalRequestBody.toString())
+                }.execute { httpResponse ->
+                    if (httpResponse.status.isSuccess()) {
+                        val channel = httpResponse.bodyAsChannel()
+                        while (!channel.isClosedForRead) {
+                            val line = channel.readUTF8Line() ?: break
+                            val trimmed = line.trim()
+                            if (trimmed.startsWith("data: ")) {
+                                val jsonStr = trimmed.removePrefix("data: ").trim()
+                                if (jsonStr.isBlank() || jsonStr == "[DONE]") continue
+                                try {
+                                    val root = json.parseToJsonElement(jsonStr).jsonObject
+                                    val candidates = root["candidates"]?.jsonArray
+                                    val content = candidates?.firstOrNull()?.jsonObject?.get("content")?.jsonObject
+                                    val parts = content?.get("parts")?.jsonArray
+                                    parts?.forEach { part ->
+                                        val text = part.jsonObject["text"]?.jsonPrimitive?.content
+                                        if (!text.isNullOrEmpty()) emit(text)
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
                 }
             }
 
@@ -556,6 +665,37 @@ class GeminiService(
             logError("GeminiService", "Multi-round orchestration error", e)
             generateResponseFlow(prompt, history, intentAddon, coreContext, enableGrounding).collect { emit(it) }
         }
+    }
+
+    private fun truncateToolResult(result: String, maxChars: Int = 10000): String {
+        if (result.length <= maxChars) return result
+        return result.take(maxChars) + "\n...[Truncated for context limit]..."
+    }
+
+    private fun sanitizeToolResultForLog(result: String): String {
+        val singleLine = result.replace("\n", "\\n")
+        return if (singleLine.length > 1200) {
+            singleLine.take(1200) + "...[truncated]"
+        } else {
+            singleLine
+        }
+    }
+
+    private fun sanitizeToolResultForChat(result: String): String {
+        if (!looksLikeJsonPayload(result)) return result
+        return buildString {
+            append("Tool completed successfully.")
+            append("\n")
+            append("Raw structured payload was hidden from chat to keep the conversation readable.")
+        }
+    }
+
+    private fun looksLikeJsonPayload(result: String): Boolean {
+        val trimmed = result.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return true
+        val payload = trimmed.substringAfter('\n', "")
+        val payloadTrimmed = payload.trim()
+        return payloadTrimmed.startsWith("{") || payloadTrimmed.startsWith("[")
     }
 
     suspend fun listModels(): List<GeminiModel> {
@@ -582,7 +722,8 @@ class GeminiService(
         return try {
             val res = client.post(generateContentUrl()) {
                 contentType(ContentType.Application.Json)
-                val contents = history.map { turn ->
+                val prunedHistory = if (history.size > 20) history.takeLast(20) else history
+                val contents = prunedHistory.map { turn ->
                     buildJsonObject {
                         put("role", turn.role)
                         put("parts", buildJsonArray { add(buildJsonObject { put("text", turn.content) }) })
@@ -670,16 +811,26 @@ class GeminiService(
      * ดึงค่าเวกเตอร์ (Embeddings) สำหรับข้อความเพื่อใช้ทำ Semantic Search / RAG
      */
     suspend fun embedText(text: String, taskType: String? = "RETRIEVAL_DOCUMENT"): List<Float> {
-        if (apiKey.isBlank()) return emptyList()
+        if (apiKey.isBlank() || text.isBlank()) return emptyList()
+        // Cascade: try gemini-embedding-001 (3072d → truncate) → text-embedding-004 (768d).
+        val cascade = listOf("gemini-embedding-001", "text-embedding-004")
+        for (model in cascade) {
+            val raw = tryEmbedWith(model, text, taskType)
+            if (raw.isNotEmpty()) {
+                // Matryoshka-truncate (or pad) to 768 + L2-norm so all callers
+                // get a uniform vector regardless of the model used.
+                return raw.fitToTargetDimension(768)
+            }
+        }
+        return emptyList()
+    }
+
+    private suspend fun tryEmbedWith(model: String, text: String, taskType: String?): List<Float> {
         return try {
-            val res = client.post(embedContentUrl()) {
+            val res = client.post(embedContentUrl(model)) {
                 contentType(ContentType.Application.Json)
                 setBody(EmbeddingRequest(
-                    model = "models/text-embedding-004",
-                    content = GeminiContent(
-                        role = "user",
-                        parts = listOf(Part(text = text))
-                    ),
+                    content = GeminiContent(parts = listOf(Part(text = text))),
                     taskType = taskType
                 ))
             }
@@ -688,11 +839,11 @@ class GeminiService(
                 resp.embedding.values
             } else {
                 val err = res.bodyAsText()
-                logError("GeminiService", "Embedding Error ${res.status}: $err")
+                logError("GeminiService", "Embedding model=$model Error ${res.status}: $err")
                 emptyList()
             }
         } catch (e: Exception) {
-            logError("GeminiService", "Failed to get embedding", e)
+            logError("GeminiService", "Embedding model=$model failed", e)
             emptyList()
         }
     }

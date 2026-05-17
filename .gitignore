@@ -17,3 +17,11 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
+brain/
+.agent/
+.agents/
+composeApp/google-services.json
+*.env
+.env.*
+mt5-core-server/.cache/
+.cache/

@@ -16,7 +16,7 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         val currentPrice: Double,
         val lsdTrend: LsdTrendResult,
         val orderflow: OrderflowResult,
-        val fiberStrength: List<FiboStrengthResult>,
+        val fiboStrength: List<FiboStrengthResult>,
         val momentum: MomentumResult,
         val summaryScore: Int // 0-100
     )
@@ -90,7 +90,7 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
             currentPrice = currentPrice,
             lsdTrend = lsdTrend,
             orderflow = orderflow,
-            fiberStrength = fiboStrength,
+            fiboStrength = fiboStrength,
             momentum = momentum,
             summaryScore = summaryScore
         )
@@ -191,14 +191,17 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         val stdev = sqrt(closes.map { (it - sma).pow(2) }.average())
         val bbWidth = (stdev * 2 * 2) / sma // Standard BB Width %
         
-        // Squeeze Detection (Simplification: narrowest BB in 50 bars)
+        // Squeeze Detection (Percentile: BB Width ≤ 20th percentile of last 50 bars)
         val historicalWidths = candles.windowed(window).map { win ->
             val winCloses = win.map { it.close }
             val winSma = winCloses.average()
             val winStdev = sqrt(winCloses.map { (it - winSma).pow(2) }.average())
             (winStdev * 4) / winSma
         }
-        val isSqueeze = bbWidth <= (historicalWidths.takeLast(50).minOrNull() ?: 0.0) * 1.1
+        val recentWidths = historicalWidths.takeLast(50).sorted()
+        val p20Index = (recentWidths.size * 0.20).toInt().coerceIn(0, recentWidths.size - 1)
+        val squeezeThreshold = if (recentWidths.isNotEmpty()) recentWidths[p20Index] else 0.0
+        val isSqueeze = bbWidth <= squeezeThreshold
 
         // Awesome Oscillator Approximation
         // AO = SMA5(hl2) - SMA34(hl2)
@@ -242,15 +245,59 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
 
     // ─── Math Utilities ──────────────────────────────────────────────────────
 
+    private fun calculateWMAseries(data: List<Double>, period: Int): List<Double?> {
+        val result = arrayOfNulls<Double>(data.size)
+        if (data.size >= period) {
+            val weightSum = period * (period + 1) / 2.0
+            for (i in period - 1 until data.size) {
+                var sum = 0.0
+                for (j in 0 until period) {
+                    val weight = period - j
+                    sum += data[i - j] * weight
+                }
+                result[i] = sum / weightSum
+            }
+        }
+        return result.toList()
+    }
+
+    private fun calculateWMAforLast(data: List<Double>, period: Int): Double {
+        if (data.size < period) return data.last()
+        val weightSum = period * (period + 1) / 2.0
+        val start = data.size - period
+        var sum = 0.0
+        for (j in 0 until period) {
+            val weight = period - j
+            sum += data[start + j] * weight
+        }
+        return sum / weightSum
+    }
+
     private fun calculateHMA(data: List<Double>, period: Int): Double {
         if (data.size < period) return data.last()
-        // WMA(2*WMA(n/2) - WMA(n), sqrt(n))
-        val halfPeriod = period / 2
-        val sqrtPeriod = sqrt(period.toDouble()).toInt()
-        
-        // สำหรับ MVP นี้ ผมจะใช้ EMA เป็นตัวแทนเพื่อป้องกันความคลาดเคลื่อนจากการคำนวณ Recursive WMA
-        // แต่จะปรับจูนค่าให้ใกล้เคียง HMA ที่สุด
-        return calculateEMA(data, period) 
+        val n = period
+        val halfPeriod = n / 2
+        val sqrtPeriod = max(1, sqrt(n.toDouble()).toInt())
+
+        // Calculate WMA series for full and half periods
+        val wmaFullList = calculateWMAseries(data, n)
+        val wmaHalfList = calculateWMAseries(data, halfPeriod)
+
+        // Build raw series where both WMAs are available (chronological)
+        val rawValues = mutableListOf<Double>()
+        for (i in 0 until data.size) {
+            val wmaFull = wmaFullList[i]
+            val wmaHalf = wmaHalfList[i]
+            if (wmaFull != null && wmaHalf != null) {
+                rawValues.add(2 * wmaHalf - wmaFull)
+            }
+        }
+
+        if (rawValues.size < sqrtPeriod) return data.last()
+
+        // Calculate WMA on rawValues with sqrtPeriod to get final HMA
+        val hma = calculateWMAforLast(rawValues, sqrtPeriod)
+        return hma
     }
 
     private fun calculateEMA(data: List<Double>, period: Int): Double {

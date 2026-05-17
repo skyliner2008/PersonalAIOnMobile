@@ -23,6 +23,10 @@ import com.example.personalaibot.tools.file.FileToolExecutor
 import android.media.AudioManager
 import android.content.Context
 import android.os.Environment
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.collect
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
 
@@ -31,6 +35,13 @@ class MainActivity : ComponentActivity() {
     // Callback ส่งกลับไปที่ Compose เพื่อ toggle live mode จาก widget
     private var onToggleLiveFromWidget: (() -> Unit)? = null
     private var onWidgetClosedCallback: (() -> Unit)? = null
+
+    /**
+     * Cached singleton — re-creating this on every download tap leaks the
+     * previous OrtSession (held in a static OrtEnvironment) and re-installs
+     * a new inference delegate on the same provider for no benefit.
+     */
+    private var onnxManager: com.example.personalaibot.data.embedding.AndroidLocalOnnxManager? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -133,6 +144,34 @@ class MainActivity : ComponentActivity() {
                 allFilesAccessGranted = _allFilesAccessGranted.value,
                 fileToolHandler = { name, args ->
                     fileToolExecutor.execute(name, args)
+                },
+                onDownloadLocalModel = { localProvider, onProgress, checkOnly ->
+                    // IMPORTANT: this lambda is `suspend` — caller (JarvisViewModel)
+                    // awaits its completion. We MUST NOT fire-and-forget via
+                    // `lifecycleScope.launch { ... }`, or the caller will think
+                    // the download is done immediately while ONNX is still
+                    // streaming the file. Run inline, only `coroutineScope` so
+                    // the progress collector runs in parallel and is cancelled
+                    // when the download finishes.
+                    val mgr = onnxManager ?: com.example.personalaibot.data.embedding
+                        .AndroidLocalOnnxManager(applicationContext, localProvider)
+                        .also { onnxManager = it }
+                    if (checkOnly) {
+                        mgr.initOrDownload()
+                    } else {
+                        kotlinx.coroutines.coroutineScope {
+                            val progressJob = launch {
+                                mgr.downloadProgress.collect { progress ->
+                                    if (progress >= 0f) onProgress(progress)
+                                }
+                            }
+                            try {
+                                mgr.downloadModelFiles()
+                            } finally {
+                                progressJob.cancel()
+                            }
+                        }
+                    }
                 }
             )
         }

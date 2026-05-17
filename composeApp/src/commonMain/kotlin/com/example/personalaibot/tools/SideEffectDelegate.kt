@@ -25,4 +25,7 @@ interface SideEffectDelegate {
 
     /** บันทึกรายงานการตรวจสอบระบบ (Diagnostic) */
     suspend fun onSaveDiagnosticReport(filename: String, content: String)
+
+    /** บันทึกเครื่องมือ (Tool/Skill) ที่สร้างโดย Agent */
+    suspend fun onSaveAgentTool(filename: String, jsonContent: String)
 }

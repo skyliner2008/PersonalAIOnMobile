@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 
 expect class DatabaseDriverFactory {
     fun createDriver(): SqlDriver
+    fun getAppDir(): String
 }
 
 fun createDatabase(databaseDriverFactory: DatabaseDriverFactory): JarvisDatabase {
@@ -86,9 +87,68 @@ private fun ensureNewTablesExist(driver: SqlDriver) {
             updated_at INTEGER NOT NULL,
             UNIQUE(symbol, interval, ts)
         )""",
+        // MT5 account snapshots
+        """CREATE TABLE IF NOT EXISTS Mt5AccountSnapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            login TEXT,
+            account_name TEXT,
+            server TEXT,
+            currency TEXT,
+            leverage INTEGER,
+            balance REAL,
+            equity REAL,
+            margin REAL,
+            free_margin REAL,
+            payload_json TEXT,
+            updated_at INTEGER NOT NULL
+        )""",
+        // MT5 symbols
+        """CREATE TABLE IF NOT EXISTS Mt5SymbolCatalog (
+            symbol TEXT PRIMARY KEY,
+            description TEXT,
+            digits INTEGER,
+            point REAL,
+            trade_mode TEXT,
+            bid REAL,
+            ask REAL,
+            spread REAL,
+            payload_json TEXT,
+            updated_at INTEGER NOT NULL
+        )""",
+        // MT5 positions/orders/deals
+        """CREATE TABLE IF NOT EXISTS Mt5TradeRecord (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_type TEXT NOT NULL,
+            ticket TEXT NOT NULL,
+            position_ticket TEXT,
+            symbol TEXT NOT NULL,
+            side TEXT,
+            volume REAL,
+            price_open REAL,
+            price_current REAL,
+            profit REAL,
+            swap REAL,
+            commission REAL,
+            sl REAL,
+            tp REAL,
+            state TEXT,
+            comment TEXT,
+            event_time INTEGER,
+            payload_json TEXT,
+            synced_at INTEGER NOT NULL,
+            UNIQUE(record_type, ticket, event_time)
+        )""",
+        // Raw sync snapshots
+        """CREATE TABLE IF NOT EXISTS TradeSyncSnapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            synced_at INTEGER NOT NULL
+        )""",
         // Migration: add unique index for KnowledgeNode.name (idempotent)
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_node_name ON KnowledgeNode(name)",
-        "CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts ON TvCandle(symbol, interval, ts)"
+        "CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts ON TvCandle(symbol, interval, ts)",
+        "CREATE INDEX IF NOT EXISTS idx_mt5_trade_type_time ON Mt5TradeRecord(record_type, event_time DESC)"
     )
 
     statements.forEach { sql ->

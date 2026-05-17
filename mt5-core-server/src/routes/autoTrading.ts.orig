@@ -1,0 +1,218 @@
+import { Router } from 'express';
+import { autoTradingService } from '../services/autoTradingService.js';
+import { register } from '../services/metrics.js';
+import { getProvider, listModelsCached, listProviderIds, invalidateModelCache, PROVIDER_DEFAULTS } from '../services/auto/providers/registry.js';
+import { ProviderId } from '../services/auto/providers/types.js';
+import { UNIVERSAL_DEFAULT_CHOICE, UNIVERSAL_EMBEDDING_DEFAULT_CHOICE, resolveProviderCredentials } from '../services/auto/modelResolver.js';
+
+const router = Router();
+
+function ok(res: any, data: unknown) { res.json({ success: true, data }); }
+function fail(res: any, err: any, status = 500) {
+  const message = String(err?.message || err || 'unknown');
+  console.error(`[auto-trading-route] ${message}`);
+  const code =
+    /quota|rate.?limit|429/i.test(message) ? 'rate_limit' :
+    /timeout|abort/i.test(message) ? 'upstream_timeout' :
+    /api key|unauthor|401|403/i.test(message) ? 'auth_failed' :
+    /no api key/i.test(message) ? 'no_api_key' :
+    'internal_error';
+  res.status(status).json({ success: false, error_code: code });
+}
+
+router.get('/snapshot', async (_req, res) => {
+  try { ok(res, autoTradingService.snapshot()); } catch (err) { fail(res, err); }
+});
+router.get('/decision-feed', async (req, res) => {
+  try { const limit = parseInt(req.query.limit as string) || 100; ok(res, await autoTradingService.getDecisionFeed(limit)); } catch (err) { fail(res, err); }
+});
+router.get('/journal', async (req, res) => {
+  try { const limit = parseInt(req.query.limit as string) || 50; ok(res, await autoTradingService.getDecisionJournal(limit)); } catch (err) { fail(res, err); }
+});
+router.get('/management-journal', async (req, res) => {
+  try { const limit = parseInt(req.query.limit as string) || 50; ok(res, await autoTradingService.getManagementJournal(limit)); } catch (err) { fail(res, err); }
+});
+router.get('/analytics', async (req, res) => {
+  try {
+    // Accept ?range=1d|1w|1m|3m (or ?days=N) so the dashboard can drill in.
+    const range = String(req.query.range || '').toLowerCase();
+    const days = req.query.days ? Math.max(1, Number(req.query.days)) :
+      range === '1d' ? 1 :
+      range === '1w' ? 7 :
+      range === '1m' ? 30 :
+      range === '3m' ? 90 :
+      0; // 0 = all
+    ok(res, await autoTradingService.getPerformanceAnalytics(days));
+  } catch (err) { fail(res, err); }
+});
+
+router.post('/config', async (req, res) => {
+  try { ok(res, autoTradingService.updateConfig((req.body || {}) as Record<string, unknown>)); } catch (err) { fail(res, err); }
+});
+router.post('/start', async (_req, res) => { try { ok(res, await autoTradingService.start()); } catch (err) { fail(res, err); } });
+router.post('/stop',  async (_req, res) => { try { ok(res, await autoTradingService.stop());  } catch (err) { fail(res, err); } });
+router.post('/halt',  async (req,  res) => {
+  try {
+    const reason = String((req.body as any)?.reason || 'user_initiated_emergency_halt').slice(0, 256);
+    console.warn(`[auto-trading-route] EMERGENCY HALT - reason=${reason}`);
+    const snapshot = await autoTradingService.stop();
+    ok(res, { halted: true, haltedAt: new Date().toISOString(), reason, snapshot });
+  } catch (err) { fail(res, err); }
+});
+router.post('/run-once', async (_req, res) => { try { ok(res, await autoTradingService.runOnce()); } catch (err) { fail(res, err); } });
+router.post('/learn',    async (_req, res) => { try { ok(res, await autoTradingService.learnNow()); } catch (err) { fail(res, err); } });
+
+router.get('/metrics/quality', async (_req, res) => {
+  try {
+    const all = await register.getMetricsAsJSON();
+    const find = (name: string) => all.find((m: any) => m.name === name)?.values ?? [];
+    const sumValues = (entries: any[]) => entries.reduce((s: number, e: any) => s + Number(e.value || 0), 0);
+    const groupBy = (entries: any[], key: string) => {
+      const out: Record<string, number> = {};
+      for (const e of entries) {
+        const k = String(e.labels?.[key] ?? 'unknown');
+        out[k] = (out[k] ?? 0) + Number(e.value || 0);
+      }
+      return out;
+    };
+    const zoneBlocks = find('mt5_zone_gate_blocks_total');
+    const slBuf = find('mt5_sl_buffer_activations_total');
+    const ctBlocks = find('mt5_counter_trend_blocks_total');
+    const mgmtEvents = find('mt5_management_events_total');
+    const zoneDist = find('mt5_entry_zone_distribution_total');
+    const placed = find('mt5_trades_placed_total');
+    const rejected = find('mt5_trades_rejected_total');
+    ok(res, {
+      generatedAt: new Date().toISOString(),
+      summary: {
+        zoneGateBlocks: sumValues(zoneBlocks),
+        slBufferActivations: sumValues(slBuf),
+        counterTrendBlocks: sumValues(ctBlocks),
+        managementEvents: sumValues(mgmtEvents),
+        entryZoneTotal: sumValues(zoneDist),
+        tradesPlaced: sumValues(placed),
+        tradesRejected: sumValues(rejected),
+      },
+      breakdown: {
+        zoneGateByZone: groupBy(zoneBlocks, 'zone'),
+        zoneGateBySide: groupBy(zoneBlocks, 'side'),
+        slBufferByTrigger: groupBy(slBuf, 'trigger'),
+        counterTrendBySide: groupBy(ctBlocks, 'side'),
+        managementByEvent: groupBy(mgmtEvents, 'event'),
+        entryZoneDistribution: groupBy(zoneDist, 'zone'),
+      },
+    });
+  } catch (err) { fail(res, err); }
+});
+
+// ---------------------------------------------------------------------------
+// Provider + model picker endpoints (2026-04-25)
+// ---------------------------------------------------------------------------
+
+function maskKey(k?: string): { hasKey: boolean; preview: string } {
+  if (!k) return { hasKey: false, preview: '' };
+  const head = k.slice(0, 4);
+  const tail = k.length > 8 ? k.slice(-4) : '';
+  return { hasKey: true, preview: `${head}...${tail}` };
+}
+
+router.get('/providers', async (_req, res) => {
+  try {
+    const cfg = autoTradingService.snapshot().config;
+    const ids = listProviderIds();
+    const items = ids.map((id) => {
+      const provider = getProvider(id);
+      const { apiKey, baseUrl } = resolveProviderCredentials(cfg, id);
+      return {
+        id,
+        displayName: provider.displayName,
+        supportsEmbeddings: provider.supportsEmbeddings,
+        defaults: PROVIDER_DEFAULTS[id],
+        baseUrl: baseUrl || PROVIDER_DEFAULTS[id].baseUrl || null,
+        ...maskKey(apiKey),
+      };
+    });
+    ok(res, {
+      providers: items,
+      currentSelection: cfg.agentModels || {},
+      universalDefaults: { generation: UNIVERSAL_DEFAULT_CHOICE, embedding: UNIVERSAL_EMBEDDING_DEFAULT_CHOICE },
+      roles: [
+        { key: 'analyst',         label: 'Analyst' },
+        { key: 'riskOfficer',     label: 'Risk Officer' },
+        { key: 'executionTrader', label: 'Execution Trader' },
+        { key: 'postMortem',      label: 'Post-Mortem Coach' },
+        { key: 'reasoning',       label: 'Reasoning (single-agent)' },
+        { key: 'embedding',       label: 'Embedding (vector memory)', embeddingOnly: true },
+      ],
+    });
+  } catch (err) { fail(res, err); }
+});
+
+router.get('/providers/:id/models', async (req, res) => {
+  try {
+    const id = req.params.id as ProviderId;
+    if (!listProviderIds().includes(id)) return res.status(400).json({ success: false, error_code: 'unknown_provider' });
+    const cfg = autoTradingService.snapshot().config;
+    const { apiKey, baseUrl } = resolveProviderCredentials(cfg, id);
+    if (!apiKey && id !== 'ollama') return res.status(400).json({ success: false, error_code: 'no_api_key' });
+    const models = await listModelsCached(id, apiKey, baseUrl, false);
+    ok(res, { providerId: id, models });
+  } catch (err) { fail(res, err); }
+});
+
+router.post('/providers/:id/refresh', async (req, res) => {
+  try {
+    const id = req.params.id as ProviderId;
+    if (!listProviderIds().includes(id)) return res.status(400).json({ success: false, error_code: 'unknown_provider' });
+    const cfg = autoTradingService.snapshot().config;
+    const { apiKey, baseUrl } = resolveProviderCredentials(cfg, id);
+    if (!apiKey && id !== 'ollama') return res.status(400).json({ success: false, error_code: 'no_api_key' });
+    invalidateModelCache(id);
+    const models = await listModelsCached(id, apiKey, baseUrl, true);
+    ok(res, { providerId: id, models, refreshedAt: new Date().toISOString() });
+  } catch (err) { fail(res, err); }
+});
+
+// Save (or clear) the API key for a provider. baseUrl optional for self-hosted.
+router.put('/providers/:id/key', async (req, res) => {
+  try {
+    const id = req.params.id as ProviderId;
+    if (!listProviderIds().includes(id)) return res.status(400).json({ success: false, error_code: 'unknown_provider' });
+    const body = (req.body || {}) as { apiKey?: string; baseUrl?: string; clear?: boolean };
+    const cfg = autoTradingService.snapshot().config;
+    const newProviderKeys = { ...(cfg.providerKeys || {}) };
+    const newProviderBaseUrls = { ...(cfg.providerBaseUrls || {}) };
+    if (body.clear) {
+      delete (newProviderKeys as any)[id];
+    } else if (typeof body.apiKey === 'string' && body.apiKey.trim()) {
+      (newProviderKeys as any)[id] = body.apiKey.trim();
+    }
+    if (typeof body.baseUrl === 'string' && (id === 'openai' || id === 'ollama')) {
+      (newProviderBaseUrls as any)[id] = body.baseUrl.trim();
+    }
+    autoTradingService.updateConfig({ providerKeys: newProviderKeys, providerBaseUrls: newProviderBaseUrls } as any);
+    invalidateModelCache(id);
+    ok(res, { providerId: id, saved: !body.clear });
+  } catch (err) { fail(res, err); }
+});
+
+router.post('/providers/:id/test', async (req, res) => {
+  try {
+    const id = req.params.id as ProviderId;
+    if (!listProviderIds().includes(id)) return res.status(400).json({ success: false, error_code: 'unknown_provider' });
+    const body = (req.body || {}) as { model?: string };
+    const cfg = autoTradingService.snapshot().config;
+    const { apiKey, baseUrl } = resolveProviderCredentials(cfg, id);
+    if (!apiKey && id !== 'ollama') return res.status(400).json({ success: false, error_code: 'no_api_key' });
+    const provider = getProvider(id);
+    const model = body.model || PROVIDER_DEFAULTS[id].generationModel;
+    const result = await provider.ping(apiKey, model, baseUrl);
+    ok(res, { providerId: id, model, ...result });
+  } catch (err) { fail(res, err); }
+});
+
+// Save per-agent model picks. Body: { agentModels: { analyst: {provider, model}, ... } }
+router.put('/agent-models', async (req, res) => {
+  try {
+    const body = (req.body || {}) as { agentModels?: Record<string, any> };
+    if (!body.agentModels) return res.status(400).json({ success: false, error_code: 'missing

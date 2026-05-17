@@ -1,0 +1,643 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for services/auto/analyzers/news.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../../prettify.css" />
+    <link rel="stylesheet" href="../../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../../index.html">All files</a> / <a href="index.html">services/auto/analyzers</a> news.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">9.82% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>11/112</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">3.65% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>3/82</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">16.66% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>2/12</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">10.75% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>10/93</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { AutoTradingConfig } from '../types.js';
+import { atLog, atWarn, atError, getLogTime } from '../utils.js';
+&nbsp;
+export interface EconomicEvent {
+    title: string;
+    impact: 'LOW' | 'MEDIUM' | 'HIGH';
+    currency: string; // e.g. USD, EUR, JPY — normalized to 3-letter code
+    time: number; // epoch ms
+    country?: string;
+}
+&nbsp;
+// ForexFactory publishes a free weekly JSON at this URL — no key required.
+// Format: [{ title, country, date, impact: 'Low'|'Medium'|'High'|'Holiday', ... }]
+const FF_THIS_WEEK = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
+const FF_NEXT_WEEK = 'https://nfs.faireconomy.media/ff_calendar_nextweek.json';
+&nbsp;
+// Map ForexFactory country labels to 3-letter ISO currency codes.
+const COUNTRY_TO_CURRENCY: Record&lt;string, string&gt; = {
+    'USD': 'USD', 'EUR': 'EUR', 'JPY': 'JPY', 'GBP': 'GBP', 'AUD': 'AUD',
+    'CAD': 'CAD', 'CHF': 'CHF', 'NZD': 'NZD', 'CNY': 'CNY',
+    'United States': 'USD', 'Euro Area': 'EUR', 'Japan': 'JPY',
+    'United Kingdom': 'GBP', 'Australia': 'AUD', 'Canada': 'CAD',
+    'Switzerland': 'CHF', 'New Zealand': 'NZD', 'China': 'CNY',
+};
+&nbsp;
+/**
+ * News Intelligence Analyzer
+ * Fetches economic calendar events from ForexFactory (free, no key) and
+ * determines if it's safe to trade given news-risk settings.
+ */
+export class NewsAnalyzer {
+    private lastFetch = 0;
+    private cachedEvents: EconomicEvent[] = [];
+    private readonly FETCH_INTERVAL = 15 * 60_000; // 15 minutes
+    private fetchingPromise: Promise&lt;EconomicEvent[]&gt; | null = null;
+&nbsp;
+    /**
+     * Get upcoming economic events. Cached for FETCH_INTERVAL.
+     * Concurrent callers share the in-flight promise to avoid request storms.
+     */
+    public async <span class="fstat-no" title="function not covered" >fetchUpcomingEvents(_</span>apiKey?: string): Promise&lt;EconomicEvent[]&gt; {
+        const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
+<span class="cstat-no" title="statement not covered" >        if (now - this.lastFetch &lt; this.FETCH_INTERVAL &amp;&amp; this.cachedEvents.length &gt; 0) {</span>
+<span class="cstat-no" title="statement not covered" >            return this.cachedEvents;</span>
+        }
+<span class="cstat-no" title="statement not covered" >        if (this.fetchingPromise) <span class="cstat-no" title="statement not covered" >return this.fetchingPromise;</span></span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        this.fetchingPromise = (<span class="fstat-no" title="function not covered" >async () =&gt; {</span></span>
+<span class="cstat-no" title="statement not covered" >            try {</span>
+                const [thisWeek, nextWeek] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
+                    this.fetchForexFactoryWeek(FF_THIS_WEEK),
+                    this.fetchForexFactoryWeek(FF_NEXT_WEEK).<span class="fstat-no" title="function not covered" >catch(() =&gt; <span class="cstat-no" title="statement not covered" >[</span>] </span>as EconomicEvent[]),
+                ]);
+                const events = <span class="cstat-no" title="statement not covered" >[...thisWeek, ...nextWeek]</span>
+                    .<span class="fstat-no" title="function not covered" >filter((e</span>) =&gt; <span class="cstat-no" title="statement not covered" >e.time &gt; now - 60 * 60_000) </span>// keep events from last hour onward
+                    .<span class="fstat-no" title="function not covered" >sort((a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >a.time - b.time);</span>
+<span class="cstat-no" title="statement not covered" >                this.cachedEvents = events;</span>
+<span class="cstat-no" title="statement not covered" >                this.lastFetch = now;</span>
+<span class="cstat-no" title="statement not covered" >                atLog(`[NewsAnalyzer] 📰 Fetched ${events.length} upcoming economic events.`);</span>
+<span class="cstat-no" title="statement not covered" >                return events;</span>
+            } catch (err) {
+<span class="cstat-no" title="statement not covered" >                atError('[NewsAnalyzer] ❌ Failed to fetch news feed:', err);</span>
+                // Keep stale cache on error so a blip doesn't disable the gate.
+<span class="cstat-no" title="statement not covered" >                return this.cachedEvents;</span>
+            } finally {
+<span class="cstat-no" title="statement not covered" >                this.fetchingPromise = null;</span>
+            }
+        })();
+<span class="cstat-no" title="statement not covered" >        return this.fetchingPromise;</span>
+    }
+&nbsp;
+    private async <span class="fstat-no" title="function not covered" >fetchForexFactoryWeek(u</span>rl: string): Promise&lt;EconomicEvent[]&gt; {
+        const controller = <span class="cstat-no" title="statement not covered" >new AbortController();</span>
+        const timer = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >setTimeout(() =&gt; <span class="cstat-no" title="statement not covered" >c</span>ontroller.abort(),</span> 10_000);</span>
+<span class="cstat-no" title="statement not covered" >        try {</span>
+            const resp = <span class="cstat-no" title="statement not covered" >await fetch(url, {</span>
+                signal: controller.signal,
+                headers: { 'User-Agent': 'PersonalAIBot/1.0 (mt5-core-server)' },
+            });
+<span class="cstat-no" title="statement not covered" >            if (!resp.ok) <span class="cstat-no" title="statement not covered" >throw new Error(`HTTP ${resp.status}`);</span></span>
+            const raw = <span class="cstat-no" title="statement not covered" >await resp.json();</span>
+<span class="cstat-no" title="statement not covered" >            if (!Array.isArray(raw)) <span class="cstat-no" title="statement not covered" >throw new Error('Unexpected JSON shape');</span></span>
+            const events: EconomicEvent[] = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >            for (const row of raw as any[]) {</span>
+                const title = <span class="cstat-no" title="statement not covered" >String(row?.title ?? '').trim();</span>
+<span class="cstat-no" title="statement not covered" >                if (!title) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+                const countryRaw = <span class="cstat-no" title="statement not covered" >String(row?.country ?? '').trim();</span>
+                const currency = <span class="cstat-no" title="statement not covered" >COUNTRY_TO_CURRENCY[countryRaw] ?? COUNTRY_TO_CURRENCY[countryRaw.toUpperCase()];</span>
+<span class="cstat-no" title="statement not covered" >                if (!currency) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+                const impactRaw = <span class="cstat-no" title="statement not covered" >String(row?.impact ?? 'Low').toLowerCase();</span>
+                const impact: 'LOW' | 'MEDIUM' | 'HIGH' =
+<span class="cstat-no" title="statement not covered" >                    impactRaw === 'high' ? 'HIGH' :</span>
+                    impactRaw === 'medium' ? 'MEDIUM' :
+                    impactRaw === 'holiday' ? 'LOW' : 'LOW';
+                const timeStr = <span class="cstat-no" title="statement not covered" >String(row?.date ?? '').trim();</span>
+                const time = <span class="cstat-no" title="statement not covered" >timeStr ? new Date(timeStr).getTime() : NaN;</span>
+<span class="cstat-no" title="statement not covered" >                if (!isFinite(time)) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+<span class="cstat-no" title="statement not covered" >                events.push({ title, impact, currency, time, country: countryRaw });</span>
+            }
+<span class="cstat-no" title="statement not covered" >            return events;</span>
+        } finally {
+<span class="cstat-no" title="statement not covered" >            clearTimeout(timer);</span>
+        }
+    }
+&nbsp;
+    /**
+     * Update the newsRisk config based on upcoming events for a given currency.
+     * Called each cycle per quote currency the watchlist depends on.
+     */
+    public async <span class="fstat-no" title="function not covered" >updateNewsRisk(c</span>urrency: string, config: AutoTradingConfig): Promise&lt;void&gt; {
+<span class="cstat-no" title="statement not covered" >        if (!config.newsRisk?.enabled) <span class="cstat-no" title="statement not covered" >return;</span></span>
+        const events = <span class="cstat-no" title="statement not covered" >await this.fetchUpcomingEvents(config.apiKey);</span>
+        const now = <span class="cstat-no" title="statement not covered" >Date.now();</span>
+        const quote = <span class="cstat-no" title="statement not covered" >currency.toUpperCase();</span>
+&nbsp;
+        // Nearest HIGH-impact event on this currency (ALL currencies event also blocks)
+        const nearest = <span class="cstat-no" title="statement not covered" >events</span>
+            .<span class="fstat-no" title="function not covered" >filter((e</span>) =&gt; <span class="cstat-no" title="statement not covered" >e.impact === 'HIGH' &amp;&amp; (e.currency === quote || e.currency === 'ALL'))</span>
+            .<span class="fstat-no" title="function not covered" >find((e</span>) =&gt; <span class="cstat-no" title="statement not covered" >e.time &gt; now - 30 * 60_000);</span> // include events that started up to 30m ago
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        if (nearest) {</span>
+            const minutesToEvent = <span class="cstat-no" title="statement not covered" >Math.round((nearest.time - now) / 60_000);</span>
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.activeEvent = `${nearest.currency} ${nearest.title}`;</span>
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.impactLevel = nearest.impact;</span>
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.minutesToEvent = minutesToEvent;</span>
+<span class="cstat-no" title="statement not covered" >            if (minutesToEvent &gt;= 0 &amp;&amp; minutesToEvent &lt;= 30) {</span>
+<span class="cstat-no" title="statement not covered" >                atWarn(`[NewsAnalyzer] ⚠️ HIGH IMPACT NEWS SOON: ${nearest.currency} ${nearest.title} in ${minutesToEvent}m`);</span>
+            } else if (<span class="cstat-no" title="statement not covered" >minutesToEvent &lt; 0 &amp;&amp; minutesToEvent &gt;= -30) {</span>
+<span class="cstat-no" title="statement not covered" >                atWarn(`[NewsAnalyzer] 🔴 HIGH IMPACT EVENT LIVE: ${nearest.currency} ${nearest.title} started ${-minutesToEvent}m ago`);</span>
+            }
+        } else {
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.activeEvent = undefined;</span>
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.impactLevel = undefined;</span>
+<span class="cstat-no" title="statement not covered" >            config.newsRisk.minutesToEvent = undefined;</span>
+        }
+    }
+&nbsp;
+    /**
+     * Check if trading is blocked due to news risk.
+     * Blocks from 30min before to 30min after any HIGH-impact event.
+     */
+    public isBlockedByNews(config: AutoTradingConfig): { blocked: boolean; reason: string } {
+        <span class="missing-if-branch" title="else path not taken" >E</span>if (!config.newsRisk?.enabled) return { blocked: false, reason: '' };
+        const risk = <span class="cstat-no" title="statement not covered" >config.newsRisk;</span>
+<span class="cstat-no" title="statement not covered" >        if (risk.impactLevel !== 'HIGH') <span class="cstat-no" title="statement not covered" >return { blocked: false, reason: '' };</span></span>
+        const m = <span class="cstat-no" title="statement not covered" >risk.minutesToEvent ?? 999;</span>
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (m &gt;= 0 &amp;&amp; <span class="branch-1 cbranch-no" title="branch not covered" >m &lt;= 30) {</span>
+<span class="cstat-no" title="statement not covered" >            return { blocked: true, reason: `News Risk: ${risk.activeEvent} starts in ${m}m` };</span>
+        }
+<span class="cstat-no" title="statement not covered" >        if (m &lt; 0 &amp;&amp; m &gt;= -30) {</span>
+<span class="cstat-no" title="statement not covered" >            return { blocked: true, reason: `News Risk: ${risk.activeEvent} started ${-m}m ago (cooldown)` };</span>
+        }
+<span class="cstat-no" title="statement not covered" >        return { blocked: false, reason: '' };</span>
+    }
+&nbsp;
+    /**
+     * Return the quote-currency set covered by a list of symbols.
+     * XAUUSD → {USD}, EURUSD → {EUR,USD}, USDJPY → {USD,JPY}
+     */
+    public static currenciesForSymbols(symbols: string[]): string[] {
+        const out = <span class="cstat-no" title="statement not covered" >new Set&lt;string&gt;();</span>
+<span class="cstat-no" title="statement not covered" >        for (const s of symbols) {</span>
+            const u = <span class="cstat-no" title="statement not covered" >s.toUpperCase();</span>
+            // Metals / crypto: treat as USD-quoted unless ends in another known ISO
+<span class="cstat-no" title="statement not covered" >            if (u.startsWith('XAU') || u.startsWith('XAG') || u.startsWith('XPT') || u.startsWith('BTC') || u.startsWith('ETH')) {</span>
+<span class="cstat-no" title="statement not covered" >                out.add('USD');</span>
+                const tail = <span class="cstat-no" title="statement not covered" >u.slice(3);</span>
+<span class="cstat-no" title="statement not covered" >                if (/^(EUR|JPY|GBP|AUD|CAD|CHF|NZD|CNY)$/.test(tail)) <span class="cstat-no" title="statement not covered" >out.add(tail);</span></span>
+<span class="cstat-no" title="statement not covered" >                continue;</span>
+            }
+            // Index aliases
+<span class="cstat-no" title="statement not covered" >            if (/^(US30|NAS100|SPX500|US500|DJI|NDX)$/.test(u)) { <span class="cstat-no" title="statement not covered" >out.add('USD'); <span class="cstat-no" title="statement not covered" >c</span>ontinue; }</span></span>
+<span class="cstat-no" title="statement not covered" >            if (/^(GER40|DAX|FDAX)$/.test(u)) { <span class="cstat-no" title="statement not covered" >out.add('EUR'); <span class="cstat-no" title="statement not covered" >c</span>ontinue; }</span></span>
+<span class="cstat-no" title="statement not covered" >            if (/^(UK100|FTSE)$/.test(u)) { <span class="cstat-no" title="statement not covered" >out.add('GBP'); <span class="cstat-no" title="statement not covered" >c</span>ontinue; }</span></span>
+<span class="cstat-no" title="statement not covered" >            if (/^(JPN225|NIKKEI)$/.test(u)) { <span class="cstat-no" title="statement not covered" >out.add('JPY'); <span class="cstat-no" title="statement not covered" >c</span>ontinue; }</span></span>
+            // Standard 6-letter forex
+<span class="cstat-no" title="statement not covered" >            if (/^[A-Z]{6}$/.test(u)) {</span>
+<span class="cstat-no" title="statement not covered" >                out.add(u.slice(0, 3));</span>
+<span class="cstat-no" title="statement not covered" >                out.add(u.slice(3, 6));</span>
+            }
+        }
+<span class="cstat-no" title="statement not covered" >        return [...out];</span>
+    }
+}
+&nbsp;
+export const newsAnalyzer = new NewsAnalyzer();
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-04-23T19:24:25.258Z
+            </div>
+        <script src="../../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../../sorter.js"></script>
+        <script src="../../../block-navigation.js"></script>
+    </body>
+</html>
+    

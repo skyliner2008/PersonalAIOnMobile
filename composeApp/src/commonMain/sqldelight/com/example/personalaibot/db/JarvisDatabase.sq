@@ -95,6 +95,42 @@ CREATE TABLE IF NOT EXISTS AlertJob (
 );
 
 -- ═══════════════════════════════════════════════════════════════
+-- AutoTrading Journal — บันทึกรายการที่ engine ทำทั้งหมด (paper+live)
+--   ใช้สำหรับ Phase "เรียนรู้" — คำนวณว่า analyzer/strategy ไหนกำไร/ขาดทุน
+--   และช่วยผู้ใช้ review ว่ากำไรเพราะอะไร/ขาดทุนเพราะอะไร
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AutoTradeJournal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    decision_id TEXT NOT NULL UNIQUE,     -- UUID per decision
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    side TEXT NOT NULL,                    -- BUY | SELL | SKIP
+    strategy TEXT NOT NULL,                -- Scalp | Swing | Grid | Trailing | TrendFollow | MeanRev | Breakout | Range
+    analyzers_used TEXT NOT NULL,          -- CSV: "TA,PA,SMC,Trend"
+    signals_json TEXT NOT NULL,            -- JSON of {analyzer: [signal1, signal2], ...}
+    confluence_score REAL NOT NULL,
+    entry REAL,
+    sl REAL,
+    tp REAL,
+    volume REAL,
+    risk_pct REAL,
+    rrr REAL,
+    regime TEXT,                           -- trending | ranging | volatile | quiet
+    market_snapshot TEXT,                  -- JSON extract of key indicators
+    was_executed INTEGER NOT NULL DEFAULT 0,
+    mt5_ticket INTEGER,
+    close_reason TEXT,                     -- TP | SL | BE-close | manual | timeout
+    close_price REAL,
+    close_at INTEGER,
+    profit REAL,
+    profit_r REAL,                         -- in R-multiple (+2R means 2× initial risk)
+    outcome TEXT,                          -- WIN | LOSS | BE | OPEN | PAPER
+    ai_review TEXT,                        -- บันทึกเหตุผลกำไร/ขาดทุนจาก Learn phase
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
 -- Queries: ChatMessage
 -- ═══════════════════════════════════════════════════════════════
 insertMessage:
@@ -273,3 +309,174 @@ WHERE symbol = ? AND interval = ?;
 deleteTvCandlesBefore:
 DELETE FROM TvCandle
 WHERE symbol = ? AND interval = ? AND ts < ?;
+
+-- MT5 account snapshots
+CREATE TABLE IF NOT EXISTS Mt5AccountSnapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT,
+    account_name TEXT,
+    server TEXT,
+    currency TEXT,
+    leverage INTEGER,
+    balance REAL,
+    equity REAL,
+    margin REAL,
+    free_margin REAL,
+    payload_json TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+insertMt5AccountSnapshot:
+INSERT INTO Mt5AccountSnapshot(
+    login, account_name, server, currency, leverage, balance, equity, margin, free_margin, payload_json, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getLatestMt5Account:
+SELECT * FROM Mt5AccountSnapshot
+ORDER BY updated_at DESC
+LIMIT 1;
+
+-- MT5 symbols catalog
+CREATE TABLE IF NOT EXISTS Mt5SymbolCatalog (
+    symbol TEXT PRIMARY KEY,
+    description TEXT,
+    digits INTEGER,
+    point REAL,
+    trade_mode TEXT,
+    bid REAL,
+    ask REAL,
+    spread REAL,
+    payload_json TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+upsertMt5Symbol:
+INSERT OR REPLACE INTO Mt5SymbolCatalog(
+    symbol, description, digits, point, trade_mode, bid, ask, spread, payload_json, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getMt5Symbols:
+SELECT * FROM Mt5SymbolCatalog
+ORDER BY symbol ASC;
+
+-- MT5 trade records (positions / orders / deals)
+CREATE TABLE IF NOT EXISTS Mt5TradeRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_type TEXT NOT NULL, -- POSITION | ORDER | DEAL
+    ticket TEXT NOT NULL,
+    position_ticket TEXT,
+    symbol TEXT NOT NULL,
+    side TEXT,
+    volume REAL,
+    price_open REAL,
+    price_current REAL,
+    profit REAL,
+    swap REAL,
+    commission REAL,
+    sl REAL,
+    tp REAL,
+    state TEXT,
+    comment TEXT,
+    event_time INTEGER,
+    payload_json TEXT,
+    synced_at INTEGER NOT NULL,
+    UNIQUE(record_type, ticket, event_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mt5_trade_type_time
+ON Mt5TradeRecord(record_type, event_time DESC);
+
+upsertMt5TradeRecord:
+INSERT OR REPLACE INTO Mt5TradeRecord(
+    record_type, ticket, position_ticket, symbol, side, volume, price_open, price_current, profit,
+    swap, commission, sl, tp, state, comment, event_time, payload_json, synced_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getRecentMt5TradeRecordsByType:
+SELECT * FROM Mt5TradeRecord
+WHERE record_type = ?
+ORDER BY event_time DESC, synced_at DESC
+LIMIT ?;
+
+-- Raw synchronization snapshots (for audit / analysis / debug)
+CREATE TABLE IF NOT EXISTS TradeSyncSnapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL, -- account | symbols | positions | orders | history
+    payload_json TEXT NOT NULL,
+    synced_at INTEGER NOT NULL
+);
+
+insertTradeSyncSnapshot:
+INSERT INTO TradeSyncSnapshot(source, payload_json, synced_at)
+VALUES (?, ?, ?);
+
+getRecentTradeSyncSnapshots:
+SELECT * FROM TradeSyncSnapshot
+ORDER BY synced_at DESC
+LIMIT ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: AutoTradeJournal
+-- ═══════════════════════════════════════════════════════════════
+insertAutoTradeJournal:
+INSERT OR REPLACE INTO AutoTradeJournal(
+    decision_id, symbol, timeframe, side, strategy, analyzers_used,
+    signals_json, confluence_score, entry, sl, tp, volume, risk_pct, rrr,
+    regime, market_snapshot, was_executed, mt5_ticket,
+    close_reason, close_price, close_at, profit, profit_r, outcome, ai_review,
+    created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateAutoTradeJournalOutcome:
+UPDATE AutoTradeJournal
+SET close_reason = ?, close_price = ?, close_at = ?, profit = ?, profit_r = ?, outcome = ?, ai_review = ?, updated_at = ?
+WHERE decision_id = ?;
+
+getOpenAutoTrades:
+SELECT * FROM AutoTradeJournal
+WHERE outcome = 'OPEN'
+ORDER BY created_at DESC;
+
+getRecentAutoTrades:
+SELECT * FROM AutoTradeJournal
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradesByStrategy:
+SELECT * FROM AutoTradeJournal
+WHERE strategy = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradesBySymbol:
+SELECT * FROM AutoTradeJournal
+WHERE symbol = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradeStatsByStrategy:
+SELECT
+    strategy,
+    COUNT(*) AS total,
+    SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+    SUM(COALESCE(profit, 0)) AS total_profit,
+    AVG(COALESCE(profit_r, 0)) AS avg_r
+FROM AutoTradeJournal
+WHERE outcome IN ('WIN','LOSS','BE')
+GROUP BY strategy;
+
+getAutoTradeStatsByAnalyzer:
+SELECT analyzers_used, COUNT(*) AS total,
+    SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+    SUM(COALESCE(profit, 0)) AS total_profit
+FROM AutoTradeJournal
+WHERE outcome IN ('WIN','LOSS','BE')
+GROUP BY analyzers_used;
+
+deleteOldAutoTrades:
+DELETE FROM AutoTradeJournal WHERE created_at < ?;

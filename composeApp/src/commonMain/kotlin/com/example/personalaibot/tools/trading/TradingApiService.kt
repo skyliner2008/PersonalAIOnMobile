@@ -8,6 +8,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.*
+import kotlinx.datetime.*
 
 /**
  * TradingApiService — HTTP layer สำหรับดึงข้อมูลการเทรดแบบ Real-time
@@ -16,6 +17,7 @@ class TradingApiService(private val client: HttpClient) {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     private val smcApi = SmcApiService(client)
+    private val modernApi = ModernTechnicalApiService(smcApi)
 
     /**
      * Resolve the best exchange for a given symbol if not specified by the user.
@@ -511,21 +513,132 @@ class TradingApiService(private val client: HttpClient) {
 
     suspend fun getFinancialNews(symbol: String? = null, limit: Int = 10): Map<String, Any> {
         val all = mutableListOf<Map<String, String>>()
-        for (url in listOf("https://finance.yahoo.com/news/rssindex")) {
+        val feeds = mapOf(
+            "Yahoo" to "https://finance.yahoo.com/news/rssindex",
+            "CoinDesk" to "https://www.coindesk.com/arc/outboundfeed/rss",
+            "MarketWatch" to "https://www.marketwatch.com/rss/marketupdate"
+        )
+
+        for ((src, url) in feeds) {
             try {
-                val resp = client.get(url) { header("User-Agent", "Mozilla/5.0") }
-                if (resp.status.isSuccess()) all.addAll(parseRssItems(resp.bodyAsText(), "Yahoo", symbol))
+                val resp = client.get(url) { 
+                    header("User-Agent", "Mozilla/5.0")
+                    timeout { requestTimeoutMillis = 10_000 }
+                }
+                if (resp.status.isSuccess()) {
+                    all.addAll(parseRssItems(resp.bodyAsText(), src, symbol))
+                }
             } catch (_: Exception) {}
         }
-        return mapOf("news" to all.take(limit))
+        
+        // กรองข่าวที่ซ้ำและเรียงลำดับใหม่
+        val uniqueNews = all.distinctBy { it["title"]?.lowercase() }
+        return mapOf("news" to uniqueNews.take(limit))
+    }
+
+    /**
+     * ดึงปฏิทินเศรษฐกิจ (Economic Calendar) จาก FXStreet JSON API
+     */
+    suspend fun getEconomicCalendar(limit: Int = 10): List<Map<String, String>> {
+        val now = Clock.System.now()
+        val zone = TimeZone.currentSystemDefault()
+        
+        val start = now.toLocalDateTime(zone).date
+        val end = now.plus(7, DateTimeUnit.DAY, zone).toLocalDateTime(zone).date
+        
+        val startDateStr = "${start}T00:00:00Z"
+        val endDateStr = "${end}T23:59:59Z"
+        
+        val url = "https://calendar-api.fxsstatic.com/en/api/v2/eventDates/$startDateStr/$endDateStr"
+        
+        return try {
+            val resp = client.get(url) { 
+                parameter("volatilities", "HIGH")
+                parameter("volatilities", "MEDIUM")
+                parameter("volatilities", "LOW")
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                timeout { requestTimeoutMillis = 20_000 }
+            }
+            if (!resp.status.isSuccess()) return emptyList()
+            
+            val body = resp.bodyAsText()
+            val eventsJson = json.parseToJsonElement(body).jsonArray
+            
+            eventsJson.mapNotNull { node ->
+                val obj = node.jsonObject
+                val title = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val country = obj["countryCode"]?.jsonPrimitive?.content ?: ""
+                val impact = obj["volatility"]?.jsonPrimitive?.content ?: "Low"
+                val dateStr = obj["dateUtc"]?.jsonPrimitive?.content ?: ""
+                
+                // ข้อมูลตัวเลข (ถ้ามี)
+                val actual = obj["actual"]?.jsonPrimitive?.contentOrNull ?: "-"
+                val consensus = obj["consensus"]?.jsonPrimitive?.contentOrNull ?: "-"
+                val previous = obj["previous"]?.jsonPrimitive?.contentOrNull ?: "-"
+                
+                mapOf(
+                    "title" to title,
+                    "country" to country,
+                    "impact" to impact,
+                    "date_time" to dateStr.replace("T", " ").replace("Z", ""),
+                    "actual" to actual,
+                    "forecast" to consensus,
+                    "previous" to previous,
+                    "impact_score" to when(impact.uppercase()) { "HIGH" -> "3"; "MEDIUM" -> "2"; else -> "1" }
+                )
+            }.sortedByDescending { it["impact_score"]?.toInt() ?: 0 }.take(limit)
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /**
+     * API สำหรับเรียกใช้ Modern Technical Analysis
+     */
+    suspend fun getModernTechnicalAnalysis(symbol: String, interval: String): ModernAnalysisResult? {
+        val fetch = smcApi.fetchCandlesWithSource(symbol, interval, 300)
+        if (fetch.candles.size < 150) return null
+        
+        // ดึง SMC มาเป็นตัวช่วยกรอง Confluence
+        val smc = smcApi.getSmcAnalysis(symbol, interval)
+        
+        return modernApi.analyze(fetch.candles, symbol, interval, smc)
     }
 
     private fun parseRssItems(xml: String, src: String, sym: String?): List<Map<String, String>> {
+        val keywords = if (!sym.isNullOrBlank()) getAssetKeywords(sym) else emptyList()
+        
         return Regex("<item>(.*?)</item>", RegexOption.DOT_MATCHES_ALL).findAll(xml).mapNotNull { block ->
             val content = block.groupValues[1]
             val title = Regex("<title>(.*?)</title>").find(content)?.groupValues?.get(1) ?: return@mapNotNull null
-            mapOf("title" to title, "source" to src)
+            val desc  = Regex("<description>(.*?)</description>").find(content)?.groupValues?.get(1) ?: ""
+            val link  = Regex("<link>(.*?)</link>").find(content)?.groupValues?.get(1) ?: ""
+
+            // กรองด้วย Keyword
+            if (keywords.isNotEmpty()) {
+                val fullText = (title + desc).lowercase()
+                // If it's a specific stock like NVDA, we might need to be more lenient or the RSS feeds we use (Yahoo, CoinDesk, MarketWatch general)
+                // might not have news for this specific ticker in their main feed.
+                // We'll still filter, but ensure we don't return an empty list just because the ticker isn't explicitly mentioned in the general feed if it's a stock.
+                if (keywords.none { fullText.contains(it) }) return@mapNotNull null
+            }
+
+            mapOf(
+                "title" to title,
+                "description" to desc.take(200) + "...",
+                "link" to link,
+                "source" to src
+            )
         }.toList()
+    }
+
+    private fun getAssetKeywords(symbol: String): List<String> {
+        val s = symbol.lowercase()
+        return when {
+            s.contains("xau") || s.contains("gold") -> listOf("gold", "xau", "fed", "inflation", "bullion", "treasury")
+            s.contains("btc") || s.contains("bitcoin") -> listOf("bitcoin", "btc", "crypto", "etf", "halving", "satoshi")
+            s.contains("eth") || s.contains("ether") -> listOf("ethereum", "eth", "vitalik", "layer 2", "staking")
+            s.length == 6 && !s.contains("usdt") -> listOf(s.substring(0, 3), s.substring(3), s, "forex", "central bank") // FX Pairs
+            else -> listOf(s, s.replace("usdt", ""), s.replace("usd", ""))
+        }.filter { it.isNotBlank() }
     }
 
     private fun exchangeToMarket(ex: String) = if (ex.uppercase() in listOf("NASDAQ", "NYSE")) "america" else if (ex.uppercase() in listOf("SET", "MAI")) "thailand" else "crypto"

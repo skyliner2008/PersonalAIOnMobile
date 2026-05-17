@@ -1,0 +1,14 @@
+--- /sessions/upbeat-funny-davinci/mnt/PersonalAIBot/mt5-core-server/src/routes/autoTrading.ts
++++ /sessions/upbeat-funny-davinci/mnt/PersonalAIBot/mt5-core-server/src/routes/autoTrading.ts
+@@ -215,8 +215,8 @@
+ router.put('/agent-models', async (req, res) => {
+   try {
+     const body = (req.body || {}) as { agentModels?: Record<string, any> };
+-    if (!body.agentModels) return res.status(400).json({ success: false, error_code: 'missing
++    if (!body.agentModels) return res.status(400).json({ success: false, error_code: 'missing_agentModels' });
+     autoTradingService.updateConfig({ agentModels: body.agentModels } as any);
+     ok(res, { agentModels: body.agentModels });
+   } catch (err) { fail(res, err); }
+ });
+ 
+ export default router;

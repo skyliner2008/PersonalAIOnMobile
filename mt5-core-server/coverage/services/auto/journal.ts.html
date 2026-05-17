@@ -1,0 +1,406 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for services/auto/journal.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../prettify.css" />
+    <link rel="stylesheet" href="../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../index.html">All files</a> / <a href="index.html">services/auto</a> journal.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>0/73</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/79</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/10</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>0/52</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import type { JournalRow } from './types.js';
+import { asNumber, asString, round2, moneyPerPriceUnit } from './utils.js';
+&nbsp;
+export type TradeOutcome = 'WIN' | 'LOSS' | 'BE';
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >profitToR(e</span>ntry: number | null, sl: number | null, closePrice: number | null, side: string): number | null {
+<span class="cstat-no" title="statement not covered" >  if (entry === null || sl === null || closePrice === null) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+  const risk = <span class="cstat-no" title="statement not covered" >Math.abs(entry - sl);</span>
+<span class="cstat-no" title="statement not covered" >  if (risk &lt;= 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+  const reward = <span class="cstat-no" title="statement not covered" >side === 'BUY' ? closePrice - entry : entry - closePrice;</span>
+<span class="cstat-no" title="statement not covered" >  return round2(reward / risk);</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >profitCashToR(p</span>rofit: number, entry: number | null, sl: number | null, volume: number, symbol: string): number | null {
+<span class="cstat-no" title="statement not covered" >  if (entry === null || sl === null || volume &lt;= 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+  const riskPerUnit = <span class="cstat-no" title="statement not covered" >Math.abs(entry - sl);</span>
+<span class="cstat-no" title="statement not covered" >  if (riskPerUnit &lt;= 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+  const <span class="cstat-no" title="statement not covered" >multiplier = moneyPerPriceUnit(symbol);</span>
+  const totalRiskCash = <span class="cstat-no" title="statement not covered" >riskPerUnit * multiplier * volume;</span>
+<span class="cstat-no" title="statement not covered" >  if (totalRiskCash &lt;= 0) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+<span class="cstat-no" title="statement not covered" >  return round2(profit / totalRiskCash);</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >detectCloseReason(d</span>eal: Record&lt;string, unknown&gt; | undefined): string {
+<span class="cstat-no" title="statement not covered" >  if (!deal) <span class="cstat-no" title="statement not covered" >return 'closed';</span></span>
+  const reasonText = <span class="cstat-no" title="statement not covered" >JSON.stringify(deal).toLowerCase();</span>
+<span class="cstat-no" title="statement not covered" >  if (reasonText.includes('take_profit') || reasonText.includes('"reason":"tp"') || reasonText.includes('"tp"')) <span class="cstat-no" title="statement not covered" >return 'TP';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (reasonText.includes('stop_loss') || reasonText.includes('"reason":"sl"')) <span class="cstat-no" title="statement not covered" >return 'SL';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (reasonText.includes('break_even')) <span class="cstat-no" title="statement not covered" >return 'BE';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (reasonText.includes('manual')) <span class="cstat-no" title="statement not covered" >return 'MANUAL';</span></span>
+<span class="cstat-no" title="statement not covered" >  return 'closed';</span>
+}
+&nbsp;
+function <span class="fstat-no" title="function not covered" >hasExitMarker(d</span>eal: Record&lt;string, unknown&gt;): boolean {
+  const <span class="cstat-no" title="statement not covered" >entry = asString(deal.entry ?? deal.deal_entry ?? deal.entry_type).toUpperCase();</span>
+<span class="cstat-no" title="statement not covered" >  if (entry.includes('OUT') || entry.includes('CLOSE')) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+  const <span class="cstat-no" title="statement not covered" >entryCode = asNumber(deal.entry ?? deal.deal_entry ?? deal.entry_type, -1);</span>
+<span class="cstat-no" title="statement not covered" >  return entryCode === 1 || entryCode === 3;</span>
+}
+&nbsp;
+function <span class="fstat-no" title="function not covered" >hasMeaningfulProfit(d</span>eal: Record&lt;string, unknown&gt;): boolean {
+<span class="cstat-no" title="statement not covered" >  return Math.abs(extractDealProfit(deal)) &gt; 0.005;</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >extractDealProfit(d</span>eal: Record&lt;string, unknown&gt; | undefined): number {
+<span class="cstat-no" title="statement not covered" >  if (!deal) <span class="cstat-no" title="statement not covered" >return 0;</span></span>
+  const candidates = <span class="cstat-no" title="statement not covered" >[</span>
+    deal.profit,
+    deal.pnl,
+    deal.p_l,
+    deal.realized_profit,
+    deal.realizedProfit,
+    deal.net_profit,
+    deal.netProfit,
+  ];
+<span class="cstat-no" title="statement not covered" >  for (const candidate of candidates) {</span>
+    const <span class="cstat-no" title="statement not covered" >value = asNumber(candidate, Number.NaN);</span>
+<span class="cstat-no" title="statement not covered" >    if (Number.isFinite(value)) <span class="cstat-no" title="statement not covered" >return value;</span></span>
+  }
+<span class="cstat-no" title="statement not covered" >  return 0;</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >extractDealClosePrice(d</span>eal: Record&lt;string, unknown&gt; | undefined): number | null {
+<span class="cstat-no" title="statement not covered" >  if (!deal) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+<span class="cstat-no" title="statement not covered" >  for (const key of ['price', 'close_price', 'closePrice', 'price_close', 'priceClose']) {</span>
+    const <span class="cstat-no" title="statement not covered" >value = asNumber((deal as any)[key], Number.NaN);</span>
+<span class="cstat-no" title="statement not covered" >    if (Number.isFinite(value) &amp;&amp; value &gt; 0) <span class="cstat-no" title="statement not covered" >return value;</span></span>
+  }
+<span class="cstat-no" title="statement not covered" >  return null;</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >classifyOutcome(p</span>rofit: number, profitR: number | null): TradeOutcome {
+  const cashEpsilon = <span class="cstat-no" title="statement not covered" >0.005;</span>
+  const rEpsilon = <span class="cstat-no" title="statement not covered" >0.05;</span>
+<span class="cstat-no" title="statement not covered" >  if (profit &gt; cashEpsilon) <span class="cstat-no" title="statement not covered" >return 'WIN';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (profit &lt; -cashEpsilon) <span class="cstat-no" title="statement not covered" >return 'LOSS';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (profitR !== null &amp;&amp; profitR &gt; rEpsilon) <span class="cstat-no" title="statement not covered" >return 'WIN';</span></span>
+<span class="cstat-no" title="statement not covered" >  if (profitR !== null &amp;&amp; profitR &lt; -rEpsilon) <span class="cstat-no" title="statement not covered" >return 'LOSS';</span></span>
+<span class="cstat-no" title="statement not covered" >  return 'BE';</span>
+}
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >matchHistoryDeal(r</span>ow: JournalRow, history: Record&lt;string, unknown&gt;[]): Record&lt;string, unknown&gt; | undefined {
+  const ticket = <span class="cstat-no" title="statement not covered" >row.mt5Ticket;</span>
+  const matches = <span class="cstat-no" title="statement not covered" >history.<span class="fstat-no" title="function not covered" >filter((d</span>eal) =&gt; {</span>
+    const candidates = <span class="cstat-no" title="statement not covered" >[</span>
+      asNumber(deal.ticket, -1),
+      asNumber(deal.position_ticket, -1),
+      asNumber(deal.position_id, -1),
+      asNumber(deal.order, -1),
+    ];
+<span class="cstat-no" title="statement not covered" >    if (ticket !== null &amp;&amp; candidates.includes(ticket)) <span class="cstat-no" title="statement not covered" >return true;</span></span>
+    const <span class="cstat-no" title="statement not covered" >symbolMatches = asString(deal.symbol).toUpperCase() === row.symbol.toUpperCase();</span>
+    const commentMatches = <span class="cstat-no" title="statement not covered" >JSON.stringify(deal).includes(row.decisionId);</span>
+<span class="cstat-no" title="statement not covered" >    return symbolMatches &amp;&amp; commentMatches;</span>
+  });
+<span class="cstat-no" title="statement not covered" >  if (matches.length === 0) <span class="cstat-no" title="statement not covered" >return undefined;</span></span>
+&nbsp;
+  // MT5 history often contains both entry and exit deals for the same order/position.
+  // Prefer the closing deal; otherwise a zero-profit entry deal makes learning label every close as BE.
+  const newestFirst = <span class="cstat-no" title="statement not covered" >matches.slice().reverse();</span>
+<span class="cstat-no" title="statement not covered" >  return (</span>
+    newestFirst.find((deal) =&gt; hasExitMarker(deal) &amp;&amp; hasMeaningfulProfit(deal)) ||
+    newestFirst.find((deal) =&gt; hasExitMarker(deal)) ||
+    newestFirst.find((deal) =&gt; hasMeaningfulProfit(deal)) ||
+    newestFirst[0]
+  );
+}
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-04-23T19:24:25.258Z
+            </div>
+        <script src="../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../sorter.js"></script>
+        <script src="../../block-navigation.js"></script>
+    </body>
+</html>
+    

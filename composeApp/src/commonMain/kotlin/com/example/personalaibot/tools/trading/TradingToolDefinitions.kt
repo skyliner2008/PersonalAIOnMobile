@@ -205,8 +205,8 @@ object TradingToolDefinitions {
         // ── 12. Financial News ─────────────────────────────────────────────
         FunctionDeclaration(
             name = "trading_news",
-            description = """ดึงข่าวการเงินล่าสุดจาก Reuters, CoinDesk, Yahoo Finance
-                |กรองตาม symbol ที่ต้องการได้
+            description = """ดึงข่าวการเงินล่าสุดจาก Reuters, CoinDesk, Yahoo Finance, MarketWatch
+                |พร้อมระบบ AI Analysis เพื่อสรุปนัยสำคัญและ Bias Score (-10 ถึง 10)
                 |ใช้เมื่อผู้ใช้ถามว่า "ข่าว BTC วันนี้", "มีข่าวอะไรเกี่ยวกับ AAPL", "ข่าวตลาดล่าสุด" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
@@ -266,10 +266,17 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_macro_calendar",
-            description = """ดึงปฏิทินเศรษฐกิจและเหตุการณ์ Macro สำคัญ
-                |แสดงวันที่, เหตุการณ์ (เช่น Fed Meeting, CPI), และระดับผลกระทบ (Impact)
-                |ใช้เมื่อผู้ใช้ถาม: "สัปดาห์นี้มีข่าวเศรษฐกิจอะไรบ้าง", "Fed ประชุมวันไหน" """.trimMargin(),
-            parameters = null
+            description = """ดึงปฏิทินเศรษฐกิจ (Economic Calendar) และเหตุการณ์สำคัญ
+                |แสดงผลกระทบ (High/Medium/Low Impact) พร้อมการวิเคราะห์ความเสี่ยงจาก AI
+                |AI จะแนะนำให้สร้างระบบติดตาม (Tracking) หากเป็นเหตุการณ์ที่มีนัยสำคัญสูง
+                |ใช้เมื่อผู้ใช้ถาม: "สัปดาห์นี้มีข่าวเศรษฐกิจอะไรบ้าง", "CPI ออกวันไหน" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "limit" to ParameterProperty("NUMBER", "จำนวนเหตุการณ์ (Default 10)")
+                ),
+                required = emptyList()
+            )
         ),
 
         FunctionDeclaration(
@@ -349,6 +356,432 @@ object TradingToolDefinitions {
                     )
                 ),
                 required = listOf("symbol")
+            )
+        ),
+
+        // ── 15. Modern Technical Suite ─────────────────────────────────────
+        
+        FunctionDeclaration(
+            name = "trading_harmonic_scan",
+            description = """สแกนหารูปแบบ Harmonic (Bat, Gartley, Butterfly)
+                |เน้นการหาจุดกลับตัวในโซน PRZ ที่สอดคล้องกับ Institutional Order Blocks
+                |ใช้เมื่อผู้ใช้ถาม: "มี Harmonic pattern ไหม", "หาจุดกลับตัวสวยๆ" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol"),
+                    "interval" to ParameterProperty("STRING", "Timeframe (default 1h)", enum = listOf("15m", "1h", "4h", "1D"))
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_elliot_modern_analysis",
+            description = """วิเคราะห์สถานะตลาดตามหลัก Elliot Wave สมัยใหม่
+                |ระบุ Stage: IMPULSE (คลื่นส่ง), CORRECTIVE (คลื่นพัก), ACCUMULATION (สะสม)
+                |พร้อม Swing-based Wave Counting, Momentum Bias, และ Graduated Confidence
+                |ใช้เมื่อผู้ใช้ถาม: "ตอนนี้อยู่คลื่นไหน", "แนวโน้มเป็นยังไงต่อ" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol"),
+                    "interval" to ParameterProperty("STRING", "Timeframe (default 1h)", enum = listOf("15m", "1h", "4h", "1D"))
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_mt5_order",
+            description = """Send a live order command to the MT5 core bridge.
+                |Use for real execution: BUY or SELL.
+                |Endpoint defaults to the mt5-core-server at http://127.0.0.1:8090/api/mt5/order;
+                |at runtime the app rewrites this with the user's configured bridge URL.""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "BUY or SELL", enum = listOf("BUY", "SELL")),
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD, EURUSD, BTCUSD"),
+                    "volume" to ParameterProperty("NUMBER", "Lot size, e.g., 0.01"),
+                    "sl" to ParameterProperty("NUMBER", "Stop loss price (optional)"),
+                    "tp" to ParameterProperty("NUMBER", "Take profit price (optional)"),
+                    "comment" to ParameterProperty("STRING", "Optional order comment"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("action", "symbol", "volume")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_mt5_close_position",
+            description = """Send a close-position command to the MT5 core bridge.
+                |Can close by ticket or close all positions for a symbol.
+                |Endpoint defaults to http://127.0.0.1:8090/api/mt5/close; rewritten
+                |at runtime with the configured bridge URL.""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD"),
+                    "ticket" to ParameterProperty("STRING", "Optional position ticket"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_mt5_modify_position",
+            description = """Update the Stop-Loss / Take-Profit of an EXISTING open position
+                |without closing it. Use this to move SL to break-even, trail a stop, or adjust TP.
+                |Identify the position by `ticket` OR by `symbol` (first match is modified).
+                |At least one of `sl` / `tp` must be provided; pass 0 to clear a value.""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD"),
+                    "ticket" to ParameterProperty("STRING", "Position ticket (preferred over symbol)"),
+                    "sl" to ParameterProperty("NUMBER", "New Stop-Loss price (0 to clear)"),
+                    "tp" to ParameterProperty("NUMBER", "New Take-Profit price (0 to clear)"),
+                    "comment" to ParameterProperty("STRING", "Optional comment"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ══════════════════════════════════════════════════════════════════════════
+        // ██  MT5 CORE AGENT TOOLS — ดึงข้อมูลจาก MT5 Broker โดยตรง  ██
+        // ══════════════════════════════════════════════════════════════════════════
+
+        // ── MT5-1. Account Info ─────────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_account_info",
+            description = """ดึงข้อมูลบัญชี MT5 จากโบรกเกอร์โดยตรง
+                |แสดง: Equity, Balance, Margin, Free Margin, Margin Level %, Profit/Loss
+                |ใช้เมื่อถาม: "ดูบัญชี MT5", "equity เท่าไหร่", "margin เหลือเท่าไหร่"
+                |ข้อมูลมาจาก broker จริงเสมอ ไม่ใช่ TradingView""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-2. List Positions ──────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_list_positions",
+            description = """ลิสต์ positions ที่เปิดอยู่ทั้งหมดใน MT5 จากโบรกเกอร์
+                |แต่ละ position แสดง: symbol, ticket, side (BUY/SELL), volume, priceOpen, sl, tp, profit, swap
+                |สามารถ filter ด้วย symbol ได้
+                |ใช้เมื่อถาม: "position ที่เปิดอยู่", "ลิสต์ออเดอร์", "XAUUSD มีกี่ lot" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol, e.g., XAUUSD (optional — blank = all)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-3. List Orders ─────────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_list_orders",
+            description = """ลิสต์ pending orders (ออเดอร์ที่ยังไม่ fill) ใน MT5 จากโบรกเกอร์
+                |แสดง: symbol, ticket, type (BUY_LIMIT/SELL_STOP/etc.), volume, price, sl, tp
+                |ใช้เมื่อถาม: "มี pending orders ไหม", "ดู limit orders" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol (optional)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-4. List History ─────────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_list_history",
+            description = """ดูประวัติการเทรดจาก MT5 broker (history deals/trades ที่ปิดแล้ว)
+                |แสดง: symbol, ticket, side, volume, price, profit, commission, swap, fee
+                |ใช้เพื่อ review ผลลัพธ์การเทรดที่ผ่านมา หรือคำนวณสถิติ win/loss
+                |ใช้เมื่อถาม: "ประวัติเทรดวันนี้", "deal ที่ปิดไปแล้ว", "ผลกำไร/ขาดทุน" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol (optional)"),
+                    "limit" to ParameterProperty("NUMBER", "จำนวน deals ที่ต้องการดู (default 100, max 500)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-5. Candles (OHLC) from Broker ──────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_candles",
+            description = """ดึงข้อมูลแท่งเทียน (OHLCV) จาก MT5 broker โดยตรง
+                |ข้อมูลจะตรงกับที่โบรกเกอร์ forex ให้ (spread, timing อาจต่างจาก TradingView)
+                |ใช้สำหรับวิเคราะห์ราคา, คำนวณอินดิเคเตอร์, หาจุดเข้า/ออก
+                |ใช้เมื่อถาม: "ดูกราฟ XAUUSD", "ดึง candle H1", "วิเคราะห์ราคาจาก broker" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD, EURUSD, BTCUSD"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1, M5, M15, M30, H1, H4, D1, W1, MN1",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1")),
+                    "count" to ParameterProperty("NUMBER", "จำนวนแท่งเทียน (default 300, max 2000)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("symbol", "timeframe")
+            )
+        ),
+
+        // ── MT5-5b. Broker Technical Analysis ──────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_analyze",
+            description = """วิเคราะห์ Technical Analysis และ SMC (FVG, OB, Liquidity) จาก broker candles จริงโดยตรง (ไม่ใช่ TradingView)
+                |คำนวณ: Regime, Bias, SMC (Order Blocks, FVG, Liquidity Sweeps), ATR, RSI, MACD
+                |สรุป signals และแสดง 20 แท่งล่าสุดแบบ compact เพื่อ pattern reading
+                |ใช้เมื่อถาม: "วิเคราะห์ mt5 xauusd", "วิเคราะห์ smc mt5", "ดู indicator broker"
+                |⚡ ควรเรียกแทน trading_mt5_candles เสมอเมื่อต้องการ analysis จริง""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"    to ParameterProperty("STRING", "Trading symbol เช่น XAUUSD, EURUSD, BTCUSD"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1,M5,M15,M30,H1,H4,D1",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1")),
+                    "count"     to ParameterProperty("NUMBER", "จำนวน candle ที่ใช้วิเคราะห์ (default 180, min 60, max 500)"),
+                    "endpoint"  to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("symbol", "timeframe")
+            )
+        ),
+
+        // ── MT5-6. Symbol Info ──────────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_symbol_info",
+            description = """ดูข้อมูลรายละเอียดของ symbol จาก MT5 broker
+                |แสดง: spread, digits, contract size, volume min/max/step, tick size/value, margin required
+                |ข้อมูล spec ตรงจากโบรกเกอร์ ใช้คำนวณ position sizing ได้แม่นยำ
+                |ระบุ symbol= เพื่อดูเฉพาะ symbol นั้น ถ้าไม่ระบุจะแสดงรายชื่อ symbols ทั้งหมด
+                |ใช้เมื่อถาม: "spread XAUUSD เท่าไหร่", "contract size", "symbol info"
+                |⚠ หากไม่แน่ใจว่าโบรกใช้ชื่ออะไร ให้เรียก trading_mt5_symbol_search ก่อน""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "ชื่อ symbol ที่ต้องการดู spec (optional — ถ้าไม่ระบุจะแสดง list ทั้งหมด)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-6b. Symbol Search & Validate ──────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_symbol_search",
+            description = """🔍 ค้นหาและตรวจสอบชื่อ symbol ที่ถูกต้องในโบรกเกอร์ MT5
+                |ปัญหาที่แก้: แต่ละโบรกมีชื่อ symbol ต่างกัน เช่น BTCUSD อาจชื่อ XBTUSD ในบางโบรก
+                |ค้นหาได้ทั้ง ชื่อ symbol (เช่น btc, gold, xau) และ คำอธิบาย (description) เช่น "bitcoin", "dollar index"
+                |ผลลัพธ์บอกว่า: exact=true ถ้ามีชื่อนั้นจริง, suggested=ชื่อที่ใกล้เคียงที่สุด
+                |⚡ ควรเรียกก่อนเสมอ ถ้าไม่แน่ใจว่าโบรกใช้ชื่อ symbol อะไร
+                |ใช้เมื่อ: "ค้นหา symbol bitcoin", "โบรกนี้มี BTCUSD ไหม", "gold ชื่อว่าอะไรในโบรก" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "q"        to ParameterProperty("STRING", "คำค้นหา — ชื่อ symbol หรือ keyword จาก description เช่น 'btc', 'gold', 'bitcoin', 'nasdaq'"),
+                    "limit"    to ParameterProperty("STRING", "จำนวนผลลัพธ์สูงสุด (default 15, max 50)"),
+                    "validate" to ParameterProperty("STRING", "true = ตรวจสอบว่า q เป็นชื่อ exact ของโบรกหรือไม่"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("q")
+            )
+        ),
+
+        // ── MT5-7. Close All Positions ──────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_close_all",
+            description = """ปิด positions ทั้งหมด หรือเฉพาะ symbol ที่ระบุ
+                |ดึงรายการ positions → loop ปิดทีละตัว → รายงานผลสรุป
+                |ใช้เมื่อ: "ปิดออเดอร์ทั้งหมด", "close all XAUUSD", "ปิดพอร์ต" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol — blank = close ALL positions (very dangerous)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-8. Break-Even All ──────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_break_even_all",
+            description = """ย้าย Stop-Loss ของ positions ที่กำไรอยู่มาที่จุด break-even (ราคาเปิด)
+                |จะดำเนินการเฉพาะ positions ที่มี profit > 0 และ priceOpen > 0
+                |ใช้เมื่อ: "break-even ทั้งหมด", "ย้าย SL มาต้นทุน", "ล็อคกำไร" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol (optional — blank = all profitable positions)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-9. Full Snapshot ────────────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_snapshot",
+            description = """ดึง snapshot รวมครั้งเดียว: account + positions + orders + history
+                |ประหยัดการเรียก API เพราะดึงทุกอย่างรวมกัน (delta-based)
+                |ใช้เพื่อดูภาพรวมพอร์ตทั้งหมดในครั้งเดียว
+                |ใช้เมื่อถาม: "ดูพอร์ต MT5", "สรุปสถานะทั้งหมด", "snapshot" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "limit" to ParameterProperty("NUMBER", "จำนวน history rows (default 200)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-10. Trade Actions Audit ─────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_trade_actions",
+            description = """ดูประวัติ trade actions ที่ JARVIS เคยส่งไปยัง MT5 (audit log)
+                |แสดง: order/close/modify actions, สถานะ, timestamp, request/response
+                |ใช้ตรวจสอบว่า AI เคยสั่งอะไรไปบ้าง
+                |ใช้เมื่อถาม: "ดูประวัติการสั่งเทรด", "JARVIS เคยสั่งอะไรไปบ้าง" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ══════════════════════════════════════════════════════════════════════════
+        // ██  MT5 ADVANCED INTELLIGENCE — วิเคราะห์ขั้นสูงจากข้อมูล Broker  ██
+        // ══════════════════════════════════════════════════════════════════════════
+
+        // ── MT5-ADV-1. Market Scanner ──────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_market_scanner",
+            description = """สแกนหา symbols ที่น่าสนใจจาก MT5 broker (ไม่ใช่ TradingView)
+                |ดึง candle data จาก broker โดยตรง แล้ววิเคราะห์หาจุดเข้าเทรดด้วย AI
+                |ตรวจ: RSI oversold/overbought, Bollinger squeeze, Volume breakout, EMA crossover
+                |ใช้เมื่อถาม: "หา symbol น่าเทรด", "สแกนตลาด MT5", "มีจุดเข้าไหม"
+                |symbols ที่สแกนมาจากรายการที่โบรกเกอร์ให้ ไม่ใช่ TradingView""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbols" to ParameterProperty("STRING", "Comma-separated symbols to scan, e.g., XAUUSD,EURUSD,GBPUSD (blank = use broker's available symbols)"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M15, H1, H4, D1",
+                        enum = listOf("M15", "H1", "H4", "D1")),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-ADV-2. Correlation Radar ───────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_correlation_radar",
+            description = """วิเคราะห์ความสัมพันธ์ (Correlation) ระหว่าง symbols จากข้อมูล candle ของ broker โดยตรง
+                |คำนวณ Pearson correlation จาก close prices ของแต่ละ symbol
+                |ใช้ดูว่า symbols เคลื่อนที่ไปทิศทางเดียวกัน (1.0) หรือสวนทาง (-1.0)
+                |ใช้เมื่อถาม: "XAUUSD กับ EURUSD สัมพันธ์กันไหม", "correlation ในพอร์ต"
+                |ข้อมูลจาก broker จริง ไม่ใช่ Yahoo Finance""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbols" to ParameterProperty("STRING", "Comma-separated symbols, e.g., XAUUSD,EURUSD,GBPUSD,USDJPY"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: H1, H4, D1 (default H1)",
+                        enum = listOf("H1", "H4", "D1")),
+                    "bars" to ParameterProperty("NUMBER", "จำนวนแท่งเทียน (default 200)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("symbols")
+            )
+        ),
+
+        // ── MT5-ADV-3. Sentiment Gauge ─────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_sentiment_gauge",
+            description = """วัดจิตวิทยา/สุขภาพพอร์ต MT5 จากข้อมูล broker โดยตรง
+                |วิเคราะห์: Net exposure (long vs short), Drawdown %, Win rate, Average profit/loss ratio
+                |Risk score, Margin health, Overtrading detection, Emotional trading signals
+                |ใช้เมื่อถาม: "สุขภาพพอร์ตเป็นยังไง", "กลัวหรือโลภ", "over-trade ไหม"
+                |ข้อมูลจากบัญชีจริง ไม่ใช่ sentiment ของ Reddit""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-ADV-4. Institutional Flow ──────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_institutional_flow",
+            description = """วิเคราะห์ทิศทางเจ้ามือ/สถาบัน จากข้อมูล candle+volume ของ broker โดยตรง
+                |ตรวจ: Volume profile, Large candle detection, Absorption patterns, Price-Volume divergence
+                |Accumulation vs Distribution, Smart money footprint, Whale activity indicators
+                |ใช้เมื่อถาม: "เจ้ามือกำลัง buy หรือ sell", "institutional flow XAUUSD"
+                |ข้อมูล volume จาก broker จริง — ใกล้เคียง tick volume สุทธิ""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Symbol to analyze, e.g., XAUUSD"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M15, H1, H4, D1",
+                        enum = listOf("M15", "H1", "H4", "D1")),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── MT5-ADV-5. Economic Radar ──────────────────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_economic_radar",
+            description = """วิเคราะห์ข่าวเศรษฐกิจ + ผลกระทบต่อ positions ที่เปิดอยู่ใน MT5
+                |ดึงปฏิทินเศรษฐกิจ แล้ว map กับ positions/symbols ที่เปิดอยู่จริง
+                |ให้คะแนนความเสี่ยง: High/Medium/Low สำหรับแต่ละ position
+                |แนะนำ: ควรปิด/ลด lot/ย้าย SL ก่อนข่าวหรือไม่
+                |ใช้เมื่อถาม: "มีข่าวอะไรกระทบพอร์ต", "ควรปิดก่อนข่าวไหม" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── MT5-ADV-6. Trade Journal & AI Scoring ──────────────────────────────
+        FunctionDeclaration(
+            name = "trading_mt5_trade_journal",
+            description = """ระบบบันทึก/วิเคราะห์ผลเทรดอัจฉริยะ จากข้อมูล history ของ broker โดยตรง
+                |วิเคราะห์: Win rate, Profit factor, Average R:R, Best/worst trade, Streak analysis
+                |AI Scoring: ให้คะแนนคุณภาพการเทรด (Discipline, Timing, Risk management)
+                |เรียนรู้จากข้อผิดพลาด: ระบุ pattern ที่เสียเงินบ่อย + แนะนำการปรับปรุง
+                |ใช้เมื่อถาม: "สรุปผลเทรด", "ให้คะแนนการเทรดของฉัน", "เรียนรู้จากข้อผิดพลาด" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "limit" to ParameterProperty("NUMBER", "จำนวน deals ย้อนหลังที่จะวิเคราะห์ (default 50, max 500)"),
+                    "symbol" to ParameterProperty("STRING", "Filter by symbol (optional)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
             )
         )
     )

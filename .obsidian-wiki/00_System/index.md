@@ -1,59 +1,121 @@
-# ⬡ JARVIS Wiki Index ⬡
+# JARVIS Wiki Index
 
-ยินดีต้อนรับเข้าสู่ฐานความรู้ของ **PersonalAIBot (JARVIS)** 
-พื้นที่นี้คือ "สมองส่วนนอก" ที่รวบรวมข้อมูลสถาปัตยกรรม การออกแบบ และความก้าวหน้าของโปรเจค
+ศูนย์รวมเอกสารของโปรเจค `PersonalAIBot (JARVIS)` — Professional AI Trading Platform แบบ Self-Hosted บน Android/iOS  
+ใช้เป็น **สมองส่วนนอก (External Brain)** สำหรับทั้งการพัฒนาแอปและระบบเทรดอัตโนมัติ
 
-## 🗺️ แผนผัง Wiki (Sitemap)
-
-### 📂 [00_System]([[schema]])
-- [[index]] - หน้าหลัก (หน้านี้)
-- [[log]] - บันทึกการเปลี่ยนแปลง (Timeline)
-- [[schema]] - กฎการรักษาระบบ Wiki สำหรับ AI
-
-### 📂 [01_Architecture]([[overview]])
-- [[overview]] - ภาพรวมโครงสร้างระบบ
-- [[memory_strategy]] - กลยุทธ์หน่วยความจำ 4 ชั้น
-- [[vision_system]] - รายละเอียดการทำงานของระบบการมองเห็น
-
-### 📂 [02_Components]([[LiveToolBridge]])
-- [[LiveGeminiService]] - การเชื่อมต่อ WebSocket กับ Gemini
-- [[GeminiService]] - บริบทการดึงข้อมูล API ทั่วไป
-- [[LiveToolBridge]] - สะพานเชื่อมการวิเคราะห์คำสั่ง (Intent)
-- [[JarvisViewModel]] - การจัดการ State และ UI
-
-### 📂 [03_Tools]([[catalogue]])
-- [[catalogue]] - รายชื่อและคู่มือการใช้เครื่องมือ JARVIS
-
-### 📂 [04_Tasks]([[Current_Tasks]])
-- [[Current_Tasks]] - รายการสิ่งที่กำลังดำเนินการ (Status & Roadmap)
-
-### 📂 [05_Android_Skills]([[agp-9-upgrade]])
-- [[agp-9-upgrade]] - แนวทางการอัปเกรด AGP 9
-- [[migrate-xml-views-to-jetpack-compose]] - การแปลง XML เป็น Compose
-- [[navigation-3]] - คู่มือ Navigation 3
-- [[r8-analyzer]] - การปรับแต่ง R8/Proguard
-- [[play-billing-library-version-upgrade]] - การอัปเกรด Play Billing
-- [[edge-to-edge]] - การจัดการหน้าจอไร้ขอบ (SDK 35+)
-
-### 📂 [06_Gemini_Skills]([[gemini-api-dev]])
-- [[gemini-api-dev]] - คู่มือการใช้ Gemini API (3.1+)
-- [[gemini-live-api-dev]] - คู่มือ Gemini Live API (3.1+)
-
-### 📂 [07_Trading_Intelligence]([[00_Tool_to_Strategy_Map]])
-- [[00_Tool_to_Strategy_Map]] - แผนที่เชื่อมโยงเครื่องมือและกลยุทธ์
-- [[01_Market_Cycles_Wyckoff]] - กลยุทธ์วัฏจักรตลาด (The Context) 
-- [[02_Institutional_Mechanics_ICT]] - กลไกราคาและสภาพคล่อง (The Mechanism)
-- [[03_Execution_SMC_V10]] - การหาจุดเข้าที่แม่นยำ (The Trigger)
-- [[04_Momentum_and_Scanners]] - เทคนิควินิจฉัยหุ้นซิ่งและ Momentum
-- [[05_Sentiment_Analysis_Logic]] - การวิเคราะห์อารมณ์และข่าวสาร
-- [[06_The_Ultimate_Checklist_V12.5]] - มาตรฐานการวิเคราะห์ (SOP V12.5)
-- [[07_Advanced_Analysis_V12.5]] - การวิเคราะห์เชิงลึกระดับสถาบัน
-- [[08_Universal_Trading_Unity_V14.1]] - ระบบรวมศูนย์ข้อมูลราคา (V14.1)
+> **อัพเดทล่าสุด**: 2026-05-01 — V20.0 Per-Agent Model Ranking, Agent Coordination Audit
 
 ---
-> [!NOTE]
-> Wiki นี้ถูกออกแบบมาเพื่อให้ทั้งมนุษย์ (ผ่าน Obsidian) และ AI (ผ่านเครื่องมือวิเคราะห์) ทำงานร่วมกันได้อย่างไร้รอยต่อ
 
-### 📂 [08_Charts_Hub]([[Knowledge_Hub]])
-- [[Knowledge_Hub]] - ศูนย์รวมความรู้และการปรับแต่ง Lightweight Charts
+## 🗂️ Sitemap
 
+### 00 System — ระบบเอกสาร
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[index]] | จุดเริ่มต้นของ wiki (หน้านี้) |
+| [[log]] | บันทึกการเปลี่ยนแปลงและ timeline สำคัญ |
+| [[schema]] | โครงสร้างและแนวทางการจัดหมวดหมู่เอกสาร |
+| [[prompt]] | บริบทและแนวทาง prompt/system behavior |
+
+### 01 Architecture — สถาปัตยกรรม
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[overview]] | ภาพรวมสถาปัตยกรรมแอป (Android + mt5-core-server) |
+| [[04_AutoTrading_Workflow]] | Workflow ของ Auto Trading Engine |
+| [[multi_provider_architecture]] | Multi-Provider AI Architecture (OpenRouter, Gemini, Ollama) |
+| [[memory_strategy]] | แนวทางจัดการ memory หลายชั้น (Vector, Graph, Episodic) |
+| [[vision_system]] | ระบบภาพ กล้อง และ provider ของ vision |
+
+### 02 Components — ส่วนประกอบหลัก
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[GeminiService]] | การเชื่อมต่อโมเดลหลักและ orchestration |
+| [[LiveGeminiService]] | Live session และการสื่อสารแบบ real-time |
+| [[LiveToolBridge]] | Bridge ระหว่าง live interaction กับ tools |
+| [[JarvisViewModel]] | State orchestration ฝั่ง UI |
+| [[LocalEmbeddingSystem]] | Embedding ฝั่ง local สำหรับ vector memory |
+
+### 03 Tools — เครื่องมือ
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[catalogue]] | สารบัญเครื่องมือทั้งหมดที่เปิดให้ agent ใช้งาน (75+ tools) |
+
+### 04 Tasks — งานและสถานะ
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[Current_Tasks]] | งานปัจจุบัน สถานะ และ next steps |
+| [[2026-04-21_Auto_Trading_Engine_Update]] | สรุปอัปเดต MT5 และ auto-trading engine |
+| [[Changelog_2026-05-01_Mobile_App_Complete]] | Changelog มือถือ — Trading Terminal, Dashboard |
+| [[Mobile_App_Improvement_Plan_2026-04-30]] | แผนปรับปรุง Mobile App |
+
+### 05 Android Skills — ทักษะ Android
+- [[agp-9-upgrade]] | [[edge-to-edge]] | [[gradle-troubleshooting]]
+- [[migrate-xml-views-to-jetpack-compose]] | [[navigation-3]]
+- [[play-billing-library-version-upgrade]] | [[r8-analyzer]]
+
+### 06 Gemini Skills — ทักษะ Gemini API
+- [[gemini-api-dev]] — Gemini API Development Guide
+- [[gemini-live-api-dev]] — Gemini Live API (WebSocket, Streaming)
+
+### 07 Trading Intelligence — ระบบวิเคราะห์การเทรด
+> 📚 เริ่มจาก [[Trading_Intelligence_MOC]] เพื่อดูเส้นทางอ่านทั้งหมด
+
+**Foundation**: [[01_Market_Cycles_Wyckoff]] → [[02_Institutional_Mechanics_ICT]] → [[03_Execution_SMC_V10]]
+
+**Analysis**: [[04_Momentum_and_Scanners]] → [[05_Sentiment_Analysis_Logic]] → [[06_The_Ultimate_Checklist_V12.5]] → [[07_Advanced_Analysis_V12.5]]
+
+**Modern Stack**: [[08_Universal_Trading_Unity_V14.4]] → [[10_Global_Insights_V16.0]] → [[11_MT5_Full_Agent_Control_V17]]
+
+**V20.0 Architecture**:
+- [[17_PerAgent_ModelRanking_V20]] — Per-Agent Model Ranking, Blacklist, Smart Fallback
+- [[18_V20_Agent_Coordination_Audit]] — Agent Flow, Interaction Matrix, ปัญหาที่พบ
+- [[Smart_Fallback_and_Token_Management]] — Token Cost Optimization
+
+### 08 Charts Hub
+- เอกสารอ้างอิง Lightweight Charts API
+
+### 09 Roadmap — แผนพัฒนา
+| ไฟล์ | หน้าที่ |
+|------|--------|
+| [[00_AI_Agent_Trader_Pro_Roadmap]] | Roadmap หลักของ AI Trading Platform |
+| [[01_mt5_core_server_plan]] | แผนพัฒนา mt5-core-server |
+| [[04_Pro_AI_Trader_Roadmap]] | Pro AI Trader Roadmap |
+| [[02_AutoTrading_Smart_Upgrade_Plan_2026_04_25]] | แผนอัพเกรด Smart Trading |
+| [[03_AutoTrading_Implementation_Audit_2026_04_25]] | Audit ผลการ implement |
+
+---
+
+## 🧭 Suggested Reading Paths
+
+### 🏗️ เข้าใจระบบทั้งโปรเจค
+1. [[overview]] → [[multi_provider_architecture]]
+2. [[JarvisViewModel]] → [[GeminiService]]
+3. [[catalogue]] → [[00_Tool_to_Strategy_Map]]
+4. [[Current_Tasks]]
+
+### 📈 เข้าใจระบบเทรดอัตโนมัติ (สำคัญที่สุด)
+1. [[Trading_Intelligence_MOC]] — จุดเริ่มต้น
+2. [[15_Cluster_Trading_Logic_V17.2]] — Cluster Trading + Risk Management
+3. [[16_Complete_Code_Logic_V19.6]] — Code Logic ทั้งระบบ
+4. [[17_PerAgent_ModelRanking_V20]] — Per-Agent Model Ranking
+5. [[18_V20_Agent_Coordination_Audit]] — Agent Coordination Audit
+
+### 🧠 เข้าใจ Memory และ AI
+1. [[memory_strategy]] → [[LocalEmbeddingSystem]]
+2. [[multi_provider_architecture]]
+3. [[Smart_Fallback_and_Token_Management]]
+
+### 📱 เข้าใจ Mobile App
+1. [[Mobile_App_Improvement_Plan_2026-04-30]]
+2. [[Changelog_2026-05-01_Mobile_App_Complete]]
+3. [[05_Android_Skills]] — ทักษะ Android ที่ใช้
+
+---
+
+## สถานะปัจจุบัน
+- **V20.0** — Per-Agent Model Ranking เสถียร, Smart Fallback ทำงาน 24/7
+- **Auto Trading Engine** — Production mode, 8+ positions managed
+- **Mobile App** — Trading Terminal, AI Dashboard พร้อมใช้
+- **mt5-core-server** — Node.js server เชื่อม MT5 Python Bridge
+
+**Links**: [[catalogue]] | [[overview]] | [[Trading_Intelligence_MOC]] | [[Current_Tasks]] | [[00_AI_Agent_Trader_Pro_Roadmap]]

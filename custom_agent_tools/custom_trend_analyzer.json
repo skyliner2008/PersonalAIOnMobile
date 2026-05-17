@@ -1,0 +1,7 @@
+{
+  "name": "custom_trend_analyzer",
+  "description": "ตัวอย่าง Tool วิเคราะห์เทรนด์อัตโนมัติที่ Agent สร้างขึ้น",
+  "triggerKeywords": ["วิเคราะห์เทรนด์", "trend analysis"],
+  "author": "Jarvis Agent",
+  "systemPromptAddon": "1. ให้ดึงข้อมูลประวัติการเทรดและราคาจาก MT5\n2. วิเคราะห์ทิศทางราคาตามหลักการ Dow Theory\n3. สรุปภาพรวมแนวโน้มและจุดเข้าเทรดที่ปลอดภัยให้ผู้ใช้"
+}

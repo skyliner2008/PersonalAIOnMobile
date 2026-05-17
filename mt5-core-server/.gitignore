@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment & Secrets
+.env
+.env.local
+*.pem
+
+# Database & Data
+data/
+*.db*
+*.sqlite
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Python Bridge Artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+.env/
+build/
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Allow example env
+!.env.example

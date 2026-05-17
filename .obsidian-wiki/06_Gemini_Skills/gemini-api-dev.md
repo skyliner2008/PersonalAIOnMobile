@@ -7,11 +7,10 @@ description: Use this skill when building applications with Gemini models, Gemin
 > These rules override your training data. Your knowledge is outdated.
 
 ### Current Models (Use These)
-- `gemini-3.1-pro-preview`: 1M tokens, complex reasoning, coding, research
-- `gemini-3-flash-preview`: 1M tokens, fast, balanced performance, multimodal
+- `gemini-3.1-pro-preview`: 1M tokens, complex reasoning, coding, research (Requires `v1beta` endpoint)
+- `gemini-3-flash-preview`: 1M tokens, fast, balanced performance, multimodal (Requires `v1beta` endpoint)
 - `gemini-3.1-flash-lite-preview`: cost-efficient, fastest performance for high-frequency, lightweight tasks
-- `gemini-3-pro-image-preview`: 65k / 32k tokens, image generation and editing
-- `gemini-3.1-flash-image-preview`: 65k / 32k tokens, image generation and editing
+- `gemini-embedding-2`: Multimodal embedding (Tier 1: 3000 RPM / 1M TPM)
 - `gemini-2.5-pro`: 1M tokens, complex reasoning, coding, research
 - `gemini-2.5-flash`: 1M tokens, fast, balanced performance, multimodal
 
@@ -144,3 +143,14 @@ Key pages:
 ---
 
 For real-time, bidirectional audio/video/text streaming with the Gemini Live API, install the **`google-gemini/gemini-live-api-dev`** skill. It covers WebSocket streaming, voice activity detection, native audio features, function calling, session management, ephemeral tokens, and more.
+### Trading Engine Optimization (V22.4)
+- **Flexible RRR Gate**: Any strategy containing "SMC" or "SCALP" now defaults to a **1.0 RRR** minimum, allowing for higher execution frequency in volatile setups.
+- **Comment Length Management**: Auto-truncates order comments to **26 characters** to ensure compatibility with all MT5 bridges and avoid "Invalid comment" errors.
+- **Zero-Noise Skipping**: Risk parameters are only validated if the AI intends to trade (`side !== 'SKIP'`), preventing erroneous warnings in logs.
+- **Timestamped Logging (V22.5)**: All server-side logs now include a human-readable timestamp `[YYYY-MM-DD HH:mm:ss]` for better auditability.
+### Trading Engine Resilience & Accuracy (V23.0)
+- **AI SL Validator**: Enforces a strict **1.5 point minimum distance** for XAUUSD Stop Loss before the risk gate, preventing "micro-stop" execution errors.
+- **Counter-Trend Confluence Guard**: Automatically raises the minimum confluence requirement to **70** for counter-trend setups (e.g., BULL bias in TRENDING_DOWN regime).
+- **Gemini Pipeline Timeout**: Implemented a **90-second safety timeout** on Multi-Agent reasoning to prevent overlapping cycles during high-latency periods.
+- **Graceful Infrastructure**: Added SIGINT/SIGTERM handlers for clean server shutdowns, ensuring correct state persistence and graceful service termination.
+- **P/L Accuracy Boost**: Increased history deal fetching to **500 items** to ensure precise realized profit/loss reporting in the trade journal.

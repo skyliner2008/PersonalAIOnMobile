@@ -3,9 +3,64 @@ package com.example.personalaibot.tools
 import com.example.personalaibot.tools.trading.TradingToolDefinitions
 import com.example.personalaibot.tools.trading.SmcToolDefinitions
 import com.example.personalaibot.tools.file.FileToolDefinitions
+import kotlinx.serialization.json.*
 
 object ToolRegistry {
-    private const val STRICT_TV_ONLY_TRADING_MODE = true
+    private const val STRICT_TV_ONLY_TRADING_MODE = false
+
+    val tvOnlyTradingFunctionNames = setOf(
+        "trading_price",
+        "trading_market_snapshot",
+        "trading_top_gainers",
+        "trading_top_losers",
+        "trading_technical_analysis",
+        "trading_multi_timeframe",
+        "trading_bollinger_scan",
+        "trading_oversold_scan",
+        "trading_overbought_scan",
+        "trading_volume_breakout",
+        "trading_sentiment",
+        "trading_news",
+        "trading_combined",
+        "trading_fundamental_analysis",
+        "trading_fear_greed",
+        "trading_macro_calendar",
+        "trading_correlation_matrix",
+        "trading_position_sizing",
+        "automation_manage_alerts",
+        "trading_deep_analysis_suite",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis",
+        "trading_smc_analysis",
+        "trading_smc_sweeps",
+        "trading_smc_liquidity",
+        "trading_smc_orderblocks",
+        "trading_smc_structure"
+    )
+
+    val mt5OnlyTradingFunctionNames = setOf(
+        "trading_mt5_account_info",
+        "trading_mt5_list_positions",
+        "trading_mt5_list_orders",
+        "trading_mt5_list_history",
+        "trading_mt5_candles",
+        "trading_mt5_analyze",
+        "trading_mt5_symbol_info",
+        "trading_mt5_symbol_search",
+        "trading_mt5_snapshot",
+        "trading_mt5_trade_actions",
+        "trading_mt5_market_scanner",
+        "trading_mt5_correlation_radar",
+        "trading_mt5_sentiment_gauge",
+        "trading_mt5_institutional_flow",
+        "trading_mt5_economic_radar",
+        "trading_mt5_trade_journal",
+        "trading_mt5_order",
+        "trading_mt5_close_position",
+        "trading_mt5_modify_position",
+        "trading_mt5_close_all",
+        "trading_mt5_break_even_all"
+    )
 
     private val _builtinTools: Map<String, FunctionDeclaration> = buildMap {
         put("get_current_datetime", FunctionDeclaration(
@@ -110,6 +165,20 @@ object ToolRegistry {
                 required = listOf("query")
             )
         ))
+        put("system_create_agent_tool", FunctionDeclaration(
+            name = "system_create_agent_tool",
+            description = "Creates a new custom tool/skill for the Agent by generating a JSON definition. Use this when the user asks you to create a new indicator, strategy, or capability. The tool will be saved locally and become available in the mobile app.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "The unique name of the tool, starting with 'custom_' (e.g., 'custom_rsi_divergence')."),
+                    "description" to ParameterProperty("STRING", "A short description of what the tool does."),
+                    "triggerKeywords" to ParameterProperty("STRING", "Comma-separated keywords that trigger this tool (e.g., 'rsi, divergence, วิเคราะห์ rsi')."),
+                    "systemPromptAddon" to ParameterProperty("STRING", "The step-by-step logic, prompt, or instructions the agent should follow when executing this tool. Be extremely detailed.")
+                ),
+                required = listOf("name", "description", "triggerKeywords", "systemPromptAddon")
+            )
+        ))
         put("system_run_diagnostics", FunctionDeclaration(
             name = "system_run_diagnostics",
             description = "Runs a comprehensive system health check and generates a diagnostic report. Use this to troubleshoot price discrepancies, connection issues, or automation failures.",
@@ -119,6 +188,36 @@ object ToolRegistry {
             name = "system_check_connectivity",
             description = "Checks the internet connection and connectivity to key financial APIs (Yahoo, TradingView).",
             parameters = null
+        ))
+        put("mt5_place_order", FunctionDeclaration(
+            name = "mt5_place_order",
+            description = "Sends a live BUY/SELL order command to an MT5 bridge service.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "BUY or SELL", enum = listOf("BUY", "SELL")),
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD, EURUSD, BTCUSD"),
+                    "volume" to ParameterProperty("NUMBER", "Lot size, e.g., 0.01"),
+                    "sl" to ParameterProperty("NUMBER", "Stop loss price (optional)"),
+                    "tp" to ParameterProperty("NUMBER", "Take profit price (optional)"),
+                    "comment" to ParameterProperty("STRING", "Optional order comment"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("action", "symbol", "volume")
+            )
+        ))
+        put("mt5_close_position", FunctionDeclaration(
+            name = "mt5_close_position",
+            description = "Sends a close-position command to an MT5 bridge service.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD"),
+                    "ticket" to ParameterProperty("STRING", "Optional position ticket to close"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
         ))
     }
 
@@ -139,10 +238,26 @@ object ToolRegistry {
         "trading_volume_breakout",
         "trading_sentiment",
         "trading_news",
-        "trading_combined"
+        "trading_combined",
+        // V16.0 Advanced Suite
+        "trading_fundamental_analysis",
+        "trading_fear_greed",
+        "trading_macro_calendar",
+        "trading_correlation_matrix",
+        "trading_position_sizing",
+        "automation_manage_alerts",
+        "trading_deep_analysis_suite",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis"
     )
 
-    private val tvOnlyTradingToolNames = setOf("trading_price")
+    private val tvOnlyTradingToolNames = setOf(
+        "trading_price",
+        "trading_news",
+        "trading_macro_calendar",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis"
+    )
 
     private val activeTradingToolNames: Set<String> =
         if (STRICT_TV_ONLY_TRADING_MODE) tvOnlyTradingToolNames else supportedTradingToolNames
@@ -150,6 +265,39 @@ object ToolRegistry {
     private val _tradingTools: Map<String, FunctionDeclaration> =
         TradingToolDefinitions.allDefinitions
             .filter { it.name in activeTradingToolNames }
+            .associateBy { it.name }
+
+    // ─── MT5 Bridge Tools (separate category) ────────────────────────────────
+    private val supportedMt5ToolNames = setOf(
+        // MT5 Core Actions
+        "trading_mt5_order",
+        "trading_mt5_close_position",
+        "trading_mt5_modify_position",
+        // MT5 Core Agent (Query)
+        "trading_mt5_account_info",
+        "trading_mt5_list_positions",
+        "trading_mt5_list_orders",
+        "trading_mt5_list_history",
+        "trading_mt5_candles",
+        "trading_mt5_analyze",
+        "trading_mt5_symbol_info",
+        "trading_mt5_symbol_search",
+        "trading_mt5_close_all",
+        "trading_mt5_break_even_all",
+        "trading_mt5_snapshot",
+        "trading_mt5_trade_actions",
+        // MT5 Advanced Intelligence
+        "trading_mt5_market_scanner",
+        "trading_mt5_correlation_radar",
+        "trading_mt5_sentiment_gauge",
+        "trading_mt5_institutional_flow",
+        "trading_mt5_economic_radar",
+        "trading_mt5_trade_journal"
+    )
+
+    private val _mt5Tools: Map<String, FunctionDeclaration> =
+        TradingToolDefinitions.allDefinitions
+            .filter { it.name in supportedMt5ToolNames }
             .associateBy { it.name }
 
     // ─── SMC (Smart Money Concepts) Tools ────────────────────────────────────
@@ -163,6 +311,7 @@ object ToolRegistry {
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
+                               _mt5Tools.values.toList() +
                                _smcTools.values.toList() +
                                _fileTools.values.toList() +
                                _cameraTools.values.toList() +
@@ -177,10 +326,13 @@ object ToolRegistry {
     )
 
     fun allToolNames(): Set<String> =
-        _builtinTools.keys + _tradingTools.keys + _smcTools.keys + _fileTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
+        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
 
     fun isTradingTool(name: String): Boolean =
-        name in _tradingTools || name in _smcTools
+        name in _tradingTools || name in _smcTools || name in _mt5Tools
+
+    fun isMt5Tool(name: String): Boolean =
+        name in _mt5Tools
 
     fun isFileTool(name: String): Boolean =
         name in _fileTools
@@ -200,6 +352,31 @@ object ToolRegistry {
     }
 
     fun getSkill(name: String): SkillDescriptor? = _skills[name]
+
+    fun toJsonSchema(params: FunctionParameters?): String {
+        if (params == null) return """{"type":"object","properties":{}}"""
+        return buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                params.properties.forEach { (name, prop) ->
+                    putJsonObject(name) {
+                        put("type", prop.type.lowercase())
+                        put("description", prop.description)
+                        prop.enum?.let { enumList ->
+                            putJsonArray("enum") {
+                                enumList.forEach { add(it) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (params.required.isNotEmpty()) {
+                putJsonArray("required") {
+                    params.required.forEach { add(it) }
+                }
+            }
+        }.toString()
+    }
 
     // ─── Camera / Vision Tools ──────────────────────────────────────────────
     private val _cameraTools: Map<String, FunctionDeclaration> = buildMap {
@@ -307,12 +484,14 @@ object ToolRegistry {
     fun getToolCategories(): List<ToolCategory> = listOf(
         ToolCategory("🧠 Built-in Tools", "🧠", _builtinTools.values.toList()),
         ToolCategory("📊 Trading Tools", "📊", _tradingTools.values.toList()),
+        ToolCategory("🔗 MT5 Bridge", "🔗", _mt5Tools.values.toList()),
         ToolCategory("📈 SMC Tools", "📈", _smcTools.values.toList()),
         ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
         ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList()),
-        ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList())
+        ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList()),
+        ToolCategory("🛠 Custom Tools", "🛠", _customTools.values.toList())
     )
 
     fun totalToolCount(): Int =
-        _builtinTools.size + _tradingTools.size + _smcTools.size + _fileTools.size + _cameraTools.size + _customTools.size
+        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _cameraTools.size + _customTools.size
 }

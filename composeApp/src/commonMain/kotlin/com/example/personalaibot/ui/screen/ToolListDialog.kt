@@ -21,10 +21,12 @@ data class ToolInfo(
 enum class ToolCategory(val label: String, val color: Color) {
     BUILTIN("Built-in", Color(0xFF00E5FF)),
     TRADING("Trading", Color(0xFF00C853)),
+    MT5("MT5 Bridge", Color(0xFF29B6F6)),
     SMC("SMC", Color(0xFFFF6D00)),
     FILE("Files", Color(0xFFFDD835)),
     VISION("Vision", Color(0xFF7C4DFF)),
-    SYSTEM("System", Color(0xFF607D8B))
+    SYSTEM("System", Color(0xFF607D8B)),
+    CUSTOM("Create tool", Color(0xFFE040FB))
 }
 
 private data class ToolMetadata(
@@ -111,9 +113,11 @@ val ALL_TOOLS: List<ToolInfo> by lazy {
 private fun categorize(decl: FunctionDeclaration): ToolCategory {
     val name = decl.name
     return when {
+        name.startsWith("custom_") -> ToolCategory.CUSTOM
         ToolRegistry.isSystemTool(name) -> ToolCategory.SYSTEM
         ToolRegistry.isFileTool(name) -> ToolCategory.FILE
         ToolRegistry.isCameraTool(name) -> ToolCategory.VISION
+        ToolRegistry.isMt5Tool(name) -> ToolCategory.MT5
         name.contains("smc", ignoreCase = true) -> ToolCategory.SMC
         ToolRegistry.isTradingTool(name) -> ToolCategory.TRADING
         else -> ToolCategory.BUILTIN
@@ -123,10 +127,12 @@ private fun categorize(decl: FunctionDeclaration): ToolCategory {
 private fun iconFor(category: ToolCategory): String = when (category) {
     ToolCategory.BUILTIN -> "*"
     ToolCategory.TRADING -> "$"
+    ToolCategory.MT5 -> "⚡"
     ToolCategory.SMC -> "#"
     ToolCategory.FILE -> "F"
     ToolCategory.VISION -> "V"
     ToolCategory.SYSTEM -> "S"
+    ToolCategory.CUSTOM -> "🛠"
 }
 
 private fun capabilitiesFrom(decl: FunctionDeclaration): List<String> {

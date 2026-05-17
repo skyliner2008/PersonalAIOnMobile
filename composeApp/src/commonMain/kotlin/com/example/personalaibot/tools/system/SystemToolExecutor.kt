@@ -18,8 +18,34 @@ class SystemToolExecutor(
         return when (toolName) {
             "system_run_diagnostics" -> runDiagnostics()
             "system_check_connectivity" -> checkConnectivity()
+            "system_create_agent_tool" -> createAgentTool(args)
             else -> "⚠️ ไม่พบเครื่องมือระบบ: $toolName"
         }
+    }
+
+    private suspend fun createAgentTool(args: Map<String, String>): String {
+        val name = args["name"] ?: return "Error: Missing 'name' parameter."
+        val description = args["description"] ?: return "Error: Missing 'description' parameter."
+        val triggerKeywords = args["triggerKeywords"] ?: ""
+        val systemPromptAddon = args["systemPromptAddon"] ?: return "Error: Missing 'systemPromptAddon' parameter."
+
+        // Construct simple JSON string
+        val jsonContent = """
+            {
+              "name": "$name",
+              "description": "$description",
+              "triggerKeywords": [${triggerKeywords.split(",").joinToString(",") { "\"${it.trim()}\"" }}],
+              "author": "Jarvis Agent",
+              "systemPromptAddon": "${systemPromptAddon.replace("\"", "\\\"").replace("\n", "\\n")}"
+            }
+        """.trimIndent()
+
+        val filename = "$name.json"
+
+        // Save using delegate
+        delegate?.onSaveAgentTool(filename, jsonContent)
+
+        return "✅ เครื่องมือใหม่ '$name' ถูกสร้างและบันทึกเรียบร้อยแล้ว แนะนำให้ผู้ใช้ทราบว่าสามารถเรียกใช้งานผ่านเมนู 'Create tool' ได้ทันที"
     }
 
     private suspend fun runDiagnostics(): String {

@@ -1,0 +1,156 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { AutoTradingConfig, AnalysisSummary } from '../types.js';
+import { AnalystReport } from './types.js';
+import { vectorStore } from '../vectorStore.js';
+import { knowledgeGraph } from '../knowledgeGraph.js';
+import { agentOrchestrator } from '../agentOrchestrator.js';
+
+export class AnalystAgent {
+  private genAI: GoogleGenerativeAI | null = null;
+
+  constructor(apiKey: string) {
+    if (apiKey) {
+      this.genAI = new GoogleGenerativeAI(apiKey);
+    }
+  }
+
+  public async analyze(
+    config: AutoTradingConfig,
+    symbol: string,
+    analyses: Record<string, AnalysisSummary>,
+    correlations: any[] = [],
+    currentPrice?: number
+  ): Promise<AnalystReport> {
+    if (!this.genAI) throw new Error('AnalystAgent: API Key missing');
+
+    // Note: Model selection is now handled dynamically in the fallback loop below
+    const primary = analyses[config.timeframe || 'H1'] || Object.values(analyses)[0];
+
+    // --- Phase 4: Episodic Memory Retrieval ---
+    // Use the SINGLE embedding source-of-truth: agentOrchestrator.getEmbedding
+    // -> gemini-embedding-001 cascade, Matryoshka 3072→768, L2-normalized.
+    // This guarantees all vectors written/searched share the same distribution
+    // so HNSW (l2) similarity is meaningful.
+    let pastLessonsContext = '';
+    try {
+      const query = `Symbol: ${symbol}, Regime: ${primary.regime}, Bias: ${primary.bias}`;
+      const queryEmbedding = await agentOrchestrator.getEmbedding(config.apiKey || '', query);
+      const similarities = vectorStore.search(queryEmbedding, 10, { type: 'trade_lesson' }); // Increased to 10 for Tier 1
+      if (similarities.length > 0) {
+        pastLessonsContext = similarities.map(s => {
+          const meta = s.metadata;
+          if (!meta) return '';
+          return `- ${meta.text || 'N/A'} (Outcome: ${meta.outcome || 'N/A'})`;
+        }).filter(t => t !== '').join('\n');
+      }
+    } catch (err: any) {
+      console.warn(`[AnalystAgent] Memory retrieval failed (likely 429), proceeding without memory:`, err?.message || err);
+      pastLessonsContext = 'Memory unavailable due to API limits. Relying on real-time technicals.';
+    }
+
+    const priceAnchor = currentPrice ? currentPrice.toFixed(2) : (analyses['M15']?.ema20 || analyses['H1']?.ema20 || 'unknown');
+    const prompt = `
+You are a Senior Market Analyst Agent. 
+Your task is to provide a deep narrative and directional bias for ${symbol} based on MTF analysis and correlations.
+
+⚠️ CRITICAL PRICE NOTICE — READ BEFORE ANALYZING:
+The current LIVE market price of ${symbol} is approximately ${priceAnchor}.
+Your training data is outdated and does NOT reflect current market prices.
+XAUUSD (Gold) is currently trading around $4500-$5000 range in 2025-2026. This is NORMAL and CORRECT.
+Do NOT question the price. Do NOT say the price is wrong or anomalous.
+All your SL/TP suggestions MUST be calculated relative to the live price of ~${priceAnchor}.
+
+DATA:
+- Current Live Price: ${priceAnchor}
+- Watchlist MTF: ${Object.entries(analyses).map(([tf, a]) => `${tf}(Bias:${a.bias},Conf:${a.confluence.toFixed(1)},RSI:${a.rsi},EMA20:${a.ema20})`).join(' | ')}
+- Technical Details (HTF H4): Regime=${analyses['H4']?.regime}, RSI=${analyses['H4']?.rsi}, SMA20=${analyses['H4']?.sma20}, SMA50=${analyses['H4']?.sma50}, EMA20=${analyses['H4']?.ema20}
+- Technical Details (MTF H1): Regime=${analyses['H1']?.regime}, RSI=${analyses['H1']?.rsi}, SMA20=${analyses['H1']?.sma20}, SMA50=${analyses['H1']?.sma50}, EMA20=${analyses['H1']?.ema20}
+- Technical Details (LTF M15): Regime=${analyses['M15']?.regime}, RSI=${analyses['M15']?.rsi}, EMA20=${analyses['M15']?.ema20}
+- Technical Details (LTF M5): Regime=${analyses['M5']?.regime}, RSI=${analyses['M5']?.rsi}, EMA20=${analyses['M5']?.ema20}
+- Smart Money Concepts (SMC): ${Object.entries(analyses).map(([tf, a]) => `${tf}: ${a.signals.filter(s => s.name.includes('fvg') || s.name.includes('order_block') || s.name.includes('market_structure')).map(s => s.evidence).join('; ')}`).join(' | ')}
+- Correlations: ${correlations.map(c => c.evidence).join('\n')}
+- Raw Rationale H4: ${analyses['H4']?.rationale || 'N/A'}
+- Raw Rationale H1: ${analyses['H1']?.rationale || 'N/A'}
+
+PAST LESSONS (EPISODIC MEMORY):
+${pastLessonsContext || 'No relevant past lessons found.'}
+
+TASK:
+1. Synthesize the MTF data into a single cohesive technical narrative. Focus on M5/M15 bounces for scalping opportunities.
+2. **TARGETING (XAUUSD)**: 1.0 point = $1.00. Always aim for a TP that is at least 8.0-20.0 points away from entry (e.g., if entry is ${priceAnchor}, TP for BUY should be around ${priceAnchor} + 10 to +20).
+3. **REVERSAL SCALPING**: If price is already at or past your first SMC target, DO NOT suggest a trade in that direction unless there is a clear secondary target significantly further away.
+4. Identify high-confluence SMC zones (where M5/M15 zones overlap with H1/H4). These are your "5-Star" setups.
+5. Target a quick profit of 8.0-15.0 points (Gold: $8-$15) using tight SL based on SMC invalidation.
+6. **PRIORITIZE FVG FILLS**: Look for unfilled FVGs nearby. If price is near ${priceAnchor}, identify nearby FVGs as targets.
+7. **COUNTER-TREND OK**: You are encouraged to propose counter-trend scalps if price is at a major SMC level with reversal signals.
+  - Target RRR: Minimum 1.5:1. Preferred 2.0:1 or higher for institutional quality.
+  - TP Distance: Ensure TP is at least 8.0 - 25.0 points away from entry ${priceAnchor} for XAUUSD.
+  - SL Distance: Place SL behind high-probability structural levels. MINIMUM distance is 1.5 points from entry ${priceAnchor}.
+  - DO NOT suggest "micro-scalps" with SL/TP smaller than 1.5 points.
+8. Mention specific indicators (RSI, SMA, EMA) and SMC elements (FVG, Order Blocks) to justify your bias.
+9. Suggest the most fitting StrategyType.
+10. Output a concise but highly technical THAI summary for the user, explaining the "Why" behind the technicals.
+
+Respond in JSON format ONLY:
+{
+  "symbol": "SYMBOL",
+  "bias": "BULL|BEAR|NEUTRAL",
+  "regime": "TRENDING|RANGING|BREAKOUT|VOLATILE",
+  "confluence": 0-100,
+  "fitness": 0-100,
+  "suggestedStrategy": "STRATEGY",
+  "suggestedSL": 0.0,
+  "suggestedTP": 0.0,
+  "confidence": 0-100,
+  "narrative": "Technical analysis summary in English",
+  "narrative_th": "Technical analysis summary in Thai",
+  "keyLevels": { "support": [], "resistance": [] },
+  "correlations": []
+}
+`;
+
+    const models = ['gemini-3.1-flash-lite-preview', 'gemini-2.5-flash-lite', 'gemini-3-flash-preview'];
+    let aiData: any = null;
+    let successfulModel: string = 'None';
+
+    for (const modelName of models) {
+      try {
+        const model = this.genAI.getGenerativeModel({ model: modelName }, { apiVersion: 'v1beta' });
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        aiData = JSON.parse(text.match(/\{.*\}/s)?.[0] || '{}');
+        successfulModel = modelName;
+        break; // Success!
+      } catch (error: any) {
+        console.warn(`[AnalystAgent] Model ${modelName} failed, trying fallback...`, error?.message || error);
+        // If it's a 429, we should definitely try the next one
+        continue;
+      }
+    }
+
+    if (!aiData) {
+      throw new Error('AnalystAgent: All AI models failed or returned no data');
+    }
+
+    return {
+      symbol,
+      regime: primary.regime,
+      confluence: primary.confluence,
+      fitness: primary.fitness,
+      bias: aiData.bias || primary.bias,
+      narrative: `[Model: ${successfulModel}] ${aiData.narrative || 'No narrative provided'}`,
+      narrative_th: aiData.narrative_th || 'ไม่มีคำอธิบาย',
+      confidence: aiData.confidence || 50,
+      suggestedStrategy: aiData.suggestedStrategy || primary.strategy,
+      suggestedSL: aiData.suggestedSL || null,
+      suggestedTP: aiData.suggestedTP || null,
+      keyLevels: aiData.keyLevels || { support: [], resistance: [] },
+      correlations: aiData.correlations || []
+    } as AnalystReport;
+  }
+
+  // NOTE: Local getEmbedding() removed in favor of agentOrchestrator.getEmbedding.
+  // Two embedding paths in the same vector store cause distribution mismatch and
+  // make HNSW (l2) similarity meaningless. See agentOrchestrator.ts for the
+  // canonical implementation (cascade → Matryoshka 3072→768 → L2 norm).
+}

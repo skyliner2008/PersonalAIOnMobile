@@ -59,6 +59,7 @@ import com.example.personalaibot.ui.screen.LiveModePanel
 import com.example.personalaibot.ui.screen.SettingsDialog
 import com.example.personalaibot.ui.screen.ToolListScreen
 import com.example.personalaibot.ui.screen.TradingChartScreen
+import com.example.personalaibot.ui.screen.TradingTerminalScreen
 import com.example.personalaibot.ui.theme.JarvisTheme
 import com.example.personalaibot.voice.VoiceManager
 import kotlinx.coroutines.launch
@@ -74,10 +75,11 @@ fun App(
     registerWidgetClosed: (() -> Unit) -> Unit = {},
     requestAllFilesPermission: () -> Unit = {},
     allFilesAccessGranted: Boolean = false,
-    fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null
+    fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null,
+    onDownloadLocalModel: (suspend (com.example.personalaibot.data.embedding.LocalOnnxEmbeddingProvider, (Float) -> Unit, Boolean) -> Unit)? = null
 ) {
     val viewModel: JarvisViewModel = viewModel {
-        JarvisViewModel(databaseDriverFactory, voiceManager, fileToolHandler)
+        JarvisViewModel(databaseDriverFactory, voiceManager, fileToolHandler, onDownloadLocalModel)
     }
 
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -94,6 +96,7 @@ fun App(
     var showSettings by remember { mutableStateOf(false) }
     var showToolList by remember { mutableStateOf(false) }
     var showAutomation by remember { mutableStateOf(false) }
+    var showTradingTerminal by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var chartSettingsSignal by remember { mutableLongStateOf(0L) }
 
@@ -104,6 +107,27 @@ fun App(
     val chartHideSideToolbar by viewModel.chartHideSideToolbar.collectAsStateWithLifecycle()
     val chartRefreshToken by viewModel.chartRefreshToken.collectAsStateWithLifecycle()
     val jobs by viewModel.activeJobs.collectAsStateWithLifecycle()
+    val mt5BridgeBaseUrl by viewModel.mt5BridgeBaseUrl.collectAsStateWithLifecycle()
+    val mt5AuthToken by viewModel.mt5AuthToken.collectAsStateWithLifecycle()
+    val mt5PairingStatus by viewModel.mt5PairingStatus.collectAsStateWithLifecycle()
+    val mt5IsSyncing by viewModel.mt5IsSyncing.collectAsStateWithLifecycle()
+    val mt5LastSyncAt by viewModel.mt5LastSyncAt.collectAsStateWithLifecycle()
+    // 2026-04-30 (P6) — server reachability + first-paint cache loading flag
+    val mt5ServerOnline by viewModel.mt5ServerOnline.collectAsStateWithLifecycle()
+    val mt5CacheLoading by viewModel.mt5CacheLoading.collectAsStateWithLifecycle()
+    val mt5Error by viewModel.mt5Error.collectAsStateWithLifecycle()
+    val mt5ActionResult by viewModel.mt5ActionResult.collectAsStateWithLifecycle()
+    val mt5Account by viewModel.mt5Account.collectAsStateWithLifecycle()
+    val mt5Positions by viewModel.mt5Positions.collectAsStateWithLifecycle()
+    val mt5Deals by viewModel.mt5Deals.collectAsStateWithLifecycle()
+    val mt5Clients by viewModel.mt5Clients.collectAsStateWithLifecycle()
+    val mt5ClientsLoading by viewModel.mt5ClientsLoading.collectAsStateWithLifecycle()
+    val mt5SelectedClientExe by viewModel.mt5SelectedClientExe.collectAsStateWithLifecycle()
+    val mt5TerminalFeed by viewModel.mt5TerminalFeed.collectAsStateWithLifecycle()
+    val mt5DefaultLot by viewModel.mt5DefaultLot.collectAsStateWithLifecycle()
+    val mt5DefaultTpPoints by viewModel.mt5DefaultTpPoints.collectAsStateWithLifecycle()
+    val mt5DefaultSlPoints by viewModel.mt5DefaultSlPoints.collectAsStateWithLifecycle()
+    val mt5MaxDdPercent by viewModel.mt5MaxDdPercent.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -111,6 +135,7 @@ fun App(
     val currentOverlayTitle = when {
         showToolList -> "Tool List"
         showAutomation -> "Cron Jobs"
+        showTradingTerminal -> "MT5 Terminal"
         showSettings -> "Settings"
         showChart -> "TradingView"
         else -> null
@@ -121,6 +146,10 @@ fun App(
         when {
             showToolList -> showToolList = false
             showAutomation -> showAutomation = false
+            showTradingTerminal -> {
+                showTradingTerminal = false
+                viewModel.closeTradingTerminal()
+            }
             showSettings -> showSettings = false
             showChart -> viewModel.closeChart()
         }
@@ -187,6 +216,12 @@ fun App(
                                 }
                                 IconButton(onClick = { showAutomation = true }) {
                                     Icon(Icons.Default.NotificationsActive, "Cron Jobs", tint = JarvisTheme.Cyan)
+                                }
+                                IconButton(onClick = {
+                                    showTradingTerminal = true
+                                    viewModel.openTradingTerminal()
+                                }) {
+                                    Text("MT5", color = JarvisTheme.Cyan, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(modifier = Modifier.weight(1f))
                                 IconButton(onClick = { showSettings = true }) {
@@ -266,6 +301,56 @@ fun App(
                             jobs = jobs,
                             onDelete = { viewModel.automationManager.deleteJob(it) },
                             onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) }
+                        )
+                    }
+
+                    showTradingTerminal -> {
+                        TradingTerminalScreen(
+                            bridgeBaseUrl = mt5BridgeBaseUrl,
+                            pairingStatus = mt5PairingStatus,
+                            isSyncing = mt5IsSyncing,
+                            lastSyncAt = mt5LastSyncAt,
+                            // 2026-04-30 (P6) — wire offline / cache state
+                            serverOnline = mt5ServerOnline,
+                            cacheLoading = mt5CacheLoading,
+                            onRetrySync = { viewModel.refreshMt5Terminal() },
+                            error = mt5Error,
+                            actionResult = mt5ActionResult,
+                            account = mt5Account,
+                            positions = mt5Positions,
+                            deals = mt5Deals,
+                            clients = mt5Clients,
+                            clientsLoading = mt5ClientsLoading,
+                            selectedClientExe = mt5SelectedClientExe,
+                            terminalFeed = mt5TerminalFeed,
+                            defaultLot = mt5DefaultLot,
+                            defaultTpPoints = mt5DefaultTpPoints,
+                            defaultSlPoints = mt5DefaultSlPoints,
+                            maxDdPercent = mt5MaxDdPercent,
+                            onBridgeBaseUrlChange = { viewModel.updateMt5BridgeBaseUrl(it) },
+                            onConnectToggle = { viewModel.toggleMt5Connection(it) },
+                            onClearError = { viewModel.clearMt5Error() },
+                            onClearActionResult = { viewModel.clearMt5ActionResult() },
+                            onSetDefaultLot = { viewModel.setMt5DefaultLot(it) },
+                            onSetDefaultTpPoints = { viewModel.setMt5DefaultTpPoints(it) },
+                            onSetDefaultSlPoints = { viewModel.setMt5DefaultSlPoints(it) },
+                            onSetMaxDdPercent = { viewModel.setMt5MaxDdPercent(it) },
+                            onSelectClient = { viewModel.selectMt5ClientExe(it) },
+                            onRefreshClients = { viewModel.refreshMt5Clients() },
+                            onStartClient = { viewModel.startSelectedMt5Client() },
+                            onStopClient = { viewModel.stopSelectedMt5Client() },
+                            onPlaceOrder = { action, symbol, volume, sl, tp, comment ->
+                                viewModel.placeMt5Order(action, symbol, volume, sl, tp, comment)
+                            },
+                            onClosePosition = { symbol, ticket ->
+                                viewModel.closeMt5Position(symbol, ticket)
+                            },
+                            onCloseAll = { side -> viewModel.closeMt5AllPositions(side) },
+                            onBreakEvenAll = { viewModel.setMt5BreakEvenAll() },
+                            onEditPosition = { symbol, ticket, sl, tp ->
+                                viewModel.modifyMt5Position(symbol, ticket, sl, tp)
+                            },
+                            autoTrading = viewModel.autoTrading
                         )
                     }
 

@@ -1,6 +1,9 @@
 package com.example.personalaibot.memory
 
 import com.example.personalaibot.data.ConversationTurn
+import com.example.personalaibot.data.embedding.EMBEDDING_TARGET_DIMS
+import com.example.personalaibot.data.embedding.EmbeddingProvider
+import com.example.personalaibot.data.embedding.fitToTargetDimension
 import com.example.personalaibot.db.JarvisDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -218,22 +221,27 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
      * ค้นหาความจำที่เกี่ยวข้องจาก Archival Memory โดยใช้ Semantic Search (Vector Similarity)
      */
     suspend fun searchRelevantFacts(
-        geminiService: com.example.personalaibot.data.GeminiService,
+        embeddingProvider: EmbeddingProvider,
         query: String,
         limit: Int = 5,
         minSimilarity: Float = 0.65f
     ): List<String> = withContext(Dispatchers.IO) {
-        val queryVector = geminiService.embedText(query, "RETRIEVAL_QUERY")
-        if (queryVector.isEmpty()) {
+        val rawQuery = embeddingProvider.embed(query, "RETRIEVAL_QUERY")
+        if (rawQuery.isEmpty()) {
             return@withContext getTopArchivalFacts(limit.toLong())
         }
+        // Always compare in the target dim — cosineSimilarity returns 0 on size mismatch.
+        val queryVector = if (rawQuery.size == EMBEDDING_TARGET_DIMS) rawQuery
+                          else rawQuery.fitToTargetDimension(EMBEDDING_TARGET_DIMS)
 
         val allFacts = database.jarvisDatabaseQueries.getArchivalWithEmbeddings().executeAsList()
         if (allFacts.isEmpty()) return@withContext emptyList()
 
-        // Rank by similarity
+        // Rank by similarity — re-fit any legacy vectors stored at a different dim.
         val scoredFacts = allFacts.mapNotNull { row ->
-            val vector = row.embedding_json?.let { decodeVector(it) } ?: return@mapNotNull null
+            val raw = row.embedding_json?.let { decodeVector(it) } ?: return@mapNotNull null
+            val vector = if (raw.size == EMBEDDING_TARGET_DIMS) raw
+                         else raw.fitToTargetDimension(EMBEDDING_TARGET_DIMS)
             val score = cosineSimilarity(queryVector, vector)
             if (score >= minSimilarity) {
                 row.content to score
@@ -275,12 +283,19 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
      * Updated archiveFact: บันทึกพร้อมสร้าง Embedding ทันที
      */
     suspend fun archiveFactWithEmbedding(
-        geminiService: com.example.personalaibot.data.GeminiService,
+        embeddingProvider: EmbeddingProvider,
         content: String,
         sourceRole: String = "system",
         importance: Float = 0.5f
     ) {
-        val vector = geminiService.embedText(content, "RETRIEVAL_DOCUMENT")
+        val raw = embeddingProvider.embed(content, "RETRIEVAL_DOCUMENT")
+        // Force every stored vector to the same dim so cosine search works
+        // even when the user later switches embedding providers.
+        val vector = when {
+            raw.isEmpty() -> raw
+            raw.size == EMBEDDING_TARGET_DIMS -> raw
+            else -> raw.fitToTargetDimension(EMBEDDING_TARGET_DIMS)
+        }
         val vectorJson = if (vector.isNotEmpty()) encodeVector(vector) else null
 
         withContext(Dispatchers.IO) {
@@ -297,13 +312,18 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
     /**
      * ดึงข้อมูลเก่าที่ยังไม่มีเวกเตอร์ และทำ Backfill ให้ครบเพื่อให้ค้นหาแบบ Semantic ได้
      */
-    suspend fun backfillEmbeddings(geminiService: com.example.personalaibot.data.GeminiService): Int = withContext(Dispatchers.IO) {
+    suspend fun backfillEmbeddings(embeddingProvider: EmbeddingProvider): Int = withContext(Dispatchers.IO) {
         val legacyFacts = database.jarvisDatabaseQueries.getArchivalByImportance(100).executeAsList()
             .filter { it.embedding_json == null }
         
         var count = 0
         legacyFacts.forEach { fact ->
-            val vector = geminiService.embedText(fact.content, "RETRIEVAL_DOCUMENT")
+            val raw = embeddingProvider.embed(fact.content, "RETRIEVAL_DOCUMENT")
+            val vector = when {
+                raw.isEmpty() -> raw
+                raw.size == EMBEDDING_TARGET_DIMS -> raw
+                else -> raw.fitToTargetDimension(EMBEDDING_TARGET_DIMS)
+            }
             if (vector.isNotEmpty()) {
                 val json = encodeVector(vector)
                 // We need a query to update by ID
@@ -528,7 +548,7 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
 
     private val consolidationJson = Json { ignoreUnknownKeys = true; isLenient = true; explicitNulls = false }
 
-    suspend fun performSleepCycle(geminiService: com.example.personalaibot.data.GeminiService, limitMsgs: Long = 100): Boolean {
+    suspend fun performSleepCycle(embeddingProvider: EmbeddingProvider, geminiService: com.example.personalaibot.data.GeminiService, limitMsgs: Long = 100): Boolean {
         return withContext(Dispatchers.IO) {
             val oldMessages = database.jarvisDatabaseQueries.getOldMessages(limitMsgs).executeAsList()
             if (oldMessages.size <= 2) return@withContext false // น้อยเกินกว่าจะวิเคราะห์
@@ -558,11 +578,11 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                 val result = consolidationJson.decodeFromString<ConsolidationResult>(jsonString)
                 
                 // 1. Insert Summary to Archival (Very High Importance)
-                archiveFactWithEmbedding(geminiService, "Daily Summary: ${result.summary}", "system", 0.95f)
+                archiveFactWithEmbedding(embeddingProvider, "Daily Summary: ${result.summary}", "system", 0.95f)
                 
                 // 2. Insert Archival Facts
                 result.newArchivalFacts.forEach { fact ->
-                    archiveFactWithEmbedding(geminiService, fact.content, "system", fact.importance)
+                    archiveFactWithEmbedding(embeddingProvider, fact.content, "system", fact.importance)
                 }
 
                 val now = Clock.System.now().toEpochMilliseconds()

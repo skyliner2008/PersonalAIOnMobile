@@ -14,6 +14,11 @@ import kotlin.math.*
  * Custom skills จะถูก route ไปยัง Gemini พร้อม systemPromptAddon ของ skill
  */
 object ToolExecutor {
+    data class Mt5RuntimeConfig(
+        val bridgeBaseUrl: String,
+        val authToken: String,
+        val pairingStatus: String
+    )
 
     // TradingToolExecutor จะถูก initialize เมื่อ HttpClient พร้อม
     private var _tradingExecutor: TradingToolExecutor? = null
@@ -23,6 +28,7 @@ object ToolExecutor {
 
     // Executor สำหรับ Camera & Vision
     private var _cameraExecutor: CameraToolExecutor? = null
+    private var _mt5RuntimeConfigProvider: (() -> Mt5RuntimeConfig)? = null
 
     // Delegate สำหรับ Side-effects (Memory, Reminders, UI)
     private var _sideEffectDelegate: SideEffectDelegate? = null
@@ -43,6 +49,10 @@ object ToolExecutor {
         _sideEffectDelegate = delegate
     }
 
+    fun setMt5RuntimeConfigProvider(provider: () -> Mt5RuntimeConfig) {
+        _mt5RuntimeConfigProvider = provider
+    }
+
     /**
      * Execute a single tool call
      * @param call  ToolCall ที่ได้จาก Gemini function calling response
@@ -50,41 +60,127 @@ object ToolExecutor {
      */
     suspend fun execute(call: ToolCall, memoryContext: String = ""): ToolResult {
         return try {
+            val routedToolName = when (call.name) {
+                "mt5_place_order" -> "trading_mt5_order"
+                "mt5_close_position" -> "trading_mt5_close_position"
+                "mt5_modify_position" -> "trading_mt5_modify_position"
+                else -> call.name
+            }
+            val routedArgs = enrichMt5Args(routedToolName, call.args)
             val result = when {
                 // ─── Trading Tools ─────────────────────────────────────────
-                ToolRegistry.isTradingTool(call.name) -> {
+                ToolRegistry.isTradingTool(routedToolName) -> {
                     val trader = _tradingExecutor
                         ?: return ToolResult(call.name, "⚠️ Trading module ยังไม่พร้อม กรุณาตั้งค่า API Key ก่อน", true)
-                    trader.execute(call.name, call.args)
+                    trader.execute(routedToolName, routedArgs)
                 }
                 // ─── File Management Tools ─────────────────────────────────
-                ToolRegistry.isFileTool(call.name) -> {
-                    _fileToolHandler?.invoke(call.name, call.args)
+                ToolRegistry.isFileTool(routedToolName) -> {
+                    _fileToolHandler?.invoke(routedToolName, routedArgs)
                         ?: "⚠️ ระบบจัดการไฟล์ยังไม่พร้อม หรือยังไม่ได้รับ Permission"
                 }
                 // ─── Camera & Vision Tools ─────────────────────────────────
-                ToolRegistry.isCameraTool(call.name) -> {
-                    _cameraExecutor?.execute(call.name, call.args)
+                ToolRegistry.isCameraTool(routedToolName) -> {
+                    _cameraExecutor?.execute(routedToolName, routedArgs)
                         ?: "⚠️ ระบบกล้องยังไม่พร้อม กรุณาเปิดกล้องก่อนใช้งาน"
                 }
                 // ─── Built-in Tools ────────────────────────────────────────
-                else -> when (call.name) {
+                else -> when (routedToolName) {
                 "get_current_datetime" -> executeDateTime()
-                "calculate"            -> executeCalculate(call.args["expression"] ?: "")
-                "remember_fact"        -> executeRememberFact(call.args)
-                "recall_memory"        -> executeRecallMemory(call.args["query"] ?: "", memoryContext)
-                "convert_units"        -> executeConvertUnits(call.args)
-                "set_reminder"         -> executeSetReminder(call.args)
-                "format_json"          -> executeFormatJson(call.args["data"] ?: "")
-                "translate_text"       -> executeTranslate(call.args)
-                "summarize_text"       -> executeSummarize(call.args)
-                "search_web"           -> executeSearchWeb(call.args["query"] ?: "")
-                else                   -> executeCustomSkill(call)
+                "calculate"            -> executeCalculate(routedArgs["expression"] ?: "")
+                "remember_fact"        -> executeRememberFact(routedArgs)
+                "recall_memory"        -> executeRecallMemory(routedArgs["query"] ?: "", memoryContext)
+                "convert_units"        -> executeConvertUnits(routedArgs)
+                "set_reminder"         -> executeSetReminder(routedArgs)
+                "format_json"          -> executeFormatJson(routedArgs["data"] ?: "")
+                "translate_text"       -> executeTranslate(routedArgs)
+                "summarize_text"       -> executeSummarize(routedArgs)
+                "search_web"           -> executeSearchWeb(routedArgs["query"] ?: "")
+                else                   -> executeCustomSkill(ToolCall(routedToolName, routedArgs))
                 } // end inner when
             } // end outer when
             ToolResult(call.name, result)
         } catch (e: Exception) {
             ToolResult(call.name, "Error: ${e.message}", isError = true)
+        }
+    }
+
+    private fun enrichMt5Args(toolName: String, args: Map<String, String>): Map<String, String> {
+        val mt5Tools = setOf(
+            "trading_mt5_order",
+            "trading_mt5_close_position",
+            "trading_mt5_modify_position",
+            // MT5 Core Agent Tools
+            "trading_mt5_account_info",
+            "trading_mt5_list_positions",
+            "trading_mt5_list_orders",
+            "trading_mt5_list_history",
+            "trading_mt5_candles",
+            "trading_mt5_analyze",
+            "trading_mt5_symbol_info",
+            "trading_mt5_close_all",
+            "trading_mt5_break_even_all",
+            "trading_mt5_snapshot",
+            "trading_mt5_trade_actions",
+            // MT5 Advanced Intelligence
+            "trading_mt5_market_scanner",
+            "trading_mt5_correlation_radar",
+            "trading_mt5_sentiment_gauge",
+            "trading_mt5_institutional_flow",
+            "trading_mt5_economic_radar",
+            "trading_mt5_trade_journal",
+            "trading_deep_analysis_suite",
+            "trading_fear_greed",
+            "trading_fundamental_analysis",
+            "trading_mt5_symbol_search"
+        )
+        if (toolName !in mt5Tools) return args
+        val runtime = _mt5RuntimeConfigProvider?.invoke() ?: return args
+        val out = args.toMutableMap()
+        if (runtime.authToken.isNotBlank() && out["token"].isNullOrBlank()) {
+            out["token"] = runtime.authToken.trim()
+        }
+        if (out["endpoint"].isNullOrBlank() && runtime.bridgeBaseUrl.isNotBlank()) {
+            val base = normalizeMt5ApiBase(runtime.bridgeBaseUrl)
+            out["endpoint"] = when (toolName) {
+                // POST-based action tools
+                "trading_mt5_order" -> "$base/order"
+                "trading_mt5_close_position" -> "$base/close"
+                "trading_mt5_modify_position" -> "$base/modify"
+                "trading_mt5_close_all" -> "$base/close"
+                "trading_mt5_break_even_all" -> "$base/modify"
+                // GET-based query tools
+                "trading_mt5_account_info" -> "$base/account"
+                "trading_mt5_list_positions" -> "$base/positions"
+                "trading_mt5_list_orders" -> "$base/orders"
+                "trading_mt5_list_history" -> "$base/history"
+                "trading_mt5_candles" -> "$base/candles"
+                "trading_mt5_analyze" -> "$base/analyze"
+                "trading_mt5_symbol_info" -> "$base/symbols"
+                "trading_mt5_snapshot" -> "$base/snapshot"
+                "trading_mt5_trade_actions" -> "$base/trade-actions"
+                // Advanced intelligence tools — use base path for multi-endpoint access
+                "trading_mt5_market_scanner" -> "$base/candles"
+                "trading_mt5_correlation_radar" -> "$base/candles"
+                "trading_mt5_sentiment_gauge" -> base
+                "trading_mt5_institutional_flow" -> "$base/candles"
+                "trading_mt5_economic_radar" -> base
+                "trading_mt5_trade_journal" -> "$base/auto"
+                "trading_deep_analysis_suite" -> "$base/auto/deep-analysis"
+                "trading_fear_greed" -> "$base/auto"
+                "trading_fundamental_analysis" -> base
+                else -> "$base/order"
+            }
+        }
+        return out
+    }
+
+    private fun normalizeMt5ApiBase(rawUrl: String): String {
+        val url = rawUrl.trim().trimEnd('/')
+        return when {
+            url.endsWith("/api/mt5", ignoreCase = true) -> url
+            url.endsWith("/mt5", ignoreCase = true) -> url
+            else -> "$url/api/mt5"
         }
     }
 

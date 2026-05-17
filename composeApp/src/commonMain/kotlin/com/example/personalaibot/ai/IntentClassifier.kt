@@ -11,7 +11,8 @@ enum class TaskType {
     ANALYSIS,   // วิเคราะห์เชิงลึก
     CREATIVE,   // งานสร้างสรรค์ (เขียน/ออกแบบ)
     PLANNING,   // วางแผน/จัดการ/todo
-    MEMORY      // recall บทสนทนาหรือข้อมูลที่เคยคุยไว้
+    MEMORY,     // recall บทสนทนาหรือข้อมูลที่เคยคุยไว้
+    TOOL_CREATION // สร้าง Tool/Skill ให้ Agent
 }
 
 /**
@@ -52,7 +53,10 @@ object IntentClassifier {
             "analyze", "วิเคราะห์", "compare", "เปรียบเทียบ", "evaluate",
             "review", "calculate", "คำนวณ", "assess", "summarize", "สรุป",
             "pros", "cons", "ข้อดี", "ข้อเสีย", "difference", "ต่างกัน",
-            "performance", "ประสิทธิภาพ", "benchmark", "metric", "statistics"
+            "performance", "ประสิทธิภาพ", "benchmark", "metric", "statistics",
+            "mt5", "xauusd", "xau", "forex", "gold", "ทอง", "confluence",
+            "regime", "bias", "indicator", "timeframe", "tf", "h1", "h4", "m15",
+            "broker", "โบรก", "เทรด", "trade", "trading", "สถานะตลาด"
         ),
         TaskType.CREATIVE to listOf(
             "write", "เขียน", "create", "สร้าง", "design", "ออกแบบ",
@@ -71,6 +75,11 @@ object IntentClassifier {
             "ก่อนหน้า", "ที่แล้ว", "เดิมทีที่", "ที่คุยกัน", "ลืมหรือยัง",
             "ที่บอกไป", "ที่เคย", "previously", "before", "last time",
             "จากที่คุย", "ตามที่บอก"
+        ),
+        TaskType.TOOL_CREATION to listOf(
+            "สร้าง tool", "create tool", "สร้าง indicator", "สร้าง skill",
+            "ทำ tool", "เขียน tool", "agent tool", "สอนตัวเอง", "make tool",
+            "ระบบเทรดใหม่", "เครื่องมือใหม่", "สร้างเครื่องมือ"
         )
     )
 
@@ -150,7 +159,16 @@ Task Type: RESEARCH — ค้นหาและอธิบายข้อม�
 Task Type: ANALYSIS — วิเคราะห์เชิงลึก
 - ใช้ step-by-step reasoning ก่อนสรุป
 - แสดงการคิด ไม่ใช่แค่ผลลัพธ์
-- เปรียบเทียบ tradeoffs อย่างสมดุล"""
+- เปรียบเทียบ tradeoffs อย่างสมดุล
+
+[MT5/Trading Analysis Protocol]:
+เมื่อวิเคราะห์ symbol ใดๆ จาก MT5 broker ให้ทำดังนี้:
+1. เรียก trading_mt5_analyze พร้อมกัน 3 TF: H4, H1, M15 ในรอบเดียวกัน (3 function calls)
+2. สรุปผลเป็นตารางเปรียบเทียบ: Regime | Bias | RSI | Confluence | Fitness ของทุก TF
+3. หา Confluence ข้าม TF — ถ้า Bias ตรงกันทุก TF = สัญญาณแข็ง
+4. ระบุแนวรับ-แนวต้าน จากข้อมูล 20-bar High/Low ของแต่ละ TF
+5. แนะนำ Entry zone, SL, TP ที่ชัดเจน พร้อม Risk:Reward ratio
+6. สรุป Risk Assessment: ปลอดภัย/ระวัง/อันตราย"""
 
             TaskType.CREATIVE -> """
 
@@ -170,6 +188,14 @@ Task Type: PLANNING — วางแผนและจัดการ
 Task Type: MEMORY — ดึงข้อมูลจาก history
 - อ้างอิง conversation history ที่ได้รับมาอย่างละเอียด
 - ถ้าไม่มีในข้อมูล บอกตรงๆ ว่าไม่พบ"""
+
+            TaskType.TOOL_CREATION -> """
+
+Task Type: TOOL_CREATION — งานสร้าง Tool/Skill สำหรับ Agent
+- ผู้ใช้ต้องการให้คุณสร้างเครื่องมือ (Tool/Indicator/Skill) ใหม่เพื่อให้คุณใช้งานได้เองในอนาคต
+- **คุณต้องเรียกใช้เครื่องมือ `system_create_agent_tool` เสมอ** เพื่อบันทึกเครื่องมือใหม่ลงในระบบ
+- ให้คุณคิดค้น `systemPromptAddon` ที่ละเอียด เป็นขั้นตอน เพื่อสอนตัวคุณเองในอนาคตว่าเมื่อถูกเรียกใช้ Tool นี้จะต้องทำอย่างไร (เช่น ดึงข้อมูลอะไร วิเคราะห์อย่างไร)
+- ห้ามตอบกลับด้วยโครงสร้าง JSON เปล่าๆ ในแชทเด็ดขาด ให้ใช้ Tool `system_create_agent_tool` ในการทำงานแทน"""
 
             TaskType.GENERAL -> ""
         }
