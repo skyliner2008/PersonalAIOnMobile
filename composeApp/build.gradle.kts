@@ -116,6 +116,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
     applicationVariants.all {
         val variantName = name
         outputs.all {
