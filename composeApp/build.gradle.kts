@@ -55,7 +55,7 @@ kotlin {
             implementation(libs.ktor.client.android)
 
             // Firebase
-            implementation(platform(libs.firebase.bom.get().toString()))
+            implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.firebase.vertexai.get().toString())
         }
         commonMain.dependencies {
@@ -116,7 +116,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    applicationVariants.all {
+        val variantName = name
+        outputs.all {
+            val outputImpl = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            outputImpl?.outputFileName = "PersonalAIBot-${variantName}.apk"
+        }
+    }
 }
+
 
 sqldelight {
     databases {
