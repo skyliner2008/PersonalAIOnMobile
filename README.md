@@ -3,11 +3,15 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
 [![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-orange.svg?style=flat)](https://www.jetbrains.com/lp/compose-multiplatform/)
 [![Gemini](https://img.shields.io/badge/AI-Gemini%203%20Series-green.svg?style=flat&logo=google-gemini)](https://ai.google.dev/)
+[![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์ข้อมูลอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 3.1 Pro (Tier 1 Optimized)** และระบบความจำแบบ 6 ชั้น (GraphRAG & Obsidian Wiki) — พร้อมระบบ **MT5 Full Agent Control V17.0** สำหรับเทรดอย่างไร้ขีดจำกัด
 - **Multi-Provider Support** — สลับการใช้งานระหว่าง Gemini Live, Gemini Flash และ OpenAI GPT-4o เพื่อการวิเคราะห์ที่แม่นยำที่สุด
 - **AR Overlay Engine** — แสดง Bounding Box และคำอธิบายวัตถุบนภาพจริงแบบ Real-time
+- **📲 Mobile Android App (Compose Multiplatform)** — แอปพลิเคชันมือถือดีไซน์พรีเมียม มาพร้อมไอคอนแอป 3D AI Trading Bot อัจฉริยะ, ระบบสแกนค้นหาตราสาร (Symbol Catalogue & Categories), ตัวกรองวิเคราะห์สถิติย้อนหลัง (Period Stats & Filters) และระบบ Auto Trading Controls
+
+---
 
 ### 🧠 3. Advanced 6-Layer Memory Engine
 - **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้ (identity จัดการผ่าน tool/Settings เท่านั้น กัน heuristic ทับ) + สกัดอาชีพ/ความสนใจจากข้อความผู้ใช้
