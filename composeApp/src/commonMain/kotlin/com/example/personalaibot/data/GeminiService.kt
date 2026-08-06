@@ -2,6 +2,7 @@ package com.example.personalaibot.data
 
 import com.example.personalaibot.tools.ToolExecutor
 import com.example.personalaibot.tools.ToolCall
+import com.example.personalaibot.tools.ToolArgParser
 import com.example.personalaibot.data.embedding.fitToTargetDimension
 import com.example.personalaibot.logDebug
 import com.example.personalaibot.logError
@@ -136,28 +137,10 @@ data class ConversationTurn(
 )
 
 // ─── Jarvis System Prompt ──────────────────────────────────────────────────
-
-private const val JARVIS_SYSTEM_PROMPT = """คุณคือ JARVIS (Ultimate Trading Brain) — AI ส่วนตัวระดับสูง
-บทบาท: คุณคือเทรดเดอร์อัจฉริยะที่เชี่ยวชาญด้าน Confluence Trading โดยใช้กระบวนการวิเคราะห์ 5 ระดับ (5-Phase Planning):
-
-Phase 1: Market Sentiment & News — ตรวจสอบข่าวสารและความรู้สึกของตลาด (trading_sentiment, trading_news, trading_fear_greed)
-Phase 2: HTF Wyckoff & Marco — หา Bias ทิศทางจากไทม์เฟรมใหญ่และปัจจัยมหภาค (trading_macro_calendar, trading_multi_timeframe)
-Phase 3: Smart Scanning — ค้นหาตัวเด่นที่กำลังจะระเบิดหรือกลับตัว (trading_bollinger_scan, trading_volume_breakout, trading_oversold_scan)
-Phase 4: SMC & Institutional Entry — หาจุดเข้าที่คมที่สุดด้วย ICT/SMC และ Deep Suite (trading_smc_analysis, trading_deep_analysis_suite, trading_smc_liquidity)
-Phase 5: Jarvis Automation — ตั้งค่าระบบเฝ้าติดตาม (automation_manage_alerts) เพื่อแจ้งเตือนโอกาสการเทรดโดยอัตโนมัติ
-
-[IMPORTANT]: เมื่อผู้ใช้สั่งให้ "วิเคราะห์เชิงลึก", "Deep Analysis", หรือ "วิเคราะห์ Confluence" ให้เรียกใช้ 'trading_deep_analysis_suite' เป็นเครื่องมือหลักเสมอ เพราะเป็นเครื่องมือที่รวบรวม Multi-Agent Consensus และ SMC ไว้ในที่เดียว
-
-กฎการทำงาน (STRICT):
-1. [SOURCE OF TRUTH]: ห้ามคาดเดาราคาหรือสภาวะตลาดเองเด็ดขาด ต้องใช้ Trading Tools ดึงข้อมูลปัจจุบันเสมอ
-2. [CONFLUENCE]: อย่าด่วนสรุปจากเครื่องมือเดียว ให้หาความสอดคล้อง (Confluence) ระหว่าง Sentiment + TA + SMC + Deep Suite (V12.5)
-3. [AUTOMATION]: เมื่อเห็นโอกาสการเทรดที่ยังไม่ถึงจุดเข้า ให้แนะนำผู้ใช้ตั้งค่า 'automation_manage_alerts' เพื่อเฝ้าราคา
-4. [AESTHETICS]: แสดงผลการวิเคราะห์ด้วยตาราง (Table), แผนภาพขั้นตอน (Workflow) และสรุปความเสี่ยง (Position Sizing)
-5. [PERSONA]: สุภาพ มั่นใจ ตรงไปตรงมาแบบผู้ช่วยอัจฉริยะ (British Butler Style)
-6. [ANTI-HALLUCINATION]: เมื่อได้รับผลลัพธ์จาก Tool ห้ามแต่งเติมตัวเลข ราคา หรือ indicator ที่ไม่ได้อยู่ใน Tool Result อ้างอิงเฉพาะข้อมูลที่ Tool คืนมาเท่านั้น ถ้าข้อมูลไม่ครบให้บอกตรงๆ ว่า "ไม่มีข้อมูล" แทนการคาดเดา
-7. [TOOL DATA INTEGRITY]: เมื่อรายงานราคา ตัวเลข หรือ indicator ต้องคัดลอกค่าจาก Tool Result ตรงๆ ห้ามปัดเศษ ห้ามเปลี่ยนแปลง ห้ามใช้ค่าจาก memory หรือ training data มาแทน
-8. [MULTI-TIMEFRAME]: เมื่อวิเคราะห์ MT5 ให้เรียก trading_mt5_analyze หลาย timeframe เสมอ (อย่างน้อย H4, H1, M15) ในรอบเดียวกัน เพื่อหา confluence ข้าม timeframe แล้วสรุปเป็นตาราง
-9. [COMPLETE ANALYSIS]: การวิเคราะห์ต้องครบถ้วน ประกอบด้วย: ภาพรวม Regime/Bias ทุก TF, ตาราง Indicator, Confluence Score, แนวรับ-แนวต้าน, จุดเข้า/SL/TP ที่แนะนำ, และ Risk Assessment"""
+// ย้ายไปรวมศูนย์ที่ com.example.personalaibot.ai.JarvisPersona (2026-07-29)
+// — ใช้ getter เพื่อให้ identity ที่ผู้ใช้/AI ปรับแต่งมีผลทันทีทุก request
+private val JARVIS_SYSTEM_PROMPT: String
+    get() = com.example.personalaibot.ai.JarvisPersona.CHAT_SYSTEM_PROMPT
 
 // ─── GeminiService ──────────────────────────────────────────────────────────
 
@@ -359,16 +342,9 @@ class GeminiService(
             val fc = (partObj["functionCall"] ?: partObj["function_call"])?.jsonObject ?: continue
             val name = fc["name"]?.jsonPrimitive?.content ?: continue
             val argsObj = fc["args"]?.jsonObject ?: JsonObject(emptyMap())
-            
-            // Harden parsing: Handle both string and array arguments
-            val args = argsObj.entries.associate { (k, v) ->
-                val stringVal = when (v) {
-                    is JsonArray -> v.map { it.jsonPrimitive.contentOrNull ?: it.toString() }.joinToString(",")
-                    is JsonPrimitive -> v.contentOrNull ?: v.toString()
-                    else -> v.toString()
-                }
-                k to stringVal
-            }
+
+            // ใช้ parser กลางตัวเดียวกับทุก provider path
+            val args = ToolArgParser.fromJsonObject(argsObj)
             results.add(DetectedFunctionCall(name, args))
         }
         return results
@@ -397,23 +373,10 @@ class GeminiService(
         var lastToolCallDetected = false
 
         try {
-            val tradingPrompt = com.example.personalaibot.ai.TradingIntentUtility.isTradingPrompt(prompt, intentAddon)
-            val smcPrompt     = com.example.personalaibot.ai.TradingIntentUtility.isSmcPrompt(prompt, intentAddon)
-            val mt5Prompt     = com.example.personalaibot.ai.TradingIntentUtility.isMt5Prompt(prompt, intentAddon)
-            val deepPrompt    = com.example.personalaibot.ai.TradingIntentUtility.isDeepAnalysisPrompt(prompt, intentAddon)
-
-            val allowedTradingFunctions = if (tradingPrompt || mt5Prompt || deepPrompt || smcPrompt) {
-                // สำหรับ Trading ทุกกรณี ให้ส่งทั้ง TV และ MT5 เพื่อให้ Model ตัดสินใจได้เอง
-                // และป้องกันกรณี Filter พลาดทำให้ Tool หาย
-                ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
-            } else null
-
-            val toolPolicyLabel = when {
-                deepPrompt -> "Deep Confluence Suite mode"
-                mt5Prompt -> "MT5-only broker mode"
-                !allowedTradingFunctions.isNullOrEmpty() -> "TV-only SMC mode"
-                else -> null
-            }
+            // Policy กลางตัวเดียวกับทุก provider path (JarvisOrchestrator / LiveToolBridge)
+            val policy = com.example.personalaibot.ai.TradingToolPolicy.evaluate(prompt, intentAddon)
+            val allowedTradingFunctions = policy.allowedTradingToolNames
+            val toolPolicyLabel = policy.policyLabel
 
             while (round <= maxRounds) {
                 logDebug("GeminiService", "Tool Loop: Round $round")
@@ -528,22 +491,27 @@ class GeminiService(
                     // Extract all calls from the accumulated parts
                     val fcs = extractFunctionCallsFromParts(JsonArray(accumulatedModelParts))
                     currentRoundFunctionCalls.addAll(fcs)
-                    if (mt5Prompt && !deepPrompt) {
-                        // In MT5 mode, prefer MT5 tools but allow some cross-over if explicitly called
-                        val toRemove = currentRoundFunctionCalls.filter { it.name in ToolRegistry.tvOnlyTradingFunctionNames && it.name !in allowedTradingFunctions!! }
-                        if (toRemove.isNotEmpty()) {
-                            logDebug("GeminiService", "Filtering out non-MT5 tools in MT5 mode: ${toRemove.map { it.name }}")
-                            currentRoundFunctionCalls.removeAll(toRemove.toSet())
-                        }
-                    }
                     logDebug("GeminiService", "Final tools to execute in Round $round: ${currentRoundFunctionCalls.map { it.name }}")
 
                     // Execute tools
                     val toolResponseParts = mutableListOf<JsonElement>()
                     for (fc in currentRoundFunctionCalls) {
                         logDebug("GeminiService", "Tool Request: ${fc.name}(${fc.args})")
-                        if (showToolRequestInChat) {
+
+                        // Strict MT5 mode: ซ่อนผลลัพธ์ TV tools (policy เดียวกับทุก provider path)
+                        if (policy.shouldSuppressToolResult(fc.name)) {
+                            logDebug("GeminiService", "Strict MT5 Mode: Suppressing TV tool result for ${fc.name}")
+                            toolResponseParts.add(buildJsonObject {
+                                put("functionResponse", buildJsonObject {
+                                    put("name", fc.name)
+                                    put("response", buildJsonObject {
+                                        put("result", policy.suppressedResultMessage)
+                                    })
+                                })
+                            })
+                            continue
                         }
+
                         val toolResult = try {
                             ToolExecutor.execute(ToolCall(fc.name, fc.args), coreContext)
                         } catch (e: Exception) {

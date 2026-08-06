@@ -8,15 +8,29 @@ import java.io.File
 /**
  * FileToolExecutor — ตัวรัน Tool จัดการไฟล์สำหรับ Android
  * จัดการ I/O จริงและเรียกใช้ FileAnalyzer สำหรับงานซับซ้อน
+ *
+ * Security model (2026-07-29 hardening):
+ * - ทุก operation (read/write/list/analyze/delete/move) ต้องผ่าน path guard
+ * - Read/List/Analyze: ต้องอยู่ใน allowedRoots (shared storage + โฟลเดอร์สาธารณะมาตรฐาน)
+ * - Write/Delete/Move: ต้องอยู่ใน allowedRoots และห้ามเป็น root เปล่า (canMutatePath)
+ * - Write: จำกัดนามสกุลไฟล์ที่อนุญาต (text-based เท่านั้น) กันเขียนทับ binary/system
+ * - ทุก path ถูก canonicalize ก่อนเช็ค กัน path traversal ด้วย ".."
  */
 class FileToolExecutor(private val context: Context) {
-    
+
     companion object {
         private const val TAG = "FileToolExecutor"
+
+        /** นามสกุลที่อนุญาตให้ file_write เขียนได้ (text-based เท่านั้น) */
+        private val WRITABLE_EXTENSIONS = setOf(
+            "txt", "md", "log", "json", "csv", "yaml", "yml", "xml",
+            "html", "htm", "css", "ini", "cfg", "conf", "properties", "toml",
+            "kt", "kts", "py", "js", "ts", "java", "sql", "sh", "bat", "pine"
+        )
     }
 
     private val analyzer = FileAnalyzer(context)
-    private val rootPath: String by lazy { 
+    private val rootPath: String by lazy {
         val path = Environment.getExternalStorageDirectory().absolutePath
         val isManager = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -30,7 +44,7 @@ class FileToolExecutor(private val context: Context) {
             // ดึงค่า path และทำการ Resolve ให้เป็นพาธจริงของเครื่อง
             val rawPath = args["path"] ?: args["source_path"] ?: rootPath
             val resolvedPath = resolvePath(rawPath)
-            
+
             val updatedArgs = args.toMutableMap().apply {
                 if (containsKey("path")) put("path", resolvedPath)
                 if (containsKey("source_path")) put("source_path", resolvedPath)
@@ -57,14 +71,13 @@ class FileToolExecutor(private val context: Context) {
      */
     private fun resolvePath(input: String): String {
         android.util.Log.d(TAG, "Resolving path: '$input'")
-        
+
         // ถ้าว่าง หรือเป็น root ให้คืน rootPath ทันที
         if (input.isBlank() || input == "/" || input == "/sdcard" || input == "sdcard" || input == "/storage/emulated/0") {
             return rootPath
         }
-        
         var path = input.trim()
-        
+
         // 1. แทนที่ Virtual Path ยอดฮิต (รองรับทั้งมีและไม่มี / ต่อท้าย)
         if (path.startsWith("/sdcard")) {
             path = path.replaceFirst("/sdcard", rootPath)
@@ -82,11 +95,11 @@ class FileToolExecutor(private val context: Context) {
             path = path.substring(0, path.length - 1)
         }
 
-        // 3. จัดการกรณีพิเศษสำหรับโฟลเดอร์มาตรฐาน
+        // 4. จัดการกรณีพิเศษสำหรับโฟลเดอร์มาตรฐาน
         val file = File(path)
         if (!file.exists()) {
             android.util.Log.d(TAG, "Path '$path' not found, trying fallback...")
-            
+
             // ลองหา Download/ Downloads
             if (path.lowercase().endsWith("/download") || path.lowercase().endsWith("/downloads")) {
                 val systemDownload = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -100,14 +113,14 @@ class FileToolExecutor(private val context: Context) {
         android.util.Log.d(TAG, "Resolved path result: '$path'")
         return path
     }
-    
-    private fun executeList(args: Map<String, String>): String {
 
+    private fun executeList(args: Map<String, String>): String {
         val path = args["path"] ?: rootPath
         val dir = File(path)
-        
-        android.util.Log.d("FileToolExecutor", "executeList on: ${dir.absolutePath}")
 
+        android.util.Log.d(TAG, "executeList on: ${dir.absolutePath}")
+
+        if (!canReadPath(dir)) return "Error: access blocked for path outside allowed roots '$path'"
         if (!dir.exists()) return "ไม่พบโฟลเดอร์: $path (System Path: ${dir.absolutePath})"
         if (!dir.isDirectory) return "$path ไม่ใช่โฟลเดอร์"
         if (!dir.canRead()) return "มีโฟลเดอร์ในระบบ (${dir.absolutePath}) แต่ Android ไม่อนุญาตให้แอปอ่านไฟล์"
@@ -128,9 +141,10 @@ class FileToolExecutor(private val context: Context) {
     private fun executeRead(args: Map<String, String>): String {
         val path = args["path"] ?: return "ต้องระบุ path"
         val file = File(path)
+        if (!canReadPath(file)) return "Error: read blocked for path outside allowed roots '$path'"
         if (!file.exists()) return "ไม่พบไฟล์: $path"
         if (file.isDirectory) return "$path เป็นโฟลเดอร์ ไม่สามารถอ่านเป็น text ได้"
-        
+
         return file.readText()
     }
 
@@ -138,11 +152,23 @@ class FileToolExecutor(private val context: Context) {
         val path = args["path"] ?: return "ต้องระบุ path"
         val content = args["content"] ?: ""
         val file = File(path)
-        
+
+        // Guard: ต้องอยู่ใน allowed roots เท่านั้น (กันเขียนทับไฟล์ระบบ/แอปอื่น)
+        if (!canMutatePath(file)) {
+            return "Error: write blocked for unsafe path '$path' (outside allowed roots หรือเป็น root เปล่า)"
+        }
+
+        // Guard: จำกัดนามสกุล — อนุญาตเฉพาะ text-based files
+        val ext = file.extension.lowercase()
+        if (ext.isNotEmpty() && ext !in WRITABLE_EXTENSIONS) {
+            return "Error: write blocked — ไม่อนุญาตให้เขียนไฟล์นามสกุล '.$ext' " +
+                   "(อนุญาตเฉพาะ: ${WRITABLE_EXTENSIONS.joinToString(", ")})"
+        }
+
         // สร้างโฟลเดอร์ถ้ายังไม่มี
         file.parentFile?.mkdirs()
         file.writeText(content)
-        
+
         return "เขียนไฟล์สำเร็จ: $path (${content.length} characters)"
     }
 
@@ -151,7 +177,7 @@ class FileToolExecutor(private val context: Context) {
         val file = File(path)
         if (!file.exists()) return "ไม่พบไฟล์ที่ต้องการลบ: $path"
         if (!canMutatePath(file)) return "Error: mutation blocked for unsafe path '$path'"
-        
+
         val success = if (file.isDirectory) file.deleteRecursively() else file.delete()
         return if (success) "ลบสำเร็จ: $path" else "ไม่สามารถลบได้ (อาจติด Permission)"
     }
@@ -159,37 +185,38 @@ class FileToolExecutor(private val context: Context) {
     private suspend fun executeAnalyze(args: Map<String, String>): String {
         val path = args["path"] ?: return "ต้องระบุ path"
         val file = File(path)
+        if (!canReadPath(file)) return "Error: access blocked for path outside allowed roots '$path'"
         if (!file.exists()) return "ไม่พบไฟล์: $path"
-        
+
         return "ผลการวิเคราะห์ไฟล์ $path:\n---\n" + analyzer.analyze(file)
     }
 
     private fun executeMove(args: Map<String, String>): String {
         val source = args["source_path"] ?: return "ต้องระบุ source_path"
         val target = args["target_path"] ?: return "ต้องระบุ target_path"
-        
+
         val srcFile = File(source)
         val dstFile = File(target)
-        
+
         if (!srcFile.exists()) return "ไม่พบไฟล์ต้นทาง: $source"
         if (!canMutatePath(srcFile) || !isPathInAllowedRoots(dstFile)) {
             return "Error: move blocked for unsafe path(s)"
         }
-        
+
         dstFile.parentFile?.mkdirs()
-        
+
         val success = srcFile.renameTo(dstFile)
-        return if (success) "ย้าย/เปลี่ยนชื่อสำเร็จ: $source -> $target" 
+        return if (success) "ย้าย/เปลี่ยนชื่อสำเร็จ: $source -> $target"
                else "ย้ายไม่สำเร็จ (อาจข้าม Partition หรือติด Permission)"
     }
 
     private fun executeSearch(args: Map<String, String>): String {
         val query = args["query"]?.lowercase() ?: return "ต้องระบุ query"
         val ext = args["extension"]?.lowercase()?.removePrefix(".")
-        
+
         val root = File(rootPath)
         val results = mutableListOf<File>()
-        
+
         // ค้นหาแบบตื้นๆ ในโฟลเดอร์มาตรฐานของ Android เพื่อความเร็ว
         val searchDirs = listOf(
             File(rootPath),
@@ -210,7 +237,7 @@ class FileToolExecutor(private val context: Context) {
         }
 
         if (results.isEmpty()) return "ไม่พบไฟล์ที่ตรงกับ '$query'${if(ext!=null)" (.$ext)" else ""}"
-        
+
         return buildString {
             append("พบ ${results.size} ไฟล์:\n")
             results.take(20).forEach { file ->
@@ -227,6 +254,12 @@ class FileToolExecutor(private val context: Context) {
         return "%.1f %sB".format(bytes / Math.pow(1024.0, exp.toDouble()), pre)
     }
 
+    // ─── Path Security Guards ─────────────────────────────────────────────
+
+    /** Read guard — อนุญาตเฉพาะ path ใน allowed roots (รวม root เองด้วย) */
+    private fun canReadPath(file: File): Boolean = isPathInAllowedRoots(file)
+
+    /** Mutation guard — ต้องอยู่ใน allowed roots และห้ามเป็น root เปล่า */
     private fun canMutatePath(file: File): Boolean {
         if (!isPathInAllowedRoots(file)) return false
         val normalized = normalizePath(file)
@@ -244,6 +277,7 @@ class FileToolExecutor(private val context: Context) {
 
     private fun normalizePath(file: File): String {
         return try {
+            // canonicalFile resolve ".." และ symlink ก่อนเช็ค — กัน path traversal
             file.canonicalFile.absolutePath.replace("\\", "/").trimEnd('/')
         } catch (_: Exception) {
             file.absolutePath.replace("\\", "/").trimEnd('/')

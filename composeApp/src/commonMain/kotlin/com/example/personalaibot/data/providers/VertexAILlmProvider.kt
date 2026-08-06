@@ -144,17 +144,44 @@ class VertexAILlmProvider(
         }
     }
 
+    private fun getFallbackModels(): List<LlmModelInfo> {
+        return listOf(
+            LlmModelInfo("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite (Vertex)", supportsVision = true),
+            LlmModelInfo("gemini-2.0-flash-exp", "Gemini 2.0 Flash (Vertex)", supportsVision = true),
+            LlmModelInfo("gemini-1.5-pro", "Gemini 1.5 Pro (Vertex)", supportsVision = true),
+            LlmModelInfo("gemini-1.5-flash", "Gemini 1.5 Flash (Vertex)", supportsVision = true)
+        )
+    }
+
     override suspend fun listModels(apiKey: String): List<LlmModelInfo> {
         if (isDirect) {
             // Direct mode returns a standard set of common Vertex models to avoid complex listing
-            return listOf(
-                LlmModelInfo("gemini-2.0-flash-lite", "Gemini 2.0 Flash Lite", supportsVision = true),
-                LlmModelInfo("gemini-2.0-flash", "Gemini 2.0 Flash", supportsVision = true),
-                LlmModelInfo("gemini-1.5-pro", "Gemini 1.5 Pro", supportsVision = true),
-                LlmModelInfo("gemini-1.5-flash", "Gemini 1.5 Flash", supportsVision = true)
-            )
+            return getFallbackModels()
         }
-        // ... (rest of the listModels code for Proxy mode remains same)
+        // Proxy mode: try to list models from server
+        return try {
+            val response = client.get("$serverBaseUrl/api/vertex/models") {
+                headers {
+                    authHeaders().forEach { (k, v) -> append(k, v) }
+                }
+            }
+            if (!response.status.isSuccess()) return getFallbackModels()
+            val json = Json { ignoreUnknownKeys = true }
+            val respText: String = response.body()
+            val respObj = json.parseToJsonElement(respText).jsonObject
+            val data = respObj["models"]?.jsonArray ?: return getFallbackModels()
+            val list = data.mapNotNull { el ->
+                val obj = el.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: id
+                LlmModelInfo(id = id, displayName = name)
+            }
+            if (list.isEmpty()) getFallbackModels() else list
+        } catch (e: Exception) {
+            logError("VertexAI", "Failed to list models from proxy: ${e.message}")
+            getFallbackModels()
+        }
+    }
 
     /**
      * ตรวจสอบว่า Vertex AI (server proxy) พร้อมใช้งานหรือไม่

@@ -1,0 +1,85 @@
+---------------------------- PROCESS ENDED (26341) for package com.example.personalaibot ----------------------------
+---------------------------- PROCESS STARTED (27669) for package com.example.personalaibot ----------------------------
+2026-07-30 02:40:45.767 27669-27669 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools'
+2026-07-30 02:40:45.767 27669-27669 FileToolExecutor        com.example.personalaibot            D  Storage Root: /storage/emulated/0 | isManager: true
+2026-07-30 02:40:45.767 27669-27669 FileToolExecutor        com.example.personalaibot            D  Path '/storage/emulated/0/custom_agent_tools' not found, trying fallback...
+2026-07-30 02:40:45.767 27669-27669 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools'
+2026-07-30 02:40:45.767 27669-27669 FileToolExecutor        com.example.personalaibot            D  executeList on: /storage/emulated/0/custom_agent_tools
+2026-07-30 02:40:45.768 27669-27710 AndroidONNX             com.example.personalaibot            D  Loading Multilingual tokenizer...
+2026-07-30 02:40:45.770 27669-27669 PcmAudio                com.example.personalaibot            D  Initializing AudioTrack (Speaker)
+2026-07-30 02:40:45.798 27669-27669 PcmAudio                com.example.personalaibot            D  AudioTrack Ready
+2026-07-30 02:40:46.665 27669-27669 GeminiService           com.example.personalaibot            D  Updating Gemini config: model=gemini-3.5-flash-lite, key=AIza...ElLY
+2026-07-30 02:40:50.576 27669-27710 AndroidONNX             com.example.personalaibot            D  Loading ONNX model...
+2026-07-30 02:40:50.918 27669-27789 ProfileInstaller        com.example.personalaibot            D  Installing profile for com.example.personalaibot
+2026-07-30 02:40:51.289 27669-27710 AndroidONNX             com.example.personalaibot            D  Multilingual model loaded successfully.
+2026-07-30 02:40:51.289 27669-27669 JarvisVM                com.example.personalaibot            D  Local ONNX model already on device — marked Ready
+2026-07-30 02:41:11.016 27669-27669 JARVIS_VM               com.example.personalaibot            D  Starting Live Voice Input
+2026-07-30 02:41:11.024 27669-27737 JARVIS_VM               com.example.personalaibot            D  Connecting Live session (with memory context)...
+2026-07-30 02:41:11.025 27669-27710 JARVIS_VM               com.example.personalaibot            D  Microphone starting...
+2026-07-30 02:41:11.025 27669-27710 PcmAudio                com.example.personalaibot            D  Starting Microphone...
+2026-07-30 02:41:11.038 27669-27737 LiveGemini              com.example.personalaibot            D  Connecting to Live API with model: gemini-3.1-flash-live-preview (attempt 1)
+2026-07-30 02:41:11.055 27669-27710 PcmAudio                com.example.personalaibot            D  AEC enabled: true
+2026-07-30 02:41:11.069 27669-27710 PcmAudio                com.example.personalaibot            D  NoiseSuppressor enabled: true
+2026-07-30 02:41:11.079 27669-27710 PcmAudio                com.example.personalaibot            D  MIC_STARTED successfully
+2026-07-30 02:41:11.906 27669-27735 LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-07-30 02:41:16.854 27669-27710 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): สภาวะเศรษฐกิจสหรัฐอเมริกา
+2026-07-30 02:41:16.864 27669-27710 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_economic_data({series=overview})
+2026-07-30 02:41:19.138 27669-27737 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_economic_data → ## 🇺🇸 ภาพรวมเศรษฐกิจสหรัฐฯ (FRED Overview)
+                                                                                                    
+                                                                                                    - **อัตราการเติบโต GDP (%, รายไตรมาส)**: 2.70 (2026-01-01) 🔺 +0.70 จากช่วงก่อน
+                                                                                                    - **ดัชนีราคาผู้บริโภค CPI (Index 1982-84=100)**: 332.57 (2026-06-01) 🔻 -1.41 จากช่วงก่อน
+                                                                                                    - **อัตราการว่างงาน (%)**: 4.20 (2026-06-01) 🔻 -0.10 จากช่วงก่อน
+                                                                                                    - **อัตราดอกเบี้ย Fed Funds (%)**: 3.63 (2026-06-01) ➖ คงที่ จากช่วงก่อน
+                                                                                                    
+                                                                                                    _ดูรายละเอียดแต่ละตัวได้ด้วย trading_economic_data + series เฉพาะทาง_
+2026-07-30 02:41:19.776 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ได้ครับเจ้านาย
+2026-07-30 02:41:20.643 27669-27734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สรุป
+2026-07-30 02:41:21.217 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวเลข
+2026-07-30 02:41:21.512 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-07-30 02:41:22.096 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สหรัฐฯ
+2026-07-30 02:41:22.642 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ล่าสุด
+2026-07-30 02:41:22.953 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะครับ
+2026-07-30 02:41:23.503 27669-27734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  GDP
+2026-07-30 02:41:24.342 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  รายไตรมาส
+2026-07-30 02:41:25.190 27669-27710 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โตขึ้น
+2026-07-30 02:41:25.467 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็น
+2026-07-30 02:41:25.744 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  2.7
+2026-07-30 02:41:26.318 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เปอร์เซ็นต์
+2026-07-30 02:41:26.894 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ส่วน
+2026-07-30 02:41:27.495 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  CPI
+2026-07-30 02:41:28.056 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หรือเงินเฟ้อ
+2026-07-30 02:41:28.605 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลดลง
+2026-07-30 02:41:29.165 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เล็กน้อย
+2026-07-30 02:41:29.725 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มาอยู่ที่
+2026-07-30 02:41:30.284 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  332.57
+2026-07-30 02:41:31.964 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อัตรา
+2026-07-30 02:41:32.805 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  การว่างงาน
+2026-07-30 02:41:33.367 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลดลง
+2026-07-30 02:41:33.647 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เช่นกัน
+2026-07-30 02:41:34.205 27669-27735 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับอยู่ที่
+2026-07-30 02:41:34.765 27669-27710 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  4.2
+2026-07-30 02:41:35.325 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เปอร์เซ็นต์
+2026-07-30 02:41:35.919 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และดอกเบี้ย
+2026-07-30 02:41:36.756 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เฟด
+2026-07-30 02:41:37.025 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังคง
+2026-07-30 02:41:37.304 27669-27710 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่ที่
+2026-07-30 02:41:37.865 27669-27710 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  3.63
+2026-07-30 02:41:38.739 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เปอร์เซ็นต์
+2026-07-30 02:41:39.006 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 02:41:39.565 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยรวม
+2026-07-30 02:41:40.407 27669-27711 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-07-30 02:41:40.966 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดูเหมือน
+2026-07-30 02:41:41.247 27669-27736 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังแข็งแกร่ง
+2026-07-30 02:41:41.846 27669-27733 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และเงินเฟ้อ
+2026-07-30 02:41:42.430 27669-27710 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เริ่มชะลอตัว
+2026-07-30 02:41:43.265 27669-27732 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลงครับ
+2026-07-30 02:41:43.824 27669-27737 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีอะไรให้
+2026-07-30 02:41:44.663 27669-27736 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผมตรวจสอบ
+2026-07-30 02:41:45.224 27669-27736 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-07-30 02:41:45.505 27669-27736 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมครับ
+2026-07-30 02:41:46.580 27669-27710 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 1284002 bytes). Persisting to DB.
+2026-07-30 02:41:51.103 27669-27669 JARVIS_VM               com.example.personalaibot            D  Stopping Live Voice Input
+2026-07-30 02:41:51.103 27669-27669 PcmAudio                com.example.personalaibot            D  Stopping Mic...
+2026-07-30 02:41:51.104 27669-28159 PcmAudio                com.example.personalaibot            D  Mic thread stopped
+2026-07-30 02:41:51.155 27669-27732 LiveGemini              com.example.personalaibot            D  🔌 Session ending. Flushing buffers.
+2026-07-30 02:41:51.159 27669-27735 LiveGemini              com.example.personalaibot            D  Session disconnected

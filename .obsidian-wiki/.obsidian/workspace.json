@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "00_System/index.md",
+                "file": "01_Architecture/multi_provider_architecture.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "index"
+              "title": "multi_provider_architecture"
             }
           }
         ]
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 298.5
   },
   "right": {
     "id": "1e3eb17d74ad9603",
@@ -182,10 +182,22 @@
   },
   "active": "6d1765c6930db568",
   "lastOpenFiles": [
-    "07_Trading_Intelligence/15_Cluster_Trading_Logic_V17.2.md",
-    "00_System/index.md",
-    "02_Components/LocalEmbeddingSystem.md",
+    "04_Tasks/Phase_5_Fixes_2026-05-02.md",
+    "04_Tasks/Phase_5.1_Compose_App_Fixes_2026-05-02.md",
     "04_Tasks/Phase_5.2_API_Provider_Connectivity_Fix_2026-05-02.md",
+    "02_Components/LocalEmbeddingSystem.md",
+    "02_Components/LiveToolBridge.md",
+    "02_Components/LiveGeminiService.md",
+    "02_Components/JarvisViewModel.md",
+    "02_Components/GeminiService.md",
+    "06_Gemini_Skills/gemini-live-api-dev.md",
+    "06_Gemini_Skills/gemini-api-dev.md",
+    "00_System/index.md",
+    "07_Trading_Intelligence/Trading_Intelligence_MOC.md",
+    "07_Trading_Intelligence/36_Scalping_Routing_V266.md",
+    "07_Trading_Intelligence/Smart_Fallback_and_Token_Management.md",
+    "07_Trading_Intelligence/35_StaleStop_RsiDivergence_V265.md",
+    "07_Trading_Intelligence/15_Cluster_Trading_Logic_V17.2.md",
     "07_Trading_Intelligence/08_Universal_Trading_Unity_V14.4.md",
     "07_Trading_Intelligence/09_TradingView_Continuity_V15.0.md",
     "07_Trading_Intelligence/10_Global_Insights_V16.0.md",
@@ -196,19 +208,7 @@
     "07_Trading_Intelligence/16_Complete_Code_Logic_V19.6.md",
     "07_Trading_Intelligence/17_PerAgent_ModelRanking_V20.md",
     "07_Trading_Intelligence/18_V20_Agent_Coordination_Audit.md",
-    "09_Roadmap/00_AI_Agent_Trader_Pro_Roadmap.md",
-    "09_Roadmap/01_mt5_core_server_plan.md",
-    "09_Roadmap/02_AutoTrading_Smart_Upgrade_Plan_2026_04_25.md",
-    "09_Roadmap/03_AutoTrading_Implementation_Audit_2026_04_25.md",
-    "09_Roadmap/04_Pro_AI_Trader_Roadmap.md",
-    "09_Roadmap/05_edit.md",
-    "09_Roadmap/06_Virtual_Price_Alert_Roadmap.md",
-    "07_Trading_Intelligence/Smart_Fallback_and_Token_Management.md",
-    "09_Roadmap/05_.md",
-    "09_Roadmap/New Text Document.md",
     "09_Roadmap/New Text Document.txt",
-    "07_Trading_Intelligence/01_Market_Cycles_Wyckoff.md",
-    "07_Trading_Intelligence/00_Tool_to_Strategy_Map.md",
     "Android wrapper",
     "iOS wrapper",
     "lightweight-charts-docs",

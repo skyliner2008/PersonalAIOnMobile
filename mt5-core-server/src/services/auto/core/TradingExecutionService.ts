@@ -208,9 +208,10 @@ class TradingExecutionService {
               if (plan.mode === 'PARTIAL_CLOSE') {
                 const matched = openJournal.find(j => j.mt5Ticket === t);
                 if (matched) {
+                    const partialToken = this.partialTokenForPlan(plan);
                     upsertJournal({
                         ...matched,
-                        aiReview: `${matched.aiReview || ''}; PARTIAL_${plan.summary}`,
+                        aiReview: `${matched.aiReview || ''}; ${partialToken}`,
                         updatedAt: Date.now()
                     });
                 }
@@ -301,6 +302,13 @@ class TradingExecutionService {
     }
 
     return { executed: false, riskGate: `${plan.mode.toLowerCase()} skipped`, ticket: null, side: plan.side };
+  }
+
+  private partialTokenForPlan(plan: ManagementPlan): string {
+    const text = `${plan.summary ?? ''} ${plan.reason ?? ''}`.toUpperCase();
+    if (text.includes('STAGE 2') || text.includes('2R')) return 'PARTIAL_2R';
+    if (text.includes('STAGE 1') || text.includes('1R')) return 'PARTIAL_1R';
+    return `PARTIAL_${String(plan.summary || 'UNKNOWN').replace(/\s+/g, '_').toUpperCase()}`;
   }
 
   public extractTicket(input: unknown): number | null {

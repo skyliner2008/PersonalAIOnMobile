@@ -25,3 +25,17 @@ composeApp/google-services.json
 .env.*
 mt5-core-server/.cache/
 .cache/
+*.bak
+*.bak*
+temp_diff*.txt
+_temp_*
+_tmp_*
+log.txt
+tmp_attach.txt
+clean_vm.py
+fix_*.py
+patch_app.py
+scratch/
+mt5-core-server/scratch/
+
+

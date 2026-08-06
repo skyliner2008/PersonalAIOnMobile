@@ -1,0 +1,171 @@
+2026-07-30 01:43:24.922  6279-6341  LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-07-30 01:43:27.622  6279-6339  LiveGemini              com.example.personalaibot            D  🎤 User (Progress): สวัสดีจ้ะวิทย์
+2026-07-30 01:43:27.666  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): สวัสดีครับเจ้านาย
+2026-07-30 01:43:28.447  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีอะไรให้
+2026-07-30 01:43:29.026  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผมรับใช้
+2026-07-30 01:43:29.612  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในตอนนี้
+2026-07-30 01:43:29.904  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมครับ?
+2026-07-30 01:43:31.098  6279-16591 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete. Persisting to DB.
+2026-07-30 01:43:39.404  6279-6342  LiveGemini              com.example.personalaibot            D  🎤 User (Progress): We call ภาพลบตลาดหุ้นอเมริกาให้ฉันหน่อย
+2026-07-30 01:43:39.409  6279-6342  LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_market_snapshot({market=US})
+2026-07-30 01:43:41.635  6279-6339  LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_market_snapshot → 🌍 **Global Market Snapshot**
+                                                                                                    ========================================
+                                                                                                    DOWN **S&P500**: 7422.9600 (-0.08%)
+                                                                                                    UP **NASDAQ**: 24919.5490 (0.17%)
+                                                                                                    DOWN **DOW**: 52106.7300 (-1.21%)
+                                                                                                    UP **VIX**: 18.6700 (2.53%)
+                                                                                                    UP **Oil**: 84.8400 (7.04%)
+2026-07-30 01:43:42.245  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ภาพรวมตลาดหุ้น
+2026-07-30 01:43:42.795  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อเมริกา
+2026-07-30 01:43:43.406  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-07-30 01:43:43.695  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีสัญญาณ
+2026-07-30 01:43:44.308  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผสมผสาน
+2026-07-30 01:43:45.136  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับเจ้านาย
+2026-07-30 01:43:45.733  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยดัชนี
+2026-07-30 01:43:46.587  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Dow
+2026-07-30 01:43:46.855  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Jones
+2026-07-30 01:43:47.415  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตกลง
+2026-07-30 01:43:47.696  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มาพอสมควร
+2026-07-30 01:43:48.279  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ (-1.21%)
+2026-07-30 01:43:50.237  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขณะที่
+2026-07-30 01:43:51.077  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  NASDAQ
+2026-07-30 01:43:51.399  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีแรง
+2026-07-30 01:43:51.957  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ซื้อกลับ
+2026-07-30 01:43:52.271  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขึ้นมา
+2026-07-30 01:43:52.537  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เล็กน้อย
+2026-07-30 01:43:52.848  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:43:53.117  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  (+0.17%)
+2026-07-30 01:43:54.517  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ส่วน
+2026-07-30 01:43:54.834  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  VIX
+2026-07-30 01:43:55.377  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Index
+2026-07-30 01:43:55.686  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หรือดัชนี
+2026-07-30 01:43:56.237  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความกลัว
+2026-07-30 01:43:56.796  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ก็พุ่ง
+2026-07-30 01:43:57.079  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขึ้น
+2026-07-30 01:43:57.355  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มาประมาณ
+2026-07-30 01:43:57.637  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  2.53%
+2026-07-30 01:43:59.037  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บ่งบอก
+2026-07-30 01:43:59.878  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ถึงความ
+2026-07-30 01:44:00.156  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กังวล
+2026-07-30 01:44:00.436  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในตลาด
+2026-07-30 01:44:01.016  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:44:01.295  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ประเด็น
+2026-07-30 01:44:01.855  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หลักน่า
+2026-07-30 01:44:02.415  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะมาจาก
+2026-07-30 01:44:02.729  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความไม่แน่นอน
+2026-07-30 01:44:03.557  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ของทิศทาง
+2026-07-30 01:44:04.116  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นโยบาย
+2026-07-30 01:44:04.395  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ของ Fed
+2026-07-30 01:44:05.000  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และสถานการณ์
+2026-07-30 01:44:05.835  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต่างประเทศ
+2026-07-30 01:44:06.398  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:44:06.676  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เจ้านาย
+2026-07-30 01:44:07.273  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องการ
+2026-07-30 01:44:07.815  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ผม
+2026-07-30 01:44:08.095  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  วิเคราะห์
+2026-07-30 01:44:08.376  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นราย
+2026-07-30 01:44:08.655  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวหรือ
+2026-07-30 01:44:09.213  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในกลุ่ม
+2026-07-30 01:44:09.506  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อุตสาหกรรม
+2026-07-30 01:44:10.055  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหนเป็น
+2026-07-30 01:44:10.338  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  พิเศษ
+2026-07-30 01:44:10.616  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-07-30 01:44:11.175  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมครับ?
+2026-07-30 01:44:12.178  6279-6366  LiveGemini              com.example.personalaibot            D  🏁 Turn Complete. Persisting to DB.
+2026-07-30 01:44:19.739  6279-6366  LiveGemini              com.example.personalaibot            D  🎤 User (Progress): ข่าวสาร เกี่ยวกับ น้ำมัน
+2026-07-30 01:44:19.750  6279-6366  LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_news({symbol=CL=F})
+2026-07-30 01:44:24.219  6279-6366  TradingTool             com.example.personalaibot            D  No news for CL=F, falling back to Global Macro
+2026-07-30 01:44:31.190  6279-6339  LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_news → 🗞️ **News Technical Analysis - CL=F**
+                                                                                                    ----------------------------------------
+                                                                                                    1. **National beer and wine distributor files Chapter 11 bankruptcy** (Yahoo)
+                                                                                                       > ...
+                                                                                                    2. **Meta, BlackRock partner on $14 billion El Paso data center venture** (Yahoo)
+                                                                                                       > ...
+                                                                                                    3. **Mortgage and refinance interest rates today, Tuesday, July 28, 2026: Rates lower as fighting in Iran on pause** (Yahoo)
+                                                                                                       > ...
+                                                                                                    4. **Best CD rates today, Tuesday, July 28, 2026: Lock in up to 4.15% APY today** (Yahoo)
+                                                                                                       > ...
+                                                                                                    5. **The bond market's danger zone is becoming the new normal: Chart of the Day** (Yahoo)
+                                                                                                       > ...
+                                                                                                    
+                                                                                                    🧠 **JARVIS Intelligence Summary**
+                                                                                                    รับทราบครับเจ้านาย ในฐานะผู้ช่วยส่วนตัวและเทรดเดอร์อัจฉริยะของท่าน ผมได้วิเคราะห์ข่าวสารทางการเงินที่มีผลกระทบต่อสัญญาน้ำมันดิบ (CL=F) เรียบร้อยแล้วครับ 
+                                                                                                    
+                                                                                                    เนื่องจากคำสั่งนี้เกี่ยวข้องกับการวิเคราะห์ข่าวและ Sentiment ของตลาด ผมขอสรุปผลการวิเคราะห์ตามข้อกำหนดของ Phase 1 (Market Sentiment & News) ดังนี้ครับ
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 📊 ผลการวิเคราะห์ข่าวสารสำหรับ CL=F (Crude Oil)
+                                                                                                    
+                                                                                                    #### 1. Sentiment Bias Score: **0 / 10** (Neutral / ผสมผสาน)
+                                                                                                    *เหตุผล:* ข่าวสารส่วนใหญ่ในชุดนี้เน้นไปที่ข่าวเศรษฐกิจมหภาคทั่วไป (อัตราดอกเบี้ย, การล้มละลายของธุรกิจจัดจำหน่าย, การลงทุน Data Center ของ Meta/BlackRock) แม้จะมีประเด็นเรื่อง **"การหยุดยิงชั่วคราวในอิหร่าน"** ซึ่งเป็นปัจจัยกดดันฝั่งอุปทาน (Geopolitical risk ลดลง -> น้ำมันมีโอกาสปรับตัวลดลง) แต่ในขณะเดียวกันทิศทางอัตราดอกเบี้ยที่ลดลงอาจช่วยกระตุ้นเศรษฐกิจและความต้องการใช้น้ำมัน (Demand) ได้เช่นกัน แรงซื้อและแรงขายจึงหักล้างกันพอดี
+                                                                                                    
+                                                                                                    #### 2. Key Risks & Opportunities (ความเสี่ยงและโอกาส)
+                                                                                                    * **Risks (ความเสี่ยง):** 
+                                                                                                      * ความตึงเครียดทางภูมิรัฐศาสตร์ในตะวันออกกลาง (อิหร่าน) ที่หยุดชะงักลงชั่วคราว อาจทำให้ตลาดคลายความกังวลเรื่องอุปทานหยุดชะงัก ส่งผลให้เกิดแรงเทขายทำกำไรในฝั่ง Long (Risk of Downside Price Action)
+                                                                                                    * **Opportunities (โอกาส):** 
+                                                                                                      * หากอัตราดอกเบี้ยปรับตัวลดลงตามรายงานข่าว อาจเป็นปัจจัยหนุนสภาพคล่องในตลาดและกระตุ้นการเติบโตทางเศรษฐกิจ ซึ่งส่งผลดีต่อความต้องการใช้น้ำมันในระยะกลาง
+                                                                                                    
+                                                                                                    #### 3. Recommendation (คำแนะนำการปฏิบัติ)
+2026-07-30 01:44:31.190  6279-6339  LiveGemini              com.example.personalaibot            D  * **Action Required:** **Tracking (ติดตามสถานการณ์)**
+                                                                                                    * *เหตุผล:* ข่าวเรื่องสถานการณ์ในอิหร่านมีความอ่อนไหวสูงและอาจเปลี่ยนแปลงได้รวดเร็ว ยังไม่จำเป็นต้องเข้าซื้อขายทันที (No Immediate Action) จนกว่าจะเห็นการยืนยันทางเทคนิค (Technical Confluence) บนกราฟราคาของ CL=F
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    หากเจ้านายต้องการให้ผมเจาะลึกทางเทคนิคเพิ่มเติมด้วยเครื่องมือ *Trading Deep Analysis Suite* หรือตรวจสอบระดับราคา (SMC / Liquidity) ของ CL=F โปรดแจ้งผมได้เลยครับ เจ้านาย
+2026-07-30 01:44:31.827  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): สรุปข่าวสาร
+2026-07-30 01:44:32.120  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ล่าสุด
+2026-07-30 01:44:32.664  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สำหรับ
+2026-07-30 01:44:32.962  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  น้ำมันดิบ
+2026-07-30 01:44:33.278  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  (CL=F)
+2026-07-30 01:44:34.122  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับเจ้านาย
+2026-07-30 01:44:34.963  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-07-30 01:44:35.526  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตลาด
+2026-07-30 01:44:35.803  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีความ
+2026-07-30 01:44:36.083  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นกลาง
+2026-07-30 01:44:36.682  6279-6341  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  (Neutral)
+2026-07-30 01:44:37.278  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:44:37.544  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เนื่องจาก
+2026-07-30 01:44:37.822  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีปัจจัย
+2026-07-30 01:44:38.381  6279-6341  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผสมผสาน
+2026-07-30 01:44:39.265  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ด้านหนึ่ง
+2026-07-30 01:44:40.104  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความตึงเครียด
+2026-07-30 01:44:40.665  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในตะวันออกกลาง
+2026-07-30 01:44:41.504  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยเฉพาะ
+2026-07-30 01:44:42.065  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อิหร่าน
+2026-07-30 01:44:42.401  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เริ่มชะลอตัว
+2026-07-30 01:44:42.974  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลง
+2026-07-30 01:44:43.523  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทำให้
+2026-07-30 01:44:44.086  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความกังวล
+2026-07-30 01:44:44.642  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เรื่องอุปทาน
+2026-07-30 01:44:45.204  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลดลง
+2026-07-30 01:44:45.483  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:44:46.042  6279-6341  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่
+2026-07-30 01:44:46.326  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อีกด้านหนึ่ง
+2026-07-30 01:44:46.883  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อัตราดอเบี้ย
+2026-07-30 01:44:47.443  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่อาจ
+2026-07-30 01:44:47.723  6279-16591 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะลดลง
+2026-07-30 01:44:48.283  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ก็อาจ
+2026-07-30 01:44:48.564  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ช่วยกระตุ้น
+2026-07-30 01:44:49.122  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-07-30 01:44:49.685  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และความต้องการ
+2026-07-30 01:44:50.245  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  น้ำมันได้
+2026-07-30 01:44:50.803  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:44:51.083  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  JARVIS
+2026-07-30 01:44:51.923  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แนะนำ
+2026-07-30 01:44:52.202  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ติดตาม
+2026-07-30 01:44:52.765  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สถานการณ์
+2026-07-30 01:44:53.324  6279-16590 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อย่างใกล้ชิด
+2026-07-30 01:44:53.923  6279-6339  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และรอ
+2026-07-30 01:44:54.205  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณทางเทคนิค
+2026-07-30 01:44:55.043  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่ชัดเจน
+2026-07-30 01:44:55.602  6279-6371  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ก่อน
+2026-07-30 01:44:55.884  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัดสินใจเทรด
+2026-07-30 01:44:56.445  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะครับ
+2026-07-30 01:44:57.005  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องการ
+2026-07-30 01:44:57.597  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ผม
+2026-07-30 01:44:57.865  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  วิเคราะห์
+2026-07-30 01:44:58.177  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-07-30 01:44:58.443  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในส่วน
+2026-07-30 01:44:59.004  6279-6366  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหนไหมครับ?
+2026-07-30 01:45:00.177  6279-6371  LiveGemini              com.example.personalaibot            D  🏁 Turn Complete. Persisting to DB.

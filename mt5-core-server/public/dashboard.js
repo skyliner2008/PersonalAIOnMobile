@@ -14,6 +14,47 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+const GATE_TOGGLES = [
+  ['marketTradabilityGate', 'Market Tradability'],
+  ['preAiPositionCapGate', 'Pre-AI Position Cap'],
+  ['unifiedZoneGate', 'Unified Zone'],
+  ['eaFallbackConfidenceGate', 'EA Confidence'],
+  ['eaFallbackRrrGate', 'EA RRR'],
+  ['decisionSideGuard', 'Decision Side'],
+  ['slDistanceGuard', 'SL Distance'],
+  ['counterTrendGuard', 'Counter Trend'],
+  ['ltfConsensusGuard', 'LTF Consensus'],
+  ['proximityGate', 'Proximity'],
+  ['m15SmcPressureGate', 'M15 SMC Pressure'],
+  ['fvgFillGate', 'FVG Fill'],
+  ['sequentialEntryGate', 'Sequential Entry'],
+  ['v25OnlyGate', 'V25 Only'],
+  ['v25BreakoutGuard', 'V25 Breakout'],
+  ['executionQualityGate', 'Execution Quality'],
+  ['riskParamsGate', 'Risk Params'],
+  ['closeWeakestGate', 'Close Weakest'],
+  ['orderPreflightGate', 'Order Preflight'],
+  ['postTpCooldownGate', 'Post-TP Cooldown']
+];
+
+const STRATEGY_TOGGLES = [
+  ['SCALPING', 'SCALPING'],
+  ['TREND_FOLLOW', 'TREND FOLLOW'],
+  ['MEAN_REVERSION', 'MEAN REVERSION'],
+  ['BREAKOUT', 'BREAKOUT'],
+  ['RANGE', 'RANGE'],
+  ['SMC_FVG_SCALP', 'SMC FVG SCALP'],
+  ['SMC_FVG_REVERSAL', 'SMC FVG REVERSAL'],
+  ['SMC_FVG_CONTINUATION', 'SMC FVG CONTINUATION'],
+  ['SMC_FVG_MAGNET_SCALP', 'SMC FVG MAGNET'],
+  ['SMC_WALL_BREAK_SCALP', 'SMC WALL BREAK'],
+  ['SMC_RSI_DIVERGENCE', 'SMC RSI DIVERGENCE'],
+  ['V25_PLAYBOOKS', 'V25 PLAYBOOKS'],
+  ['SWING', 'SWING'],
+  ['GRID', 'GRID'],
+  ['TRAILING', 'TRAILING']
+];
+
 // --- API Helper ---
 async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -179,7 +220,39 @@ function renderOverview() {
   $('liveToggle').checked = cfg.enableLiveTrading || false;
   $('aiToggle').checked = cfg.enableAiMode || false;
   $('v25Toggle').checked = cfg.adaptive?.v25?.enabled || false;
-  $('v25OnlyToggle').checked = cfg.adaptive?.v25?.enableV25Only || false;
+  renderExecutionToggles(cfg);
+}
+
+function renderToggleGrid(containerId, items, values, dataAttr) {
+  const grid = $(containerId);
+  if (!grid) return;
+  grid.innerHTML = items.map(([key, label]) => {
+    const checked = values?.[key] !== false ? 'checked' : '';
+    return `
+      <div class="toggle-box">
+        <span>${esc(label)}</span>
+        <label class="switch"><input type="checkbox" ${checked} ${dataAttr}="${esc(key)}"><i></i></label>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderExecutionToggles(cfg) {
+  renderToggleGrid('gateTogglesGrid', GATE_TOGGLES, cfg.adaptive?.gateToggles || {}, 'data-gate-toggle');
+  renderToggleGrid('strategyTogglesGrid', STRATEGY_TOGGLES, cfg.adaptive?.strategyToggles || {}, 'data-strategy-toggle');
+
+  document.querySelectorAll('[data-gate-toggle]').forEach((el) => {
+    el.addEventListener('change', (e) => {
+      const key = e.target.getAttribute('data-gate-toggle');
+      updateConfig({ adaptive: { gateToggles: { [key]: e.target.checked } } }, 'Gate updated');
+    });
+  });
+  document.querySelectorAll('[data-strategy-toggle]').forEach((el) => {
+    el.addEventListener('change', (e) => {
+      const key = e.target.getAttribute('data-strategy-toggle');
+      updateConfig({ adaptive: { strategyToggles: { [key]: e.target.checked } } }, 'Strategy updated');
+    });
+  });
 }
 
 async function loadPositions() {
@@ -580,12 +653,33 @@ function bindEvents() {
   $('liveToggle').addEventListener('change', (e) => updateConfig({ enableLiveTrading: e.target.checked }, 'Live trading updated'));
   $('aiToggle').addEventListener('change', (e) => updateConfig({ enableAiMode: e.target.checked }, 'AI mode updated'));
   $('v25Toggle').addEventListener('change', (e) => updateConfig({ adaptive: { v25: { enabled: e.target.checked } } }, 'V25 updated'));
-  $('v25OnlyToggle').addEventListener('change', (e) => updateConfig({ adaptive: { v25: { enableV25Only: e.target.checked } } }, 'V25 only updated'));
   
   // System
   $('refreshClientsBtn').addEventListener('click', refreshMt5Clients);
   $('startClientBtn').addEventListener('click', startClient);
   $('refreshPairBtn').addEventListener('click', refreshPairRequests);
+  
+  // Analytics
+  $('btnRunAnalyze').addEventListener('click', () => runAnalyticsScript('analyze'));
+  $('btnRunGateSummary').addEventListener('click', () => runAnalyticsScript('analytics:gate'));
+  $('btnRunGateCategory').addEventListener('click', () => {
+    const val = $('gateCategoryInput').value.trim();
+    if (!val) return showToast('Please enter a gate category');
+    runAnalyticsScript('analytics:gate', val);
+  });
+}
+
+// --- Analytics Integration ---
+async function runAnalyticsScript(script, arg = '') {
+  $('analyticsOutput').textContent = 'Running...\nThis may take a moment.';
+  try {
+    const data = await api('/auto/run-script', { method: 'POST', body: { script, arg } });
+    let out = data.stdout || '';
+    if (data.stderr) out += '\n\n--- ERRORS ---\n' + data.stderr;
+    $('analyticsOutput').textContent = out || 'No output.';
+  } catch (err) {
+    $('analyticsOutput').textContent = 'Error: ' + err.message;
+  }
 }
 
 function boot() {

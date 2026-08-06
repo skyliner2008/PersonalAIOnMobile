@@ -4,7 +4,10 @@ import { register } from '../services/metrics.js';
 import { getProvider, listModelsCached, listProviderIds, invalidateModelCache, PROVIDER_DEFAULTS } from '../services/auto/providers/registry.js';
 import { ProviderId } from '../services/auto/providers/types.js';
 import { resolveProviderCredentials } from '../services/auto/modelResolver.js';
+import { exec } from 'child_process';
+import util from 'util';
 
+const execPromise = util.promisify(exec);
 const router = Router();
 
 function ok(res: any, data: unknown) { res.json({ success: true, data }); }
@@ -84,6 +87,28 @@ router.get('/deep-analysis', async (req, res) => {
     if (!symbol) return res.status(400).json({ success: false, error: 'Missing symbol' });
     ok(res, await autoTradingService.runDeepAnalysis(symbol, timeframe));
   } catch (err) { fail(res, err); }
+});
+
+router.post('/run-script', async (req, res) => {
+  try {
+    const script = String(req.body.script || '');
+    const arg = String(req.body.arg || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    
+    let command = '';
+    if (script === 'analyze') {
+      command = 'npm run analyze';
+    } else if (script === 'analytics:gate') {
+      command = arg ? `npm run analytics:gate ${arg}` : 'npm run analytics:gate';
+    } else {
+      return res.status(400).json({ success: false, error: 'Invalid script requested' });
+    }
+
+    const { stdout, stderr } = await execPromise(command, { cwd: process.cwd() });
+    ok(res, { stdout, stderr });
+  } catch (err: any) {
+    // If the script fails (exit code 1), it still produces stdout we might want to see
+    ok(res, { stdout: err.stdout || '', stderr: err.stderr || err.message });
+  }
 });
 
 router.get('/metrics/quality', async (_req, res) => {

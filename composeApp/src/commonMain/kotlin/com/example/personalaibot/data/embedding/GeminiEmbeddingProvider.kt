@@ -26,8 +26,20 @@ import kotlinx.serialization.json.Json
  */
 class GeminiEmbeddingProvider(
     private val client: HttpClient,
-    private val apiKey: String
+    apiKey: String
 ) : EmbeddingProvider {
+
+    /**
+     * API key เป็น mutable — Orchestrator.updateConfig() จะเรียก updateApiKey()
+     * ทุกครั้งที่ผู้ใช้บันทึก key ใหม่ (เดิม key ถูก capture ตอน init = "" ทำให้
+     * cloud embedding ไม่เคยทำงานหลังผู้ใช้ใส่ key ทีหลัง)
+     */
+    @Volatile
+    private var currentApiKey: String = apiKey
+
+    fun updateApiKey(newKey: String) {
+        currentApiKey = newKey
+    }
 
     override val providerId = "gemini"
     override val displayName = "Gemini (Cloud)"
@@ -66,7 +78,7 @@ class GeminiEmbeddingProvider(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     override suspend fun embed(text: String, taskType: String): List<Float> {
-        if (apiKey.isBlank() || text.isBlank()) return emptyList()
+        if (currentApiKey.isBlank() || text.isBlank()) return emptyList()
         for (model in modelCascade) {
             val raw = tryEmbed(model, text, taskType)
             if (raw.isNotEmpty()) {
@@ -79,7 +91,7 @@ class GeminiEmbeddingProvider(
 
     private suspend fun tryEmbed(model: String, text: String, taskType: String): List<Float> {
         return try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:embedContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:embedContent?key=$currentApiKey"
             val res = client.post(url) {
                 contentType(ContentType.Application.Json)
                 setBody(json.encodeToString(EmbedRequest.serializer(), EmbedRequest(
@@ -102,6 +114,6 @@ class GeminiEmbeddingProvider(
     }
 
     override suspend fun isAvailable(): Boolean {
-        return apiKey.isNotBlank()
+        return currentApiKey.isNotBlank()
     }
 }

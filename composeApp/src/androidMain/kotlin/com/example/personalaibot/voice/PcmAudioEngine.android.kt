@@ -145,12 +145,22 @@ actual class PcmAudioEngine {
     }
 
     actual fun playAudio(pcmBytes: ByteArray) {
-        audioTrack?.write(pcmBytes, 0, pcmBytes.size)
+        try {
+            audioTrack?.write(pcmBytes, 0, pcmBytes.size)
+        } catch (e: Exception) {
+            logError("PcmAudio", "AudioTrack write error", e)
+        }
     }
     
     actual fun stopPlaying() {
-        audioTrack?.pause()
-        audioTrack?.flush()
+        try {
+            audioTrack?.pause()
+            audioTrack?.flush()
+            // กลับสู่สถานะพร้อมเล่นทันที — ไม่งั้น chunk ถัดไปหลัง flush (เช่นหลัง interrupted) จะไม่มีเสียง
+            audioTrack?.play()
+        } catch (e: Exception) {
+            logError("PcmAudio", "stopPlaying error", e)
+        }
     }
 
     actual fun release() {

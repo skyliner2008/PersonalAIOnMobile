@@ -20,6 +20,7 @@
 - [[overview]] - ภาพรวมสถาปัตยกรรมของแอปและ service หลัก
 - [[memory_strategy]] - แนวทางจัดการ memory หลายชั้น
 - [[vision_system]] - ระบบภาพ กล้อง และ provider ของ vision
+- [[ai_subsystem_review_2026-07-29]] - Code review ระบบ AI ฝั่งมือถือ (findings + แผนปรับปรุง)
 
 ### 02 Components
 - [[GeminiService]] - การเชื่อมต่อโมเดลหลักและ orchestration
@@ -31,6 +32,7 @@
 - [[catalogue]] - สารบัญเครื่องมือทั้งหมดที่เปิดให้ agent ใช้งาน
 
 ### 04 Tasks
+- [[App_Review_Checklist]] - 📋 เช็คลิสต์ review ทั้งแอป แบ่ง 15 หมวด (4 เสร็จแล้ว) ใช้ติดตามการตรวจ/แก้ทีละหมวด
 - [[Current_Tasks]] - งานปัจจุบัน สถานะ และ roadmap
 - [[2026-04-21_Auto_Trading_Engine_Update]] - สรุปอัปเดตล่าสุดของ MT5 และ auto-trading engine
 

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { JournalRow } from './types.js';
-import { detectCloseReason, extractDealProfit, matchHistoryDeal } from './journal.js';
+import {
+  detectCloseReason,
+  extractDealTimeMs,
+  extractDealProfit,
+  extractHistoryOpenPrice,
+  matchHistoryDeal,
+  profitToR,
+  resolveDealCloseAtMs,
+} from './journal.js';
 
 function journal(overrides: Partial<JournalRow> = {}): JournalRow {
   return {
@@ -100,6 +108,52 @@ describe('journal history matching', () => {
     ]);
 
     expect(deal?.ticket).toBe(9002);
+  });
+
+  it('extracts broker open price from the entry deal so loss R is not biased by planned entry slippage', () => {
+    const row = journal({
+      mt5Ticket: 164475366,
+      entry: 4528.05,
+      sl: 4524.74,
+      side: 'BUY',
+    });
+    const history = [
+      {
+        ticket: 119474736,
+        order: 164475366,
+        position_id: 164475366,
+        symbol: 'XAUUSD',
+        entry: 0,
+        price: 4528.37,
+        profit: 0,
+        time_msc: 1780289740376,
+      },
+      {
+        ticket: 119475809,
+        order: 164476497,
+        position_id: 164475366,
+        symbol: 'XAUUSD',
+        entry: 1,
+        reason: 4,
+        price: 4524.74,
+        profit: -18.15,
+        time_msc: 1780289825781,
+      },
+    ];
+
+    const openPrice = extractHistoryOpenPrice(row, history);
+    const closeDeal = matchHistoryDeal(row, history);
+
+    expect(openPrice).toBe(4528.37);
+    expect(extractDealTimeMs(closeDeal)).toBe(1780289825781);
+    expect(profitToR(row.entry, row.sl, 4524.74, row.side, openPrice)).toBe(-1);
+  });
+
+  it('does not persist broker-local history timestamps that are ahead of server time', () => {
+    const now = 1780279000000;
+
+    expect(resolveDealCloseAtMs({ time_msc: now + 3 * 60 * 60_000 }, now)).toBe(now);
+    expect(resolveDealCloseAtMs({ time_msc: now - 30_000 }, now)).toBe(now - 30_000);
   });
 });
 

@@ -21,6 +21,7 @@ export interface DeterministicDecision {
   action: DeterministicAction;
   management: ManagementHint;
   confidence: number;        // 0-100
+  strategy: StrategyType;
   rationale: string;
   rationale_th: string;
   timeframe: string;         // preferred next TF
@@ -84,24 +85,55 @@ export function marketStateHashLoose(
 }
 
 /**
- * Score the four-TF MTF confluence for each side (BUY/SELL).
- * Weights: H4 (35%), H1 (35%), M15 (20%), M5 (10%).
+ * Regime-adaptive weight profiles for MTF scoring.
+ *
+ * V26.25 — Previously used fixed weights (H4=22%, H1=23%) which over-weighted
+ * HTF context and suppressed valid LTF execution signals. Now weights shift
+ * based on market regime:
+ *   TRENDING:  HTF matters for direction → H4/H1 = 50%
+ *   RANGING:   Execution TFs matter → M15/M5 = 44%
+ *   BREAKOUT:  Momentum TFs matter → M5/M1 = 35%
+ *   DEFAULT:   Balanced profile similar to legacy
+ */
+const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
+  TRENDING_UP:       { H4: 0.25, H1: 0.25, M30: 0.14, M15: 0.16, M5: 0.13, M1: 0.07 },
+  TRENDING_DOWN:     { H4: 0.25, H1: 0.25, M30: 0.14, M15: 0.16, M5: 0.13, M1: 0.07 },
+  RANGING:           { H4: 0.15, H1: 0.15, M30: 0.15, M15: 0.22, M5: 0.22, M1: 0.11 },
+  VOLATILE_BREAKOUT: { H4: 0.15, H1: 0.18, M30: 0.12, M15: 0.20, M5: 0.20, M1: 0.15 },
+  DEFAULT:           { H4: 0.20, H1: 0.20, M30: 0.15, M15: 0.20, M5: 0.17, M1: 0.08 },
+};
+
+/**
+ * Score MTF confluence for each side (BUY/SELL).
+ *
+ * V26.25 — Regime-adaptive weights + fitness quality multiplier.
+ * Weights shift based on the primary regime so that execution TFs
+ * have more influence in RANGING/BREAKOUT and HTF context dominates
+ * in TRENDING. Each TF's contribution is also scaled by its fitness
+ * (0-100 → 0.5-1.0 multiplier) to down-weight noisy / low-quality TFs.
+ *
  * Returns buyScore and sellScore in 0..100 range.
  */
-function scoreSides(analyses: Record<string, AnalysisSummary>): { buyScore: number; sellScore: number; htfAligned: Bias } {
-  const weights: Record<string, number> = { H4: 0.35, H1: 0.35, M15: 0.2, M5: 0.1 };
+function scoreSides(analyses: Record<string, AnalysisSummary>, regime?: string): { buyScore: number; sellScore: number; htfAligned: Bias } {
+  const regimeKey = regime && REGIME_WEIGHTS[regime] ? regime : 'DEFAULT';
+  const weights = REGIME_WEIGHTS[regimeKey];
   let buyScore = 0;
   let sellScore = 0;
   for (const [tf, w] of Object.entries(weights)) {
     const a = analyses[tf];
     if (!a) continue;
     const c = a.confluence || 0;
-    if (a.bias === 'BULL') buyScore += c * w;
-    else if (a.bias === 'BEAR') sellScore += c * w;
+    // Fitness quality multiplier: fitness 0→0.5, 50→0.75, 100→1.0
+    // This down-weights TFs with poor signal quality
+    const fitnessRaw = a.fitness ?? 50;
+    const fitnessMul = 0.5 + (Math.min(100, Math.max(0, fitnessRaw)) / 200);
+    const effectiveWeight = w * fitnessMul;
+    if (a.bias === 'BULL') buyScore += c * effectiveWeight;
+    else if (a.bias === 'BEAR') sellScore += c * effectiveWeight;
     else {
       // Neutral splits evenly
-      buyScore += c * w * 0.5;
-      sellScore += c * w * 0.5;
+      buyScore += c * effectiveWeight * 0.5;
+      sellScore += c * effectiveWeight * 0.5;
     }
   }
   const h4 = analyses['H4'];
@@ -123,10 +155,27 @@ function pickStrategyAndTF(
   const m15 = analyses['M15'];
   const m5 = analyses['M5'];
 
-  // If HTFs disagree with primary → use SMC/FVG scalp on LTF
+  const ltfScalp =
+    m5?.strategy === 'SCALPING' && m5.bias !== 'NEUTRAL' && m5.confluence >= 55 && m5.fitness >= 60
+      ? { strategy: 'SCALPING' as StrategyType, timeframe: 'M5' }
+      : m15?.strategy === 'SCALPING' && m15.bias !== 'NEUTRAL' && m15.confluence >= 55 && m15.fitness >= 60
+      ? { strategy: 'SCALPING' as StrategyType, timeframe: 'M15' }
+      : null;
+
+  if (primary.strategy === 'SCALPING') {
+    return { strategy: 'SCALPING' as StrategyType, timeframe: 'M5' };
+  }
+  // V26.35 — Allow LTF scalp to execute even in TRENDING or other regimes
+  if (ltfScalp) {
+    return ltfScalp;
+  }
+
   const htfDisagrees = h4 && h1 && h4.bias !== h1.bias;
+  // Ranging markets without a dedicated LTF scalp signal should stay generic.
+  // SMC_FVG_SCALP is reserved for the SignalDetector path where an active FVG
+  // fill is proven before the order enters the execution pipeline.
   if (primary.regime === 'RANGING' && (m5 || m15)) {
-    return { strategy: 'SMC_FVG_SCALP' as StrategyType, timeframe: 'M5' };
+    return { strategy: 'MEAN_REVERSION' as StrategyType, timeframe: 'M5' };
   }
   if (primary.regime === 'TRENDING_UP' || primary.regime === 'TRENDING_DOWN') {
     return { strategy: 'TREND_FOLLOW' as StrategyType, timeframe: 'M15' };
@@ -138,6 +187,82 @@ function pickStrategyAndTF(
     return { strategy: 'MEAN_REVERSION' as StrategyType, timeframe: 'M5' };
   }
   return { strategy: primary.strategy as StrategyType, timeframe: 'M15' };
+}
+
+function localBreakoutBlockReason(
+  action: DeterministicAction,
+  strategy: StrategyType,
+  analyses: Record<string, AnalysisSummary>,
+  zoneAtEntry: PremiumDiscountZone,
+): string | null {
+  if (action !== 'BUY' && action !== 'SELL') return null;
+  if (strategy !== 'BREAKOUT') return null;
+
+  const wanted: Bias = action === 'BUY' ? 'BULL' : 'BEAR';
+  const opposite: Bias = action === 'BUY' ? 'BEAR' : 'BULL';
+  const localTfs = ['M15', 'M5'] as const;
+  const aligned = localTfs.filter((tf) => {
+    const a = analyses[tf];
+    return a?.bias === wanted && (a.confluence ?? 0) >= 55;
+  });
+  const opposing = localTfs.filter((tf) => {
+    const a = analyses[tf];
+    return a?.bias === opposite && (a.confluence ?? 0) >= 55;
+  });
+  const m1 = analyses['M1'];
+  const m1Opposes = m1?.bias === opposite && (m1.confluence ?? 0) >= 55;
+  const wrongZone =
+    (action === 'BUY' && zoneAtEntry === 'PREMIUM') ||
+    (action === 'SELL' && zoneAtEntry === 'DISCOUNT');
+
+  if (opposing.length >= 2) {
+    return `local ${opposing.join('+')} oppose ${action} breakout`;
+  }
+  if (wrongZone && aligned.length === 0) {
+    return `${action} breakout in ${zoneAtEntry} without M15/M5 confirmation${m1Opposes ? ' and M1 opposes' : ''}`;
+  }
+  if (wrongZone && opposing.length >= 1 && m1Opposes) {
+    return `${action} breakout in ${zoneAtEntry} while ${opposing.join('+')} and M1 oppose`;
+  }
+  return null;
+}
+
+function isLocalProofStrategy(strategy: StrategyType): boolean {
+  return strategy === 'SCALPING' || String(strategy).includes('SCALP');
+}
+
+function localExecutionBlockReason(
+  action: DeterministicAction,
+  strategy: StrategyType,
+  analyses: Record<string, AnalysisSummary>,
+): string | null {
+  if (action !== 'BUY' && action !== 'SELL') return null;
+  if (isLocalProofStrategy(strategy)) return null;
+
+  const needsLocalExecution = strategy === 'BREAKOUT' || strategy === 'MEAN_REVERSION' || strategy === 'TREND_FOLLOW';
+  if (!needsLocalExecution) return null;
+
+  const wanted: Bias = action === 'BUY' ? 'BULL' : 'BEAR';
+  const opposite: Bias = action === 'BUY' ? 'BEAR' : 'BULL';
+  const localTfs = ['M15', 'M5'] as const;
+  const aligned = localTfs.filter((tf) => {
+    const a = analyses[tf];
+    return a?.bias === wanted && (a.confluence ?? 0) >= 55;
+  });
+  const opposing = localTfs.filter((tf) => {
+    const a = analyses[tf];
+    return a?.bias === opposite && (a.confluence ?? 0) >= 55;
+  });
+  const m1 = analyses['M1'];
+  const m1Opposes = m1?.bias === opposite && (m1.confluence ?? 0) >= 55;
+
+  if (opposing.length >= 2 && aligned.length === 0) {
+    return `local ${opposing.join('+')} oppose ${strategy} ${action}`;
+  }
+  if (strategy === 'MEAN_REVERSION' && opposing.length >= 1 && m1Opposes && aligned.length === 0) {
+    return `local ${opposing.join('+')} plus M1 oppose ${strategy} ${action}`;
+  }
+  return null;
 }
 
 /**
@@ -167,14 +292,26 @@ export function deterministicDecide(args: {
     recoveryThresholdR = -0.2
   } = args;
 
-  const { buyScore, sellScore, htfAligned } = scoreSides(analyses);
+  const { buyScore, sellScore, htfAligned } = scoreSides(analyses, primary.regime);
   const { strategy, timeframe } = pickStrategyAndTF(primary, analyses);
+
+  // V26.25 — Regime-adaptive score threshold.
+  // TRENDING: require higher delta (clearer direction from HTF)
+  // RANGING:  allow lower delta (LTF execution signals are smaller but valid)
+  // BREAKOUT: allow lower delta (momentum moves fast, don't miss)
+  const scoreThreshold = primary.regime === 'TRENDING_UP' || primary.regime === 'TRENDING_DOWN'
+    ? 10
+    : primary.regime === 'RANGING'
+    ? 5
+    : primary.regime === 'VOLATILE_BREAKOUT'
+    ? 6
+    : 8; // default
 
   // Baseline side from score delta
   const scoreDelta = buyScore - sellScore;
   let action: DeterministicAction = 'SKIP';
-  if (scoreDelta > 8) action = 'BUY';
-  else if (scoreDelta < -8) action = 'SELL';
+  if (scoreDelta > scoreThreshold) action = 'BUY';
+  else if (scoreDelta < -scoreThreshold) action = 'SELL';
 
   // --- P1.2: Zone-Aware Gate ---
   // Classify current price position relative to H4 swing structure.
@@ -198,13 +335,22 @@ export function deterministicDecide(args: {
   if (counterTrend) confidence = Math.max(50, confidence - 15); // penalty for counter-trend
 
   // P1.2: Zone penalty — buying in premium or selling in discount is suboptimal
-  if (enableZoneAwareGate) {
+  // V26.35: Skip H4 zone penalty for scalp-like strategies
+  const isScalp = strategy === 'SCALPING' || String(strategy).includes('SCALP') || String(strategy).startsWith('V25_');
+  if (enableZoneAwareGate && !isScalp) {
     const h4Bias = analyses['H4']?.bias;
     const wrongZoneBuy = action === 'BUY' && zoneAtEntry === 'PREMIUM' && h4Bias === 'BULL';
     const wrongZoneSell = action === 'SELL' && zoneAtEntry === 'DISCOUNT' && h4Bias === 'BEAR';
     if (wrongZoneBuy || wrongZoneSell) {
       confidence = Math.max(40, confidence - 15); // significant downgrade
     }
+  }
+
+  const breakoutLocalBlock = localBreakoutBlockReason(action, strategy, analyses, zoneAtEntry);
+  const executionLocalBlock = breakoutLocalBlock ?? localExecutionBlockReason(action, strategy, analyses);
+  if (executionLocalBlock) {
+    action = 'SKIP';
+    confidence = Math.min(confidence, 35);
   }
 
   // Sizing
@@ -262,12 +408,21 @@ export function deterministicDecide(args: {
   }
 
   const sideName = action === 'BUY' ? 'Long' : action === 'SELL' ? 'Short' : 'Wait';
+  const isWait = action === 'SKIP';
   const rationale = counterTrend
     ? `Counter-trend ${sideName}: buy=${buyScore} vs sell=${sellScore}; HTF=${htfAligned} → small size`
+    : executionLocalBlock
+    ? `${strategy === 'BREAKOUT' ? 'Breakout' : 'Execution'} wait: buy=${buyScore} vs sell=${sellScore}; HTF=${htfAligned || 'mixed'}; ${executionLocalBlock}`
+    : isWait && (strategy === 'BREAKOUT' || strategy === 'MEAN_REVERSION' || strategy === 'TREND_FOLLOW')
+    ? `${strategy === 'BREAKOUT' ? 'Breakout' : 'Execution'} wait: buy=${buyScore} vs sell=${sellScore}; HTF=${htfAligned || 'mixed'}; strategy=${strategy}`
     : `MTF-aligned ${sideName}: buy=${buyScore} vs sell=${sellScore}; HTF=${htfAligned || 'mixed'}; strategy=${strategy}`;
   const rationale_th = counterTrend
-    ? `สวนเทรนด์ ${sideName} · buy=${buyScore} vs sell=${sellScore} · HTF=${htfAligned} · ใช้ size เล็ก`
-    : `ตาม MTF ${sideName} · buy=${buyScore} vs sell=${sellScore} · HTF=${htfAligned || 'mixed'} · ${strategy}`;
+    ? `Counter-trend ${sideName} | buy=${buyScore} vs sell=${sellScore} | HTF=${htfAligned} | smaller size`
+    : executionLocalBlock
+    ? `${strategy === 'BREAKOUT' ? 'Breakout' : 'Execution'} wait | buy=${buyScore} vs sell=${sellScore} | HTF=${htfAligned || 'mixed'} | ${executionLocalBlock}`
+    : isWait && (strategy === 'BREAKOUT' || strategy === 'MEAN_REVERSION' || strategy === 'TREND_FOLLOW')
+    ? `${strategy === 'BREAKOUT' ? 'Breakout' : 'Execution'} wait | buy=${buyScore} vs sell=${sellScore} | HTF=${htfAligned || 'mixed'} | ${strategy}`
+    : `MTF-aligned ${sideName} | buy=${buyScore} vs sell=${sellScore} | HTF=${htfAligned || 'mixed'} | ${strategy}`;
 
   // Second-opinion trigger: close calls or heavy defense decisions
   const needsLlmSecondOpinion =
@@ -282,6 +437,7 @@ export function deterministicDecide(args: {
     action,
     management,
     confidence: round1(confidence),
+    strategy,
     rationale,
     rationale_th,
     timeframe,

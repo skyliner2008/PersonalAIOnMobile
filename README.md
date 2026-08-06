@@ -6,35 +6,196 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์ข้อมูลอัจฉริยะ ขับเคลื่อนด้วยพลังของ **Google Gemini 3.1 Pro (Tier 1 Optimized)** และระบบความจำแบบ 6 ชั้น (GraphRAG & Obsidian Wiki) — พร้อมระบบ **MT5 Full Agent Control V17.0** สำหรับเทรดอย่างไร้ขีดจำกัด
-
----
-
-## 🚀 Verified Features (ใช้งานได้จริง 100%)
-
-### 🎙️ 1. Pro-Analyst Live Voice & UI
-ยกระดับการโต้ตอบด้วยเสียงแบบ Real-time ที่ฉลาดกว่าเดิม:
-- **Pro-Analyst Summarization** — AI ไม่เพียงแค่สรุป แต่จะวิเคราะห์แนวโน้มและจุดสำคัญ (Insights) ให้ฟังทันที
-- **Dynamic UI Separation** — ระบบแยกกล่องข้อความอัจฉริยะ: **Static Boxes** สำหรับข้อมูลเทคนิค/รายงานถาวร และ **Progress Boxes** สำหรับคำพูด AI ที่อัปเดตแบบ Real-time
-- **Low Latency Interaction** — ตอบโต้รวดเร็วด้วย WebSocket 60fps พร้อมระบบ AEC + Noise Suppression
-
-### 📸 2. Real-time Camera Vision (Adaptive System)
-- **AI Adaptive Vision** — ระบบปรับความเร็วภาพอัตโนมัติ 0–3 FPS (0 FPS เมื่อนิ่ง, 3 FPS เมื่อ AI ร้องขอ) เพื่อประหยัด Token และแบตเตอรี่
-- **Vision Activate/Deactivate** — AI สามารถ "เปิด/ปิดตา" เองได้ตามบริบทความจำเป็น
 - **Multi-Provider Support** — สลับการใช้งานระหว่าง Gemini Live, Gemini Flash และ OpenAI GPT-4o เพื่อการวิเคราะห์ที่แม่นยำที่สุด
 - **AR Overlay Engine** — แสดง Bounding Box และคำอธิบายวัตถุบนภาพจริงแบบ Real-time
 
 ### 🧠 3. Advanced 6-Layer Memory Engine
-- **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้และสกัดความสนใจอัตโนมัติ (Profile Persistence)
+- **Layer 1: Core Memory** — จำข้อมูลส่วนตัวผู้ใช้ (identity จัดการผ่าน tool/Settings เท่านั้น กัน heuristic ทับ) + สกัดอาชีพ/ความสนใจจากข้อความผู้ใช้
 - **Layer 2: Working Memory** — บันทึกประวัติการคุยปัจจุบันลง SQLite ทันที (Context Tracking)
-- **Layer 3: Archival Memory** — ระบบค้นหาความความจำด้วยความหมาย (Semantic Search / Vector Embeddings)
-- **Layer 4: GraphRAG Knowledge Graph** — เชื่อมโยงความสัมพันธ์ของแนวคิดต่างๆ เป็นโครงข่ายสมอง (Entities & Edges)
-- **Layer 5: Memory Consolidation** — ระบบ "Sleep Cycle" สรุปและย้ายความจำจากระยะสั้นไประยะยาวอัตโนมัติ
+- **Layer 3: Archival Memory** — Semantic Search / Vector Embeddings (Local ONNX หรือ Gemini Cloud — key อัปเดตตาม settings, auto-backfill)
+- **Layer 4: GraphRAG Knowledge Graph** — โครงข่ายความสัมพันธ์แนวคิด + **retrieval จริงผ่าน recall_memory** (edges กันซ้ำด้วย UNIQUE index)
+- **Layer 5: Memory Consolidation** — "Sleep Cycle" สรุปและย้ายความจำระยะสั้นไประยะยาว (auto-trigger เมื่อแชทสะสม 200 ข้อความ)
 - **Layer 6: LLM-Wiki (Obsidian)** — ระบบ "สมองส่วนนอก" ที่ AI และมนุษย์จัดการร่วมกันผ่าน Markdown (Persistent Knowledge Hub)
 
 ### 📊 4. JARVIS Advanced Trading Intelligence V24.2 → V25.1 (Real-Time Wall Engine — Coordination Hardened)
 
-> **Status: 🟢 Production = V26.5 (Stale-Stop Guard & RSI Divergence 2026-05-18)**
-> **Last Update: 2026-05-18 — V26.5 Stale-Stop Market Closed Guard + RSI Divergence Strategy**
+> **Status: Production = V26.26 (Modular Codebase & Verification Pass 2026-05-23)**
+> **Last Update: 2026-05-23 - Auto Trade Refactored to separate Helper modules (decisionLogger, strategySelector), reducing codebase length while passing 100% of the 103 Unit Tests.**
+
+
+#### M15 Wall Scalping Simplification (2026-05-30)
+
+- `mt5-core-server` default runtime is now `engineMode: M15_WALL_SCALPING`.
+- The live decision path is reduced to `IndicatorPipeline` + `PriceMap` wall detection, merged into M15 for short-term trading.
+- Initial strategy set is intentionally only `SCALPING`; legacy AI/multi-strategy/manage/learn/V25 shadow loops stay off in this mode.
+- Implementation: `mt5-core-server/src/services/auto/core/SimpleScalpingEngine.ts`.
+- 2026-06-01 follow-up: closed MT5 history is now synced back into the journal/analytics in simple mode without re-enabling the legacy manage loop, R outcome uses the broker fill/open price when history provides it, mitigated OBs no longer count as fresh OB/FVG wall confirmation, and the simple planner now blocks counter-context scalps plus ambiguous `BOTH` anchor walls.
+- 2026-06-01 wall-model follow-up: PriceMap now passes through a stable wall registry so HTF walls keep identity across cycles instead of flickering off/on; `M15/M30/H1/H4` act as core wall anchors, `M1/M5` act as confirmation, and Simple Scalping separates `HTF_TREND_RETEST` from `M15_FVG_MAGNET`.
+- 2026-06-02 loss follow-up: retained `STALE` walls are no longer valid execution anchors, live M1/M5 confirmation now requires both TFs to touch/reclaim with directional body plus at least one directional micro-structure break (`breakHigh`/`breakLow`) instead of accepting reclaim alone, reclaim can complete after a recent touch as long as price is still within the wall/FVG drift limit, and simple-mode entries pause after same-symbol daily/consecutive loss limits.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/62_M15_Wall_Scalping_Simplification.md`
+
+#### TradingView Pine SMC V8.5 M15 Wall Map (2026-05-27)
+
+- ปรับปรุง `Pine Script/SMC & Multi-TF Order Blocks Sweeps V8.3.txt` สำหรับใช้งานบน TradingView Pine v6 โดยเพิ่ม `max_boxes_count=500` ให้รองรับ FVG boxes ที่สคริปต์สร้างจริง
+- เปิดค่าที่เคย hardcode ให้ปรับจาก UI ได้ เช่น FVG ATR multiplier/color/fill, Equal HL threshold, Swing Liquidity length, MTF sweep toggles, reclaim factor, wick ATR filter, PD zone location/width
+- เพิ่ม guard ด้านประสิทธิภาพ: จำกัดจำนวน Order Blocks/Liquidity Zones, จำกัดระยะ scan หา OB candle, และแก้ loop หา equal levels/MTF liquidity ให้ไม่วิ่งย้อนทิศโดยไม่ตั้งใจ
+- V8.4 follow-up: ตัด `barstate.isconfirmed` ออกจาก expression ที่ส่งเข้า `request.security()` สำหรับ MTF sweeps และ gate label ด้วยการเปิดแท่ง TF ใหม่ เพื่อลด repaint/duplicate label risk
+- V8.4 follow-up: aggregate MTF mode เคารพ toggle `M1/M5/M15`, FVG toggle ไม่สร้างกล่อง/average ที่ซ่อนอยู่เมื่อปิด, และ OB trigger/trend filter ใช้แท่งที่ปิดแล้วพร้อมยอมรับ structure break ของแท่งปัจจุบันก่อน state update ท้ายไฟล์
+- V8.5 follow-up: ปรับ MTF Liquidity ให้เหมาะกับการดูบน M15 โดยแยก `MTF Merge Threshold` ออกจาก Equal HL threshold, เพิ่ม `MTF Levels Per TF` เป็นสูงสุด 5 level ต่อฝั่ง/ต่อ TF, และใส่ดาวบนป้าย MTF ตามจำนวน TF ที่ซ้อนกัน เช่น `4503.2 ★★ M1+M5`
+- V8.5 Instance 2 follow-up: เพิ่ม toggle `showCurrentTFZones` (Show Current TF Zones) เพื่อซ่อนการวาด Liquidity Zones ของ TF ปัจจุบันใน Instance 2 (ที่เปิด MTF Confluence) ป้องกันการวาดซ้ำซ้อนกับ Instance 1
+- V8.5 UI Cleanup: Hardcode ค่าคงที่ประเภทตัวเลขและข้อความทั้งหมด (เช่น Lookback, Threshold, สี) และคงเหลือเฉพาะการตั้งค่า เปิด-ปิด (Toggle) เพื่อให้หน้าต่างตั้งค่าใน TradingView สะอาดและใช้งานง่ายขึ้น
+- Details: `.obsidian-wiki/07_Trading_Intelligence/61_TradingView_SMC_Pine_V83_Hardening.md`
+
+#### V26.26 - Modular Codebase & Verification Pass (2026-05-23)
+
+- **Code Refactoring & Size Reduction**: แยกฟังก์ชันช่วยเหลือ (Helper Functions) ขนาดใหญ่ออกจากไฟล์ระบบหลัก `autoTradingService.ts` (เดิม ~6,124 บรรทัด) ไปเป็นโมดูลย่อยๆ เพื่อเพิ่มระเบียบในการดูแลรักษาโค้ดและลดความยาวของโค้ดหลัก
+- **Helper Modules Created**:
+  - `decisionLogger.ts`: จัดการเรื่อง Logger/Analytics เช่น `compactAnalysisForLog`, `compactMtfForLog`, `compactDeterministicForLog` และการแยกประเภทการบล็อกด้วย `classifyDecisionBlockCategory`
+  - `strategySelector.ts`: จัดการตรรกะประเมินกลยุทธ์, คัดสรร Candidate, ดึงราคาที่ดีที่สุด และเกตย่อยในการตัดสินใจแบบ Deterministic Quick Checks (รวม 24 ฟังก์ชัน เช่น `isGateEnabled`, `v25AlignedDirectEntry`, `selectUnifiedV25Candidate`)
+- **Type Safety & Integrity**: แก้ไขข้อผิดพลาดของ Pathing และ Interface `TradePlan` ร่วมกับการกู้คืนฟังก์ชันความปลอดภัยทางด้าน Typings จนสมบูรณ์
+- **Full Verification**: ตรวจสอบคุณภาพด้วย `npm run build` และการรัน Unit Tests `npm test` ทั้งหมด 103 เคส ผ่านสำเร็จ 100% พร้อมใช้งานบน Production อย่างราบรื่นและมีประสิทธิภาพ
+- Details: `.obsidian-wiki/07_Trading_Intelligence/56_ModularCodebaseRefactoring_V2626.md`
+
+#### V26.25 - Unified Zone & Execution Quality & Performance Fix (2026-05-23)
+
+- **Gate Simplification**: รวม Pre-AI Zone Gate + Zone-Aware Gate เข้าเป็น `Unified Zone Gate` เพื่อลดการบล็อกซ้ำซ้อน และรวม Entry Drift + Hard Risk เป็น `Execution Quality Gate` รวมถึงล้างโค้ดส่วนเกินใน Sequential Entry + Order Preflight
+- **Regime-Adaptive Scoring**: ปรับปรุงคะแนนระบบ Deterministic ใน `scoreSides()` ให้คำนวณน้ำหนัก (Weights) ตามสภาวะตลาดจริง และสเกลค่าคะแนน Threshold ให้ขยาย/แคบตาม Regime ของตลาด
+- **SL Proportional Scaling on TP Cap**: เพิ่ม Logic ย่อระยะ Stop Loss ลงตามสัดส่วนโดยอัตโนมัติเมื่อ Take Profit โดนบีบจากกำแพงราคาเชิงโครงสร้าง (Structural Wall Cap) เพื่อให้ได้ RRR คุ้มค่าและเป็นธรรมที่สุด
+- **Scalping Trade Management**: ปรับปรุงฟังก์ชัน Invalidation ไวขึ้น (Early Invalidation) และขยับจุดตัดขาดทุนเป็นกำไรตามเทรนเร็วขึ้น (Aggressive Trailing) สำหรับกลยุทธ์ SCALPING และ SMC_FVG_SCALP
+- **SQLite Database Fix**: แก้ไขข้อผิดพลาด SQLite Query ของสคริปต์วิเคราะห์ประสิทธิภาพ `gate_flow_audit.mjs` และ `advanced_analytics.mjs` โดยเปลี่ยนชื่อตารางให้ตรงกับตารางจริง `auto_trading_journal`
+- **Syntax Resolution**: แก้ไข Syntax error บริเวณ Pre-AI zone gate เก่าที่ค้างใน `autoTradingService.ts` และกู้คืนระบบควบคุมเพดานความปลอดภัย `pre_ai_defense_cap` ทำงานได้เต็มประสิทธิภาพ
+- Details: `.obsidian-wiki/07_Trading_Intelligence/55_UnifiedZoneExecutionQuality_V2625.md`
+
+#### V26.24 - Gate/Strategy Runtime Controls (2026-05-23)
+
+- Added `adaptive.gateToggles` and `adaptive.strategyToggles` so individual gates and strategies can be enabled/disabled without code edits.
+- Auto Trade UI now includes `Execution Gates` and `Strategy Switches` panels.
+- Covered gates include Pre-AI MTF Zone, EA Confidence/RRR, Proximity, Zone-Aware, FVG Fill, Sequential Entry, Entry Drift, Hard Risk, Risk Params, Order Preflight, and Post-TP Cooldown.
+- Defaults keep all protections enabled; disabling a gate is an explicit live-tuning action.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/54_GateStrategyRuntimeControls_V2624.md`
+
+#### V26.23 - Entry Drift Synced Decision Price (2026-05-22)
+
+- Fixed false `ENTRY_DRIFT` blocks where AutoEngine had already synced `last.c` from candle close to live tick/broker price, but the drift guard still compared final entry against the stale original candle close.
+- Preserves the existing drift/RRR protection for real slippage while allowing valid PriceMap wall proximity + Zone-Aware-approved setups to continue through execution checks.
+- PriceMap pipeline logs now split `overlay`, ladder-position, and execution-side counts so wall order/counts are easier to audit from log output.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/53_EntryDriftSyncedDecisionPrice_V2623.md`
+
+#### V26.22 - PriceMap Wall Overlay Stability (2026-05-22)
+
+- Fixed wall flicker where a valid wall disappeared while price was sitting inside `minDistanceAtrPct * ATR`, then reappeared one tick later.
+- PriceMap `walls` now keeps the full overlay map, while the printed ladder splits walls strictly by current price so above-price walls cannot appear under support and below-price walls cannot appear under resistance.
+- Cluster joins use a structural-aware weighted anchor instead of previous-level chain clustering.
+- Larger TFs anchor wall price more strongly than M1 noise; Pivot/VWAP/Fib context can boost real structural walls but cannot create a 5-star wall by itself.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/52_PriceMapWallOverlayStability_V2622.md`
+
+#### V26.21 - EA-Only Execution Hardening (2026-05-22)
+
+- EA-only deterministic fallback now requires `adaptive.eaOnlyMinConfidence` (`55` default) instead of the old `35%` live threshold.
+- M1+M5 local opposition now blocks EA-only fast entries with `LTF_CONSENSUS_GUARD`.
+- `MEAN_REVERSION` cannot bypass Proximity Gate via generic `MTF-ALIGNED` continuation text; it must remain close to a PriceMap wall.
+- Order preflight blocks same-side re-entry near a recent TP close with `POST_TP_COOLDOWN`.
+- The live manager loop now executes early invalidation directly and stable `PARTIAL_1R`/`PARTIAL_2R` markers prevent repeated partial closes.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/51_EaOnlyExecutionHardening_V2621.md`
+
+#### V26.20 - PriceMap Execution Tightening (2026-05-21)
+
+- Final execution RRR now revalidates after PriceMap TP cap, entry drift, and hard-risk checks so V25/scalp plans cannot pass with the old `1.0R` escape hatch.
+- Unified V25 PB1 candidates expire after `30s` by default and must pass fresh live tick preflight before AutoEngine can consume them.
+- Breakout/continuation strategies no longer bypass Proximity Gate while H4 is `RANGING`; the system must still respect nearby walls.
+- Trade management now moves XAU trades to breakeven from `0.4R` and cuts failed V25/scalp/breakout proof earlier at `-0.45R/-0.65R`.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/50_PriceMapExecutionTightening_V2620.md`
+
+#### V26.19 - Unified V25 Decision Path (2026-05-20)
+
+- V25/PB1 no longer needs the separate `V25 Only` live route to influence orders.
+- Fresh V25 playbook candidates are consumed by AutoEngine as local-proof scalp evidence with their own side, SL, TP, RRR, and strategy.
+- V25 direct order sending is candidate-only by default; legacy direct execution now requires explicit `legacyDirectExecution=true`.
+- Latest-log follow-up: deterministic fast-path now preserves PB candidate SL/TP, V25 selector no longer blocks unified candidates with the old AI Bias Gate, and `V25_*` TP-cap checks use scalp-like RRR handling.
+- Dashboard settings keep `V25 Adaptive` and remove the confusing `V25 Only` toggle.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/49_UnifiedV25DecisionPath_V2619.md`
+
+#### V26.18 - Execution-Aware MTF Weighting (2026-05-20)
+
+- Deterministic side scoring no longer gives H4/H1 70% control; it now uses H4/H1 as context while adding M30, M15, M5, and M1 execution weight.
+- New score weights: H4 `22%`, H1 `23%`, M30 `15%`, M15 `18%`, M5 `15%`, M1 `7%`.
+- `BREAKOUT`, `MEAN_REVERSION`, and `TREND_FOLLOW` now wait when M15 and M5 both oppose the selected side.
+- Local-proof scalp playbooks such as `SCALPING`, `SMC_FVG_SCALP`, `SMC_FVG_MAGNET_SCALP`, and `SMC_WALL_BREAK_SCALP` keep their own local evidence path and are not blocked by this generic guard.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/48_ExecutionAwareMtfWeighting_V2618.md`
+
+#### V26.17 - Breakout Local Confirmation Guard (2026-05-20)
+
+- Deterministic `BREAKOUT` no longer enters just because H4/H1 dominate the weighted score.
+- If HTF wants `BREAKOUT SELL` but M15 and M5 are both bullish, deterministic now returns `SKIP` with `Breakout wait` rationale.
+- Wrong-zone breakouts such as SELL in H4 discount also require M15/M5 confirmation before becoming actionable.
+- This moves the old repeated `BREAKOUT SELL` -> `M15 SMC Pressure Guard blocked` loop from a late gate into the strategy-selection layer.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/47_BreakoutLocalConfirmationGuard_V2617.md`
+
+#### V26.14 - Wall Break Scalp + Fresh Decision Price (2026-05-19)
+
+- Added `SMC_WALL_BREAK_SCALP`: a local scalp playbook that does not require M15 FVG, but requires a 3+ star wall, both M1 and M5 break/reclaim confirmation, and both M1/M5 Premium/Discount zones favorable for the side.
+- `SMC_FVG_MAGNET_SCALP` still keeps the stricter M15 FVG target requirement; the new wall-break scalp is intentionally separate.
+- AutoEngine now syncs decision `last.c` to fresh V25 tick mid or broker symbol price before deterministic strategy, zone/proximity gates, and order bracket calculations.
+- Decision logs now include `originalLastClose`, `decisionPriceSource`, and `decisionPriceAgeMs` so stale candle-close decisions are visible.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/44_WallBreakScalp_FreshDecisionPrice_V2614.md`
+
+#### V26.13 - PriceMap Wall Anchor Stability (2026-05-19)
+
+- PriceMap still clusters OB/FVG/liquidity/structure/swing with Pivot/VWAP/Fib context, but structural/SMC sources now own the displayed wall anchor when present.
+- Dynamic context levels (`D1`, `SESSION`, `SWING`) still add TF labels and star confluence, but no longer drag `price`, `priceTop`, or `priceBottom` away from the real structural wall.
+- Added PriceMap tests for structural wall plus moving context and context-only walls.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/43_PriceMap_WallAnchorStability_V2613.md`
+
+#### V26.12 - Decision Gate Analytics Observability (2026-05-19)
+
+- Fixed `npm run analyze YYYY-MM-DD` after the Bangkok-day analytics change by restoring the missing `existsSync` import.
+- Decision reports now normalize `Decision Side Guard`, `M15 SMC Pressure Guard`, `Anti-Hedge`, and `Fitness Below Minimum` into dedicated block categories instead of hiding them under `Other Skip` or `FVG Alignment`.
+- Future decision-feed rows also store these clearer block categories from `autoTradingService.ts`.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/42_DecisionGate_AnalyticsObservability_V2612.md`
+
+#### V26.11 - M15 Scalp Pressure Guard (2026-05-19)
+
+- Audit of latest `A_SCALPING_XAUUSD` found BUY orders opened while M15 had opposing Bearish OB/FVG pressure; later SELL signals were blocked by anti-hedge because the BUY was already open.
+- Generic `SCALPING` now checks M15 SMC pressure before entry and blocks BUY into M15 bearish pressure or SELL into M15 bullish pressure.
+- Dedicated FVG playbooks (`SMC_FVG_SCALP`, `SMC_FVG_MAGNET_SCALP`) keep their own proof gates; this guard targets only generic `A_SCALPING`.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/41_M15_ScalpPressureGuard_V2611.md`
+
+#### V26.10 - Mean Reversion Guard (2026-05-19)
+
+- Yesterday's Bangkok-day analytics showed `MEAN_REVERSION` as the weak bucket: 14 trades, 8 wins, 6 losses, net `-$42.75`, with repeated SELL entries around the same price.
+- `MEAN_REVERSION` now uses a longer duplicate-intent TTL (`900_000ms`) while normal sequential intents stay at `300_000ms`.
+- TP for `MEAN_REVERSION` is capped to `adaptive.meanReversionMaxRrr` (`1.8R` default), preventing 4R-6R mean-reversion targets while keeping SL from the existing bracket formula.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/40_MeanReversion_OrderGuard_V2610.md`
+
+#### V26.9 - Wall-to-FVG Magnet Scalp (2026-05-18)
+
+- Added `SMC_FVG_MAGNET_SCALP` as a separate playbook: 3+ star wall near price, unmitigated M15 FVG target, then M1/M5 wall reclaim or micro break.
+- This playbook bypasses HTF bias/context and Zone-Aware Gate vetoes by design, while still requiring the wall proximity check and normal risk/spread/duplicate guards.
+- TP is locked to the FVG edge minus spread; SL is recalculated from the remaining FVG reward using the scalp target RRR instead of inheriting wide HTF brackets.
+- BUY and SELL mirror paths are covered by unit tests.
+- Date-specific analytics now treats `YYYY-MM-DD` as the Asia/Bangkok trading day, matching decision JSONL logs.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/39_WallFvgMagnetScalp_V269.md`
+
+#### V26.8 - SMC FVG Scalp Proof Gate (2026-05-18)
+
+- `SMC_FVG_SCALP` is now reserved for real `FVG_FILL` signals; generic MTF liquidity sweeps are labeled `SCALPING`.
+- Deterministic ranging fallback no longer invents `SMC_FVG_SCALP` without FVG evidence; it uses `MEAN_REVERSION` unless a valid LTF scalp signal exists.
+- The final `SMC_FVG_SCALP` gate now requires price to be inside an aligned active FVG with at least `50%` fill, instead of broad "near FVG" tolerance.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/38_SmcFvgScalp_ProofGate_V268.md`
+
+#### V26.7 - Scalp TP/SL Bracket Rebalance (2026-05-18)
+
+- `SMC_FVG_SCALP` now targets at least `1.35R` instead of inheriting the generic `1.2R` scalp floor.
+- Compact scalp bracket now runs in normal V24/V26 flow too, not only `v25.enableV25Only`.
+- XAUUSD scalp SL defaults tightened from about `4.5` points minimum risk to `3.0` points while preserving existing TP when it already offers better reward.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/37_Scalp_TpSl_Bracket_V267.md`
+
+#### V26.6 - Scalping Routing & RRR Relaxation (2026-05-18)
+
+- Promoted valid M5/M15 `SCALPING` analysis into the deterministic executable strategy instead of always remapping ranging markets to `SMC_FVG_SCALP`.
+- EA fallback now uses `strategy.scalpingRRR` for scalp-like strategies, so valid `SCALPING`/`SMC_FVG_SCALP` setups are not rejected by the global `1.5` RRR floor.
+- `Zone-Aware Gate` now treats generic `SCALP` intent as short-term execution intent while still requiring local TF alignment/FVG/SMC/wall evidence.
+- Details: `.obsidian-wiki/07_Trading_Intelligence/36_Scalping_Routing_V266.md`
 
 #### V26.5 - Stale-Stop Guard & RSI Divergence Strategy (2026-05-18)
 
@@ -149,7 +310,7 @@ V25 รื้อสถาปัตยกรรมเป็น **7-layer event-dr
 
 ### 🔗 7. MT5 Full Agent Control V17.0 (Broker-First Architecture)
 
-> **Status: 🟢 Stable (19 MT5 Tools — 10 Core + 3 Action + 6 Intelligence)**
+> **Status: 🟢 Stable (21 MT5 Tools — 12 Core + 3 Action + 6 Intelligence)**
 > **Last Update: 2026-04-21 (V17.0 Major Upgrade)**
 
 - **Broker-First Data Sourcing** — ข้อมูลทั้งหมดดึงจาก MT5 Broker โดยตรง ไม่ใช่ TradingView (ราคา, volume, positions ตรงกับโบรกเกอร์)
@@ -194,22 +355,28 @@ V25 รื้อสถาปัตยกรรมเป็น **7-layer event-dr
 
 ---
 
-## 📦 Tool Catalogue (Total: 71 Tools)
+## 📦 Tool Catalogue (Total: 84 Tools)
 
-### 🧠 BUILT-IN & SYSTEM TOOLS (11 tools)
+### 🧠 BUILT-IN & SYSTEM TOOLS (17 tools)
 - `calculate`: คำนวณนิพจน์คณิตศาสตร์ซับซ้อน
 - `get_current_datetime`: ข้อมูลวันเวลาและปฏิทินปัจจุบัน
 - `remember_fact`: บันทึกข้อมูลสำคัญลงความจำระยะยาว
 - `recall_memory`: ดึงข้อมูลจากฐานความรู้เดิม
 - `convert_units`: แปลงหน่วยสากลทุกประเภท
 - `set_reminder`: ตั้งการแจ้งเตือน/TODO
+- `format_json`: จัดรูปแบบข้อมูลเป็น JSON
 - `translate_text`: แปลภาษาแบบ Multilingual
 - `summarize_text`: สรุปข้อความยาวๆ พร้อมกำหนดระดับความละเอียด
 - `search_web`: ค้นหาข้อมูลล่าสุดจากโลกออนไลน์
+- `identity_update`: AI ปรับแต่งตัวตน/ข้อมูลผู้ใช้เองเมื่อถูกสั่ง
+- `analyze_and_display_report`: ส่งรายงาน markdown ยาวลงแชท แล้วพูด/ตอบสรุปสั้น (กันเสียง Live ขาด)
 - `system_run_diagnostics`: ตรวจสอบสุขภาพระบบ (Self-healing)
 - `system_check_connectivity`: ตรวจสอบการเชื่อมต่อ API ทั้งหมด
+- `system_create_agent_tool`: 🤖 AI สร้างเครื่องมือใหม่เอง (save + register ทันที + โหลดกลับอัตโนมัติ)
+- `mt5_place_order`: alias ส่งคำสั่ง MT5 (route → trading_mt5_order)
+- `mt5_close_position`: alias ปิด position MT5 (route → trading_mt5_close_position)
 
-### 📊 TRADING TOOLS (20 tools)
+### 📊 TRADING TOOLS (25 tools)
 - `trading_price`: ราคา Real-time (Stocks/Crypto/Forex/Gold)
 - `trading_market_snapshot`: ภาพรวมตลาดเจาะตามกลุ่มอุตสาหกรรม
 - `trading_top_gainers`: หุ้น/Crypto ที่พุ่งแรงที่สุดในตลาด
@@ -221,17 +388,22 @@ V25 รื้อสถาปัตยกรรมเป็น **7-layer event-dr
 - `trading_overbought_scan`: หาตัวที่ราคาร้อนแรงเกินไป (RSI > 70)
 - `trading_volume_breakout`: หาตัวที่มีแรงซื้อขายผิดปกติพร้อมราคาพุ่ง
 - `trading_sentiment`: วิเคราะห์อารมณ์ตลาดจาก Reddit
-- `trading_news`: ข่าวการเงินล่าสุดแยกตาม Symbol
+- `trading_news`: ข่าวการเงินล่าสุดแยกตาม Symbol (6 แหล่ง: Google News ค้นตรงสินทรัพย์ + Yahoo/CNBC/MarketWatch/Investing.com/CoinDesk)
 - `trading_combined`: สุดยอดเครื่องมือวิเคราะห์ (TA + News + Sentiment)
 - `trading_fundamental_analysis`: วิเคราะห์ปัจจัยพื้นฐาน (Fundamental)
-- `trading_fear_greed`: ดัชนีความกลัวและความโลภ (Crypto)
-- `trading_macro_calendar`: ปฏิทินเหตุการณ์เศรษฐกิจโลก
+- `trading_fear_greed`: 🌡️ Crypto Fear & Greed Index ตัวจริง (alternative.me — ฟรี, อนุกรม 7 วัน + การตีความไทย)
+- `trading_macro_calendar`: 📅 ปฏิทินเศรษฐกิจรายสัปดาห์ (ForexFactory — ฟรี, ไม่ต้อง API Key, แสดงเวลาไทย, เรียงข่าว impact สูงก่อน)
+- `trading_economic_data`: 🇺🇸 ตัวเลขเศรษฐกิจสหรัฐฯ จาก FRED (GDP, CPI, ว่างงาน, ดอกเบี้ย Fed — ไม่ต้องใช้ API Key)
 - `trading_correlation_matrix`: คำนวณความสัมพันธ์ระหว่างสินทรัพย์
 - `trading_position_sizing`: ช่วยคำนวณขนาดไม้ที่เหมาะสม
-- `automation_manage_alerts`: ระบบสร้าง/ลบงานเฝ้าติดตามอัตโนมัติ
+- `trading_crypto_overview`: 🪙 ภาพรวมตลาดคริปโต (CoinGecko — ฟรี: Market Cap รวม, BTC/ETH Dominance, เหรียญ Trending)
+- `automation_manage_alerts`: ระบบสร้าง/แก้ไข/ลบ/list งานเฝ้าติดตามอัตโนมัติ (เข้าเงื่อนไข → ปลุก AI สรุปแล้วแจ้งเตือนพร้อมปุ่ม หยุด/แจ้งซ้ำ) — ตั้งเงื่อนไขได้เฉพาะ field ที่อยู่ใน `AlertFieldCatalog` (ดู `.obsidian-wiki/02_Components/Alert_System_V2.md`)
+- `automation_manage_schedule`: ⏰ งานตามเวลา (one-time/daily) — ถึงเวลาแล้วปลุก AI มาทำตาม prompt
 - `trading_deep_analysis_suite`: วิเคราะห์ 5 มิติ (LSD, Orderflow, Fibo Score) - **Institutional Grade** 
+- `trading_harmonic_scan`: สแกนรูปแบบ Harmonic (Gartley, Bat, Butterfly)
+- `trading_elliot_modern_analysis`: วิเคราะห์ Elliott Wave แบบ Modern
 
-### 🔗 MT5 BRIDGE TOOLS (19 tools) — V17.0
+### 🔗 MT5 BRIDGE TOOLS (21 tools) — V17.0
 **Core Actions:**
 - `trading_mt5_order`: ส่งคำสั่ง Market/Limit/Stop
 - `trading_mt5_close_position`: ปิด position ด้วย ticket/symbol
@@ -244,6 +416,8 @@ V25 รื้อสถาปัตยกรรมเป็น **7-layer event-dr
 - `trading_mt5_list_history`: ประวัติ deals ที่ปิดแล้ว
 - `trading_mt5_candles`: OHLCV จาก broker
 - `trading_mt5_symbol_info`: Spread, digits, contract size
+- `trading_mt5_symbol_search`: ค้นหา symbol ใน broker
+- `trading_mt5_analyze`: AI วิเคราะห์ symbol จากข้อมูล broker
 - `trading_mt5_close_all`: ⚠️ ปิด positions ทั้งหมด
 - `trading_mt5_break_even_all`: ⚠️ ย้าย SL มา break-even
 - `trading_mt5_snapshot`: Snapshot รวม (account+positions+orders)
@@ -320,13 +494,82 @@ V25 รื้อสถาปัตยกรรมเป็น **7-layer event-dr
 
 ---
 
-## 📊 สรุปจำนวน Tools ทั้งหมด: **71 Tools** (6 หมวดหมู่หลัก)
+## 🧠 AI Subsystem Hardening (2026-07-29)
+
+Code review + ปรับปรุงระบบ AI ฝั่งมือถือครบวงจร (รายละเอียดเต็ม: `.obsidian-wiki/01_Architecture/ai_subsystem_review_2026-07-29.md`)
+
+- **File Security**: `file_write`/`file_read`/`file_list`/`file_analyze` มี path guard ครบทุก op + จำกัดนามสกุลที่เขียนได้ + กัน path traversal
+- **Shared Modules ใหม่**: `ToolArgParser` (parse tool args กลาง คืน error เมื่อ JSON เพี้ยน), `TradingToolPolicy` (รวม trading tool filter ที่เคยซ้ำ 3 จุด), `TaIndicators` (TA library กลาง: SMA/EMA/RSI/ATR/Bollinger)
+- **Memory**: `recall_memory` ใช้ embedding semantic search แล้ว, SleepCycle archive transcript ก่อนลบข้อมูล, กัน extractName false positive
+- **Cleanup**: ลบ `JarvisPlanner` (dead code), IntentClassifier ใช้ word-boundary + weighted scoring, ToolRegistry เป็น copy-on-write
+
+## 🎭 Provider System + Persona Unification (2026-07-29)
+
+- **JarvisPersona**: ตัวตน/system prompt ก้อนเดียว (`ai/JarvisPersona.kt`) ใช้ร่วมกันทุก provider path (Gemini/External/Live) — แก้ AI สับสนตัวตน อ้างตัวเป็น ChatGPT/Claude
+- **Model Lists สดจาก API**: Claude ดึงจาก Anthropic Models API จริง (+ fallback), OpenRouter อ่าน `supported_parameters`/`input_modalities` จริง (badge 🔧 tools / 👁 vision / FREE)
+- **Settings UX**: auto-sync model เมื่อสลับ provider, Live model ดึงจาก Gemini เสมอ, ปุ่ม ↻ refresh, search filter (OpenRouter 200+ models), empty-state บอกสาเหตุ+วิธีแก้
+
+## 🪪 Customizable Identity (2026-07-30)
+
+- **Settings → หัวข้อ "Identity (ตัวตน AI & ผู้ใช้)"**: ปรับแต่ง Agent (Name/Creature/Vibe/Gender) + User (Name/What to call them/Notes) ได้เอง บันทึกลง Core Memory โหลดกลับทุกครั้งที่เปิดแอป
+- **AI แก้ตัวตนเองได้**: tool `identity_update` — สั่งได้เลย เช่น "เรียกฉันว่าบอส", "เปลี่ยนชื่อเป็น...", "พูดตลกๆ หน่อย" — มีผลทันทีทุก provider (Chat/Live/External)
+- system prompt ทุก path build จาก IdentityConfig ปัจจุบันเสมอ (computed getter)
+
+## 🛠️ Tool System Audit + Agent Tool Creation (2026-07-30)
+
+Audit เทียบ tool declaration กับ handler จริงทั้ง 80 ตัว พบและแก้ 7 จุดพัง:
+
+- **System tools ใช้ไม่ได้เลย**: `SystemToolExecutor` ไม่เคยถูก wire เข้า `ToolExecutor` → wire แล้ว (route `system_*`) — แก้สาเหตุหลักที่ AI สร้าง tool ไม่ได้
+- **AI สร้าง tool ได้จริง end-to-end**: `system_create_agent_tool` sanitize ชื่อ + JSON ปลอดภัย (kotlinx.serialization) + **register เข้า ToolRegistry ทันที** + บันทึก `custom_agent_tools/*.json` + `loadCustomTools()` โหลดกลับตอนเปิดแอป → custom tool ทำงานได้ข้าม session
+- **executeCustomSkill ทำงานจริง**: คืน `systemPromptAddon` ของ custom tool เข้า tool loop ให้ model ทำตามขั้นตอน (แทน placeholder "กำลังดึงข้อมูล...")
+- **เติม handler ที่ขาด**: `trading_position_sizing` (คำนวณไม้ pure math), `trading_correlation_matrix` (Yahoo daily closes → Pearson matrix), `automation_manage_alerts` (route → AutomationManager ผ่าน delegate), `vision_activate/deactivate` + `voice_get/set_profile` (route → SideEffectDelegate ใน text path — เดิมใช้ได้เฉพาะ Live)
+
+## 🔇 Live Voice Fix — เสียงตอบไม่หมด/เงียบ (2026-07-30)
+
+จาก log ทดสอบ Live 4 รอบ: ข้อความในแชทมาครบ แต่เสียงพูดขาด/เงียบเป็นบางรอบ — พบว่ารอบที่เสียงหาย model ตอบเป็น **markdown text แทนเสียง** (Live API ไม่แปลง text part เป็นเสียง)
+
+- **LIVE_RULES ใหม่**: ห้าม markdown/ตาราง/bullet ในคำตอบเสียงเด็ดขาด — ต้องพูดประโยคสนทนาสั้นๆ เท่านั้น
+- **tool `analyze_and_display_report`**: ประกาศใน ToolRegistry แล้ว (เดิมมีแต่ handler ใน LiveToolBridge แต่ model มองไม่เห็น) — รายละเอียดยาว/ตารางลงแชทผ่าน tool นี้ แล้วพูดสรุป 2-4 ประโยค
+- **LiveGeminiService**: capture text parts ที่เคยถูกทิ้ง (กันข้อความหาย) + log เตือน turn ที่ไม่มีเสียง (`🔇 Turn Complete with NO AUDIO`) สำหรับ debug รอบถัดไป
+
+### 🔧 Live Voice Fix รอบ 2 — pipeline + interruption (2026-07-30)
+
+- **คืน transcription config**: ส่ง `output_audio_transcription`/`input_audio_transcription` (`{}`) ใน setup — ตาม Live API guide ต้องขอเองถึงจะได้ transcript (แชท/DB พึ่งอันนี้ทั้งหมด)
+- **handle `interrupted`**: เมื่อ VAD/user ขัดจังหวะ generation กลางทาง → flush คิวเสียงค้างเล่นทันทีผ่าน `onInterrupted` → `PcmAudioEngine.stopPlaying()` (เดิมไม่ handle เลย — เสียงเก่าเล่นต่อทับ + turn ที่โดนตัดค้าง) และ `stopPlaying()` กลับสู่สถานะ play หลัง flush ทันที
+- **audio flow มี buffer (128 chunks)**: แยกการอ่าน WebSocket ออกจาก `AudioTrack.write()` ที่ blocking — กันเฟรมค้างทั้งระบบ
+- **แก้ instruction ขัดกันเอง**: `sendBridgeToolResult` + ผล tool ทั่วไป (Path A) แนบ `[VOICE RULE]` พูดสรุปสั้น 2-4 ประโยค ห้ามอ่านตาราง/markdown — ตรงกับ LIVE_RULES (เดิมสั่ง "นำเสนออย่างละเอียด อย่าสรุปสั้น" ขัดกันเอง → model สับสนสลับไปตอบ text)
+- **TTS fallback**: turn ไหนจบโดยไม่มีเสียงเลย (model ตอบ text ล้วน) → `onTurnWithoutAudio` → Android `VoiceManager.speak()` พูดแทน ไม่ให้เงียบเฉย
+
+### 🎚️ Live Voice Tuning — สมดุลความยาวคำตอบเสียง (2026-08-03)
+
+- หลังรอบ 2 เสียงทำงานเต็มแล้ว แต่ `[VOICE RULE]` "2-4 ประโยค" ทำให้คำตอบกระชับเกิน (ไม่เล่าตัวเลขที่ดึงมาเลย) → ปรับเป็น **พูด 5-8 ประโยค**: ผลสรุปหลัก + เหตุผล/ตัวเลขสำคัญ 2-4 จุด เล่าเป็นประโยคธรรมชาติ (เช่น "RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ") + จุดที่ควรระวัง — ยังคงห้ามอ่านตาราง/markdown
+
+## 🇺🇸 Tool ใหม่: trading_economic_data — ตัวเลขเศรษฐกิจสหรัฐฯ (2026-07-30)
+
+- **แหล่งข้อมูล**: FRED (Federal Reserve Economic Data) — ใช้ endpoint สาธารณะ `fredgraph.csv` **ไม่ต้องสมัคร API Key** ใช้ได้ทันที; ถ้ามี key จะสลับไป FRED JSON API อัตโนมัติ (arg `api_key` optional)
+- **16 presets**: `gdp`, `gdp_growth`, `cpi`, `core_cpi`, `pce`, `unemployment`, `nfp`, `fedfunds`, `10y`, `2y`, `m2`, `retail`, `housing`, `sentiment`, `indpro`, `claims` — หรือระบุ FRED series id ตรง (เช่น DGS10)
+- **โหมด overview**: สรุป 4 ตัวชี้วัดหลัก (GDP growth / CPI / ว่างงาน / Fed Funds) ในคำสั่งเดียว
+- ตัวอย่างสั่งในแชท: "GDP อเมริกาล่าสุด", "เงินเฟ้อสหรัฐเท่าไหร่", "สรุปตัวเลขเศรษฐกิจสหรัฐ"
+- หมายเหตุ: Trading Economics / FMP ต้องใช้ key เสียเงิน — ยังไม่ผูก ถ้าต้องการเพิ่มบอกได้
+
+## 📚 Tool ใหม่: Strategy Library — คลังกลยุทธ์ Quantpedia 60 แบบ (2026-07-30)
+
+- **3 tools ใหม่ (offline ทั้งหมด)**: `strategy_list` (ดูหมวด/รายชื่อ), `strategy_search` (ค้นหาจาก keyword), `strategy_explain` (คำอธิบาย + โค้ด QuantConnect เต็ม)
+- **60 กลยุทธ์เชิงวิชาการ** จาก Quantpedia แบ่ง 9 หมวด: Momentum & Trend (18), Value & Fundamental (13), Volatility & Risk (8), Calendar & Seasonality (6), Reversal (4), Pairs & Arbitrage (4), Asset Allocation & Macro (3), Carry & FX (2), Crypto (2)
+- **Bundle ในแอป**: ไฟล์อยู่ที่ `composeResources/files/strategies/` (สร้าง index ด้วย `scripts/generate_strategy_index.py` — รันใหม่เมื่อเพิ่มไฟล์ใน `strategies/`)
+- ใช้เป็นคลังความรู้ให้ AI อธิบาย/เปรียบเทียบ/ปรับใช้กลยุทธ์ — ไม่ใช่ backtest engine (โค้ดต้นฉบับรันบน QuantConnect)
+- ตัวอย่างสั่งในแชท: "มีกลยุทธ์ momentum อะไรบ้าง", "อธิบาย fx carry trade", "เทียบ reversal กับ momentum"
+
+---
+
+## 📊 สรุปจำนวน Tools ทั้งหมด: **87 Tools** (7 หมวดหมู่หลัก)
 
 | หมวดหมู่ | จำนวน | ความสามารถหลัก |
 | :--- | :---: | :--- |
-| **Trading & Finance** | 20 | ราคา Real-time, TA, Scanner, **Institutional Stability V16.0** |
-| **🔗 MT5 Bridge** | 19 | Account Control, Positions, Candles, Advanced Intelligence **V17.0** |
+| **Trading & Finance** | 25 | ราคา Real-time, TA, Scanner, Correlation, Position Sizing, **FRED US Economic Data**, **Crypto Overview (CoinGecko)**, **Fear & Greed (alternative.me)**, **Scheduled Tasks** |
+| **🔗 MT5 Bridge** | 21 | Account Control, Positions, Candles, Advanced Intelligence **V17.0** |
 | **SMC (Smart Money)** | 5 | Market Structure, Order Blocks, Liquidity Sweeps, **Continuity V15.0** |
+| **📚 Strategy Library** | 3 | คลังกลยุทธ์ Quantpedia 60 แบบ (list/search/explain) ใช้งาน offline |
 | **Files & Documents** | 7 | จัดการไฟล์ในเครื่อง, อ่าน/เขียน, วิเคราะห์ PDF/Word, ค้นหาข้อมูล |
 | **Vision & Camera** | 9 | Gemini Live Vision, Object Detection, Scan QR/Barcode, Text OCR |
-| **Core & Intelligence** | 11 | ค้นหาเว็บ, แปลภาษา, สรุปความ, คำนวณ, บันทึกความจำระยะยาว, Diagnostic |
+| **Core & Intelligence** | 17 | ค้นหาเว็บ, แปลภาษา, สรุปความ, คำนวณ, บันทึกความจำระยะยาว, Diagnostic, **AI สร้าง Tool เอง** |

@@ -300,13 +300,7 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         return hma
     }
 
-    private fun calculateEMA(data: List<Double>, period: Int): Double {
-        if (data.isEmpty()) return 0.0
-        var ema = data[0]
-        val multiplier = 2.0 / (period + 1)
-        for (i in 1 until data.size) {
-            ema = (data[i] - ema) * multiplier + ema
-        }
-        return ema
-    }
+    /** ใช้ TA library กลาง (TaIndicators) แทน local implementation */
+    private fun calculateEMA(data: List<Double>, period: Int): Double =
+        TaIndicators.ema(data, period)
 }

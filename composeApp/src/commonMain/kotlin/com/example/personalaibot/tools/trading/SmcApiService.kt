@@ -857,7 +857,8 @@ class SmcApiService(private val client: HttpClient) {
         // Strict crypto-like detection only, to avoid routing Forex/Gold to Binance accidentally.
         val upper = s.uppercase()
         if (upper.contains("XAU") || upper.contains("XAG") || upper.contains("GOLD")) return false
-        if (upper.length == 6 && upper.all { it.isLetter() }) return false // likely FX pair
+        // Forex pairs are exactly 6 letters with no USDT/USD suffix → skip them
+        if (upper.length == 6 && upper.all { it.isLetter() } && !upper.endsWith("USD")) return false
         return upper.all { it.isLetterOrDigit() } &&
             (upper.endsWith("USDT") || upper.endsWith("BTC") || upper.endsWith("ETH") || upper.endsWith("BNB"))
     }
@@ -888,13 +889,29 @@ class SmcApiService(private val client: HttpClient) {
 
         // Normalize Gold
         if (s.contains("XAU") || s.contains("GOLD") || s == "GCF" || s == "PAXG") s = "XAUUSD"
-        
-        // Auto-append USDT if no quote currency detected AND it's not a known commodity
-        val commodities = listOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "CLF", "GCF")
-        return if (!s.endsWith("USDT") && !s.endsWith("BTC") &&
-                   !s.endsWith("ETH") && !s.endsWith("BNB") && 
-                   !commodities.contains(s)) "$s USDT".replace(" ", "")
-        else s
+
+        // Forex pairs (exactly 6 letters, both halves are known currencies) — don't append USDT
+        val forexCurrencies = setOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "CNY", "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "INR", "THB")
+        if (s.length == 6 && s.all { it.isLetter() }) {
+            val base = s.substring(0, 3)
+            val quote = s.substring(3, 6)
+            if (base in forexCurrencies && quote in forexCurrencies) return s
+        }
+
+        // Handle Yahoo-style crypto: BTCUSD → BTCUSDT (replace trailing USD with USDT)
+        // Must NOT be a commodity and must end with exactly "USD" (not "USDT")
+        val commodities = setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "CLF", "GCF")
+        if (commodities.contains(s)) return s
+
+        if (s.endsWith("USDT") || s.endsWith("BTC") || s.endsWith("ETH") || s.endsWith("BNB")) return s
+
+        // If ends with "USD" but not "USDT" → replace "USD" with "USDT" (e.g. BTCUSD → BTCUSDT)
+        if (s.endsWith("USD") && s.length > 3) {
+            return s.removeSuffix("USD") + "USDT"
+        }
+
+        // Auto-append USDT for remaining crypto-like symbols
+        return "${s}USDT"
     }
 
     // ─── Core SMC Algorithms ──────────────────────────────────────────────────

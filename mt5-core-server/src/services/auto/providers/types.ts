@@ -32,6 +32,8 @@ export interface GenerateOptions {
   timeoutMs?: number;
   /** Force the model to output a JSON object (if supported by provider) */
   jsonMode?: boolean;
+  messages?: any[];
+  tools?: any[];
 }
 
 export interface GenerateResult {
@@ -39,6 +41,7 @@ export interface GenerateResult {
   modelUsed: string;
   promptTokens?: number;
   completionTokens?: number;
+  functionCalls?: any[];
 }
 
 export interface EmbedResult {

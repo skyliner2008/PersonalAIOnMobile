@@ -1,0 +1,37 @@
+026-07-30 02:23:25.111 24137-24195 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_economic_data({series=overview})
+2026-07-30 02:23:26.580 24137-24729 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_economic_data → ## 🇺🇸 ภาพรวมเศรษฐกิจสหรัฐฯ (FRED Overview)
+                                                                                                    
+                                                                                                    - **อัตราการเติบโต GDP (%, รายไตรมาส)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **ดัชนีราคาผู้บริโภค CPI (Index 1982-84=100)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **อัตราการว่างงาน (%)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **อัตราดอกเบี้ย Fed Funds (%)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    
+                                                                                                    _ดูรายละเอียดแต่ละตัวได้ด้วย trading_economic_data + series เฉพาะทาง_
+2026-07-30 02:23:27.235 24137-24207 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ขออภัยครับเจ้านาย
+2026-07-30 02:23:28.212 24137-24207 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-07-30 02:23:28.777 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผม
+2026-07-30 02:23:29.083 24137-24195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไม่สามารถ
+2026-07-30 02:23:29.641 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดึงข้อมูล
+2026-07-30 02:23:30.234 24137-24195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-07-30 02:23:30.500 24137-24728 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สหรัฐฯ
+2026-07-30 02:23:31.059 24137-24728 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บางตัว
+2026-07-30 02:23:31.338 24137-24195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มาแสดง
+2026-07-30 02:23:31.905 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้
+2026-07-30 02:23:32.468 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่ถ้า
+2026-07-30 02:23:33.020 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เจ้านาย
+2026-07-30 02:23:33.301 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องการ
+2026-07-30 02:23:33.578 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวเลข
+2026-07-30 02:23:33.859 24137-24195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เฉพาะเจาะจง
+2026-07-30 02:23:34.700 24137-24195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เช่น
+2026-07-30 02:23:34.980 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อัตรา
+2026-07-30 02:23:35.538 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เงินเฟ้อ
+2026-07-30 02:23:36.100 24137-24728 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หรือดอกเบี้ย
+2026-07-30 02:23:36.660 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สามารถ
+2026-07-30 02:23:37.546 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สั่งโดยระบุ
+2026-07-30 02:23:38.102 24137-24728 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ซีรีส์
+2026-07-30 02:23:38.661 24137-24197 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้เลยครับ
+2026-07-30 02:23:39.222 24137-24192 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีตัวไหน
+2026-07-30 02:23:40.061 24137-24726 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่เจ้านาย
+2026-07-30 02:23:40.339 24137-24192 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สนใจเป็นพิเศษ
+2026-07-30 02:23:41.180 24137-24728 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมครับ
+2026-07-30 02:23:42.127 24137-24192 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 711842 bytes). Persisting to DB.

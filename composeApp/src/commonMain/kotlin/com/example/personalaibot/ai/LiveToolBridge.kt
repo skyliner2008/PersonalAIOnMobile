@@ -18,6 +18,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class LiveToolBridge(
     private val liveService: LiveGeminiService,
@@ -129,10 +134,11 @@ class LiveToolBridge(
             }
         }
 
+        // ผลเต็มแสดงในแชทแล้ว (emitTextToChat ด้านบน) — แนบกฎเสียงกำกับไม่ให้ model อ่านตาราง/markdown ออกเสียง
         liveService.sendNativeToolResponse(
             callId   = event.callId,
             toolName = event.name,
-            result   = finalResultText
+            result   = finalResultText + "\n\n[VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 2-4 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 5-8 ประโยค ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown"
         )
         logDebug("LiveBridge", "✅ Path A done: ${event.name} → ${finalResultText.take(80)}")
     }
@@ -168,15 +174,20 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                 .removePrefix("```json").removePrefix("```")
                 .removeSuffix("```").trim()
 
-            val toolMatch = Regex(""""tool"\s*:\s*"([^"]+)"""").find(raw)
-            toolNameFromModel = toolMatch?.groupValues?.get(1) ?: "none"
+            // Parse ด้วย kotlinx.serialization จริง (ไม่ใช่ regex)
+            // — รองรับ nested args, number/boolean/array และ text นำหน้า JSON
+            val parsed = runCatching {
+                val start = raw.indexOf('{')
+                val end = raw.lastIndexOf('}')
+                if (start >= 0 && end > start) {
+                    Json.parseToJsonElement(raw.substring(start, end + 1)).jsonObject
+                } else null
+            }.getOrNull()
 
-            val argsSection = Regex(""""args"\s*:\s*\{([^}]*)\}""").find(raw)?.groupValues?.get(1)
-            if (!argsSection.isNullOrBlank()) {
-                argsFromModel = Regex(""""(\w+)"\s*:\s*"([^"]*)"""")
-                    .findAll(argsSection)
-                    .associate { it.groupValues[1] to it.groupValues[2] }
-            }
+            toolNameFromModel = parsed?.get("tool")?.jsonPrimitive?.contentOrNull ?: "none"
+            argsFromModel = (parsed?.get("args") as? JsonObject)
+                ?.let { com.example.personalaibot.tools.ToolArgParser.fromJsonObject(it) }
+                ?: emptyMap()
         } catch (e: Exception) {
             logError("LiveBridge", "Model analysis failed", e)
         }

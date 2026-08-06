@@ -1,0 +1,38 @@
+2026-07-30 02:30:39.271 26341-26370 PcmAudio                com.example.personalaibot            D  MIC_STARTED successfully
+2026-07-30 02:30:40.307 26341-26373 LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-07-30 02:30:43.523 26341-26388 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): ลองดึงข้อมูลอีกครั้ง
+2026-07-30 02:30:43.527 26341-26388 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_economic_data({series=overview})
+2026-07-30 02:30:44.906 26341-26392 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_economic_data → ## 🇺🇸 ภาพรวมเศรษฐกิจสหรัฐฯ (FRED Overview)
+                                                                                                    
+                                                                                                    - **อัตราการเติบโต GDP (%, รายไตรมาส)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **ดัชนีราคาผู้บริโภค CPI (Index 1982-84=100)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **อัตราการว่างงาน (%)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    - **อัตราดอกเบี้ย Fed Funds (%)**: ดึงข้อมูลไม่สำเร็จ
+                                                                                                    
+                                                                                                    _ดูรายละเอียดแต่ละตัวได้ด้วย trading_economic_data + series เฉพาะทาง_
+2026-07-30 02:30:45.721 26341-26804 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): รับทราบครับ
+2026-07-30 02:30:46.325 26341-26372 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผมพยายาม
+2026-07-30 02:30:46.899 26341-26387 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดึงข้อมูล
+2026-07-30 02:30:47.480 26341-26372 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อีกครั้ง
+2026-07-30 02:30:47.773 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้ว
+2026-07-30 02:30:48.039 26341-26388 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่ยัง
+2026-07-30 02:30:48.601 26341-26832 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไม่สามารถ
+2026-07-30 02:30:48.881 26341-26832 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดึงข้อมูล
+2026-07-30 02:30:49.445 26341-26388 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้ใน
+2026-07-30 02:30:49.721 26341-26388 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-07-30 02:30:50.001 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับเจ้านาย
+2026-07-30 02:30:50.842 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อาจจะมี
+2026-07-30 02:30:51.409 26341-26372 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปัญหา
+2026-07-30 02:30:51.681 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  การเชื่อมต่อ
+2026-07-30 02:30:52.520 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กับแหล่งข้อมูล
+2026-07-30 02:30:53.081 26341-26804 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ชั่วคราว
+2026-07-30 02:30:53.643 26341-26393 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 02:30:53.922 26341-26804 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะให้ผม
+2026-07-30 02:30:54.487 26341-26387 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลองใหม่
+2026-07-30 02:30:54.767 26341-26387 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อีกครั้ง
+2026-07-30 02:30:55.321 26341-26370 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หรือจะ
+2026-07-30 02:30:55.602 26341-26387 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดูข้อมูล
+2026-07-30 02:30:56.163 26341-26370 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวอื่น
+2026-07-30 02:30:56.443 26341-26387 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แทนก่อน
+2026-07-30 02:30:56.723 26341-26372 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดีครับ
+2026-07-30 02:30:57.939 26341-26373 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 585630 bytes). Persisting to DB.

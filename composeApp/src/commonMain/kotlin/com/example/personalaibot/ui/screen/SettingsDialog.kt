@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -93,11 +95,11 @@ private data class ProviderMeta(
 
 private val ProviderMetas = listOf(
     ProviderMeta("gemini",     "Google Gemini",    "AIza…",   "AIza…"),
-    ProviderMeta("vertexai",   "Vertex AI (GCP)",  "ADC",     "ADC — ใช้ผ่าน Server"),
     ProviderMeta("openai",     "OpenAI",           "sk-…",    "sk-…"),
     ProviderMeta("claude",     "Anthropic Claude", "sk-ant-…", "sk-ant-…"),
     ProviderMeta("openrouter", "OpenRouter",       "sk-or-…", "sk-or-…"),
     ProviderMeta("minimax",    "MiniMax",          "minimax-…", "minimax-…"),
+    ProviderMeta("adk_vertex", "Vertex AI ADK",    "ADC",       "ADC — ใช้ผ่าน Server (ADK)"),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,6 +122,8 @@ fun SettingsDialog(
     val currentMinimaxKey by viewModel.minimaxApiKey.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.modelDownloadProgress.collectAsStateWithLifecycle()
     val autoTradingConfig by viewModel.autoTrading.config.collectAsStateWithLifecycle()
+    val mt5PairingStatus by viewModel.mt5PairingStatus.collectAsStateWithLifecycle()
+    val mt5BridgeBaseUrl by viewModel.mt5BridgeBaseUrl.collectAsStateWithLifecycle()
 
     var geminiKey by remember(currentApiKey) { mutableStateOf(currentApiKey) }
     var openaiKey by remember(currentOpenaiKey) { mutableStateOf(currentOpenaiKey) }
@@ -140,28 +144,70 @@ fun SettingsDialog(
     var providerModels by remember { mutableStateOf<List<com.example.personalaibot.data.providers.LlmModelInfo>>(emptyList()) }
     var liveModels by remember { mutableStateOf<List<com.example.personalaibot.data.providers.LlmModelInfo>>(emptyList()) }
     var isLoadingModels by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableStateOf(0) }
+    var modelSearch by remember { mutableStateOf("") }
 
-    LaunchedEffect(selectedProvider, showFreeOnly) {
-        isLoadingModels = true
-        val keyOverride = when (selectedProvider) {
-            "gemini" -> geminiKey
-            "openai" -> openaiKey
-            "claude" -> claudeKey
-            "openrouter" -> openRouterKey
-            "minimax" -> minimaxKey
-            else -> null
+    /** key ของ provider ที่เลือก (blank = ยังไม่ได้ตั้งค่า) */
+    fun keyFor(providerId: String): String = when (providerId) {
+        "gemini" -> geminiKey
+        "openai" -> openaiKey
+        "claude" -> claudeKey
+        "openrouter" -> openRouterKey
+        "minimax" -> minimaxKey
+        else -> ""
+    }
+
+    // Main models: reload เมื่อ provider / free-filter / refresh เปลี่ยน
+    LaunchedEffect(selectedProvider, showFreeOnly, refreshTick) {
+        // free filter มีผลเฉพาะ OpenRouter — reset อัตโนมัติเมื่อสลับ provider
+        if (selectedProvider != "openrouter" && showFreeOnly) {
+            showFreeOnly = false
+            return@LaunchedEffect // รอ trigger รอบใหม่จาก showFreeOnly
         }
-        providerModels = viewModel.getModelsForProvider(selectedProvider, showFreeOnly, keyOverride)
-        liveModels = viewModel.getLiveCapableModels(selectedProvider, keyOverride)
+        isLoadingModels = true
+        providerModels = viewModel.getModelsForProvider(
+            selectedProvider,
+            showFreeOnly,
+            keyFor(selectedProvider).ifBlank { null }
+        )
+        // Auto-sync: ถ้า model ปัจจุบันไม่ได้อยู่ใน provider ที่เลือก
+        // (เช่นเพิ่งสลับ provider) → เลือก model ตัวแรกของ provider ให้อัตโนมัติ
+        // กันกรณี mismatch เงียบๆ (routing ใช้ prefix ของ modelName เป็นหลัก)
+        if (providerModels.isNotEmpty()) {
+            val belongs = if (selectedProvider == "gemini") !mainModel.contains("/")
+                          else mainModel.startsWith("$selectedProvider/")
+            if (!belongs) {
+                val first = providerModels.first()
+                mainModel = if (selectedProvider == "gemini") first.id
+                            else "$selectedProvider/${first.id}"
+            }
+        }
         isLoadingModels = false
+    }
+
+    // Live models: Live mode รองรับเฉพาะ Google Gemini (Live API)
+    // — ดึงจาก gemini เสมอ ไม่ขึ้นกับ provider ที่เลือกในส่วน Main Model
+    LaunchedEffect(geminiKey) {
+        liveModels = viewModel.getLiveCapableModels("gemini", geminiKey.ifBlank { null })
     }
 
     var sectApiKeys by remember { mutableStateOf(true) }
     var sectModels by remember { mutableStateOf(true) }
     var sectLive by remember { mutableStateOf(false) }
+    var sectIdentity by remember { mutableStateOf(false) }
     var sectLocalAi by remember { mutableStateOf(false) }
     var sectWidget by remember { mutableStateOf(false) }
     var sectPermissions by remember { mutableStateOf(false) }
+
+    // ─── Identity state (โหลดจาก JarvisPersona ปัจจุบัน) ───────────────────
+    val currentIdentity = com.example.personalaibot.ai.JarvisPersona.identity
+    var agentName by remember { mutableStateOf(currentIdentity.agentName) }
+    var agentCreature by remember { mutableStateOf(currentIdentity.agentCreature) }
+    var agentVibe by remember { mutableStateOf(currentIdentity.agentVibe) }
+    var agentGender by remember { mutableStateOf(currentIdentity.agentGender) }
+    var userName by remember { mutableStateOf(currentIdentity.userName) }
+    var userCallName by remember { mutableStateOf(currentIdentity.userCallName) }
+    var userNotes by remember { mutableStateOf(currentIdentity.userNotes) }
 
     val scope = rememberCoroutineScope()
     val testResults = remember { mutableStateMapOf<String, ApiKeyTester.TestResult?>() }
@@ -191,35 +237,45 @@ fun SettingsDialog(
             },
         ) {
             ProviderMetas.forEach { meta ->
-                val key: String
-                val setter: (String) -> Unit
-                when (meta.id) {
-                    "gemini" -> { key = geminiKey; setter = { geminiKey = it } }
-                    "openai" -> { key = openaiKey; setter = { openaiKey = it } }
-                    "claude" -> { key = claudeKey; setter = { claudeKey = it } }
-                    "openrouter" -> { key = openRouterKey; setter = { openRouterKey = it } }
-                    "minimax" -> { key = minimaxKey; setter = { minimaxKey = it } }
-                    else -> { key = ""; setter = { } }
-                }
-                ProviderKeyCard(
-                    meta = meta,
-                    key = key,
-                    onKeyChange = setter,
-                    visible = apiKeyVisible,
-                    testing = testing[meta.id] == true,
-                    result = testResults[meta.id],
-                    onTest = {
-                        scope.launch {
-                            testing[meta.id] = true
-                            testResults[meta.id] = viewModel.testApiKey(meta.id, key)
-                            if (testResults[meta.id]?.ok == true && selectedProvider == meta.id) {
-                                providerModels = viewModel.getModelsForProvider(meta.id, showFreeOnly, key)
-                                liveModels = viewModel.getLiveCapableModels(meta.id, key)
+                if (meta.id == "adk_vertex") {
+                    ServerProviderStatusCard(
+                        meta = meta,
+                        pairingStatus = mt5PairingStatus,
+                        serverUrl = mt5BridgeBaseUrl
+                    )
+                } else {
+                    val key: String
+                    val setter: (String) -> Unit
+                    when (meta.id) {
+                        "gemini" -> { key = geminiKey; setter = { geminiKey = it } }
+                        "openai" -> { key = openaiKey; setter = { openaiKey = it } }
+                        "claude" -> { key = claudeKey; setter = { claudeKey = it } }
+                        "openrouter" -> { key = openRouterKey; setter = { openRouterKey = it } }
+                        "minimax" -> { key = minimaxKey; setter = { minimaxKey = it } }
+                        else -> { key = ""; setter = { } }
+                    }
+                    ProviderKeyCard(
+                        meta = meta,
+                        key = key,
+                        onKeyChange = setter,
+                        visible = apiKeyVisible,
+                        testing = testing[meta.id] == true,
+                        result = testResults[meta.id],
+                        onTest = {
+                            scope.launch {
+                                testing[meta.id] = true
+                                testResults[meta.id] = viewModel.testApiKey(meta.id, key)
+                                if (testResults[meta.id]?.ok == true && selectedProvider == meta.id) {
+                                    providerModels = viewModel.getModelsForProvider(meta.id, showFreeOnly, key)
+                                }
+                                if (testResults[meta.id]?.ok == true && meta.id == "gemini") {
+                                    liveModels = viewModel.getLiveCapableModels("gemini", key)
+                                }
+                                testing[meta.id] = false
                             }
-                            testing[meta.id] = false
-                        }
-                    },
-                )
+                        },
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -230,6 +286,15 @@ fun SettingsDialog(
             icon = Icons.Default.Memory,
             expanded = sectModels,
             onToggle = { sectModels = !sectModels },
+            trailing = {
+                IconButton(onClick = { refreshTick++ }, enabled = !isLoadingModels) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh model list",
+                        tint = if (isLoadingModels) Color.White.copy(alpha = 0.3f) else JarvisTheme.Cyan,
+                    )
+                }
+            },
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExposedDropdownMenuBox(
@@ -286,17 +351,50 @@ fun SettingsDialog(
                         containerColor = JarvisTheme.Card,
                     ) {
                         if (providerModels.isEmpty() && !isLoadingModels) {
+                            val emptyHint = when {
+                                selectedProvider == "adk_vertex" ->
+                                    "Vertex AI ADK ใช้ผ่าน Server — ดูสถานะการเชื่อมต่อในส่วน API Keys ด้านบน"
+                                keyFor(selectedProvider).isBlank() ->
+                                    "ยังไม่มี API Key — ใส่ key ด้านบน แล้วกด Test หรือ ↻"
+                                else ->
+                                    "โหลด models ไม่สำเร็จ — ตรวจ key/เน็ต แล้วกด ↻ ลองใหม่"
+                            }
                             DropdownMenuItem(
-                                text = { Text("No models found", color = Color.White.copy(alpha = 0.5f)) },
+                                text = { Text(emptyHint, color = Color.White.copy(alpha = 0.5f), fontSize = BodySize) },
                                 onClick = {},
                             )
                         }
-                        providerModels.forEach { model ->
+                        // Search filter — มีประโยชน์มากกับ OpenRouter (200+ models)
+                        if (providerModels.size > 8) {
+                            DropdownMenuItem(
+                                text = {
+                                    OutlinedTextField(
+                                        value = modelSearch,
+                                        onValueChange = { modelSearch = it },
+                                        placeholder = { Text("ค้นหา model… (${providerModels.size} ตัว)", color = Color.White.copy(alpha = 0.35f), fontSize = HelperSize) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = fieldColors(),
+                                    )
+                                },
+                                onClick = {},
+                            )
+                        }
+                        val filteredModels = providerModels.filter {
+                            modelSearch.isBlank()
+                                || it.displayName.contains(modelSearch, ignoreCase = true)
+                                || it.id.contains(modelSearch, ignoreCase = true)
+                        }
+                        filteredModels.forEach { model ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
                                         Text(model.displayName, color = Color.White, fontSize = BodySize)
-                                        if (model.isFree) Text("FREE", color = JarvisTheme.Cyan, fontSize = HelperSize)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (model.isFree) Text("FREE", color = JarvisTheme.Cyan, fontSize = HelperSize)
+                                            if (model.supportsFunctions) Text("🔧 tools", color = JarvisTheme.Green, fontSize = HelperSize)
+                                            if (model.supportsVision) Text("👁 vision", color = JarvisTheme.Purple, fontSize = HelperSize)
+                                        }
                                     }
                                 },
                                 onClick = {
@@ -382,7 +480,8 @@ fun SettingsDialog(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    "No live-capable models found",
+                                    if (geminiKey.isBlank()) "ใส่ Gemini API Key ด้านบนก่อน — Live mode ใช้ได้เฉพาะ Gemini"
+                                    else "No live-capable models found — กด Test key ด้านบนเพื่อตรวจสอบ",
                                     color = Color.White.copy(alpha = 0.5f),
                                     fontSize = BodySize,
                                 )
@@ -399,11 +498,35 @@ fun SettingsDialog(
                 }
             }
             Text(
-                "Filtered by capability (vision / realtime / multimodal). Falls back to keyword match when capability flags aren't published.",
+                "Live mode รองรับเฉพาะ Google Gemini (Live API) — รายการนี้ดึงจาก Gemini key เสมอ ไม่ขึ้นกับ provider ที่เลือกในส่วน Main Model",
                 color = Color.White.copy(alpha = 0.55f),
                 fontSize = HelperSize,
                 modifier = Modifier.padding(top = 6.dp),
             )
+        }
+
+        // ─── Identity section ───────────────────────────────────────────────
+        SectionCard(
+            title = "Identity (ตัวตน AI & ผู้ใช้)",
+            icon = Icons.Default.Person,
+            expanded = sectIdentity,
+            onToggle = { sectIdentity = !sectIdentity },
+        ) {
+            Text(
+                "ปรับแต่งข้อมูลพื้นฐานของ AI agent และผู้ใช้ — มีผลกับ system prompt ทุก provider ทันทีหลังกด Save (AI ก็เปลี่ยนค่าเหล่านี้เองได้เมื่อคุณสั่ง)",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = HelperSize,
+            )
+            Text("AGENT IDENTITY", color = JarvisTheme.Cyan, fontSize = HelperSize, fontWeight = FontWeight.Bold)
+            IdentityField("Name", agentName, { agentName = it }, "เช่น JARVIS")
+            IdentityField("Creature (บทบาท)", agentCreature, { agentCreature = it }, "เช่น ผู้ช่วยส่วนตัว เลขา")
+            IdentityField("Vibe (บุคลิก/น้ำเสียง)", agentVibe, { agentVibe = it }, "เช่น พูดสั้น กระชับ สุภาพ ตลก มีอารมณ์ขัน")
+            IdentityField("Gender", agentGender, { agentGender = it }, "เช่น Female / Male / ไม่ระบุ")
+            Spacer(Modifier.height(4.dp))
+            Text("USER IDENTITY", color = JarvisTheme.Cyan, fontSize = HelperSize, fontWeight = FontWeight.Bold)
+            IdentityField("Name (ชื่อจริง)", userName, { userName = it }, "เช่น บอส")
+            IdentityField("What to call them (การเรียก)", userCallName, { userCallName = it }, "เช่น บอส")
+            IdentityField("Notes (หมายเหตุ)", userNotes, { userNotes = it }, "เช่น ใช้ภาษาไทยเป็นหลัก", singleLine = false)
         }
 
         // ─── Local AI section ───────────────────────────────────────────────
@@ -537,6 +660,15 @@ fun SettingsDialog(
                         preferFree = autoTradingConfig.preferFreeOnly,
                     )
                     viewModel.updateExternalApiKeys(openaiKey, claudeKey, openRouterKey, minimaxKey)
+                    viewModel.updateIdentity(
+                        agentName = agentName,
+                        agentCreature = agentCreature,
+                        agentVibe = agentVibe,
+                        agentGender = agentGender,
+                        userName = userName,
+                        userCallName = userCallName,
+                        userNotes = userNotes,
+                    )
                     onDismiss()
                 },
                 modifier = Modifier.weight(1f).heightIn(min = FieldHeight),
@@ -687,3 +819,86 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = JarvisTheme.Surface,
     cursorColor = JarvisTheme.Cyan,
 )
+
+/** ช่องกรอกข้อมูล Identity — label + placeholder + helper */
+@Composable
+private fun IdentityField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    singleLine: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label, fontSize = HelperSize) },
+        placeholder = { Text(placeholder, color = Color.White.copy(alpha = 0.35f), fontSize = BodySize) },
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else 2,
+        modifier = Modifier.fillMaxWidth(),
+        colors = fieldColors(),
+    )
+}
+
+@Composable
+private fun ServerProviderStatusCard(
+    meta: ProviderMeta,
+    pairingStatus: String,
+    serverUrl: String
+) {
+    val statusColor = when (pairingStatus) {
+        "APPROVED" -> JarvisTheme.Green
+        "PENDING", "PAIRING_REQUEST_SENT" -> JarvisTheme.Amber
+        else -> JarvisTheme.Red
+    }
+    val statusLabel = when (pairingStatus) {
+        "APPROVED" -> "Connected & Approved"
+        "PENDING" -> "Pending Approval"
+        "PAIRING_REQUEST_SENT" -> "Pairing Request Sent"
+        else -> "Not Connected"
+    }
+    val statusDesc = when (pairingStatus) {
+        "APPROVED" -> "ใช้ข้อมูลสิทธิ์การเข้าถึงจาก Server (MT5 Bridge) โดยอัตโนมัติ"
+        "PENDING" -> "กรุณากด Approve อุปกรณ์นี้ในหน้า Dashboard ของ Server:\n$serverUrl"
+        "PAIRING_REQUEST_SENT" -> "ส่งคำขอเชื่อมต่อแล้ว กรุณากด Approve บน Server"
+        else -> "กรุณาเชื่อมต่อ Server ที่ส่วน 'MT5 Bridge' ด้านล่างก่อนใช้งาน"
+    }
+
+    Surface(
+        color = JarvisTheme.Surface,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    meta.displayName,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = LabelSize,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    statusLabel,
+                    color = statusColor,
+                    fontSize = HelperSize,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Text(
+                statusDesc,
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = HelperSize,
+                lineHeight = 16.sp
+            )
+        }
+    }
+}

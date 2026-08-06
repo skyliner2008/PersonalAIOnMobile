@@ -1,0 +1,67 @@
+2026-07-30 01:56:27.840  6279-6342  LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-07-30 01:56:33.216  6279-6341  LiveGemini              com.example.personalaibot            D  🎤 User (Progress): วิเคราะห์ SMC ทองคำ ใน Timeframe M15 ให้ฉันหน่อย
+2026-07-30 01:56:33.217  6279-6342  LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_smc_analysis({interval=15m, symbol=XAUUSD})
+2026-07-30 01:56:33.230  6279-6342  SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=5 fetchDelta=11 dbBars=150
+2026-07-30 01:56:46.268  6279-6341  SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-07-30 01:56:46.271  6279-6341  SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-07-30 01:56:46.276  6279-6341  SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-07-30 01:56:46.291  6279-6341  SmcApiService           com.example.personalaibot            D  TV bars loaded: 11 for OANDA:XAUUSD/15
+2026-07-30 01:56:47.022  6279-16590 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_smc_analysis → =============================
+                                                                                                    🧠 **SMC Analysis — XAUUSD (15m)**
+                                                                                                    💰 ราคาปัจจุบัน: **4105.54**|ATR: 16.5857
+                                                                                                    
+                                                                                                    **📐 Market Structure**
+                                                                                                      ⚪ Trend: **NEUTRAL**
+                                                                                                      Structure High: 4047.88
+                                                                                                      Structure Low:  3996.06
+                                                                                                      Last Event: — ไม่มี event ล่าสุด
+                                                                                                    
+                                                                                                    **📊 Premium / Discount Zones**
+                                                                                                      Zone ปัจจุบัน: 🔴 PREMIUM (แพง — บริเวณ Short)
+                                                                                                      Premium  ≥ 4034.92
+                                                                                                      Equilibrium: 4021.97
+                                                                                                      Discount ≤ 4009.01
+                                                                                                    
+                                                                                                    **🟢 Bullish OB (Demand Zones)**
+                                                                                                      — ไม่พบ Active Bullish OB
+                                                                                                    **🔴 Bearish OB (Supply Zones)**
+                                                                                                      — ไม่พบ Active Bearish OB
+                                                                                                    
+                                                                                                    **⬛ Fair Value Gaps (FVG)**
+                                                                                                      🟢 Bull FVG: 4048.16 — 4064.01  (size: 15.8550)
+                                                                                                      🟢 Bull FVG: 4032.92 — 4037.38  (size: 4.4600)
+                                                                                                      🟢 Bull FVG: 4019.15 — 4027.41  (size: 8.2600)
+                                                                                                      🔴 Bear FVG: 4029.70 — 4035.36  (size: 5.6650)
+                                                                                                      🔴 Bear FVG: 4034.38 — 4039.16  (size: 4.7800)
+                                                                                                    
+                                                                                                    **💧 Liquidity Zones (Pending Sweeps)**
+                                                                                                      🔻 EQL 3996.06  ★★★ (touches: 2)
+                                                                                                      🔻 EQL 4015.07  ★ (touches: 1)
+                                                                                                      🔻 EQL 4037.38  ★ (touches: 2)
+                                                                                                    =============================
+                                                                                                    
+                                                                                                    **🎯 SMC Bias: 🟡 **CAUTION** — ราคาอยู่ใน Premium zone — ระวัง Short opportunity**
+                                                                                                    [Data] candle_source=TV:DB | price_source=UNIFIED_PRICE:TV:OANDA | bars=155 | strict_tv=true
+2026-07-30 01:56:47.682  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): รับทราบครับเจ้านาย
+2026-07-30 01:56:48.613  6279-20275 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผลการวิเคราะห์
+2026-07-30 01:56:49.771  6279-16592 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  SMC
+2026-07-30 01:56:50.349  6279-6341  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-07-30 01:56:50.630  6279-20275 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในไทม์เฟรม
+2026-07-30 01:56:51.470  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  M15
+2026-07-30 01:56:52.068  6279-6342  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปรากฏ
+2026-07-30 01:56:52.351  6279-20275 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดังนี้
+2026-07-30 01:56:52.372  6279-20275 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): 
+                                                                                                    
+                                                                                                    ### ภาพรวมทางเทคนิค (M15)
+                                                                                                    *   **แนวโน้ม (Trend):** เป็นกลาง (NEUTRAL) ครับ ยังไม่มีทิศทางชัดเจน
+                                                                                                    *   **โซนราคา:** ตอนนี้ราคาอยู่ที่ 4105.54 ซึ่งอยู่ใน **"โซนนอก Premium Zone"** (แพงมาก) ครับเจ้านาย ซึ่งอาจจะเป็นโอกาสในการพิจารณาฝั่ง Short หากมีสัญญาณกลับตัว
+                                                                                                    
+                                                                                                    ### จุดสำคัญที่ต้องเฝ้าระวัง
+                                                                                                    *   **Fair Value Gap (FVG):** มีช่องว่างราคา (Bullish FVG) อยู่ด้านล่างหลายจุด โดยเฉพาะช่วง 4048.16 - 4064.01 ซึ่งราคามีโอกาสย่อลงมาเติมเต็มได้
+                                                                                                    *   **Liquidity:** มีสภาพคล่องฝั่งซื้อ (Buy-side Liquidity) อยู่ด้านล่างบริเวณ 3996.06 ที่ราคาอาจจะลงไปกวาดก่อนจะขึ้นต่อ
+                                                                                                    
+                                                                                                    **สรุปมุมมอง:** ตอนนี้ราคาทองค่อนข้างแพงในไทม์เฟรมนี้ ควรระมัดระวังหากจะเปิด Long และเฝ้าดูจังหวะ Short หากมีสัญญาณยืนยันการกลับตัวในโซนด้านบนนี้ครับเจ้านาย
+                                                                                                    
+                                                                                                    ต้องการให้ผมตั้งแจ้งเตือนที่ราคาเท่าไหร่เป็นพิเศษไหมครับ?
+2026-07-30 01:56:52.910  6279-20275 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-07-30 01:56:53.560  6279-20275 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete. Persisting to DB.

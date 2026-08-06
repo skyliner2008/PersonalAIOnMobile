@@ -258,9 +258,18 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_fear_greed",
-            description = """ดึงดัชนีความกลัวและความโลภ (Crypto Fear & Greed Index)
+            description = """ดึงดัชนีความกลัวและความโลภ (Crypto Fear & Greed Index ตัวจริงจาก alternative.me — ฟรี real-time)
+                |แสดงค่า 0-100, การตีความภาษาไทย และอนุกรมย้อนหลัง 7 วันพร้อมทิศทางอารมณ์ตลาด
                 |ใช้เพื่อดู Sentiment ภาพรวมของตลาด Crypto ว่าอยู่ในจุดที่กลัวสุดขีด (ซื้อ) หรือโลภสุดขีด (ขาย)
                 |ใช้เมื่อผู้ใช้ถาม: "ตลาดคริปโตตอนนี้เป็นยังไง", "กลัวหรือโลภแล้วตอนนี้" """.trimMargin(),
+            parameters = null
+        ),
+
+        FunctionDeclaration(
+            name = "trading_crypto_overview",
+            description = """ภาพรวมตลาดคริปโตทั้งตลาดจาก CoinGecko (ฟรี ไม่ต้องใช้ API Key)
+                |Market Cap รวม + %เปลี่ยน 24h, Volume, BTC/ETH Dominance, เหรียญ Trending และ Fear & Greed Index
+                |ใช้เมื่อผู้ใช้ถาม: "ภาพรวมตลาดคริปโต", "BTC dominance เท่าไหร่", "เหรียญไหนกำลังมาแรง", "ตลาดคริปโตวันนี้" """.trimMargin(),
             parameters = null
         ),
 
@@ -295,6 +304,23 @@ object TradingToolDefinitions {
         ),
 
         FunctionDeclaration(
+            name = "trading_economic_data",
+            description = """ดึงตัวเลขเศรษฐกิจมหภาคสหรัฐฯ จาก FRED (Federal Reserve Economic Data) — GDP, เงินเฟ้อ CPI/PCE, การว่างงาน, ดอกเบี้ย Fed, Bond Yield, Nonfarm Payrolls ฯลฯ
+                |ใช้เมื่อผู้ใช้ถาม: "GDP อเมริกาล่าสุด", "เงินเฟ้อสหรัฐเท่าไหร่", "อัตราการว่างงาน", "ดอกเบี้ย Fed ตอนนี้", "ตัวเลขเศรษฐกิจสหรัฐ"
+                |series presets: gdp, gdp_growth, cpi, core_cpi, pce, unemployment, nfp, fedfunds, 10y, 2y, m2, retail, housing, sentiment, indpro, claims, overview (สรุปตัวชี้วัดหลัก)
+                |หรือระบุ FRED series id โดยตรงได้ (เช่น DGS10, UNRATE)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "series" to ParameterProperty("STRING", "ชื่อ preset (gdp, cpi, unemployment, fedfunds, overview...) หรือ FRED series id โดยตรง"),
+                    "limit"  to ParameterProperty("NUMBER", "จำนวนช่วงข้อมูลย้อนหลังที่แสดง (Default 12)"),
+                    "api_key" to ParameterProperty("STRING", "FRED API Key (ไม่บังคับ — ไม่มี key ก็ดึงได้ผ่านช่องทางสาธารณะ)")
+                ),
+                required = listOf("series")
+            )
+        ),
+
+        FunctionDeclaration(
             name = "trading_position_sizing",
             description = """คำนวณขนาดไม้ (Position Sizing) ตามความเสี่ยงที่กำหนด
                 |ช่วยคำนวณว่าควรเปิดกี่ Units, มูลค่าสัญญาเท่าไหร่ และใช้ Leverage เท่าไหร่
@@ -315,25 +341,59 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "automation_manage_alerts",
-            description = """สร้างหรือลบการแจ้งเตือน (Alert) และการเฝ้าติดตามตลาดอัตโนมัติในเบื้องหลัง
-                |JARVIS จะทำการดึงข้อมูลมาตรวจสอบเงื่อนไขทุกๆ N นาที และส่ง Notification เมื่อพบจังหวะที่กำหนด
-                |Action: 'create' เพื่อสร้างใหม่, 'delete' เพื่อลบ (ระบุ alert_id)
-                |Tool Name: ชื่อ tool ที่จะใช้ดึงข้อมูล (เช่น trading_price, trading_sentiment)
-                |Condition: ฟิลด์ที่ต้องการตรวจ เช่น 'price', 'rsi', 'bias_score'
-                |Operator: >=, <=, ==, >, <
-                |ใช้เมื่อผู้ใช้สั่ง: "ช่วยเฝ้าดูทองให้หน่อย ถ้าถึง 4800 บอกฉันด้วย", "ลบการแจ้งเตือน ID 5" """.trimMargin(),
+            description = """จัดการการแจ้งเตือน (Alert) และการเฝ้าติดตามตลาดอัตโนมัติในเบื้องหลัง
+                |JARVIS จะทำการดึงข้อมูลมาตรวจสอบเงื่อนไขทุกๆ N นาที เมื่อเงื่อนไขตรงระบบจะปลุก AI มาสรุปและแจ้งเตือนผู้ใช้ (notification มีปุ่ม "หยุดแจ้งเตือน" / "แจ้งเตือนซ้ำ" ให้ผู้ใช้กด)
+                |Action: 'create' สร้างใหม่, 'update' แก้ค่าเปรียบเทียบ (ระบุ alert_id + condition_value ใหม่), 'rename' เปลี่ยนชื่อ (ระบุ alert_id + name ใหม่ — ชื่อนี้ใช้ในหัว notification และเสียงพูด), 'delete' ลบ (ระบุ alert_id), 'list' ดูรายการ
+                |
+                |[สำคัญ] ตั้งเงื่อนไขได้เฉพาะ tool_name/field ที่ background ดึงค่าได้จริงต่อไปนี้เท่านั้น (ห้ามตั้งมั่ว เช่น EMA cross ที่ไม่มีในรายการ):
+                |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction (ใช้กับ ==)
+                |- trading_indicators ⭐ แนะนำ (คำนวณจากแท่งเทียนเอง แม่นกว่า scanner — เลือก TF ได้ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH ใช้กับ ==), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
+                |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM ใช้กับ ==), smc_zone_pct (>=80 พรีเมียม, <=20 ดิสเคาน์), smc_trend, smc_last_event (BOS_UP/BOS_DOWN/CHOCH_UP/CHOCH_DOWN), smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
+                |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal (STRONG BUY/SELL ใช้กับ ==), volume
+                |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore (0-100), lsdState (BULLISH/BEARISH/NEUTRAL ใช้กับ ==/contains), lsdConfluenceTF (1-4), deltaLabel (ใช้กับ ==/contains), deltaValue, fiboScore (0-10), momentum (EXPANSION/SQUEEZE/REVERSAL ใช้กับ ==/contains), isSqueeze (0/1), close
+                |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label (ใช้กับ ==) ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
+                |- trading_fear_greed: value (0-100), classification (ใช้กับ ==)
+                |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
+                |
+                |Operator: >=, <=, ==, >, <, contains
+                |ตัวอย่าง: RSI Overbought → tool=trading_technical_analysis, field=RSI, >= 70 | RSI Oversold → RSI <= 30 | ราคาทองถึงเป้า → tool=trading_price, field=price, >= 4100
+                |ใช้เมื่อผู้ใช้สั่ง: "ช่วยเฝ้าดูทองให้หน่อย ถ้าถึง 4800 บอกฉันด้วย", "แก้ alert ID 5 เป็น 4200", "ลบการแจ้งเตือน ID 5", "มี alert อะไรอยู่บ้าง" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "action"   to ParameterProperty("STRING", "การกระทำ: create หรือ delete", enum = listOf("create", "delete")),
-                    "alert_id" to ParameterProperty("NUMBER", "ID ของการแจ้งเตือนที่ต้องการลบ (เฉพาะ action=delete)"),
-                    "name"     to ParameterProperty("STRING", "ชื่อเรียกของงานแจ้งเตือนนี้ (เช่น 'Gold Alert')"),
+                    "action"   to ParameterProperty("STRING", "การกระทำ: create, update, delete, rename หรือ list", enum = listOf("create", "update", "delete", "rename", "list")),
+                    "alert_id" to ParameterProperty("NUMBER", "ID ของการแจ้งเตือน (เฉพาะ action=update/delete/rename)"),
+                    "name"     to ParameterProperty("STRING", "ชื่อเรียกของงานแจ้งเตือนนี้ (เช่น 'Gold Alert') — action=rename ใช้เป็นชื่อใหม่"),
                     "symbol"   to ParameterProperty("STRING", "Symbol ที่ต้องการเฝ้าดู เช่น XAUUSD, BTCUSDT"),
-                    "tool_name" to ParameterProperty("STRING", "Tool ที่จะใช้ดึงข้อมูล (default: trading_price)"),
-                    "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่จะตรวจสอบ (เช่น price)"),
-                    "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <)"),
+                    "tool_name" to ParameterProperty("STRING", "Tool ที่จะใช้ดึงข้อมูล (default: trading_price) — ต้องอยู่ในรายการที่ background รองรับ"),
+                    "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่จะตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้นเท่านั้น"),
+                    "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <, contains)"),
                     "condition_value"    to ParameterProperty("STRING", "ค่าเปรียบเทียบ (เช่น 4800, 30, bullish)"),
                     "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการดึงข้อมูล (1-1440 นาที, default 15)")
+                ),
+                required = listOf("action")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "automation_manage_schedule",
+            description = """จัดการงานตามเวลา (Scheduled Tasks) ที่ระบบจะ "ปลุก AI" มาทำงานเมื่อถึงเวลาที่กำหนด
+                |ต่างจาก alert ตรงที่ไม่ต้องมีเงื่อนไขราคา — เป็นการสั่งให้ AI ทำงานตามเวลา เช่น สรุปข่าวตอนเช้า เตือนตอน 2 ทุ่ม
+                |Action: 'create' สร้างใหม่, 'delete' ลบ (ระบุ task_id), 'list' ดูรายการทั้งหมด
+                |schedule_type: 'one_time' (ยิงครั้งเดียว — ระบุ run_at หรือ in_minutes) หรือ 'daily' (ทุกวัน — ระบุ time_hhmm)
+                |prompt คือสิ่งที่ AI จะได้รับเมื่อถึงเวลา เช่น "สรุปข่าวคริปโตเช้านี้" — AI จะประมวลผลแล้วแจ้งเตือนผู้ใช้
+                |ใช้เมื่อผู้ใช้สั่ง: "ทุกเช้า 8 โมงสรุปข่าวให้หน่อย", "เตือนฉัน 30 นาทีข้างหน้า", "สองทุ่มเตือนดูกราฟทอง" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "การกระทำ: create, delete หรือ list", enum = listOf("create", "delete", "list")),
+                    "task_id" to ParameterProperty("NUMBER", "ID ของงานที่ต้องการลบ (เฉพาะ action=delete)"),
+                    "name"   to ParameterProperty("STRING", "ชื่อของงาน (เช่น 'สรุปข่าวเช้า')"),
+                    "prompt" to ParameterProperty("STRING", "คำสั่งที่จะส่งให้ AI เมื่อถึงเวลา (เช่น 'สรุปข่าวตลาดคริปโตล่าสุด')"),
+                    "schedule_type" to ParameterProperty("STRING", "one_time หรือ daily", enum = listOf("one_time", "daily")),
+                    "time_hhmm" to ParameterProperty("STRING", "เวลาประจำวันรูปแบบ HH:mm เช่น 08:00, 20:30 (เฉพาะ daily)"),
+                    "run_at" to ParameterProperty("STRING", "วันเวลาที่จะยิง เช่น 2026-07-30 20:00 (เฉพาะ one_time)"),
+                    "in_minutes" to ParameterProperty("NUMBER", "อีกกี่นาทีให้ยิง (เฉพาะ one_time — ทางเลือกแทน run_at)")
                 ),
                 required = listOf("action")
             )
@@ -766,22 +826,58 @@ object TradingToolDefinitions {
             )
         ),
 
-        // ── MT5-ADV-6. Trade Journal & AI Scoring ──────────────────────────────
+        // ── AUTOMATION-1. Manage Alerts ──────────────────────────────────────
         FunctionDeclaration(
-            name = "trading_mt5_trade_journal",
-            description = """ระบบบันทึก/วิเคราะห์ผลเทรดอัจฉริยะ จากข้อมูล history ของ broker โดยตรง
-                |วิเคราะห์: Win rate, Profit factor, Average R:R, Best/worst trade, Streak analysis
-                |AI Scoring: ให้คะแนนคุณภาพการเทรด (Discipline, Timing, Risk management)
-                |เรียนรู้จากข้อผิดพลาด: ระบุ pattern ที่เสียเงินบ่อย + แนะนำการปรับปรุง
-                |ใช้เมื่อถาม: "สรุปผลเทรด", "ให้คะแนนการเทรดของฉัน", "เรียนรู้จากข้อผิดพลาด" """.trimMargin(),
+            name = "automation_manage_alerts",
+            description = """จัดการการแจ้งเตือนอัตโนมัติ (Price Alerts / Condition Alerts)
+                |สร้าง แก้ไขค่า เปลี่ยนชื่อ ลบ หรือดูรายการการแจ้งเตือนที่กำลังทำงาน
+                |ใช้เมื่อผู้ใช้ต้องการ: "เฝ้าทองถ้าถึง 4100 บอกฉัน", "แจ้งเตือนเมื่อ RSI ต่ำกว่า 30", "แก้ alert ID 5 เป็นราคา 4200", "เปลี่ยนชื่อ alert ID 5 เป็น ทองทะลุเป้า", "ลบ alert หมายเลข 5"
+                |[สำคัญ] ตั้งได้เฉพาะ tool_name/field ที่ background ดึงค่าได้จริง:
+                |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction
+                |- trading_indicators ⭐ (คำนวณจากแท่งเทียนเอง — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
+                |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM), smc_zone_pct, smc_trend, smc_last_event, smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
+                |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal, volume
+                |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore, lsdState, lsdConfluenceTF, deltaLabel, deltaValue, fiboScore, momentum, isSqueeze, close
+                |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
+                |- trading_fear_greed: value, classification
+                |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
+                |เมื่อเข้าเงื่อนไข ระบบจะปลุก AI มาสรุปบริบทก่อนแจ้งเตือนผู้ใช้ (notification มีปุ่ม หยุดแจ้งเตือน/แจ้งเตือนซ้ำ)""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "limit" to ParameterProperty("NUMBER", "จำนวน deals ย้อนหลังที่จะวิเคราะห์ (default 50, max 500)"),
-                    "symbol" to ParameterProperty("STRING", "Filter by symbol (optional)"),
-                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                    "action" to ParameterProperty("STRING", "create | update | rename | delete | list", enum = listOf("create", "update", "rename", "delete", "list")),
+                    "name" to ParameterProperty("STRING", "ชื่อ alert (สำหรับ create) — rename ใช้เป็นชื่อใหม่"),
+                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTC-USD (สำหรับ create)"),
+                    "tool_name" to ParameterProperty("STRING", "trading_price | trading_technical_analysis | trading_sentiment | trading_fear_greed | trading_crypto_overview | trading_deep_analysis_suite (default: trading_price)"),
+                    "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่ตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้น (default: price)"),
+                    "condition_operator" to ParameterProperty("STRING", "> | < | >= | <= | == | contains (default: >=)"),
+                    "condition_value" to ParameterProperty("STRING", "ค่าเปรียบเทียบ เช่น 4100, 30, 85 (สำหรับ update ใช้เป็นค่าใหม่)"),
+                    "interval_minutes" to ParameterProperty("NUMBER", "ความถี่ตรวจสอบเป็นนาที (default: 15, min: 1, max: 1440)"),
+                    "alert_id" to ParameterProperty("NUMBER", "ID ของ alert ที่ต้องการลบ/แก้ไข (สำหรับ delete/update)")
                 ),
-                required = emptyList()
+                required = listOf("action")
+            )
+        ),
+
+        // ── AUTOMATION-2. Manage Schedule ──────────────────────────────────────
+        FunctionDeclaration(
+            name = "automation_manage_schedule",
+            description = """จัดการงานตามเวลา (Scheduled Tasks) — ปลุก AI ทำตาม prompt เมื่อถึงเวลา
+                |สร้าง ลบ หรือดูรายการงานตามเวลา
+                |ใช้เมื่อผู้ใช้ต้องการ: "ทุกเช้า 8 โมงสรุปข่าวให้หน่อย", "อีก 30 นาทีเตือนฉัน", "ลบงานหมายเลข 3"""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "create | delete | list", enum = listOf("create", "delete", "list")),
+                    "name" to ParameterProperty("STRING", "ชื่องาน (สำหรับ create)"),
+                    "prompt" to ParameterProperty("STRING", "คำสั่งที่จะให้ AI ทำเมื่อถึงเวลา (สำหรับ create)"),
+                    "schedule_type" to ParameterProperty("STRING", "one_time | daily (default: one_time)"),
+                    "time_hhmm" to ParameterProperty("STRING", "เวลาในรูปแบบ HH:mm เช่น 08:00 (สำหรับ daily)"),
+                    "run_at" to ParameterProperty("STRING", "วันเวลาในรูปแบบ ISO เช่น 2026-08-03 20:00 (สำหรับ one_time)"),
+                    "in_minutes" to ParameterProperty("NUMBER", "จำนวนนาทีจากตอนนี้ (สำหรับ one_time, ทางเลือกแทน run_at)"),
+                    "task_id" to ParameterProperty("NUMBER", "ID ของงานที่ต้องการลบ (สำหรับ delete)")
+                ),
+                required = listOf("action")
             )
         )
     )

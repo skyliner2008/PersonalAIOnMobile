@@ -186,6 +186,7 @@ export interface WallSource {
 
 /** PriceWall — กำแพงราคาหนึ่งจุด รวม zone จากหลาย TF */
 export interface PriceWall {
+  id?: string;
   price: number;
   priceTop: number;
   priceBottom: number;
@@ -200,6 +201,15 @@ export interface PriceWall {
   label: string;
   distanceFromPrice: number;
   distancePct: number;
+  rawPrice?: number;
+  anchorTimeframes?: string[];
+  confirmationTimeframes?: string[];
+  contextTimeframes?: string[];
+  status?: 'ACTIVE' | 'TOUCHED' | 'STALE';
+  firstSeenAt?: number;
+  lastSeenAt?: number;
+  missingCycles?: number;
+  touchCount?: number;
 }
 
 /** PathObstacle — กำแพงที่ขวางอยู่ระหว่างจุดเข้าและ TP */

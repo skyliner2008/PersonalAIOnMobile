@@ -22,6 +22,14 @@ class EmbeddingProviderRegistry(
     val gemini: GeminiEmbeddingProvider by lazy { GeminiEmbeddingProvider(client, geminiApiKey) }
     val localOnnx: LocalOnnxEmbeddingProvider by lazy { LocalOnnxEmbeddingProvider() }
 
+    /**
+     * อัปเดต API key ของ cloud provider — ต้องถูกเรียกทุกครั้งที่ผู้ใช้บันทึก key ใหม่
+     * (provider เป็น lazy singleton key เดิมจะไม่ตามไปเอง)
+     */
+    fun updateGeminiKey(newKey: String) {
+        gemini.updateApiKey(newKey)
+    }
+
     /** ทุก provider ที่ลงทะเบียน */
     val allProviders: List<EmbeddingProvider>
         get() = listOf(localOnnx, gemini)

@@ -314,14 +314,56 @@ class ClaudeLlmProvider(
     }
 
     override suspend fun listModels(apiKey: String): List<LlmModelInfo> {
-        // Anthropic doesn't have a public list models API — return known models
-        return listOf(
-            LlmModelInfo("claude-sonnet-4-20250514", "Claude Sonnet 4", 200000, supportsFunctions = true),
-            LlmModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200000, supportsFunctions = true),
-            LlmModelInfo("claude-opus-4-20250514", "Claude Opus 4", 200000, supportsFunctions = true),
-            LlmModelInfo("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200000, supportsFunctions = true),
-        )
+        // Anthropic มี GET /v1/models API แล้ว (2024+) — ลองดึงของจริงก่อน
+        // เพื่อให้รายการ models อัปเดตตามบัญชีผู้ใช้เสมอ
+        // ถ้า API ล้มเหลว (key เก่า/network) → fallback เป็น static list
+        val fromApi = fetchModelsFromApi(apiKey)
+        if (fromApi.isNotEmpty()) return fromApi
+
+        logDebug("Claude", "Models API unavailable — falling back to static list")
+        return fallbackModels
     }
+
+    /** ดึงรายการ models จาก Anthropic Models API (GET /v1/models) */
+    private suspend fun fetchModelsFromApi(apiKey: String): List<LlmModelInfo> {
+        return try {
+            val response = client.get("$baseUrl/models") {
+                header("x-api-key", apiKey)
+                header("anthropic-version", "2023-06-01")
+            }
+            if (!response.status.isSuccess()) {
+                logError("Claude", "Models API error ${response.status.value}")
+                return emptyList()
+            }
+            val respJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val data = respJson["data"]?.jsonArray ?: return emptyList()
+            data.mapNotNull { element ->
+                try {
+                    val obj = element.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val name = obj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
+                    LlmModelInfo(
+                        id = id,
+                        displayName = name,
+                        contextLength = 200000,
+                        supportsFunctions = true,
+                        supportsVision = true
+                    )
+                } catch (_: Exception) { null }
+            }
+        } catch (e: Exception) {
+            logError("Claude", "Failed to fetch models: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Static fallback — ใช้เมื่อ Models API ไม่พร้อม */
+    private val fallbackModels = listOf(
+        LlmModelInfo("claude-sonnet-4-20250514", "Claude Sonnet 4", 200000, supportsFunctions = true),
+        LlmModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 200000, supportsFunctions = true),
+        LlmModelInfo("claude-opus-4-20250514", "Claude Opus 4", 200000, supportsFunctions = true),
+        LlmModelInfo("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", 200000, supportsFunctions = true),
+    )
 
     override suspend fun isAvailable(): Boolean = apiKey.isNotBlank()
 }

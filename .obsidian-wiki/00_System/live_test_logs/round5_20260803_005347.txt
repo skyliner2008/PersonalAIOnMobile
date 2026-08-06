@@ -1,0 +1,71 @@
+2026-08-03 00:53:47.154 27556-28195 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): คาดการณ์ทิศทางของทองคำในวันพรุ่งนี้ให้ฉันหน่อย
+2026-08-03 00:53:47.158 27556-28195 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_combined({interval=1D, exchange=OANDA, symbol=XAUUSD})
+2026-08-03 00:53:47.160 27556-27807 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_economic_data({series=overview, limit=5})
+2026-08-03 00:53:55.509 27556-28196 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_combined → Combined Analysis - XAUUSD (1D)
+                                                                                                    =============================
+                                                                                                    
+                                                                                                    Technical: STRONG SELL (score: -0.512)
+                                                                                                      RSI: 45.5523 | MACD hist: null
+                                                                                                      EMA20: null vs EMA50: null
+                                                                                                    
+                                                                                                    Sentiment: Neutral (0.0)
+                                                                                                      0 posts - Bull: 0 Bear: 0
+                                                                                                    
+                                                                                                    Latest News:
+                                                                                                    
+                                                                                                    -----------------------------
+                                                                                                    Confluence Decision: SELL
+                                                                                                    TA and Sentiment are aligned.
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปไฮไลต์สำคัญเป็นภาษาไทยแบบสนทนาสั้นๆ 2-4 ประโยคเท่านั้น ห้ามอ่านตาราง/ลิสต์/ตัวเลขยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-03 00:53:58.124 27556-28196 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_economic_data → ## 🇺🇸 ภาพรวมเศรษฐกิจสหรัฐฯ (FRED Overview)
+                                                                                                    
+                                                                                                    - **อัตราการเติบโต GDP (%, รายไตรมาส)**: 2.10 (2026-04-01) 🔻 -0.60 จากช่วงก่อน
+                                                                                                    - **ดัชนีราคาผู้บริโภค CPI (Index 1982-84=100)**: 332.57 (2026-06-01) 🔻 -1.41 จากช่วงก่อน
+                                                                                                    - **อัตราการว่างงาน (%)**: 4.20 (2026-06-01) 🔻 -0.10 จากช่วงก่อน
+                                                                                                    - **อัตราดอกเบี้ย Fed Funds (%)**: 3.63 (2026-06-01) ➖ คงที่ จากช่วงก่อน
+                                                                                                    
+                                                                                                    _ดูรายละเอียดแต่ละตัวได้ด้วย trading_economic_data + series เฉพาะทาง_
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปไฮไลต์สำคัญเป็นภาษาไทยแบบสนทนาสั้นๆ 2-4 ประโยคเท่านั้น ห้ามอ่านตาราง/ลิสต์/ตัวเลขยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-03 00:53:58.866 27556-27702 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): จากข้อมูลภาพรวม
+2026-08-03 00:53:59.176 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-03 00:53:59.284 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะครับ
+2026-08-03 00:53:59.410 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทิศทาง
+2026-08-03 00:53:59.486 27556-27702 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-08-03 00:53:59.676 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  วันพรุ่งนี้
+2026-08-03 00:53:59.893 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีแนวโน้ม
+2026-08-03 00:53:59.925 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขาย
+2026-08-03 00:54:00.067 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เด่นชัด
+2026-08-03 00:54:00.135 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-08-03 00:54:00.368 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เนื่องจาก
+2026-08-03 00:54:00.391 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทางเทคนิค
+2026-08-03 00:54:00.542 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้สัญญาณ
+2026-08-03 00:54:00.713 27556-27807 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Strong
+2026-08-03 00:54:00.803 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Sell
+2026-08-03 00:54:00.983 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ประกอบ
+2026-08-03 00:54:01.068 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กับดัชนี
+2026-08-03 00:54:01.272 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความรู้สึก
+2026-08-03 00:54:01.415 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตลาดค่อนข้าง
+2026-08-03 00:54:01.519 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นกลาง
+2026-08-03 00:54:01.750 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และยัง
+2026-08-03 00:54:01.781 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไม่มี
+2026-08-03 00:54:01.885 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปัจจัย
+2026-08-03 00:54:02.084 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ข่าวใหม่ๆ
+2026-08-03 00:54:02.118 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เข้ามา
+2026-08-03 00:54:02.243 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หนุนราคา
+2026-08-03 00:54:02.476 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อย่างไรก็ตาม
+2026-08-03 00:54:02.697 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ควรติดตาม
+2026-08-03 00:54:02.816 27556-27807 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวเลข
+2026-08-03 00:54:02.907 27556-27771 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-08-03 00:54:03.004 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สหรัฐฯ
+2026-08-03 00:54:03.168 27556-27807 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-08-03 00:54:03.256 27556-28194 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ด้วยนะครับ
+2026-08-03 00:54:03.316 27556-27701 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพราะอาจ
+2026-08-03 00:54:03.430 27556-28194 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ส่งผล
+2026-08-03 00:54:03.524 27556-27807 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กระทบ
+2026-08-03 00:54:03.556 27556-28195 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้
+2026-08-03 00:54:03.728 27556-27807 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-08-03 00:54:16.576 27556-27703 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 849122 bytes). Persisting to DB.
+2026-08-03 00:54:27.991 27556-27556 JARVIS_VM               com.example.personalaibot            D  Microphone muted: true

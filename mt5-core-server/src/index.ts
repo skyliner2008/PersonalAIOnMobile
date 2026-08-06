@@ -16,6 +16,7 @@ import authRoutes from './routes/auth.js';
 import autoTradingRoutes from './routes/autoTrading.js';
 import v25Routes from './routes/v25.js';
 import vertexProxyRoutes from './routes/vertexProxy.js';
+import adkRoutes from './routes/adkRoutes.js';
 import { requireClientToken } from './services/tokenAuth.js';
 import { ensureBridgeReady } from './services/bridgeSupervisor.js';
 import { createMt5RealtimeHub } from './services/mt5RealtimeHub.js';
@@ -143,6 +144,8 @@ async function bootstrap(): Promise<void> {
   app.use('/api/v25', requireClientToken, v25Routes);
   // Vertex AI Proxy — token-protected; lets mobile app use ADC via server
   app.use('/api/vertex', requireClientToken, vertexProxyRoutes);
+  // ADK endpoints
+  app.use('/api/adk', requireClientToken, adkRoutes);
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const message = String(err?.message || err || 'unknown');
@@ -160,6 +163,16 @@ async function bootstrap(): Promise<void> {
   // V25 Phase A — Real-Time Wall Engine
   // Boot order: env-based first (V25_SHADOW=true), then fallback to persisted UI config.
   try {
+    const { autoTradingService } = await import('./services/autoTradingService.js');
+    const cfg = autoTradingService.snapshot().config;
+    const simpleMode =
+      cfg.engineMode !== 'LEGACY_COMPLEX' &&
+      (cfg.engineMode === 'M15_WALL_SCALPING' || cfg.adaptive?.simpleScalping?.enabled === true);
+
+    if (simpleMode) {
+      shutdownV25Shadow();
+      atLog('[V25] startup skipped: M15_WALL_SCALPING owns wall runtime (Pipeline/PriceMap only)');
+    } else {
     const envStarted = bootstrapV25Shadow();
     if (!envStarted) {
       // ENV didn't enable it — check if user turned it ON via UI (adaptive.v25.enabled)
@@ -171,6 +184,7 @@ async function bootstrap(): Promise<void> {
         atLog('[V25] env flag absent — booting from UI config (adaptive.v25.enabled=true)');
         bootstrapV25ShadowFromConfig(v25cfg, cfg.watchlist);
       }
+    }
     }
   } catch (err) {
     atError(`[mt5-core-server] V25 shadow bootstrap failed: ${err}`);

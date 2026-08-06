@@ -14,6 +14,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class JarvisOrchestrator(
     private val client: HttpClient,
@@ -26,7 +34,6 @@ class JarvisOrchestrator(
 ) : com.example.personalaibot.tools.SideEffectDelegate {
     private val geminiService = GeminiService(client, apiKey, modelName)
     private val liveService   = LiveGeminiService(client, apiKey, liveModelName, memoryManager)
-    private val planner       = JarvisPlanner(geminiService)
     val embeddingRegistry = EmbeddingProviderRegistry(client, apiKey)
     
     // ── Multi-Provider Registry ──
@@ -43,7 +50,12 @@ class JarvisOrchestrator(
         com.example.personalaibot.tools.ToolExecutor.init(client, geminiService)
         // เชื่อม File handler (Platform specific)
         fileHandler?.let { com.example.personalaibot.tools.ToolExecutor.initFileHandler(it) }
-        
+
+        // เชื่อม System tools (diagnostics / connectivity / create custom tool)
+        com.example.personalaibot.tools.ToolExecutor.initSystemExecutor(
+            com.example.personalaibot.tools.system.SystemToolExecutor(diagnosticManager, this)
+        )
+
         // เชื่อมต่อ Side-effect Delegate
         com.example.personalaibot.tools.ToolExecutor.setSideEffectDelegate(this)
     }
@@ -72,6 +84,8 @@ class JarvisOrchestrator(
         liveModelName = newLiveModelName
         geminiService.updateConfig(newApiKey, newModelName)
         liveService.updateConfig(newApiKey, newLiveModelName, newVoiceName)
+        // cloud embedding ต้องได้ key ใหม่ด้วย — ไม่งั้น semantic memory เงียบทั้งระบบ
+        embeddingRegistry.updateGeminiKey(newApiKey)
     }
 
     fun setAiVisionToggle(onToggle: (Boolean) -> Unit) {
@@ -82,6 +96,16 @@ class JarvisOrchestrator(
     fun setVoiceChangeHandler(onVoiceChange: (String) -> Unit) {
         this.voiceChangeCallback = onVoiceChange
         toolBridge.onVoiceChange = onVoiceChange
+    }
+
+    /** แจ้งเตือนเมื่อ Live generation ถูกขัดจังหวะ (VAD/user) — ViewModel ใช้ flush คิวเสียงค้างเล่น */
+    fun setLiveInterruptionHandler(handler: () -> Unit) {
+        liveService.onInterrupted = handler
+    }
+
+    /** fallback เมื่อ turn ไม่มีเสียงออกเลย (model ตอบ text ล้วน) — ViewModel ใช้ TTS พูดแทน */
+    fun setLiveNoAudioFallback(handler: (String) -> Unit) {
+        liveService.onTurnWithoutAudio = handler
     }
 
     suspend fun listAvailableModels(): List<GeminiModel> =
@@ -166,7 +190,7 @@ class JarvisOrchestrator(
 
         com.example.personalaibot.logDebug("Orchestrator", "Using provider: ${provider.displayName}")
         val messages = mutableListOf<LlmMessage>()
-        val mt5Mode = com.example.personalaibot.ai.TradingIntentUtility.isMt5Prompt(text)
+        val policy = TradingToolPolicy.evaluate(text)
 
         // --- Context Pruning (Token Saving) ---
         // 1. Truncate coreContext (long-term memories) to prevent context bloat
@@ -176,14 +200,10 @@ class JarvisOrchestrator(
         } else coreContext
 
         val systemPrompt = buildString {
-            appendLine("คุณคือ JARVIS (Ultimate Trading Brain) — AI ส่วนตัวระดับสูง")
-            appendLine("Context: $prunedCoreContext")
-            if (mt5Mode) {
-                appendLine("\n[IMPORTANT: STRICT MT5 MODE ACTIVE]")
-                appendLine("- User explicitly asked for MT5/Broker data.")
-                appendLine("- Use 'trading_mt5_analyze' for all technical and SMC analysis (FVG, OB, Structure).")
-                appendLine("- DO NOT use TradingView-derived tools (e.g., trading_smc_analysis, trading_price).")
-            }
+            // ใช้ persona กลางตัวเดียวกับทุก path — กัน external providers สับสนตัวตน
+            appendLine(JarvisPersona.EXTERNAL_SYSTEM_PROMPT)
+            if (prunedCoreContext.isNotBlank()) appendLine("Context: $prunedCoreContext")
+            append(policy.strictMt5SystemPromptAddon())
         }
 
         // 2. Prune history to last 20 turns (approx 10 user/assistant turns)
@@ -240,17 +260,8 @@ class JarvisOrchestrator(
                 model = actualModel,
                 systemPrompt = systemPrompt,
                 tools = if (provider.supportsFunctionCalling) {
-                    val tradingPrompt = com.example.personalaibot.ai.TradingIntentUtility.isTradingPrompt(text)
-                    val smcPrompt     = com.example.personalaibot.ai.TradingIntentUtility.isSmcPrompt(text)
-                    val mt5Prompt     = com.example.personalaibot.ai.TradingIntentUtility.isMt5Prompt(text)
-                    val deepPrompt    = com.example.personalaibot.ai.TradingIntentUtility.isDeepAnalysisPrompt(text)
-
-                    val allowedNames = if (tradingPrompt || mt5Prompt || deepPrompt || smcPrompt) {
-                        ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
-                    } else null
-
                     ToolRegistry.getGeminiTool().functionDeclarations
-                        .filter { allowedNames == null || !ToolRegistry.isTradingTool(it.name) || it.name in allowedNames }
+                        .filter { policy.isToolAllowed(it.name) }
                         .map { decl ->
                             LlmToolSpec(
                                 name = decl.name,
@@ -305,12 +316,21 @@ class JarvisOrchestrator(
             
             for (toolCall in toolCallsDetected!!) {
                 emit("\n🔔 [TOOL]: ${toolCall.name}...")
+
+                // Parse args ด้วย parser กลาง — ถ้า JSON เพี้ยน ให้คืน error เข้า loop
+                // แทนการ execute ด้วย args ว่าง (กัน tool ทำงานผิดพลาดเงียบๆ)
+                val argsMap = com.example.personalaibot.tools.ToolArgParser.parse(toolCall.arguments)
+                if (argsMap == null) {
+                    com.example.personalaibot.logError("Orchestrator", "Tool args parse failed for ${toolCall.name}: ${toolCall.arguments.take(200)}")
+                    messages.add(LlmMessage(
+                        role = "tool",
+                        content = "Error: invalid tool arguments JSON. Please re-issue the tool call with a valid JSON object of string key/value pairs.",
+                        toolCallId = toolCall.id
+                    ))
+                    continue
+                }
+
                 val result = try {
-                    val argsMap = try {
-                        kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(toolCall.arguments)
-                    } catch (_: Exception) {
-                        emptyMap<String, String>()
-                    }
                     com.example.personalaibot.tools.ToolExecutor.execute(
                         com.example.personalaibot.tools.ToolCall(toolCall.name, argsMap),
                         coreContext
@@ -319,14 +339,11 @@ class JarvisOrchestrator(
                     com.example.personalaibot.tools.ToolResult(toolCall.name, "Error: ${e.message}", true)
                 }
 
-                val mt5Prompt = com.example.personalaibot.ai.TradingIntentUtility.isMt5Prompt(text)
-                val deepPrompt = com.example.personalaibot.ai.TradingIntentUtility.isDeepAnalysisPrompt(text)
-                
-                if (mt5Prompt && !deepPrompt && toolCall.name in ToolRegistry.tvOnlyTradingFunctionNames) {
+                if (policy.shouldSuppressToolResult(toolCall.name)) {
                     com.example.personalaibot.logDebug("Orchestrator", "Strict MT5 Mode: Suppressing TV tool result for ${toolCall.name}")
                     messages.add(LlmMessage(
                         role = "tool",
-                        content = "This tool result was suppressed because strict MT5 mode is active. Please use trading_mt5_analyze for broker-specific analysis.",
+                        content = policy.suppressedResultMessage,
                         toolCallId = toolCall.id
                     ))
                     continue
@@ -424,8 +441,23 @@ class JarvisOrchestrator(
             query = query,
             limit = 5
         )
-        if (facts.isEmpty()) return "ขออภัย ฉันยังไม่มีข้อมูลเกี่ยวกับเรื่องนี้ในความทรงจำ"
-        return "พบข้อมูลที่เกี่ยวข้องดังนี้:\n" + facts.joinToString("\n- ", prefix = "- ")
+        // GraphRAG retrieval — ดึงความสัมพันธ์จาก knowledge graph ประกอบ (Layer 4)
+        val graphContext = try { memoryManager.getGraphContext(query) } catch (_: Exception) { "" }
+
+        if (facts.isEmpty() && graphContext.isBlank()) {
+            return "ขออภัย ฉันยังไม่มีข้อมูลเกี่ยวกับเรื่องนี้ในความทรงจำ"
+        }
+        return buildString {
+            if (facts.isNotEmpty()) {
+                appendLine("พบข้อมูลที่เกี่ยวข้องดังนี้:")
+                appendLine(facts.joinToString("\n- ", prefix = "- "))
+            }
+            if (graphContext.isNotBlank()) {
+                appendLine()
+                appendLine("ความสัมพันธ์ที่เกี่ยวข้อง (Knowledge Graph):")
+                append(graphContext)
+            }
+        }.trim()
     }
 
     override suspend fun onRememberFact(key: String, value: String, importance: String) {
@@ -452,8 +484,14 @@ class JarvisOrchestrator(
     }
 
     override suspend fun onDisplayReport(markdown: String, voiceSummary: String) {
-        // จะถูกจัดการผ่าน textOutputFlow ของ liveService (ถ้าจำเป็น)
-        // หรือส่งผ่าน Event ไปที่ UI
+        // Live path: LiveToolBridge emit เข้าแชทผ่าน liveService.emitTextToChat อยู่แล้ว
+        // Text chat path: ส่งผ่าน callback ไปที่ ViewModel เพื่อ append ข้อความรายงานในแชท
+        displayReportCallback?.invoke(markdown)
+        com.example.personalaibot.logDebug("Orchestrator", "SideEffect: Display report (${markdown.length} chars)")
+    }
+
+    fun setDisplayReportHandler(onDisplay: (String) -> Unit) {
+        this.displayReportCallback = onDisplay
     }
 
     override suspend fun onVisionToggle(active: Boolean) {
@@ -478,6 +516,260 @@ class JarvisOrchestrator(
         com.example.personalaibot.logDebug("Orchestrator", "New Agent Tool saved: $path")
     }
 
+    /**
+     * โหลด custom tools ทั้งหมดจากโฟลเดอร์ custom_agent_tools (ไฟล์ .json) กลับเข้า ToolRegistry
+     * เรียกตอน app start (จาก JarvisViewModel) — ทำให้ tool ที่ Agent เคยสร้างใช้งานได้ข้าม session
+     */
+    suspend fun loadCustomTools() {
+        val handler = fileHandler ?: return
+        try {
+            val listing = handler.invoke("file_list", mapOf("path" to "custom_agent_tools"))
+            if (listing.startsWith("Error") || listing.startsWith("ไม่พบ") || listing.startsWith("โฟลเดอร์ว่าง")) return
+
+            // รูปแบบบรรทัดจาก FileToolExecutor: "[FILE] name.json (123 B)"
+            val jsonFiles = listing.lines()
+                .map { it.trim() }
+                .filter { it.startsWith("[FILE]") && it.contains(".json") }
+                .mapNotNull { line ->
+                    val raw = line.removePrefix("[FILE]").trim()
+                    raw.substringBefore(" (").trim().takeIf { it.endsWith(".json") }
+                }
+
+            var loaded = 0
+            jsonFiles.forEach { filename ->
+                try {
+                    val content = handler.invoke("file_read", mapOf("path" to "custom_agent_tools/$filename"))
+                    if (content.startsWith("Error") || content.startsWith("ไม่พบ")) return@forEach
+                    val obj = kotlinx.serialization.json.Json.parseToJsonElement(content).jsonObject
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    val desc = obj["description"]?.jsonPrimitive?.contentOrNull ?: name
+                    val addon = obj["systemPromptAddon"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    val keywords = obj["triggerKeywords"]?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+
+                    com.example.personalaibot.tools.ToolRegistry.registerCustomTool(
+                        com.example.personalaibot.tools.FunctionDeclaration(
+                            name = name,
+                            description = "[CUSTOM] $desc",
+                            parameters = null
+                        )
+                    )
+                    com.example.personalaibot.tools.ToolRegistry.registerSkill(
+                        com.example.personalaibot.tools.SkillDescriptor(
+                            name = name,
+                            description = desc,
+                            systemPromptAddon = addon,
+                            triggerKeywords = keywords,
+                            author = obj["author"]?.jsonPrimitive?.contentOrNull ?: "Jarvis Agent"
+                        )
+                    )
+                    loaded++
+                } catch (e: Exception) {
+                    com.example.personalaibot.logError("Orchestrator", "Failed to load custom tool: $filename", e)
+                }
+            }
+            if (loaded > 0) {
+                com.example.personalaibot.logDebug("Orchestrator", "Loaded $loaded custom tool(s) from custom_agent_tools/")
+            }
+        } catch (e: Exception) {
+            com.example.personalaibot.logError("Orchestrator", "loadCustomTools failed", e)
+        }
+    }
+
+    override suspend fun onManageAlerts(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim()
+            ?: return "❌ ต้องระบุ action (create หรือ delete)"
+
+        return when (action) {
+            "create" -> {
+                val name = args["name"]?.trim().takeUnless { it.isNullOrBlank() }
+                    ?: "Alert ${args["symbol"] ?: ""}".trim()
+                val symbol = args["symbol"]?.trim()?.uppercase()
+                    ?: return "❌ ต้องระบุ symbol ที่ต้องการเฝ้าดู (เช่น XAUUSD, BTCUSDT)"
+                val toolName = args["tool_name"]?.trim().takeUnless { it.isNullOrBlank() } ?: "trading_price"
+                val field = args["condition_field"]?.trim().takeUnless { it.isNullOrBlank() } ?: "price"
+                val operator = when (args["condition_operator"]?.trim()) {
+                    ">"  -> com.example.personalaibot.automation.ConditionOperator.GT
+                    "<"  -> com.example.personalaibot.automation.ConditionOperator.LT
+                    ">=" -> com.example.personalaibot.automation.ConditionOperator.GTE
+                    "<=" -> com.example.personalaibot.automation.ConditionOperator.LTE
+                    "==", "=" -> com.example.personalaibot.automation.ConditionOperator.EQ
+                    "contains" -> com.example.personalaibot.automation.ConditionOperator.CONTAINS
+                    else -> com.example.personalaibot.automation.ConditionOperator.GTE
+                }
+                val value = args["condition_value"]?.trim()
+                    ?: return "❌ ต้องระบุ condition_value (ค่าเปรียบเทียบ เช่น 4800)"
+                val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 15L
+
+                // จำกัดให้ตั้งได้เฉพาะ tool/field ที่ background engine ดึงค่าได้จริง
+                if (!com.example.personalaibot.automation.AlertFieldCatalog.isFieldSupported(toolName, field)) {
+                    return "❌ ไม่รองรับ tool_name='$toolName' กับ field='$field' — ตั้งได้เฉพาะ:\n" +
+                            com.example.personalaibot.automation.AlertFieldCatalog.describeForAi()
+                }
+                // ฟิลด์ข้อความ (direction, signal, lsdState ฯลฯ) เปรียบเทียบ >,< ไม่ได้
+                if (!com.example.personalaibot.automation.AlertFieldCatalog.isNumericField(toolName, field) &&
+                    operator !in listOf(com.example.personalaibot.automation.ConditionOperator.EQ,
+                                        com.example.personalaibot.automation.ConditionOperator.CONTAINS)
+                ) {
+                    return "❌ field '$field' เป็นข้อความ (เช่น BULLISH, STRONG BUY) — ใช้ได้เฉพาะ operator == หรือ contains เท่านั้น"
+                }
+
+                automationManager.registerJob(
+                    name = name,
+                    symbol = symbol,
+                    exchange = null,
+                    toolName = toolName,
+                    condition = com.example.personalaibot.automation.AutomationCondition(field, operator, value),
+                    intervalMinutes = interval
+                )
+                "✅ สร้างการแจ้งเตือน '$name' แล้ว — เฝ้าดู $symbol ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที"
+            }
+            "delete" -> {
+                val id = args["alert_id"]?.toLongOrNull()
+                    ?: return "❌ ต้องระบุ alert_id ของการแจ้งเตือนที่ต้องการลบ"
+                automationManager.deleteJob(id)
+                "✅ ลบการแจ้งเตือน ID $id แล้ว"
+            }
+            "update" -> {
+                val id = args["alert_id"]?.toLongOrNull()
+                    ?: return "❌ ต้องระบุ alert_id ของการแจ้งเตือนที่ต้องการแก้ไข"
+                val newValue = args["condition_value"]?.trim()
+                    ?: return "❌ ต้องระบุ condition_value ใหม่ (เช่น ราคาเป้าหมายใหม่)"
+                val job = automationManager.activeJobs.value.firstOrNull { it.id == id }
+                    ?: return "❌ ไม่พบการแจ้งเตือน ID $id (หรือถูกปิดไปแล้ว)"
+                val old = try {
+                    com.example.personalaibot.automation.automationJson.decodeFromString(
+                        com.example.personalaibot.automation.AutomationCondition.serializer(), job.condition_json
+                    )
+                } catch (_: Exception) {
+                    return "❌ เงื่อนไขเดิมของ alert ID $id เสียหาย — ลบแล้วสร้างใหม่แทน"
+                }
+                val newOp = when (args["condition_operator"]?.trim()) {
+                    ">"  -> com.example.personalaibot.automation.ConditionOperator.GT
+                    "<"  -> com.example.personalaibot.automation.ConditionOperator.LT
+                    ">=" -> com.example.personalaibot.automation.ConditionOperator.GTE
+                    "<=" -> com.example.personalaibot.automation.ConditionOperator.LTE
+                    "==", "=" -> com.example.personalaibot.automation.ConditionOperator.EQ
+                    "contains" -> com.example.personalaibot.automation.ConditionOperator.CONTAINS
+                    else -> old.operator
+                }
+                automationManager.updateCondition(id, old.copy(operator = newOp, value = newValue))
+                "✅ แก้ไขการแจ้งเตือน '${job.name}' (ID $id) แล้ว — ${old.field} จาก ${old.value} → $newValue (ระบบรีเซ็ตสถานะและเริ่มเฝ้าดูใหม่)"
+            }
+            "list" -> {
+                val jobs = automationManager.activeJobs.value
+                if (jobs.isEmpty()) return "📭 ยังไม่มีการแจ้งเตือนที่ active อยู่"
+                buildString {
+                    appendLine("📋 **การแจ้งเตือนที่กำลังทำงาน (${jobs.size} รายการ):**")
+                    jobs.forEach { j ->
+                        val state = if (j.is_triggered == 1L) "🔔 เข้าเงื่อนไขแล้ว" else "⏳ เฝ้าดูอยู่"
+                        appendLine("- ID ${j.id}: ${j.name} — ${j.symbol} (${j.tool_name}) ทุก ${j.interval_minutes} นาที | $state | ค่าล่าสุด: ${j.last_value ?: "-"}")
+                    }
+                }.trim()
+            }
+            "rename" -> {
+                val id = args["alert_id"]?.toLongOrNull()
+                    ?: return "❌ ต้องระบุ alert_id ของการแจ้งเตือนที่ต้องการเปลี่ยนชื่อ (ดู ID จาก action=list)"
+                val newName = args["name"]?.trim().takeUnless { it.isNullOrBlank() }
+                    ?: return "❌ ต้องระบุ name ใหม่ — ชื่อนี้จะใช้ในหัว notification และเป็นชื่อที่ฉันใช้พูดตอนแจ้งเตือน"
+                val job = automationManager.activeJobs.value.firstOrNull { it.id == id }
+                    ?: return "❌ ไม่พบการแจ้งเตือน ID $id (หรือถูกปิดไปแล้ว)"
+                automationManager.renameJob(id, newName)
+                "✅ เปลี่ยนชื่อการแจ้งเตือน ID $id จาก '${job.name}' → '$newName' แล้ว"
+            }
+            else -> "❌ ไม่รู้จัก action '$action' — ใช้ create, update, delete, rename หรือ list"
+        }
+    }
+
+    override suspend fun onManageSchedule(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim()
+            ?: return "❌ ต้องระบุ action (create, delete หรือ list)"
+
+        return when (action) {
+            "create" -> {
+                val name = args["name"]?.trim().takeUnless { it.isNullOrBlank() } ?: "Scheduled Task"
+                val prompt = args["prompt"]?.trim().takeUnless { it.isNullOrBlank() }
+                    ?: return "❌ ต้องระบุ prompt (คำสั่งที่จะให้ AI ทำเมื่อถึงเวลา)"
+                val type = args["schedule_type"]?.lowercase()?.trim() ?: "one_time"
+
+                when (type) {
+                    "daily" -> {
+                        val hhmm = args["time_hhmm"]?.trim()
+                            ?: return "❌ daily ต้องระบุ time_hhmm (เช่น 08:00, 20:30)"
+                        if (!Regex("^([01]?\\d|2[0-3]):[0-5]\\d$").matches(hhmm)) {
+                            return "❌ time_hhmm รูปแบบไม่ถูกต้อง: '$hhmm' (ต้องเป็น HH:mm เช่น 08:00)"
+                        }
+                        val normalized = hhmm.padStart(5, '0')
+                        automationManager.registerScheduledTask(name, prompt, "daily", 0L, normalized)
+                        "✅ สร้างงานประจำวัน '$name' แล้ว — ระบบจะปลุกฉันมาทำ \"$prompt\" ทุกวันเวลา $normalized น."
+                    }
+                    else -> {
+                        val now = kotlinx.datetime.Clock.System.now()
+                        val runAtMs: Long? = args["in_minutes"]?.toLongOrNull()?.let { mins ->
+                            if (mins <= 0) null
+                            else now.plus(mins, kotlinx.datetime.DateTimeUnit.MINUTE).toEpochMilliseconds()
+                        } ?: args["run_at"]?.trim()?.let { raw ->
+                            try {
+                                val iso = raw.replace(" ", "T").take(16)
+                                kotlinx.datetime.LocalDateTime.parse(iso)
+                                    .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault())
+                                    .toEpochMilliseconds()
+                            } catch (_: Exception) { null }
+                        }
+                        if (runAtMs == null) {
+                            return "❌ one_time ต้องระบุ run_at (เช่น 2026-07-30 20:00) หรือ in_minutes (เช่น 30)"
+                        }
+                        val whenText = kotlinx.datetime.Instant.fromEpochMilliseconds(runAtMs)
+                            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+                        automationManager.registerScheduledTask(name, prompt, "one_time", runAtMs, null)
+                        "✅ สร้างงานครั้งเดียว '$name' แล้ว — ระบบจะปลุกฉันมาทำ \"$prompt\" วันที่ ${whenText.date} เวลา ${whenText.hour.toString().padStart(2, '0')}:${whenText.minute.toString().padStart(2, '0')} น."
+                    }
+                }
+            }
+            "delete" -> {
+                val id = args["task_id"]?.toLongOrNull()
+                    ?: return "❌ ต้องระบุ task_id ของงานที่ต้องการลบ"
+                automationManager.deleteScheduledTask(id)
+                "✅ ลบงานตามเวลา ID $id แล้ว"
+            }
+            "list" -> {
+                val tasks = automationManager.scheduledTasks.value
+                if (tasks.isEmpty()) return "📭 ยังไม่มีงานตามเวลาที่ active อยู่"
+                buildString {
+                    appendLine("📋 **งานตามเวลาที่กำลังทำงาน (${tasks.size} รายการ):**")
+                    tasks.forEach { t ->
+                        val whenDesc = if (t.schedule_type == "daily") "ทุกวัน ${t.time_hhmm} น."
+                        else {
+                            val lt = kotlinx.datetime.Instant.fromEpochMilliseconds(t.run_at)
+                                .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+                            "ครั้งเดียว ${lt.date} ${lt.hour.toString().padStart(2, '0')}:${lt.minute.toString().padStart(2, '0')} น."
+                        }
+                        appendLine("- ID ${t.id}: ${t.name} — $whenDesc | คำสั่ง: \"${t.prompt}\"")
+                    }
+                }.trim()
+            }
+            else -> "❌ ไม่รู้จัก action '$action' — ใช้ create, delete หรือ list"
+        }
+    }
+
+    override suspend fun onUpdateIdentity(target: String, field: String, value: String): String {
+        val updated = JarvisPersona.updateIdentityField(target, field, value)
+            ?: return "❌ ไม่รู้จัก target/field: '$target.$field' (agent: name/creature/vibe/gender | user: name/call_name/notes)"
+
+        // persist ลง Core Memory — โหลดกลับทุกครั้งที่เปิดแอป
+        JarvisPersona.toCoreMemoryMap(updated).forEach { (k, v) ->
+            memoryManager.setCoreMemory(k, v)
+        }
+        com.example.personalaibot.logDebug("Orchestrator", "Identity updated: $target.$field = $value")
+
+        val label = when (target.lowercase()) {
+            "agent" -> "ตัวตนของฉัน (${JarvisPersona.identity.agentName})"
+            else -> "ข้อมูลของ${JarvisPersona.identity.userCallName}"
+        }
+        return "✅ อัปเดต $label เรียบร้อย: $field = \"$value\" — มีผลทันทีทุก provider (Chat/Live/External)"
+    }
+
     private var visionToggleCallback: ((Boolean) -> Unit)? = null
     private var voiceChangeCallback: ((String) -> Unit)? = null
+    private var displayReportCallback: ((String) -> Unit)? = null
 }

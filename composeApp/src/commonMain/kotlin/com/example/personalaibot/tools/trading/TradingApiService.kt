@@ -9,6 +9,8 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.serialization.json.*
 import kotlinx.datetime.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 /**
  * TradingApiService — HTTP layer สำหรับดึงข้อมูลการเทรดแบบ Real-time
@@ -111,14 +113,29 @@ class TradingApiService(private val client: HttpClient) {
             else -> raw
         }
 
+        // Detect Yahoo-style crypto (e.g. BTCUSD from BTC-USD) and create proper Binance symbol
+        val cryptoCanonical = when {
+            canonical.endsWith("USDT") || canonical.endsWith("BTC") || canonical.endsWith("ETH") -> canonical
+            canonical.endsWith("USD") && canonical.length > 3 -> {
+                val base = canonical.removeSuffix("USD")
+                // Check if it's a Forex pair (base is a known fiat currency)
+                val fiatCurrencies = setOf("EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "CNY", "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "INR", "THB")
+                if (base.length == 3 && base in fiatCurrencies) canonical  // It's Forex, keep as-is
+                else "${base}USDT"  // It's crypto (BTC-USD → BTCUSDT)
+            }
+            else -> canonical
+        }
+
         val exchanges = when {
             canonical == "XAUUSD" || canonical == "XAGUSD" -> listOf("OANDA", "FX_IDC", "TVC")
-            canonical.length == 6 && canonical.all { it.isLetter() } -> listOf("OANDA", "FX_IDC")
-            else -> listOf(resolveExchange(canonical, null))
+            canonical.length == 6 && canonical.all { it.isLetter() } && !cryptoCanonical.endsWith("USDT") -> listOf("OANDA", "FX_IDC")
+            cryptoCanonical.endsWith("USDT") -> listOf("BINANCE")
+            else -> listOf(resolveExchange(cryptoCanonical, null))
         }
 
         for (ex in exchanges.distinct()) {
-            val ta = getTechnicalAnalysis(canonical, ex, "1m")
+            val tvSymbol = if (ex == "BINANCE") cryptoCanonical else canonical
+            val ta = getTechnicalAnalysis(tvSymbol, ex, "1m")
             val close = ta["close"]?.toDoubleOrNull()
             if (close != null && close > 0.0) {
                 val change = ta["change"]?.toDoubleOrNull() ?: 0.0
@@ -149,7 +166,7 @@ class TradingApiService(private val client: HttpClient) {
             return yahoo
         }
 
-        getSmcPriceFallback(canonical, requestedSymbol)?.let { return it }
+        getSmcPriceFallback(cryptoCanonical, requestedSymbol)?.let { return it }
         return yahoo
     }
 
@@ -460,20 +477,28 @@ class TradingApiService(private val client: HttpClient) {
     suspend fun getTechnicalAnalysis(symbol: String, exchange: String, interval: String = "1h"): Map<String, String> {
         return try {
             val fullSymbol = if (":" in symbol) symbol else "${exchange.uppercase()}:${symbol.uppercase()}"
+            // TradingView scanner เลือก timeframe ผ่าน suffix ท้ายชื่อคอลัมน์ เช่น RSI|15, close|240
+            // (plain = 1h) — ก่อนหน้านี้ param interval ไม่ได้ถูกใช้ ทำให้ alert ติดที่ TF 1h เสมอ
+            val tfSuffix = when (interval.lowercase()) {
+                "1m" -> "|1"; "3m" -> "|3"; "5m" -> "|5"; "15m" -> "|15"; "30m" -> "|30"; "45m" -> "|45"
+                "4h" -> "|240"; "1d" -> "|1D"; "1w" -> "|1W"
+                else -> ""
+            }
+            val requestCols = taColumns.map { it + tfSuffix }
             val url = "https://scanner.tradingview.com/symbol"
-            val resp = client.get(url) { parameter("symbol", fullSymbol); parameter("fields", taColumns.joinToString(",")); header("User-Agent", "Mozilla/5.0"); timeout { requestTimeoutMillis = 15_000 } }
+            val resp = client.get(url) { parameter("symbol", fullSymbol); parameter("fields", requestCols.joinToString(",")); header("User-Agent", "Mozilla/5.0"); timeout { requestTimeoutMillis = 15_000 } }
             if (!resp.status.isSuccess()) return mapOf("error" to "HTTP ${resp.status.value}")
             val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
             val res = mutableMapOf("symbol" to symbol.uppercase())
             taColumns.forEach { col ->
-                val v = root[col]
+                val v = root[col + tfSuffix]
                 res[col] = when {
                     v == null || v is JsonNull -> "N/A"
                     v.jsonPrimitive.isString -> v.jsonPrimitive.content
                     else -> v.jsonPrimitive.doubleOrNull?.let { "%.4f".format(it).trimEnd('0').trimEnd('.') } ?: v.jsonPrimitive.content
                 }
             }
-            val rec = root["Recommend.All"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+            val rec = root["Recommend.All$tfSuffix"]?.jsonPrimitive?.doubleOrNull ?: 0.0
             res["signal"] = when { rec >= 0.5 -> "STRONG BUY"; rec >= 0.1 -> "BUY"; rec >= -0.1 -> "HOLD"; rec >= -0.5 -> "SELL"; else -> "STRONG SELL" }
             res["recommend_score"] = "%.3f".format(rec)
             res
@@ -511,83 +536,216 @@ class TradingApiService(private val client: HttpClient) {
         )
     }
 
-    suspend fun getFinancialNews(symbol: String? = null, limit: Int = 10): Map<String, Any> {
+    suspend fun getFinancialNews(symbol: String? = null, limit: Int = 10): Map<String, Any> = coroutineScope {
         val all = mutableListOf<Map<String, String>>()
+
+        // 1) Symbol-specific: Google News RSS (ค้นตรงสินทรัพย์ฝั่ง server ฟรี ไม่ต้อง API key)
+        if (!symbol.isNullOrBlank()) {
+            val q = getAssetQuery(symbol).encodeURLParameter()
+            all.addAll(fetchFeed("Google News",
+                "https://news.google.com/rss/search?q=$q&hl=en-US&gl=US&ceid=US:en") { xml ->
+                parseRssItems(xml, "Google News", null)
+            })
+        }
+
+        // 2) General feeds หลายแหล่ง (กรอง keyword ถ้ามี symbol) — ดึงขนานกัน
         val feeds = mapOf(
             "Yahoo" to "https://finance.yahoo.com/news/rssindex",
-            "CoinDesk" to "https://www.coindesk.com/arc/outboundfeed/rss",
-            "MarketWatch" to "https://www.marketwatch.com/rss/marketupdate"
+            "CNBC" to "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+            "MarketWatch" to "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+            "Investing.com" to "https://www.investing.com/rss/news.rss",
+            "Cointelegraph" to "https://cointelegraph.com/rss"
         )
+        feeds.map { (src, url) ->
+            async { fetchFeed(src, url) { xml -> parseRssItems(xml, src, symbol) } }
+        }.forEach { all.addAll(it.await()) }
 
-        for ((src, url) in feeds) {
-            try {
-                val resp = client.get(url) { 
-                    header("User-Agent", "Mozilla/5.0")
-                    timeout { requestTimeoutMillis = 10_000 }
-                }
-                if (resp.status.isSuccess()) {
-                    all.addAll(parseRssItems(resp.bodyAsText(), src, symbol))
-                }
-            } catch (_: Exception) {}
-        }
-        
-        // กรองข่าวที่ซ้ำและเรียงลำดับใหม่
+        // กรองข่าวซ้ำและจำกัดจำนวน
         val uniqueNews = all.distinctBy { it["title"]?.lowercase() }
-        return mapOf("news" to uniqueNews.take(limit))
+        return@coroutineScope mapOf("news" to uniqueNews.take(limit))
+    }
+
+    /** ดึง RSS feed เดียวแบบปลอดภัย (timeout 10 วิ, ล้มเหลวคืน list ว่าง) */
+    private suspend fun fetchFeed(src: String, url: String, parse: (String) -> List<Map<String, String>>): List<Map<String, String>> {
+        return try {
+            val resp = client.get(url) {
+                header("User-Agent", "Mozilla/5.0")
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (resp.status.isSuccess()) parse(resp.bodyAsText()) else {
+                com.example.personalaibot.logDebug("TradingApi", "Feed $src failed: HTTP ${resp.status.value}")
+                emptyList()
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** สร้าง search query สำหรับ Google News ตามประเภทสินทรัพย์ */
+    private fun getAssetQuery(symbol: String): String {
+        val s = symbol.uppercase().trim()
+        return when {
+            s.contains("XAU") || s == "GOLD" -> "gold price OR XAUUSD OR bullion"
+            s.contains("XAG") || s == "SILVER" -> "silver price OR XAGUSD"
+            s in listOf("USOIL", "WTI", "CL=F") -> "crude oil price OR WTI"
+            s.contains("BTC") -> "bitcoin price OR BTC"
+            s.contains("ETH") -> "ethereum price"
+            s.endsWith("=F") -> "${s.removeSuffix("=F")} futures price"
+            s.endsWith("=X") -> "${s.removeSuffix("=X")} exchange rate"
+            s.length == 6 && s.all { it.isLetter() } -> "${s.take(3)}/${s.takeLast(3)} forex OR ${s.take(3)} exchange rate"
+            else -> "$s stock"
+        }
     }
 
     /**
-     * ดึงปฏิทินเศรษฐกิจ (Economic Calendar) จาก FXStreet JSON API
+     * ดึงปฏิทินเศรษฐกิจรายสัปดาห์จาก ForexFactory (ฟรี ไม่ต้องใช้ API Key)
+     * แหล่งเดิม FXStreet API ตายแล้ว (401) — เปลี่ยนมาใช้ ff_calendar_thisweek.xml
+     * เวลาใน feed เป็น ET (New York) — แปลงเป็นเวลาไทยให้พร้อมกัน
      */
     suspend fun getEconomicCalendar(limit: Int = 10): List<Map<String, String>> {
-        val now = Clock.System.now()
-        val zone = TimeZone.currentSystemDefault()
-        
-        val start = now.toLocalDateTime(zone).date
-        val end = now.plus(7, DateTimeUnit.DAY, zone).toLocalDateTime(zone).date
-        
-        val startDateStr = "${start}T00:00:00Z"
-        val endDateStr = "${end}T23:59:59Z"
-        
-        val url = "https://calendar-api.fxsstatic.com/en/api/v2/eventDates/$startDateStr/$endDateStr"
-        
         return try {
-            val resp = client.get(url) { 
-                parameter("volatilities", "HIGH")
-                parameter("volatilities", "MEDIUM")
-                parameter("volatilities", "LOW")
-                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-                timeout { requestTimeoutMillis = 20_000 }
+            val resp = client.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
             }
-            if (!resp.status.isSuccess()) return emptyList()
-            
-            val body = resp.bodyAsText()
-            val eventsJson = json.parseToJsonElement(body).jsonArray
-            
-            eventsJson.mapNotNull { node ->
-                val obj = node.jsonObject
-                val title = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                val country = obj["countryCode"]?.jsonPrimitive?.content ?: ""
-                val impact = obj["volatility"]?.jsonPrimitive?.content ?: "Low"
-                val dateStr = obj["dateUtc"]?.jsonPrimitive?.content ?: ""
-                
-                // ข้อมูลตัวเลข (ถ้ามี)
-                val actual = obj["actual"]?.jsonPrimitive?.contentOrNull ?: "-"
-                val consensus = obj["consensus"]?.jsonPrimitive?.contentOrNull ?: "-"
-                val previous = obj["previous"]?.jsonPrimitive?.contentOrNull ?: "-"
-                
-                mapOf(
-                    "title" to title,
-                    "country" to country,
-                    "impact" to impact,
-                    "date_time" to dateStr.replace("T", " ").replace("Z", ""),
-                    "actual" to actual,
-                    "forecast" to consensus,
-                    "previous" to previous,
-                    "impact_score" to when(impact.uppercase()) { "HIGH" -> "3"; "MEDIUM" -> "2"; else -> "1" }
+            if (!resp.status.isSuccess()) {
+                com.example.personalaibot.logDebug("TradingApi", "FF calendar failed: HTTP ${resp.status.value}")
+                return emptyList()
+            }
+            val xml = resp.bodyAsText()
+
+            val events: List<Map<String, String>> = Regex("<event>(.*?)</event>", RegexOption.DOT_MATCHES_ALL)
+                .findAll(xml).mapNotNull { block ->
+                    val c = block.groupValues[1]
+                    fun tag(name: String): String {
+                        val m = Regex(
+                            "<$name>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$name>",
+                            RegexOption.DOT_MATCHES_ALL
+                        ).find(c) ?: return ""
+                        return m.groupValues[1].trim()
+                    }
+                    val title = tag("title")
+                    if (title.isBlank()) return@mapNotNull null
+                    val impact = tag("impact")
+                    val date = tag("date"); val time = tag("time")
+                    mapOf(
+                        "title" to title,
+                        "country" to tag("country"),
+                        "impact" to impact,
+                        "date_time" to formatEventTimeThai(date, time),
+                        "date_sort" to eventSortKey(date, time),
+                        "actual" to "-",
+                        "forecast" to tag("forecast").ifBlank { "-" },
+                        "previous" to tag("previous").ifBlank { "-" },
+                        "impact_score" to when (impact.lowercase()) {
+                            "high" -> "3"; "medium" -> "2"; "low" -> "1"; else -> "0"
+                        }
+                    )
+                }
+                .sortedWith(
+                    compareByDescending<Map<String, String>> { it["impact_score"]?.toInt() ?: 0 }
+                        .thenBy { it["date_sort"] ?: "" }
                 )
-            }.sortedByDescending { it["impact_score"]?.toInt() ?: 0 }.take(limit)
-        } catch (_: Exception) { emptyList() }
+                .take(limit)
+                .toList()
+            events
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "FF calendar error: ${e.message}")
+            emptyList<Map<String, String>>()
+        }
+    }
+
+    /** แปลงเวลา ET (New York) ของ ForexFactory เป็นเวลาไทย — input: date "MM-dd-yyyy", time "h:mmam/pm" */
+    private fun formatEventTimeThai(date: String, time: String): String {
+        return try {
+            val dp = date.split("-")
+            if (dp.size != 3) return "$date $time".trim()
+            val iso = "${dp[2]}-${dp[0]}-${dp[1]}"
+            val t = time.lowercase().trim()
+            val m = Regex("(\\d+):(\\d+)(am|pm)").find(t)
+                ?: return "$iso ($time)"
+            var h = m.groupValues[1].toInt()
+            val min = m.groupValues[2]
+            if (m.groupValues[3] == "pm" && h != 12) h += 12
+            if (m.groupValues[3] == "am" && h == 12) h = 0
+            val ldt = LocalDateTime.parse("${iso}T${h.toString().padStart(2, '0')}:$min:00")
+            val instant = ldt.toInstant(TimeZone.of("America/New_York"))
+            val bkk = instant.toLocalDateTime(TimeZone.of("Asia/Bangkok"))
+            "${bkk.date} ${bkk.hour.toString().padStart(2, '0')}:${bkk.minute.toString().padStart(2, '0')} น. (ไทย) | $iso $time ET"
+        } catch (_: Exception) { "$date $time".trim() }
+    }
+
+    private fun eventSortKey(date: String, time: String): String {
+        return try {
+            val dp = date.split("-")
+            val iso = if (dp.size == 3) "${dp[2]}-${dp[0]}-${dp[1]}" else date
+            val t = time.lowercase().trim()
+            val m = Regex("(\\d+):(\\d+)(am|pm)").find(t)
+            if (m != null) {
+                var h = m.groupValues[1].toInt()
+                if (m.groupValues[3] == "pm" && h != 12) h += 12
+                if (m.groupValues[3] == "am" && h == 12) h = 0
+                "$iso ${h.toString().padStart(2, '0')}:${m.groupValues[2]}"
+            } else "$iso 99"
+        } catch (_: Exception) { date }
+    }
+
+    /**
+     * ดึงข้อมูลอนุกรมเวลาเศรษฐกิจสหรัฐฯ จาก FRED (Federal Reserve Economic Data)
+     * - ไม่มี API Key → ใช้ endpoint สาธารณะ fredgraph.csv (ฟรี ไม่ต้องสมัคร)
+     * - มี API Key → ใช้ FRED JSON API (api.stlouisfed.org)
+     * @return list of (date, value) เรียงจากเก่า→ใหม่ หรือ null ถ้าดึงไม่สำเร็จ
+     */
+    suspend fun getFredSeriesObservations(seriesId: String, apiKey: String? = null): List<Pair<String, Double>>? {
+        if (!apiKey.isNullOrBlank()) {
+            getFredViaJsonApi(seriesId, apiKey)?.let { return it }
+        }
+        return getFredViaCsv(seriesId)
+    }
+
+    private suspend fun getFredViaCsv(seriesId: String): List<Pair<String, Double>>? {
+        return try {
+            val resp = client.get("https://fred.stlouisfed.org/graph/fredgraph.csv") {
+                parameter("id", seriesId.uppercase())
+                // CDN ของ FRED กรอง User-Agent: browser UA ถูก stall, ไม่มี UA ถูกปฏิเสธ
+                // ผ่านเฉพาะ UA แบบ curl (ทดสอบแล้ว: curl/8.0 → 200 OK)
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                com.example.personalaibot.logDebug("TradingApi", "FRED CSV $seriesId failed: HTTP ${resp.status.value}")
+                return null
+            }
+            resp.bodyAsText().lines().drop(1).mapNotNull { line ->
+                val parts = line.split(",")
+                if (parts.size < 2) return@mapNotNull null
+                // FRED ใช้ "." แทนค่าที่ไม่มีข้อมูล
+                val v = parts[1].trim().toDoubleOrNull() ?: return@mapNotNull null
+                parts[0].trim() to v
+            }.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "FRED CSV $seriesId error: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun getFredViaJsonApi(seriesId: String, apiKey: String): List<Pair<String, Double>>? {
+        return try {
+            val resp = client.get("https://api.stlouisfed.org/fred/series/observations") {
+                parameter("series_id", seriesId.uppercase())
+                parameter("api_key", apiKey)
+                parameter("file_type", "json")
+                parameter("sort_order", "asc")
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            root["observations"]?.jsonArray?.mapNotNull { obs ->
+                val date = obs.jsonObject["date"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val v = obs.jsonObject["value"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    ?: return@mapNotNull null
+                date to v
+            }?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) { null }
     }
 
     /**
@@ -605,27 +763,47 @@ class TradingApiService(private val client: HttpClient) {
 
     private fun parseRssItems(xml: String, src: String, sym: String?): List<Map<String, String>> {
         val keywords = if (!sym.isNullOrBlank()) getAssetKeywords(sym) else emptyList()
-        
+
+        fun tag(content: String, name: String): String =
+            Regex("<$name>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$name>", RegexOption.DOT_MATCHES_ALL)
+                .find(content)?.groupValues?.get(1)?.trim() ?: ""
+
+        fun clean(html: String): String = html
+            // unescape ก่อน (Google News เข้ารหัส HTML ไว้) แล้วค่อย strip tag 2 รอบ
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ").trim()
+
         return Regex("<item>(.*?)</item>", RegexOption.DOT_MATCHES_ALL).findAll(xml).mapNotNull { block ->
             val content = block.groupValues[1]
-            val title = Regex("<title>(.*?)</title>").find(content)?.groupValues?.get(1) ?: return@mapNotNull null
-            val desc  = Regex("<description>(.*?)</description>").find(content)?.groupValues?.get(1) ?: ""
-            val link  = Regex("<link>(.*?)</link>").find(content)?.groupValues?.get(1) ?: ""
+            var title = clean(tag(content, "title"))
+            if (title.isBlank()) return@mapNotNull null
+            val desc = clean(tag(content, "description"))
+            val link = tag(content, "link")
 
-            // กรองด้วย Keyword
+            // Google News ต่อท้าย title ด้วย " - SourceName" → แยกเป็น source จริง
+            var source = src
+            if (src == "Google News" && title.contains(" - ")) {
+                val idx = title.lastIndexOf(" - ")
+                source = title.substring(idx + 3)
+                title = title.substring(0, idx)
+            }
+
+            // กรองด้วย keyword เฉพาะ general feeds เมื่อมี symbol (Google News ค้นฝั่ง server แล้ว)
             if (keywords.isNotEmpty()) {
                 val fullText = (title + desc).lowercase()
-                // If it's a specific stock like NVDA, we might need to be more lenient or the RSS feeds we use (Yahoo, CoinDesk, MarketWatch general)
-                // might not have news for this specific ticker in their main feed.
-                // We'll still filter, but ensure we don't return an empty list just because the ticker isn't explicitly mentioned in the general feed if it's a stock.
                 if (keywords.none { fullText.contains(it) }) return@mapNotNull null
             }
 
+            // Google News ใส่ description = "title + source" ซ้ำกัน → ลบทิ้งถ้าไม่มีเนื้อหาเพิ่ม
+            val cleanDesc = if (desc.isBlank() || desc.removeSuffix(source).trim() == title) "" else desc
+
             mapOf(
                 "title" to title,
-                "description" to desc.take(200) + "...",
+                "description" to (cleanDesc.take(200) + if (cleanDesc.length > 200) "..." else ""),
                 "link" to link,
-                "source" to src
+                "source" to source
             )
         }.toList()
     }
@@ -643,4 +821,99 @@ class TradingApiService(private val client: HttpClient) {
 
     private fun exchangeToMarket(ex: String) = if (ex.uppercase() in listOf("NASDAQ", "NYSE")) "america" else if (ex.uppercase() in listOf("SET", "MAI")) "thailand" else "crypto"
     private fun mapInterval(i: String) = i.uppercase()
+
+    // ─── Fear & Greed Index (alternative.me — ฟรี ไม่ต้องใช้ API Key) ────────
+
+    /**
+     * ดึง Crypto Fear & Greed Index ตัวจริงจาก alternative.me
+     * คืน map: value (0-100), classification, trend (ค่าย้อนหลัง N วัน "newest,…,oldest")
+     */
+    suspend fun getFearGreedIndex(limit: Int = 7): Map<String, String> {
+        return try {
+            val resp = client.get("https://api.alternative.me/fng/?limit=$limit&format=json") {
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                return mapOf("error" to "HTTP ${resp.status.value}")
+            }
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val data = root["data"]?.jsonArray ?: return mapOf("error" to "no data")
+            if (data.isEmpty()) return mapOf("error" to "no data")
+            val latest = data[0].jsonObject
+            val trend = data.mapNotNull { it.jsonObject["value"]?.jsonPrimitive?.contentOrNull }
+                .joinToString(",")
+            mapOf(
+                "value" to (latest["value"]?.jsonPrimitive?.contentOrNull ?: "0"),
+                "classification" to (latest["value_classification"]?.jsonPrimitive?.contentOrNull ?: "Unknown"),
+                "trend" to trend
+            )
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "FearGreed error: ${e.message}")
+            mapOf("error" to (e.message ?: "unknown"))
+        }
+    }
+
+    // ─── CoinGecko (ฟรี ไม่ต้องใช้ API Key) ──────────────────────────────────
+
+    /**
+     * ภาพรวมตลาดคริปโตจาก CoinGecko /global — market cap รวม, BTC/ETH dominance,
+     * volume 24h, % เปลี่ยนแปลง market cap, จำนวนเหรียญ/ตลาดที่ active
+     */
+    suspend fun getCryptoGlobal(): Map<String, String> {
+        return try {
+            val resp = client.get("https://api.coingecko.com/api/v3/global") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 12_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                return mapOf("error" to "HTTP ${resp.status.value}")
+            }
+            val data = json.parseToJsonElement(resp.bodyAsText())
+                .jsonObject["data"]?.jsonObject ?: return mapOf("error" to "no data")
+            fun num(path: JsonObject?, key: String) =
+                path?.get(key)?.jsonPrimitive?.contentOrNull ?: "-"
+            val totalMcap = data["total_market_cap"]?.jsonObject
+            val totalVol  = data["total_volume"]?.jsonObject
+            val dom       = data["market_cap_percentage"]?.jsonObject
+            mapOf(
+                "total_market_cap_usd" to num(totalMcap, "usd"),
+                "total_volume_24h_usd" to num(totalVol, "usd"),
+                "btc_dominance" to num(dom, "btc"),
+                "eth_dominance" to num(dom, "eth"),
+                "market_cap_change_24h" to num(data, "market_cap_change_percentage_24h_usd"),
+                "active_cryptocurrencies" to num(data, "active_cryptocurrencies"),
+                "markets" to num(data, "markets")
+            )
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "CoinGecko global error: ${e.message}")
+            mapOf("error" to (e.message ?: "unknown"))
+        }
+    }
+
+    /**
+     * เหรียญที่กำลัง trending บน CoinGecko (24h ที่คนค้นหามากสุด)
+     * คืน list ของ map: name, symbol, market_cap_rank, price_btc
+     */
+    suspend fun getCryptoTrending(): List<Map<String, String>> {
+        return try {
+            val resp = client.get("https://api.coingecko.com/api/v3/search/trending") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 12_000 }
+            }
+            if (!resp.status.isSuccess()) return emptyList()
+            val coins = json.parseToJsonElement(resp.bodyAsText())
+                .jsonObject["coins"]?.jsonArray ?: return emptyList()
+            coins.mapNotNull { c ->
+                val item = c.jsonObject["item"]?.jsonObject ?: return@mapNotNull null
+                mapOf(
+                    "name" to (item["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null),
+                    "symbol" to (item["symbol"]?.jsonPrimitive?.contentOrNull ?: ""),
+                    "market_cap_rank" to (item["market_cap_rank"]?.jsonPrimitive?.contentOrNull ?: "-")
+                )
+            }
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "CoinGecko trending error: ${e.message}")
+            emptyList()
+        }
+    }
 }

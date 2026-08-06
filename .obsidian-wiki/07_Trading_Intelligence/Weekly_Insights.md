@@ -13126,3 +13126,16 @@ AI Lesson generation failed.
 
 ---
 
+# 🧠 Weekly Insights (23/5/2569)
+
+## 📊 Performance Summary
+| Symbol | Wins | Losses | Net Profit |
+| :--- | :---: | :---: | :---: |
+| XAUUSD | 68 | 47 | $-135.00 |
+| XBTUSD | 4 | 6 | $-11.86 |
+
+## 🧠 AI Observations
+AI Lesson generation failed.
+
+---
+

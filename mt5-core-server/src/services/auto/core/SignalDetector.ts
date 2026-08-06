@@ -12,10 +12,12 @@
  * 2026-05-06 — skyliner.jojo@gmail.com
  */
 
-import type { SmcSnapshot, OrderBlock, FVG, LiquidityZone, PriceMap, PriceWall } from '../analyzers/smc/types.js';
+import type { SmcSnapshot, OrderBlock, FVG, LiquidityZone, PriceMap, PriceWall, Candle } from '../analyzers/smc/types.js';
 import { analyzePath } from '../analyzers/smc/priceMapBuilder.js';
+import { getActiveFVGs } from '../analyzers/smc/fvgDetection.js';
 import type { AnalysisSummary, StrategyType, Bias } from '../types.js';
 import { applyIndicatorConfluence } from './IndicatorConfluence.js';
+import { zoneIsFavorableForSide } from './ZoneAwareGate.js';
 
 export interface EntrySignal {
   symbol: string;
@@ -50,6 +52,11 @@ export interface SignalDetectorConfig {
   enableStructureBreak: boolean;
   enableFvgFill: boolean;
   enableSweepToFvg: boolean;
+  enableWallBreakScalp: boolean;
+  magnetMinWallStars: number;
+  magnetWallMaxAtrMul: number;
+  magnetTargetRrr: number;
+  wallBreakTargetRrr: number;
 }
 
 const DEFAULT_CONFIG: SignalDetectorConfig = {
@@ -62,6 +69,11 @@ const DEFAULT_CONFIG: SignalDetectorConfig = {
   enableStructureBreak: true,
   enableFvgFill: true,
   enableSweepToFvg: true,
+  enableWallBreakScalp: true,
+  magnetMinWallStars: 3,
+  magnetWallMaxAtrMul: 0.35,
+  magnetTargetRrr: 1.35,
+  wallBreakTargetRrr: 1.25,
 };
 
 /**
@@ -112,11 +124,18 @@ export function detectEntrySignals(
 
   // 5. Sweep to FVG Magnet Entry (V24.2 - Human Scalp Logic)
   if (cfg.enableSweepToFvg) {
-    const magnetSignals = detectSweepToFvg(symbol, lastPrice, smc, htfBias, cfg);
+    const magnetSignals = detectSweepToFvg(symbol, lastPrice, analyses, priceMap, cfg);
     signals.push(...magnetSignals);
   }
 
-  // 6. RSI Divergence Entry (V24.1.5)
+  // 6. Wall Break Scalp (V26.14): no M15 FVG required, but M1+M5 must
+  // both confirm the break and both execution TFs must be in the right PD zone.
+  if (cfg.enableWallBreakScalp) {
+    const wallBreakSignals = detectWallBreakScalp(symbol, lastPrice, analyses, priceMap, cfg);
+    signals.push(...wallBreakSignals);
+  }
+
+  // 7. RSI Divergence Entry (V24.1.5)
   const entryTfAnalysis = analyses['M5'] ?? analyses['M15'] ?? analyses['H1'];
   const tfCandles = entryTfAnalysis?.candles || [];
   const divSignals = detectRsiDivergence(symbol, lastPrice, tfCandles, smc, priceMap);
@@ -132,6 +151,10 @@ export function detectEntrySignals(
   // ใช้ analysis ของ entry TF (M5 → M15 → H1 fallback) เป็น indicator source
   const filtered: EntrySignal[] = [];
   for (const signal of passedBasic) {
+    if (signal.strategy === 'SMC_FVG_MAGNET_SCALP' || signal.strategy === 'SMC_WALL_BREAK_SCALP') {
+      filtered.push(signal);
+      continue;
+    }
     const adjusted = applyIndicatorConfluence(signal, entryTfAnalysis);
     if (adjusted !== null) filtered.push(adjusted);
   }
@@ -259,7 +282,7 @@ function detectLiquiditySweep(
       sl: round(sl), tp: round(tp),
       confidence: Math.min(85, 55 + smc.mtfSweeps.bullScore * 10),
       confluenceStars: stars,
-      strategy: 'SMC_FVG_SCALP',
+      strategy: 'SCALPING',
       triggers: [`MTF_SWEEP bull (${smc.mtfSweeps.bullScore} TFs)`, `Sweep reclaim`],
       riskRewardRatio: round(rrr),
       pathAnalysis,
@@ -286,7 +309,7 @@ function detectLiquiditySweep(
       sl: round(sl), tp: round(tp),
       confidence: Math.min(85, 55 + smc.mtfSweeps.bearScore * 10),
       confluenceStars: stars,
-      strategy: 'SMC_FVG_SCALP',
+      strategy: 'SCALPING',
       triggers: [`MTF_SWEEP bear (${smc.mtfSweeps.bearScore} TFs)`, `Sweep reclaim`],
       riskRewardRatio: round(rrr),
       pathAnalysis,
@@ -453,54 +476,69 @@ function detectFvgFill(
 function detectSweepToFvg(
   symbol: string,
   lastPrice: number,
-  smc: SmcSnapshot,
-  htfBias: { bullCount: number; bearCount: number; dominant: Bias },
+  analyses: Record<string, AnalysisSummary>,
+  priceMap: PriceMap | undefined,
   cfg: SignalDetectorConfig
 ): EntrySignal[] {
   const signals: EntrySignal[] = [];
+  if (!priceMap) return signals;
 
-  // BUY: If recent bull sweep (swept support) -> target nearest unmitigated bear FVG above
-  if (smc.mtfSweeps.bullScore >= 1 && htfBias.dominant !== 'BEAR') {
-    const targetFvg = smc.activeFVGs
-      .filter(f => f.type === 'BEAR' && !f.mitigated && f.bottom > lastPrice)
-      .sort((a, b) => a.bottom - b.bottom)[0];
-      
-    if (targetFvg) {
-      const tp = targetFvg.bottom; // TP exactly at the start of the FVG
-      const sl = Math.min(...smc.swingLows.slice(-2), lastPrice * 0.998); // SL below recent swing low
-      const rrr = Math.abs(tp - lastPrice) / Math.abs(lastPrice - sl);
-      
+  const m15Candles = analyses['M15']?.candles ?? [];
+  const m15Fvgs = m15Candles.length >= 20 ? getActiveFVGs(m15Candles as Candle[]) : [];
+  const confirmTf = analyses['M1']?.candles?.length ? 'M1' : 'M5';
+  const confirmCandles = analyses[confirmTf]?.candles;
+  if (!confirmCandles || confirmCandles.length < 4) return signals;
+
+  const buyWall = findMagnetWall('BUY', lastPrice, priceMap, cfg);
+  if (buyWall) {
+    const targetFvg = findMagnetTargetFvg('BUY', lastPrice, buyWall.wall, m15Fvgs);
+    const breakConfirm = targetFvg ? detectWallReclaimBreak('BUY', buyWall.wall, confirmCandles, priceMap.atr, confirmTf) : null;
+    if (targetFvg && breakConfirm?.ok) {
+      const tp = targetFvg.bottom;
+      const reward = Math.abs(tp - lastPrice);
+      const sl = lastPrice - reward / cfg.magnetTargetRrr;
+      const rrr = reward / Math.abs(lastPrice - sl);
+
       signals.push({
         symbol, side: 'BUY', entry: lastPrice,
         sl: round(sl), tp: round(tp),
-        confidence: Math.min(85, 75 + smc.mtfSweeps.bullScore * 5),
-        confluenceStars: 3,
+        confidence: Math.min(88, 58 + buyWall.wall.confluenceStars * 6 + Math.min(10, reward / Math.max(priceMap.atr, 0.0001) * 3)),
+        confluenceStars: Math.min(5, buyWall.wall.confluenceStars),
         strategy: 'SMC_FVG_MAGNET_SCALP',
-        triggers: [`LIQ_SWEEP_BULL`, `Magnet target FVG at ${round(tp)}`],
-        riskRewardRatio: round(rrr)
+        triggers: [
+          `WALL_RECLAIM_BUY ${buyWall.wall.confluenceStars}star @ ${round(buyWall.wall.price)}`,
+          `M15_BEAR_FVG_MAGNET ${round(targetFvg.bottom)}-${round(targetFvg.top)}`,
+          breakConfirm.note,
+        ],
+        riskRewardRatio: round(rrr),
+        pathAnalysis: buildMagnetPathAnalysis(lastPrice, 'UP', tp, priceMap),
       });
     }
   }
 
-  // SELL: If recent bear sweep (swept resistance) -> target nearest unmitigated bull FVG below
-  if (smc.mtfSweeps.bearScore >= 1 && htfBias.dominant !== 'BULL') {
-    const targetFvg = smc.activeFVGs
-      .filter(f => f.type === 'BULL' && !f.mitigated && f.top < lastPrice)
-      .sort((a, b) => b.top - a.top)[0];
-      
-    if (targetFvg) {
-      const tp = targetFvg.top; // TP exactly at the start of the FVG
-      const sl = Math.max(...smc.swingHighs.slice(-2), lastPrice * 1.002); // SL above recent swing high
-      const rrr = Math.abs(lastPrice - tp) / Math.abs(sl - lastPrice);
-      
+  const sellWall = findMagnetWall('SELL', lastPrice, priceMap, cfg);
+  if (sellWall) {
+    const targetFvg = findMagnetTargetFvg('SELL', lastPrice, sellWall.wall, m15Fvgs);
+    const breakConfirm = targetFvg ? detectWallReclaimBreak('SELL', sellWall.wall, confirmCandles, priceMap.atr, confirmTf) : null;
+    if (targetFvg && breakConfirm?.ok) {
+      const tp = targetFvg.top;
+      const reward = Math.abs(lastPrice - tp);
+      const sl = lastPrice + reward / cfg.magnetTargetRrr;
+      const rrr = reward / Math.abs(sl - lastPrice);
+
       signals.push({
         symbol, side: 'SELL', entry: lastPrice,
         sl: round(sl), tp: round(tp),
-        confidence: Math.min(85, 75 + smc.mtfSweeps.bearScore * 5),
-        confluenceStars: 3,
+        confidence: Math.min(88, 58 + sellWall.wall.confluenceStars * 6 + Math.min(10, reward / Math.max(priceMap.atr, 0.0001) * 3)),
+        confluenceStars: Math.min(5, sellWall.wall.confluenceStars),
         strategy: 'SMC_FVG_MAGNET_SCALP',
-        triggers: [`LIQ_SWEEP_BEAR`, `Magnet target FVG at ${round(tp)}`],
-        riskRewardRatio: round(rrr)
+        triggers: [
+          `WALL_RECLAIM_SELL ${sellWall.wall.confluenceStars}star @ ${round(sellWall.wall.price)}`,
+          `M15_BULL_FVG_MAGNET ${round(targetFvg.bottom)}-${round(targetFvg.top)}`,
+          breakConfirm.note,
+        ],
+        riskRewardRatio: round(rrr),
+        pathAnalysis: buildMagnetPathAnalysis(lastPrice, 'DOWN', tp, priceMap),
       });
     }
   }
@@ -509,6 +547,251 @@ function detectSweepToFvg(
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+function detectWallBreakScalp(
+  symbol: string,
+  lastPrice: number,
+  analyses: Record<string, AnalysisSummary>,
+  priceMap: PriceMap | undefined,
+  cfg: SignalDetectorConfig,
+): EntrySignal[] {
+  const signals: EntrySignal[] = [];
+  if (!priceMap) return signals;
+
+  const m1Candles = analyses['M1']?.candles as Candle[] | undefined;
+  const m5Candles = analyses['M5']?.candles as Candle[] | undefined;
+  if (!m1Candles || !m5Candles || m1Candles.length < 6 || m5Candles.length < 6) {
+    return signals;
+  }
+
+  const m1Zone = classifyExecutionPdZone(m1Candles, lastPrice);
+  const m5Zone = classifyExecutionPdZone(m5Candles, lastPrice);
+
+  const buyWall = findMagnetWall('BUY', lastPrice, priceMap, cfg);
+  if (
+    buyWall &&
+    (m1Zone.zone === 'DISCOUNT' || m1Zone.zone === 'EQ') &&
+    (m5Zone.zone === 'DISCOUNT' || m5Zone.zone === 'EQ')
+  ) {
+    const m1Break = detectWallReclaimBreak('BUY', buyWall.wall, m1Candles, priceMap.atr, 'M1');
+    const m5Break = detectWallReclaimBreak('BUY', buyWall.wall, m5Candles, priceMap.atr, 'M5');
+    if (m1Break.ok && m5Break.ok) {
+      const signal = buildWallBreakScalpSignal({
+        symbol,
+        side: 'BUY',
+        lastPrice,
+        wall: buyWall.wall,
+        priceMap,
+        cfg,
+        breakNotes: [m1Break.note, m5Break.note],
+        zoneNotes: [`M1_${m1Zone.zone}_${round(m1Zone.pct)}%`, `M5_${m5Zone.zone}_${round(m5Zone.pct)}%`],
+      });
+      if (signal) signals.push(signal);
+    }
+  }
+
+  const sellWall = findMagnetWall('SELL', lastPrice, priceMap, cfg);
+  if (
+    sellWall &&
+    (m1Zone.zone === 'PREMIUM' || m1Zone.zone === 'EQ') &&
+    (m5Zone.zone === 'PREMIUM' || m5Zone.zone === 'EQ')
+  ) {
+    const m1Break = detectWallReclaimBreak('SELL', sellWall.wall, m1Candles, priceMap.atr, 'M1');
+    const m5Break = detectWallReclaimBreak('SELL', sellWall.wall, m5Candles, priceMap.atr, 'M5');
+    if (m1Break.ok && m5Break.ok) {
+      const signal = buildWallBreakScalpSignal({
+        symbol,
+        side: 'SELL',
+        lastPrice,
+        wall: sellWall.wall,
+        priceMap,
+        cfg,
+        breakNotes: [m1Break.note, m5Break.note],
+        zoneNotes: [`M1_${m1Zone.zone}_${round(m1Zone.pct)}%`, `M5_${m5Zone.zone}_${round(m5Zone.pct)}%`],
+      });
+      if (signal) signals.push(signal);
+    }
+  }
+
+  return signals;
+}
+
+function classifyExecutionPdZone(candles: Candle[], price: number): {
+  zone: 'PREMIUM' | 'EQ' | 'DISCOUNT';
+  pct: number;
+} {
+  const lookback = candles.slice(-80);
+  const highs = lookback.map((c) => Number(c.h ?? c.c)).filter(Number.isFinite);
+  const lows = lookback.map((c) => Number(c.l ?? c.c)).filter(Number.isFinite);
+  const high = Math.max(...highs);
+  const low = Math.min(...lows);
+  if (!Number.isFinite(high) || !Number.isFinite(low) || high <= low) {
+    return { zone: 'EQ', pct: 50 };
+  }
+  const pct = ((price - low) / (high - low)) * 100;
+  if (pct > 62) return { zone: 'PREMIUM', pct };
+  if (pct < 38) return { zone: 'DISCOUNT', pct };
+  return { zone: 'EQ', pct };
+}
+
+function buildWallBreakScalpSignal(args: {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  lastPrice: number;
+  wall: PriceWall;
+  priceMap: PriceMap;
+  cfg: SignalDetectorConfig;
+  breakNotes: string[];
+  zoneNotes: string[];
+}): EntrySignal | null {
+  const direction = args.side === 'BUY' ? 'UP' : 'DOWN';
+  const path = analyzePath(args.priceMap, args.lastPrice, direction);
+  const rawTp = path.suggestedTP;
+  const reward = args.side === 'BUY'
+    ? rawTp - args.lastPrice
+    : args.lastPrice - rawTp;
+  if (!Number.isFinite(reward) || reward <= Math.max(args.priceMap.atr * 0.05, Math.abs(args.lastPrice) * 0.00005)) {
+    return null;
+  }
+
+  const risk = reward / args.cfg.wallBreakTargetRrr;
+  const sl = args.side === 'BUY'
+    ? args.lastPrice - risk
+    : args.lastPrice + risk;
+  const rrr = reward / Math.abs(args.lastPrice - sl);
+
+  return {
+    symbol: args.symbol,
+    side: args.side,
+    entry: args.lastPrice,
+    sl: round(sl),
+    tp: round(rawTp),
+    confidence: Math.min(86, 56 + args.wall.confluenceStars * 5 + Math.min(10, path.clearPathProbability / 12)),
+    confluenceStars: Math.min(5, args.wall.confluenceStars),
+    strategy: 'SMC_WALL_BREAK_SCALP',
+    triggers: [
+      `WALL_BREAK_${args.side} ${args.wall.confluenceStars}star @ ${round(args.wall.price)}`,
+      ...args.breakNotes,
+      ...args.zoneNotes,
+      `TP_PATH_${direction} ${round(rawTp)}`,
+    ],
+    riskRewardRatio: round(rrr),
+    pathAnalysis: buildMagnetPathAnalysis(args.lastPrice, direction, rawTp, args.priceMap),
+  };
+}
+
+function findMagnetWall(
+  side: 'BUY' | 'SELL',
+  lastPrice: number,
+  priceMap: PriceMap,
+  cfg: SignalDetectorConfig,
+): { wall: PriceWall; distance: number } | null {
+  const candidates = side === 'BUY' ? priceMap.supportWalls : priceMap.resistanceWalls;
+  const maxDistance = Math.max(
+    priceMap.atr * cfg.magnetWallMaxAtrMul,
+    Math.abs(lastPrice) * 0.00015,
+  );
+
+  const valid = candidates
+    .filter((wall) => wall.confluenceStars >= cfg.magnetMinWallStars)
+    .map((wall) => ({ wall, distance: Math.abs(lastPrice - wall.price) }))
+    .filter((item) => {
+      const wallRange = Math.abs(item.wall.priceTop - item.wall.priceBottom);
+      return item.distance <= Math.max(maxDistance, wallRange * 0.6);
+    })
+    .sort((a, b) =>
+      b.wall.confluenceStars - a.wall.confluenceStars ||
+      a.distance - b.distance
+    );
+
+  return valid[0] ?? null;
+}
+
+function findMagnetTargetFvg(
+  side: 'BUY' | 'SELL',
+  lastPrice: number,
+  wall: PriceWall,
+  fvgs: FVG[],
+): FVG | null {
+  const targetSide = side === 'BUY' ? 'BEAR' : 'BULL';
+  const boundary = side === 'BUY'
+    ? Math.max(lastPrice, wall.price)
+    : Math.min(lastPrice, wall.price);
+
+  const candidates = fvgs
+    .filter((fvg) => fvg.type === targetSide && !fvg.mitigated)
+    .filter((fvg) => side === 'BUY' ? fvg.bottom > boundary : fvg.top < boundary)
+    .sort((a, b) =>
+      (a.age ?? Number.MAX_SAFE_INTEGER) - (b.age ?? Number.MAX_SAFE_INTEGER) ||
+      Math.abs((side === 'BUY' ? a.bottom : a.top) - lastPrice) -
+        Math.abs((side === 'BUY' ? b.bottom : b.top) - lastPrice)
+    );
+
+  return candidates[0] ?? null;
+}
+
+function detectWallReclaimBreak(
+  side: 'BUY' | 'SELL',
+  wall: PriceWall,
+  candles: any[],
+  atr: number,
+  timeframe: string,
+): { ok: boolean; note: string } {
+  const recent = candles.slice(-6);
+  const last = recent[recent.length - 1];
+  const prev = recent[recent.length - 2] ?? last;
+  const prior = recent.slice(0, -1);
+  const wallRange = Math.abs(wall.priceTop - wall.priceBottom);
+  const tolerance = Math.max(atr * 0.05, Math.abs(wall.price) * 0.00005, wallRange * 0.25);
+
+  const priorHigh = Math.max(...prior.map((c: any) => Number(c.h ?? c.c ?? 0)));
+  const priorLow = Math.min(...prior.map((c: any) => Number(c.l ?? c.c ?? 0)));
+  const recentLow = Math.min(...recent.map((c: any) => Number(c.l ?? c.c ?? 0)));
+  const recentHigh = Math.max(...recent.map((c: any) => Number(c.h ?? c.c ?? 0)));
+  const lastOpen = Number(last.o ?? last.c);
+  const lastClose = Number(last.c);
+  const lastLow = Number(last.l ?? last.c);
+  const lastHigh = Number(last.h ?? last.c);
+  const prevClose = Number(prev.c);
+
+  if (side === 'BUY') {
+    const touchedWall = recentLow <= wall.price + tolerance;
+    const reclaimedWall = lastClose >= wall.price && (prevClose <= wall.price + tolerance || lastLow <= wall.price + tolerance);
+    const brokeMicroHigh = lastClose > priorHigh + tolerance * 0.1;
+    const bullishBody = lastClose > lastOpen || lastClose > Number(prev.h ?? prevClose);
+    return {
+      ok: touchedWall && bullishBody && (reclaimedWall || brokeMicroHigh),
+      note: `${timeframe}_BREAK_BUY wall=${round(wall.price)} reclaim=${reclaimedWall} breakHigh=${brokeMicroHigh}`,
+    };
+  }
+
+  const touchedWall = recentHigh >= wall.price - tolerance;
+  const reclaimedWall = lastClose <= wall.price && (prevClose >= wall.price - tolerance || lastHigh >= wall.price - tolerance);
+  const brokeMicroLow = lastClose < priorLow - tolerance * 0.1;
+  const bearishBody = lastClose < lastOpen || lastClose < Number(prev.l ?? prevClose);
+  return {
+    ok: touchedWall && bearishBody && (reclaimedWall || brokeMicroLow),
+    note: `${timeframe}_BREAK_SELL wall=${round(wall.price)} reclaim=${reclaimedWall} breakLow=${brokeMicroLow}`,
+  };
+}
+
+function buildMagnetPathAnalysis(
+  entry: number,
+  direction: 'UP' | 'DOWN',
+  tp: number,
+  priceMap: PriceMap,
+): EntrySignal['pathAnalysis'] {
+  const path = analyzePath(priceMap, entry, direction, tp);
+  return {
+    clearPathProbability: path.clearPathProbability,
+    obstacleCount: path.obstacles.length,
+    biggestObstaclePrice: path.biggestObstacle?.wall.price,
+    biggestObstacleStars: path.biggestObstacle?.wall.confluenceStars,
+    conservativeTP: path.conservativeTP,
+    aggressiveTP: path.aggressiveTP,
+    note: path.note,
+  };
+}
 
 function computeHtfBias(analyses: Record<string, AnalysisSummary>): {
   bullCount: number; bearCount: number; dominant: Bias;

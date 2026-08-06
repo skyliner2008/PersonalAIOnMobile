@@ -68,13 +68,15 @@ export function inferAnalysis(candles: ReturnType<typeof parseCandles>): Analysi
     strategy = 'BREAKOUT';
     fitness = clamp(48 + confluence * 0.42, 0, 100);
   } else if (regime === 'RANGING' && dominantBias !== 'NEUTRAL') {
-    // If it's a tight bounce or low timeframe, it's SCALPING, otherwise RANGE/MEAN_REVERSION
+    // If it's a tight bounce or low timeframe, it's SCALPING, otherwise MEAN_REVERSION
+    // V26.15: RANGE strategy disabled (0% WR, -$10.88) — all ranging conditions
+    // now route to MEAN_REVERSION with proper TP cap, or SCALPING for tight ranges.
     if (rsi <= 32 || rsi >= 68) {
         strategy = 'MEAN_REVERSION';
     } else if (widthPct < 0.6) {
         strategy = 'SCALPING'; // Tight consolidation bounce
     } else {
-        strategy = 'RANGE';
+        strategy = 'MEAN_REVERSION'; // Was RANGE — disabled V26.15
     }
     fitness = clamp(38 + confluence * 0.4 + (strategy === 'SCALPING' ? 10 : 0), 0, 100);
   } else if (regime === 'QUIET') {

@@ -1,0 +1,184 @@
+2026-08-03 01:13:52.566 31556-31587 LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-08-03 01:13:57.063 31556-31614 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): ข่าวที่มีผลต่อทองคำมีอะไรบ้าง
+2026-08-03 01:13:57.076 31556-31587 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_news({symbol=XAUUSD})
+2026-08-03 01:13:57.077 31556-31588 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_macro_calendar({})
+2026-08-03 01:14:03.465 31556-31614 TradingTool             com.example.personalaibot            D  No news for Gold, falling back to Global Macro
+2026-08-03 01:14:09.767 31556-31614 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_news → 🗞️ **News Technical Analysis - GOLD**
+                                                                                                    ----------------------------------------
+                                                                                                    1. **Why Sprouts Farmers Market Stock Surged This Week** (Yahoo)
+                                                                                                       > ...
+                                                                                                    2. **Dow Jones Futures Due As Trump Shifts On Iran; SpaceX, AMD, Sandisk, Eli Lilly Earnings Loom** (Yahoo)
+                                                                                                       > ...
+                                                                                                    3. **Shoppers made 158 million chargeback disputes in 2025 as 'friendly fraud' surged 29% — and businesses pay the price** (Yahoo)
+                                                                                                       > ...
+                                                                                                    4. **Tesla Rival BYD Ramping Up Sales On Overseas Demand, Flash Charging** (Yahoo)
+                                                                                                       > ...
+                                                                                                    5. **US retirees blow nearly $1 of every $3 on a single expense — here's what it costs you each year** (Yahoo)
+                                                                                                       > ...
+                                                                                                    
+                                                                                                    🧠 **JARVIS Intelligence Summary**
+                                                                                                    รับทราบครับเจ้านาย จากการวิเคราะห์ข่าวสารการเงินที่เจ้านายจัดเตรียมมาให้ ขออนุญาตสรุปผลการวิเคราะห์สำหรับตลาดทองคำ (Gold) ตามโครงสร้างระดับมืออาชีพ ดังนี้ครับ:
+                                                                                                    
+                                                                                                    ### 1. Sentiment Bias Score
+                                                                                                    * **Score:** **0 / 10 (Neutral)**
+                                                                                                    * **เหตุผล:** พาดหัวข่าวส่วนใหญ่เน้นไปที่หุ้นรายตัว (Sprouts, BYD, Tesla), ข่าวผลประกอบการบริษัทเทคโนโลยีและสุขภาพ (SpaceX, AMD, Eli Lilly), สถานการณ์ภูมิรัฐศาสตร์ (Trump และอิหร่าน - ซึ่งอาจมีผลบ้างแต่ยังไม่มีรายละเอียดตัวเลขที่ชัดเจน), รวมถึงปัญหาเศรษฐกิจภายในของสหรัฐฯ (การใช้จ่ายของคนเกษียณและปัญหา Friendly Fraud) ข่าวเหล่านี้ยังไม่มีน้ำหนักเพียงพอที่จะสร้างทิศทางราคา (Directional Bias) ที่ชัดเจนให้กับทองคำในทันที
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 2. Key Risks & Opportunities
+                                                                                                    * **Opportunities (โอกาส):** 
+                                                                                                      * ความตึงเครียดด้านภูมิรัฐศาสตร์ระหว่างสหรัฐฯ และอิหร่านที่อาจกลับมาร้อนแรงขึ้น (ตามข่าว Trump Shifts On Iran) ถือเป็นปัจจัยหนุนสถานะสินทรัพย์ปลอดภัย (Safe-Haven Asset) ของทองคำ หากสถานการณ์ทวีความรุนแรง
+                                                                                                    * **Risks (ความเสี่ยง):** 
+                                                                                                      * ตลาดกำลังให้ความสนใจกับผลประกอบการของหุ้นกลุ่มเทคโนโลยีขนาดใหญ่และมหภาคอื่นๆ ซึ่งอาจดึงดูดเม็ดเงินลงทุน (Liquidity) ออกจากตลาดสินค้าโภคภัณฑ์ชั่วคราว
+                                                                                                      * ความผันผวนจากตัวเลขเศรษฐกิจสหรัฐฯ อาจทำให้ค่าเงินดอลลาร์ (USD) และอัตราผลตอบแทนพันธบัตร (US Bond Yield) แกว่งตัว กดดันราคาทองคำในระยะสั้น
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 3. Recommendation
+                                                                                                    * **คำแนะนำ:** **For Tracking (รอติดตามและเฝ้าระวัง)**
+2026-08-03 01:14:09.767 31556-31614 LiveGemini              com.example.personalaibot            D  * **การปฏิบัติการ:** ยังไม่จำเป็นต้องเข้าทำรายการในทันที (No Immediate Action) เนื่องจากข่าวสารยังไม่มีแรงขับเคลื่อนที่ทรงพลังพอ แนะนำให้เปิดเครื่องมือติดตามสถานการณ์ความตึงเครียดด้านภูมิรัฐศาสตร์ และรอสัญญาณ Confluence จากกราฟเทคนิค (SMC/Multi-Timeframe) อีกครั้งครับเจ้านาย
+                                                                                                    
+                                                                                                    หากเจ้านายต้องการให้ผมเจาะลึกกราฟทองคำทางเทคนิคเพิ่มเติม โปรดออกคำสั่งได้เลยครับ
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 2-4 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 5-8 ประโยค ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-03 01:14:16.196 31556-31610 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_macro_calendar → 📅 **Economic Calendar สัปดาห์นี้ (ForexFactory — Real-time, เวลาไทย)**
+                                                                                                    ----------------------------------------
+                                                                                                    🔴 **ISM Manufacturing PMI** (USD)
+                                                                                                       | Impact: High | Time: 2026-08-04 01:00 น. (ไทย) | 2026-08-03 2:00pm ET
+                                                                                                       | Actual: - | Forecast: 54.0 | Prev: 53.3
+                                                                                                    🔴 **Employment Change q/q** (NZD)
+                                                                                                       | Impact: High | Time: 2026-08-05 09:45 น. (ไทย) | 2026-08-04 10:45pm ET
+                                                                                                       | Actual: - | Forecast: 0.1% | Prev: 0.2%
+                                                                                                    🔴 **Unemployment Rate** (NZD)
+                                                                                                       | Impact: High | Time: 2026-08-05 09:45 น. (ไทย) | 2026-08-04 10:45pm ET
+                                                                                                       | Actual: - | Forecast: 5.4% | Prev: 5.3%
+                                                                                                    🔴 **Employment Change** (CAD)
+                                                                                                       | Impact: High | Time: 2026-08-07 23:30 น. (ไทย) | 2026-08-07 12:30pm ET
+                                                                                                       | Actual: - | Forecast: 15.0K | Prev: 18.2K
+                                                                                                    🔴 **Unemployment Rate** (CAD)
+                                                                                                       | Impact: High | Time: 2026-08-07 23:30 น. (ไทย) | 2026-08-07 12:30pm ET
+                                                                                                       | Actual: - | Forecast: 6.5% | Prev: 6.5%
+                                                                                                    🔴 **Average Hourly Earnings m/m** (USD)
+                                                                                                       | Impact: High | Time: 2026-08-07 23:30 น. (ไทย) | 2026-08-07 12:30pm ET
+                                                                                                       | Actual: - | Forecast: 0.3% | Prev: 0.3%
+                                                                                                    🔴 **Non-Farm Employment Change** (USD)
+                                                                                                       | Impact: High | Time: 2026-08-07 23:30 น. (ไทย) | 2026-08-07 12:30pm ET
+                                                                                                       | Actual: - | Forecast: 88K | Prev: 57K
+                                                                                                    🔴 **Unemployment Rate** (USD)
+                                                                                                       | Impact: High | Time: 2026-08-07 23:30 น. (ไทย) | 2026-08-07 12:30pm ET
+                                                                                                       | Actual: - | Forecast: 4.2% | Prev: 4.2%
+                                                                                                    🟠 **OPEC-JMMC Meetings** (All)
+                                                                                                       | Impact: Medium | Time: 2026-08-02 20:15 น. (ไทย) | 2026-08-02 9:15am ET
+                                                                                                       | Actual: - | Forecast: - | Prev: -
+                                                                                                    🟠 **CPI m/m** (CHF)
+                                                                                                       | Impact: Medium | Time: 2026-08-03 17:30 น. (ไทย) | 2026-08-03 6:30am ET
+                                                                                                       | Actual: - | Forecast: -0.1% | Prev: 0.0%
+                                                                                                    
+                                                                                                    🔦 **AI Strategic Preview**
+                                                                                                    รับทราบครับเจ้านาย ในฐานะนักเศรษฐศาสตร์มหภาคและผู้ช่วยส่วนตัวระดับสูงของท่าน ผมได้คัดกรองและวิเคราะห์เหตุการณ์เศรษฐกิจมหภาคระดับความสำคัญสูง (Red / High Impact Events) จากรายการที่ท่านมอบหมาย เพื่อประเมินผลกระทบต่อค่าเงินดอลลาร์สหรัฐ (USD) และราคาทองคำ (Gold) ครับ
+                                                                                                    
+                                                                                                    เนื่องจากข้อมูลตัวเลขจริง (Actual) ยังไม่ประกาศ (สถานะเป็น -) ผมจึงวิเคราะห์โดยอิงจากความคาดหมายของตลาด (Consensus) และแนวโน้มเชิงมหภาคดังตารางและรายละเอียดด้านล่างนี้ครับ
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 📊 ตารางวิเคราะห์เหตุการณ์มหภาคสำคัญ (High Impact Economic Events)
+                                                                                                    
+                                                                                                    | วันที่/เวลา (ไทย) | สกุลเงิน | เหตุการณ์สำคัญ (Event) | ตัวเลขคาดการณ์ (Consensus) | ตัวเลขเดิม (Previous) | ผลกระทบคาดการณ์ต่อ USD | ผลกระทบคาดการณ์ต่อ Gold |
+                                                                                                    | :--- | :---: | :--- | :---: | :---: | :--- | :--- |
+                                                                                                    | **04 ส.ค. 01:00 น.** | **USD** | ISM Manufacturing PMI | **54.0** | 53.3 | **Bullish** (หากออกมาสูงกว่าคาด) | **Bearish** (หากออกมาสูงกว่าคาด) |
+                                                                                                    | **05 ส.ค. 09:45 น.** | **NZD** | Employment Change q/q | **0.1%** | 0.2% | - (Neutral ต่อ USD) | - (Neutral ต่อ USD) |
+2026-08-03 01:14:16.197 31556-31610 LiveGemini              com.example.personalaibot            D  | **05 ส.ค. 09:45 น.** | **NZD** | Unemployment Rate | **5.4%** | 5.3% | - (Neutral ต่อ USD) | - (Neutral ต่อ USD) |
+                                                                                                    | **07 ส.ค. 23:30 น.** | **CAD** | Employment Change | **15.0K** | 18.2K | - (ทางอ้อมผ่าน USD/CAD) | - |
+                                                                                                    | **07 ส.ค. 23:30 น.** | **CAD** | Unemployment Rate | **6.5%** | 6.5% | - (ทางอ้อมผ่าน USD/CAD) | - |
+                                                                                                    | **07 ส.ค. 23:30 น.** | **USD** | Average Hourly Earnings m/m | **0.3%** | 0.3% | **Bullish** (หากเติบโตสูง) | **Bearish** (หากเติบโตสูง) |
+                                                                                                    | **07 ส.ค. 23:30 น.** | **USD** | Non-Farm Employment Change (NFP) | **88K** | 57K | **Bullish** (หากสูงกว่า 88K) | **Bearish** (หากสูงกว่า 88K) |
+                                                                                                    | **07 ส.ค. 23:30 น.** | **USD** | Unemployment Rate | **4.2%** | 4.2% | **Bullish** (หากต่ำกว่าคาด) | **Bearish** (หากต่ำกว่าคาด) |
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 🔍 เจาะลึกเหตุการณ์วิกฤตที่ต้องเฝ้าระวังเป็นพิเศษ (Critical Events)
+                                                                                                    
+                                                                                                    #### 1. สหรัฐอเมริกา: ISM Manufacturing PMI (4 ส.ค. 2026 เวลา 01:00 น.)
+                                                                                                    *   **Consensus:** 54.0 | **Previous:** 53.3
+                                                                                                    *   **Macro Analysis:** ตัวเลขคาดการณ์ปรับตัวสูงขึ้นจากเดือนก่อน สะท้อนมุมมองว่าภาคการผลิตของสหรัฐฯ กำลังขยายตัวแข็งแกร่งขึ้น
+                                                                                                    *   **Impact on USD & Gold:** 
+                                                                                                        *   หากตัวเลข **Actual > 54.0**: จะเป็นผลบวกต่อ USD (Bullish) เนื่องจากสะท้อนเศรษฐกิจที่ยังคงร้อนแรง ทำให้ Fed มีความจำเป็นต้องคงอัตราดอกเบี้ยสูงไว้นานขึ้น ส่งผลกดดันราคาทองคำ (Bearish)
+                                                                                                        *   หากตัวเลข **Actual < 53.3**: จะสะท้อนการชะลอตัวของภาคการผลิต ส่งผลให้ USD อ่อนค่าลง และทองคำพุ่งขึ้นทันที
+                                                                                                    
+                                                                                                    #### 2. สหรัฐอเมริกา: ชุดข้อมูลการจ้างงานสหรัฐฯ (NFP, Unemployment Rate, AHE) (7 ส.ค. 2026 เวลา 23:30 น.)
+                                                                                                    *   **Consensus:** NFP **88K** (เพิ่มขึ้นจาก 57K), Unemployment Rate **4.2%** (ทรงตัว), Average Hourly Earnings m/m **0.3%**
+                                                                                                    *   **Macro Analysis:** นี่คือ Super-Data ของสัปดาห์ การที่ตลาดคาดการณ์ NFP ปรับตัวขึ้นมาอยู่ที่ 88K บ่งชี้ว่าตลาดแรงงานยังคงมีความยืดหยุ่น แม้จะอยู่ในภาวะดอกเบี้ยสูง
+                                                                                                    *   **Impact on USD & Gold:**
+                                                                                                        *   **กรณีข้อมูลออกมาแข็งแกร่งกว่าคาด (NFP สูงกว่า 88K และรายได้เฉลี่ยต่อชั่วโมงสูงกว่า 0.3%):** ตลาดจะตีความว่าเศรษฐกิจสหรัฐฯ ปลอดภัยจากภาวะถดถอย (No-Landing) แต่กดดันโอกาสการลดดอกเบี้ยของ Fed ส่งผลให้ **USD พุ่งขึ้นอย่างรุนแรง** และ **Gold ร่วงลงหลุดแนวรับสำคัญ**
+2026-08-03 01:14:16.197 31556-31610 LiveGemini              com.example.personalaibot            D      *   **กรณีข้อมูลออกมาอ่อนแอกว่าคาด (NFP ต่ำกว่าคาด หรืออัตราการว่างงานพุ่ง):** ตลาดจะคาดการณ์การผ่อนקיคลายโยกย้ายนโยบายการเงินของ Fed ทันที ส่งผลให้ **USD ร่วงหล่น** และ **Gold ทะยานขึ้นอย่างรุนแรง**
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ### 🛡️ คำแนะนำเชิงกลยุทธ์สำหรับเจ้านาย (Jarvis Trading Protocol)
+                                                                                                    1. **Risk Management:** ช่วงวันที่ 7 ส.ค. 23:30 น. (รายงาน NFP) สภาพคล่องจะเบาบางก่อนประกาศ และความผันผวนจะรุนแรงมากหลังประกาศ ผมแนะนำให้เจ้านาย **ลด Position Sizing หรือปิดสถานะที่เปิดค้างไว้ก่อนเวลาประกาศข่าว** เพื่อป้องกัน Slippage
+                                                                                                    2. **Confluence Monitoring:** หากเจ้านายต้องการเทรดคู่เงิน Major หรือทองคำในช่วงวันดังกล่าว ให้รอสัญญาณ SMC (Smart Money Concepts) ควบคู่กับผลลัพธ์ Actual ที่เทียบกับ Consensus เสมอ 
+                                                                                                    
+                                                                                                    หากเจ้านายต้องการให้ผมตั้งระบบแจ้งเตือน (Alert) ล่วงหน้าก่อนข่าวสำคัญเหล่านี้จะประกาศ โปรดสั่งการได้เลยครับ เจ้านาย!
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 2-4 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 5-8 ประโยค ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-03 01:14:16.879 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ข่าวที่ส่งผล
+2026-08-03 01:14:17.388 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต่อทองคำ
+2026-08-03 01:14:17.466 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีหลาย
+2026-08-03 01:14:17.493 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อย่าง
+2026-08-03 01:14:17.579 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลยครับ
+2026-08-03 01:14:17.795 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-03 01:14:17.926 31556-31611 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตลาดยัง
+2026-08-03 01:14:18.067 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดูไม่มี
+2026-08-03 01:14:18.189 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทิศทาง
+2026-08-03 01:14:18.293 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ชัดเจน
+2026-08-03 01:14:18.368 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-08-03 01:14:18.497 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปัจจัย
+2026-08-03 01:14:18.634 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หลักคือ
+2026-08-03 01:14:18.767 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ความตึงเครียด
+2026-08-03 01:14:18.975 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ด้านภูมิรัฐศาสตร์
+2026-08-03 01:14:19.396 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระหว่าง
+2026-08-03 01:14:19.447 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สหรัฐฯ
+2026-08-03 01:14:19.567 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กับอิหร่าน
+2026-08-03 01:14:19.702 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่อาจ
+2026-08-03 01:14:19.818 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หนุน
+2026-08-03 01:14:19.886 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ราคาทอง
+2026-08-03 01:14:20.009 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นสินทรัพย์
+2026-08-03 01:14:20.179 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปลอดภัย
+2026-08-03 01:14:20.437 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่ก็
+2026-08-03 01:14:20.531 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องระวัง
+2026-08-03 01:14:20.735 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เรื่องผลประกอบการ
+2026-08-03 01:14:20.976 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ของบริษัท
+2026-08-03 01:14:21.054 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ใหญ่ๆ
+2026-08-03 01:14:21.147 31556-31588 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ด้วย
+2026-08-03 01:14:21.297 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพราะอาจ
+2026-08-03 01:14:21.380 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดึงดูด
+2026-08-03 01:14:21.466 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เงินลงทุน
+2026-08-03 01:14:21.589 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไปจาก
+2026-08-03 01:14:21.698 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-08-03 01:14:21.842 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ชั่วคราว
+2026-08-03 01:14:21.938 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-08-03 01:14:22.069 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สรุป
+2026-08-03 01:14:22.216 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  คือ
+2026-08-03 01:14:22.337 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-03 01:14:22.419 31556-31588 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังเป็น
+2026-08-03 01:14:22.580 31556-31588 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ช่วงเฝ้าติดตาม
+2026-08-03 01:14:22.676 31556-31588 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สถานการณ์
+2026-08-03 01:14:22.923 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังไม่
+2026-08-03 01:14:23.062 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ควรรีบ
+2026-08-03 01:14:23.126 31556-31614 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เข้าทำ
+2026-08-03 01:14:23.277 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  รายการ
+2026-08-03 01:14:23.336 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หนักๆ
+2026-08-03 01:14:23.414 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ครับ
+2026-08-03 01:14:23.511 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เจ้านาย
+2026-08-03 01:14:23.710 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องการ
+2026-08-03 01:14:23.753 31556-31609 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ช่วย
+2026-08-03 01:14:23.872 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตั้งเตือน
+2026-08-03 01:14:23.997 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัวเลข
+2026-08-03 01:14:24.059 31556-31588 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เศรษฐกิจ
+2026-08-03 01:14:24.148 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สำคัญ
+2026-08-03 01:14:24.253 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อะไรเป็น
+2026-08-03 01:14:24.349 31556-31587 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  พิเศษ
+2026-08-03 01:14:24.467 31556-31607 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมครับ
+2026-08-03 01:14:44.883 31556-31612 LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 1342562 bytes). Persisting to DB.

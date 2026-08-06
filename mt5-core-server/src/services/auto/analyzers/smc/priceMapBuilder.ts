@@ -36,6 +36,10 @@ export interface PriceMapConfig {
   maxDistanceAtrPct: number;
   /** แรง blockProbability ของกำแพงที่มี stars เท่าไร ถึงจะหยุด path (default: 3) */
   blockThresholdStars: number;
+  /** เปิดใช้งานการระงับแนวราคาประชิดฝั่งเดียวกัน (default: true) */
+  enableProximitySuppression: boolean;
+  /** % ของ ATR ขั้นต่ำสำหรับการเว้นระยะระหว่างกำแพงฝั่งเดียวกัน (default: 0.75) */
+  minWallSpacingAtrPct: number;
 }
 
 const DEFAULT_CFG: PriceMapConfig = {
@@ -44,6 +48,8 @@ const DEFAULT_CFG: PriceMapConfig = {
   minDistanceAtrPct: 0.05,
   maxDistanceAtrPct: 10,
   blockThresholdStars: 3,
+  enableProximitySuppression: true,
+  minWallSpacingAtrPct: 0.75,
 };
 
 // ── Raw Level (internal) ─────────────────────────────────────────────
@@ -56,6 +62,26 @@ interface RawLevel {
   source: WallSource;
 }
 
+function isContextSource(source: WallSource): boolean {
+  return source.type === 'PIVOT' || source.type === 'VWAP' || source.type === 'FIB';
+}
+
+function isOrderBlockSource(source: WallSource): boolean {
+  return source.type === 'OB_BULL' || source.type === 'OB_BEAR';
+}
+
+function isFreshOrderBlockSource(source: WallSource): boolean {
+  return isOrderBlockSource(source) && source.mitigated !== true;
+}
+
+function isFvgSource(source: WallSource): boolean {
+  return source.type === 'FVG_BULL' || source.type === 'FVG_BEAR';
+}
+
+function hasFvgEvidence(source: WallSource): boolean {
+  return isFvgSource(source) || (isFreshOrderBlockSource(source) && source.hasFVG === true);
+}
+
 /** V24.2.0 — Context level (Pivot/VWAP/Fib) ที่ caller ส่งเข้ามา feed wall */
 export interface ExtraContextLevel {
   price: number;
@@ -65,6 +91,69 @@ export interface ExtraContextLevel {
   weight: number;       // 1-3
   /** TF ของ context (default 'D1' สำหรับ pivot, 'SESSION' สำหรับ vwap, 'SWING' สำหรับ fib) */
   timeframe?: string;
+}
+
+// V26.31 — Proximity Suppression (Non-Maximum Suppression)
+/**
+ * ยุบแนวรับ/แนวต้านระยะประชิดฝั่งเดียวกัน ที่อยู่ในรัศมีต่ำกว่า atr * minWallSpacingAtrPct
+ * โดยเลือกเก็บบรรดากำแพงที่แข็งแกร่งที่สุดไว้และระงับตัวที่อ่อนแอกว่าออกไป
+ */
+function suppressProximityWalls(
+  walls: PriceWall[],
+  atr: number,
+  cfg: PriceMapConfig
+): PriceWall[] {
+  if (!cfg.enableProximitySuppression || walls.length === 0) {
+    return walls;
+  }
+
+  const spacingLimit = atr * cfg.minWallSpacingAtrPct;
+
+  // จัดเรียงตามความแข็งแกร่งเป็นหลัก (Stars -> Timeframes -> Sources)
+  const sorted = [...walls].sort((a, b) => {
+    if (b.confluenceStars !== a.confluenceStars) {
+      return b.confluenceStars - a.confluenceStars;
+    }
+    if (b.timeframes.length !== a.timeframes.length) {
+      return b.timeframes.length - a.timeframes.length;
+    }
+    if (b.sources.length !== a.sources.length) {
+      return b.sources.length - a.sources.length;
+    }
+    return 0;
+  });
+
+  const suppressed = new Set<number>();
+  const kept: PriceWall[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    if (suppressed.has(i)) continue;
+
+    const current = sorted[i];
+    kept.push(current);
+
+    for (let j = i + 1; j < sorted.length; j++) {
+      if (suppressed.has(j)) continue;
+
+      const other = sorted[j];
+
+      // ยุบระงับเฉพาะแนวราคาฝั่งการทำงานเดียวกัน (RESISTANCE กับ RESISTANCE, SUPPORT กับ SUPPORT)
+      // หรือหากฝ่ายใดฝ่ายหนึ่งเป็น BOTH สามารถพิจารณายุบร่วมด้วย
+      const isSameSide =
+        current.side === 'BOTH' ||
+        other.side === 'BOTH' ||
+        current.side === other.side;
+
+      if (isSameSide) {
+        const dist = Math.abs(current.price - other.price);
+        if (dist < spacingLimit) {
+          suppressed.add(j);
+        }
+      }
+    }
+  }
+
+  return kept;
 }
 
 // ── Main Builder ─────────────────────────────────────────────────────
@@ -87,7 +176,6 @@ export function buildPriceMap(
   const cfg = { ...DEFAULT_CFG, ...config };
   const atr = primaryAtr > 0 ? primaryAtr : currentPrice * 0.001;
   const clusterRange = atr * cfg.clusterAtrPct;
-  const minDist = atr * cfg.minDistanceAtrPct;
   const maxDist = atr * cfg.maxDistanceAtrPct;
 
   const sourceTimeframes = Array.from(snapshots.keys()).sort();
@@ -96,13 +184,13 @@ export function buildPriceMap(
   const rawLevels: RawLevel[] = [];
 
   for (const [tf, snap] of snapshots) {
-    extractLevels(tf, snap, currentPrice, minDist, maxDist, rawLevels);
+    extractLevels(tf, snap, currentPrice, maxDist, rawLevels);
   }
 
   // ── Step 1b (V24.2.0): inject context levels (Pivot/VWAP/Fib) ──────
   for (const ctx of extraLevels) {
     const dist = Math.abs(ctx.price - currentPrice);
-    if (dist < minDist || dist > maxDist) continue;
+    if (dist > maxDist) continue;
     const tf = ctx.timeframe ?? (ctx.type === 'PIVOT' ? 'D1' : ctx.type === 'VWAP' ? 'SESSION' : 'SWING');
     rawLevels.push({
       price: ctx.price,
@@ -124,22 +212,26 @@ export function buildPriceMap(
   const clusters = clusterLevels(rawLevels, clusterRange);
 
   // ── Step 3: Score + build PriceWall ────────────────────────────────
-  const walls: PriceWall[] = clusters.map(cluster =>
+  const rawWalls: PriceWall[] = clusters.map(cluster =>
     buildWall(cluster, currentPrice, atr)
   );
 
+  // ── Step 3.5: Proximity Suppression Filter (V26.31) ────────────────
+  const walls = suppressProximityWalls(rawWalls, atr, cfg);
+
   // ── Step 4: Split + sort ────────────────────────────────────────────
+  const dividerTolerance = Math.max(atr * cfg.minDistanceAtrPct, Math.abs(currentPrice) * 0.00001);
   const resistanceWalls = walls
-    .filter(w => w.price > currentPrice && (w.side === 'RESISTANCE' || w.side === 'BOTH'))
-    .sort((a, b) => a.price - b.price)   // ใกล้สุดก่อน (บนลงล่าง)
+    .filter(w => w.price >= currentPrice - dividerTolerance && (w.side === 'RESISTANCE' || w.side === 'BOTH'))
+    .sort((a, b) => a.price - b.price)
     .slice(0, cfg.maxWallsPerSide);
 
   const supportWalls = walls
-    .filter(w => w.price < currentPrice && (w.side === 'SUPPORT' || w.side === 'BOTH'))
-    .sort((a, b) => b.price - a.price)   // ใกล้สุดก่อน (ล่างขึ้นบน)
+    .filter(w => w.price <= currentPrice + dividerTolerance && (w.side === 'SUPPORT' || w.side === 'BOTH'))
+    .sort((a, b) => b.price - a.price)
     .slice(0, cfg.maxWallsPerSide);
 
-  const allWalls = [...resistanceWalls, ...supportWalls]
+  const allWalls = [...walls]
     .sort((a, b) => b.price - a.price);  // เรียงจากบนลงล่าง
 
   return {
@@ -188,12 +280,18 @@ export function analyzePath(
   const mediumWalls = wallsInPath.filter(w => w.confluenceStars >= 2 && w.confluenceStars < 4);
   const strongWalls = wallsInPath.filter(w => w.confluenceStars >= 4);
 
+  /*
   // Conservative TP: ก่อนกำแพง 2★+ แรก
+  */
+  // Conservative TP: first >=2-star wall in the path.
   const firstMediumWall = direction === 'UP'
     ? mediumWalls.sort((a, b) => a.price - b.price)[0]
     : mediumWalls.sort((a, b) => b.price - a.price)[0];
 
+  /*
   // Suggested TP: ก่อนกำแพงที่มีดาว >= minStars แรก
+  */
+  // Suggested TP: first wall matching the requested minimum stars.
   const firstStrongWall = direction === 'UP'
     ? wallsInPath.filter(w => w.confluenceStars >= minStars).sort((a, b) => a.price - b.price)[0]
     : wallsInPath.filter(w => w.confluenceStars >= minStars).sort((a, b) => b.price - a.price)[0];
@@ -262,13 +360,12 @@ function extractLevels(
   tf: string,
   snap: SmcSnapshot,
   currentPrice: number,
-  minDist: number,
   maxDist: number,
   out: RawLevel[]
 ): void {
   const push = (level: RawLevel) => {
     const dist = Math.abs(level.price - currentPrice);
-    if (dist >= minDist && dist <= maxDist) {
+    if (dist <= maxDist) {
       out.push(level);
     }
   };
@@ -384,23 +481,75 @@ function clusterLevels(
 ): RawLevel[][] {
   if (rawLevels.length === 0) return [];
 
-  // เรียงตามราคา
   const sorted = [...rawLevels].sort((a, b) => a.price - b.price);
   const clusters: RawLevel[][] = [];
-  let current: RawLevel[] = [sorted[0]];
 
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
-    if (Math.abs(curr.price - prev.price) <= clusterRange) {
-      current.push(curr);
+  for (const level of sorted) {
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < clusters.length; i++) {
+      const anchor = clusterAnchorPrice(clusters[i]);
+      const distance = Math.abs(level.price - anchor);
+      if (distance <= clusterRange && distance < bestDistance) {
+        bestIndex = i;
+        bestDistance = distance;
+      }
+    }
+
+    if (bestIndex >= 0) {
+      clusters[bestIndex].push(level);
     } else {
-      clusters.push(current);
-      current = [curr];
+      clusters.push([level]);
     }
   }
-  clusters.push(current);
+
   return clusters;
+}
+
+function clusterAnchorPrice(cluster: RawLevel[]): number {
+  const hasStructural = cluster.some(l => !isContextSource(l.source));
+  const anchorLevels = hasStructural ? cluster.filter(l => !isContextSource(l.source)) : cluster;
+  return weightedLevelPrice(anchorLevels);
+}
+
+function weightedLevelPrice(levels: RawLevel[]): number {
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const level of levels) {
+    const weight = levelAnchorWeight(level);
+    weighted += level.price * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted / totalWeight : levels[0]?.price ?? 0;
+}
+
+function levelAnchorWeight(level: RawLevel): number {
+  const tfWeight = timeframeAnchorWeight(level.source.timeframe);
+  if (isContextSource(level.source)) {
+    return Math.max(0.5, tfWeight * Math.max(1, level.source.weight ?? 1) * 0.25);
+  }
+  const typeBonus =
+    level.source.type === 'STRUCTURE_HIGH' || level.source.type === 'STRUCTURE_LOW' ? 1.25 :
+    isFreshOrderBlockSource(level.source) ? 1.15 :
+    1;
+  return tfWeight * typeBonus;
+}
+
+function timeframeAnchorWeight(timeframe: string): number {
+  switch (timeframe) {
+    case 'M1': return 1;
+    case 'M5': return 1.5;
+    case 'M15': return 2.5;
+    case 'M30':
+    case 'M45': return 3.5;
+    case 'H1': return 5;
+    case 'H4': return 8;
+    case 'D1': return 6;
+    case 'SWING': return 4;
+    case 'SESSION': return 1;
+    default: return 1;
+  }
 }
 
 // ── Build Wall from Cluster ───────────────────────────────────────────
@@ -410,14 +559,20 @@ function buildWall(
   currentPrice: number,
   atr: number
 ): PriceWall {
-  // ราคากลาง = median
-  const prices = cluster.map(l => l.price).sort((a, b) => a - b);
-  const price = prices[Math.floor(prices.length / 2)];
-  const priceTop = Math.max(...cluster.map(l => l.priceTop));
-  const priceBottom = Math.min(...cluster.map(l => l.priceBottom));
+  // Anchor on structural/SMC levels when present. Dynamic context layers
+  // (Pivot/VWAP/Fib) should add confluence, not drag the wall price or zone
+  // width every time they drift inside the same ATR cluster.
+  const anchorCluster = cluster.some(l => !isContextSource(l.source))
+    ? cluster.filter(l => !isContextSource(l.source))
+    : cluster;
+  const price = weightedLevelPrice(anchorCluster);
+  const priceTop = Math.max(...anchorCluster.map(l => l.priceTop));
+  const priceBottom = Math.min(...anchorCluster.map(l => l.priceBottom));
 
   // รวม sources
   const sources = cluster.map(l => l.source);
+  const hasStructuralSource = sources.some(s => !isContextSource(s));
+  const structuralSources = hasStructuralSource ? sources.filter(s => !isContextSource(s)) : sources;
 
   // TF ที่ appear (unique + sorted)
   // V24.2.0: เพิ่ม D1/SESSION/SWING สำหรับ Pivot/VWAP/Fib
@@ -432,19 +587,18 @@ function buildWall(
   // 1★ base: มี level อย่างน้อย 1 อัน
   stars += 1;
 
-  // +1 per additional TF (สูงสุด +3)
-  const additionalTfBonus = Math.min(3, timeframes.length - 1);
+  // +1 per additional structural TF (สูงสุด +3). Context layers add confidence,
+  // but they must not make a context-only area look like a true MTF wall.
+  const scoringTfSet = new Set(structuralSources.map(s => s.timeframe));
+  const additionalTfBonus = hasStructuralSource ? Math.min(3, Math.max(0, scoringTfSet.size - 1)) : 0;
   stars += additionalTfBonus;
 
   // +1 ถ้ามี OB
-  const hasOB = sources.some(s => s.type === 'OB_BULL' || s.type === 'OB_BEAR');
+  const hasOB = sources.some(isFreshOrderBlockSource);
   if (hasOB) stars += 1;
 
   // +1 ถ้ามี OB + FVG confirm
-  const hasFVG = sources.some(s =>
-    s.type === 'FVG_BULL' || s.type === 'FVG_BEAR' ||
-    (s.hasFVG === true)
-  );
+  const hasFVG = sources.some(hasFvgEvidence);
   if (hasFVG && hasOB) stars += 1;
 
   // +1 ถ้ามี Structure level (แทนของ Pine Script: premium/discount alignment)
@@ -457,15 +611,31 @@ function buildWall(
     (s.type === 'PIVOT' || s.type === 'VWAP' || s.type === 'FIB') &&
     (s.weight ?? 0) >= 3
   );
-  if (hasHighWeightContext) stars += 1;
+  if (hasStructuralSource && sources.some(s => isContextSource(s))) stars += 1;
+  if (hasStructuralSource && hasHighWeightContext) stars += 1;
 
   // cap 5★
   stars = Math.min(5, stars);
+  if (!hasStructuralSource) {
+    stars = Math.min(2, stars);
+  } else {
+    // Institutional Wall Cap: สะกดดาวสูงสุดไม่เกิน 3★ หากไม่มีกรอบเวลาขนาดใหญ่ (HTF) อยู่ด้วยเลย
+    const hasHTF = sources.some(s =>
+      s.timeframe === 'H1' ||
+      s.timeframe === 'H4' ||
+      s.timeframe === 'D1' ||
+      s.timeframe === 'SWING'
+    );
+    if (!hasHTF) {
+      stars = Math.min(3, stars);
+    }
+  }
 
   // ── Side ─────────────────────────────────────────────────────────
 
-  const resistanceCount = cluster.filter(l => l.side === 'RESISTANCE').length;
-  const supportCount = cluster.filter(l => l.side === 'SUPPORT').length;
+  const sideAnchorCluster = hasStructuralSource ? anchorCluster : cluster;
+  const resistanceCount = sideAnchorCluster.filter(l => l.side === 'RESISTANCE').length;
+  const supportCount = sideAnchorCluster.filter(l => l.side === 'SUPPORT').length;
   let side: 'RESISTANCE' | 'SUPPORT' | 'BOTH' = 'BOTH';
   if (resistanceCount > supportCount * 1.5) side = 'RESISTANCE';
   else if (supportCount > resistanceCount * 1.5) side = 'SUPPORT';
@@ -592,12 +762,19 @@ export function buildPriceMapFromRecord(
  */
 export function formatPriceMap(map: PriceMap): string {
   const lines: string[] = [];
+  const resistanceDisplay = map.walls
+    .filter(w => w.price > map.currentPrice)
+    .sort((a, b) => b.price - a.price);
+  const supportDisplay = map.walls
+    .filter(w => w.price <= map.currentPrice)
+    .sort((a, b) => b.price - a.price);
+
   lines.push(`── RESISTANCE ────────────────────`);
-  for (const w of [...map.resistanceWalls].reverse()) {
+  for (const w of resistanceDisplay) {
     lines.push(`  ${w.label}`);
   }
   lines.push(`── PRICE: ${map.currentPrice} ──────────────`);
-  for (const w of map.supportWalls) {
+  for (const w of supportDisplay) {
     lines.push(`  ${w.label}`);
   }
   lines.push(`── SUPPORT ────────────────────────`);

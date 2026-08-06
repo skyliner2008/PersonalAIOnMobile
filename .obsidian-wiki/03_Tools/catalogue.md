@@ -105,12 +105,18 @@
 - `voice_get_profiles` - ดูรายการเสียงที่รองรับ
 - `voice_set_profile` - เปลี่ยน voice profile
 
+## 7. Strategy Library Tools (Quantpedia knowledge base — offline)
+- `strategy_list` - ดูหมวด/รายชื่อกลยุทธ์ 60 แบบ (9 หมวด: Momentum, Value, Volatility, Seasonality, Reversal, Pairs, Macro, Carry, Crypto)
+- `strategy_search` - ค้นหากลยุทธ์จาก keyword (ชื่อ/หมวด/คำอธิบาย)
+- `strategy_explain` - ดูคำอธิบาย + โค้ด QuantConnect (Lean) เต็มของกลยุทธ์ — reference เท่านั้น ไม่ได้รันบนเครื่อง
+
 ## แนวทางการเลือกใช้ Tool
 - ใช้กลุ่ม `trading_*` เมื่อต้องการ market analysis จากแหล่งข้อมูลภายนอกหรือ layer วิเคราะห์
 - ใช้กลุ่ม `trading_mt5_*` เมื่อต้องการข้อมูลหรือ action ที่ผูกกับบัญชี broker จริง
 - ใช้กลุ่ม `trading_smc_*` เมื่อต้องการโฟกัส Smart Money Concepts โดยเฉพาะ
 - ใช้กลุ่ม `file_*` สำหรับงานเอกสาร ไฟล์ และ OCR
 - ใช้กลุ่ม `vision_*` และ `camera_*` เมื่อต้องการข้อมูลจากภาพหรือกล้อง
+- ใช้กลุ่ม `strategy_*` เมื่อต้องการความรู้กลยุทธ์เชิงวิชาการ (อธิบาย/เปรียบเทียบ/ปรับใช้) จากคลัง Quantpedia ในเครื่อง
 
 ## ข้อสังเกตสำคัญ
 - เอกสารเวอร์ชันเก่าหลายแห่งยังระบุจำนวน tool เป็น `71` แต่จาก registry ปัจจุบันมีจำนวนมากกว่านั้น

@@ -90,34 +90,62 @@ object IntentClassifier {
         "compare", "เปรียบเทียบ", "multiple", "หลาย", "architecture", "system"
     )
 
+    // ─── Keyword matching helpers ─────────────────────────────────────────
+    // Cache compiled regex ของ ASCII keywords (word-boundary matching)
+    private val boundaryRegexCache = mutableMapOf<String, Regex>()
+
+    /**
+     * ASCII keyword → word-boundary regex match
+     * กัน false positive เช่น "import" ⊂ "important", "trade" ⊂ "trademark"
+     * ภาษาไทย (ไม่มี space คั่นคำ) → contains ตามเดิม
+     */
+    private fun matchesKeyword(lowerText: String, keyword: String): Boolean {
+        val kw = keyword.lowercase()
+        return if (kw.all { it.code < 128 }) {
+            boundaryRegexCache.getOrPut(kw) {
+                Regex("""\b${Regex.escape(kw)}\b""")
+            }.containsMatchIn(lowerText)
+        } else {
+            lowerText.contains(kw)
+        }
+    }
+
+    /** keyword ที่ยาว/เฉพาะเจาะจงกว่า ให้น้ำหนักมากกว่า (ลดความกำกวมของคำสั้นทั่วไป) */
+    private fun keywordWeight(keyword: String): Int = when {
+        keyword.length >= 8 -> 3
+        keyword.length >= 5 -> 2
+        else -> 1
+    }
+
     /**
      * วิเคราะห์ intent จากข้อความ user
      */
     fun classify(text: String): IntentResult {
         val lowerText = text.lowercase()
 
-        // คำนวณ score ของแต่ละ type
+        // คำนวณ weighted score ของแต่ละ type
         val scores = TaskType.entries.associateWith { taskType ->
-            patterns[taskType]?.count { keyword ->
-                lowerText.contains(keyword.lowercase())
-            } ?: 0
+            patterns[taskType]
+                ?.filter { matchesKeyword(lowerText, it) }
+                ?.sumOf { keywordWeight(it) } ?: 0
         }
 
         // เก็บ keywords ที่เจอ
         val detected = patterns.values.flatten()
-            .filter { lowerText.contains(it.lowercase()) }
+            .filter { matchesKeyword(lowerText, it) }
             .take(5)
 
         // หา type ที่ score สูงสุด
+        // (tie → enum ตัวแรกตามลำดับประกาศ — deterministic เสมอ)
         val best = scores.maxByOrNull { it.value }
         val taskType = if (best != null && best.value > 0) best.key else TaskType.GENERAL
         val maxScore = best?.value ?: 0
 
-        // คำนวณ confidence (0.0-1.0)
+        // คำนวณ confidence (0.0-1.0) ตาม weighted score
         val confidence = when {
             maxScore == 0 -> 0.5f
-            maxScore == 1 -> 0.65f
-            maxScore == 2 -> 0.8f
+            maxScore <= 2 -> 0.65f
+            maxScore <= 5 -> 0.8f
             else          -> 0.95f
         }
 

@@ -23,6 +23,7 @@ import {
   computePivotLevels, deriveDailyOhlcFromIntraday,
   computeSessionVwap, computeFibLevels, buildContextLevels,
 } from '../analyzers/levels.js';
+import { StableWallRegistry } from '../analyzers/smc/WallRegistry.js';
 
 // ── Indicator Snapshot ─────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ class IndicatorPipeline {
   private states = new Map<string, PipelineState>();
   private snapshots = new Map<string, IndicatorSnapshot>();
   private signalCooldownMs = 60_000; // 1 minute between signals
+  private wallRegistry = new StableWallRegistry();
 
   /**
    * Process new candle data for a symbol.
@@ -74,9 +76,11 @@ class IndicatorPipeline {
    */
   async processUpdate(
     symbol: string,
-    candlesByTf: Map<string, ReturnType<typeof parseCandles>>
+    candlesByTf: Map<string, ReturnType<typeof parseCandles>>,
+    opts: { emitEvents?: boolean } = {},
   ): Promise<EntrySignal[]> {
     const upper = symbol.toUpperCase();
+    const emitEvents = opts.emitEvents !== false;
 
     // Get or create pipeline state
     let state = this.states.get(upper);
@@ -101,7 +105,7 @@ class IndicatorPipeline {
 
     // 2. Build SMC V2 snapshots for ALL structural timeframes (ทุก TF เพื่อ PriceMap)
     const smcSnapshots: Record<string, SmcSnapshot> = {};
-    const smcTfs = ['M5', 'M15', 'M30', 'H1', 'H4'];  // V21.1: เพิ่ม M30
+    const smcTfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4'];  // V26.9: include M1 for wall-break confirmation
     const mtfCandleArrays: { timeframe: string; candles: Candle[] }[] = [];
 
     for (const tf of smcTfs) {
@@ -120,8 +124,9 @@ class IndicatorPipeline {
       mtfCandleArrays.push({ timeframe: tf, candles: smcCandles });
     }
 
-    // Build primary SMC snapshot with MTF context (use M5 if available, else M15)
-    const primaryTf = candlesByTf.has('M5') ? 'M5' : (candlesByTf.has('M15') ? 'M15' : 'H1');
+    // Build primary SMC snapshot with MTF context. The simplified runtime is
+    // M15-centered, so M15 is the preferred anchor for ATR and wall merging.
+    const primaryTf = candlesByTf.has('M15') ? 'M15' : (candlesByTf.has('M5') ? 'M5' : 'H1');
     const primaryCandles = candlesByTf.get(primaryTf);
     if (primaryCandles && primaryCandles.length >= 30) {
       const smcCandles: Candle[] = primaryCandles.map(c => ({
@@ -133,7 +138,9 @@ class IndicatorPipeline {
       smcSnapshots[primaryTf] = snapshot;
 
       // 3. Detect regime changes
-      await this.checkRegimeChange(upper, snapshot, state);
+      if (emitEvents) {
+        await this.checkRegimeChange(upper, snapshot, state);
+      }
 
       // Update state
       state.lastSmcSnapshot = snapshot;
@@ -158,11 +165,15 @@ class IndicatorPipeline {
         // V24.2.0 — คำนวณ Context Levels (Pivot + VWAP + Fib) ก่อนสร้าง PriceMap
         const contextLevels = this.buildContextLevelsFor(upper, candlesByTf, lastPrice, primaryAtr, smcSnapshots[primaryTf] ?? null);
 
-        priceMap = buildPriceMapFromRecord(smcSnapshots, lastPrice, primaryAtr, undefined, contextLevels);
+        const rawPriceMap = buildPriceMapFromRecord(smcSnapshots, lastPrice, primaryAtr, undefined, contextLevels);
+        const builtPriceMap = this.wallRegistry.stabilize(upper, rawPriceMap);
+        priceMap = builtPriceMap;
         const priceMapMs = Date.now() - priceMapStartedAt;
+        const ladderResistanceCount = builtPriceMap.walls.filter(w => w.price > builtPriceMap.currentPrice).length;
+        const ladderSupportCount = builtPriceMap.walls.filter(w => w.price <= builtPriceMap.currentPrice).length;
         atLog(`[Pipeline] ${upper}: PriceMap calculation time=${priceMapMs}ms`);
-        atLog(`[Pipeline] ${upper}: PriceMap built — ${priceMap.resistanceWalls.length} resistance, ${priceMap.supportWalls.length} support walls (+${contextLevels.length} context levels: Pivot/VWAP/Fib)`);
-        atLog(`[Pipeline]\n${formatPriceMap(priceMap)}`);
+        atLog(`[Pipeline] ${upper}: PriceMap built - overlay=${builtPriceMap.walls.length} walls | ladder=${ladderResistanceCount} above / ${ladderSupportCount} at-below price | execution-side=${builtPriceMap.resistanceWalls.length} resistance / ${builtPriceMap.supportWalls.length} support (+${contextLevels.length} context levels: Pivot/VWAP/Fib)`);
+        atLog(`[Pipeline]\n${formatPriceMap(builtPriceMap)}`);
       } catch (pmErr) {
         atWarn(`[Pipeline] ${upper}: PriceMap build error: ${pmErr}`);
       }
@@ -185,18 +196,20 @@ class IndicatorPipeline {
       // 6. Emit entry signals via EventBus
       for (const signal of entrySignals) {
         state.lastSignalAt = now;
-        await eventBus.emitSignalEntry(
-          upper,
-          signal.side,
-          signal.entry,
-          signal.sl,
-          signal.tp,
-          signal.confidence,
-          signal.confluenceStars,
-          signal.strategy,
-          signal.triggers,
-          primarySmc
-        );
+        if (emitEvents) {
+          await eventBus.emitSignalEntry(
+            upper,
+            signal.side,
+            signal.entry,
+            signal.sl,
+            signal.tp,
+            signal.confidence,
+            signal.confluenceStars,
+            signal.strategy,
+            signal.triggers,
+            primarySmc
+          );
+        }
       }
     }
 
@@ -214,15 +227,17 @@ class IndicatorPipeline {
     this.snapshots.set(upper, indicatorSnapshot);
 
     // 7. Emit indicator update
-    await eventBus.emit({
-      type: 'INDICATOR_UPDATE',
-      symbol: upper,
-      timestamp: Date.now(),
-      data: {
-        reason: `Indicators updated for ${upper} (${Object.keys(analyses).join(',')})`,
-        indicators: indicatorSnapshot,
-      },
-    });
+    if (emitEvents) {
+      await eventBus.emit({
+        type: 'INDICATOR_UPDATE',
+        symbol: upper,
+        timestamp: Date.now(),
+        data: {
+          reason: `Indicators updated for ${upper} (${Object.keys(analyses).join(',')})`,
+          indicators: indicatorSnapshot,
+        },
+      });
+    }
 
     return entrySignals;
   }

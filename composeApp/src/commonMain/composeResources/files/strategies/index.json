@@ -1,0 +1,482 @@
+[
+ {
+  "name": "12-month-cycle-in-cross-section-of-stocks-returns",
+  "title": "12 Month Cycle In Cross Section Of Stocks Returns",
+  "file": "12-month-cycle-in-cross-section-of-stocks-returns.py",
+  "category": "Calendar & Seasonality",
+  "description": "The top 30% of firms based on their market cap from NYSE and AMEX are part of the investment universe. Every month, stocks are grouped into ten portfolios (with an equal number of stocks in each portfolio) according to their performance in one month one year ago. Investors go long in stocks from the winner decile and shorts stocks from the loser decile. The portfolio is equally weighted and rebalanced every month.",
+  "url": "https://quantpedia.com/strategies/12-month-cycle-in-cross-section-of-stocks-returns/"
+ },
+ {
+  "name": "52-weeks-high-effect-in-stocks",
+  "title": "52 Weeks High Effect In Stocks",
+  "file": "52-weeks-high-effect-in-stocks.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of all stocks from NYSE, AMEX and NASDAQ (the research paper used the CRSP database for backtesting). The ratio between the current price and 52-week high is calculated for each stock at the end of each month (PRILAG i,t = Price i,t / 52-Week High i,t). Every month, the investor then calculates the weighted average of ratios (PRILAG i,t) from all firms in each industry (20 industries are used), where the weight is the market capitalization of the stock at the end of month t. The winners (losers) are stocks in the six industries with the highest (lowest) weighted averages of PRILAGi,t. The investor buys stocks in the winner portfolio and shorts stocks in the loser portfolio and holds them for three months. Stocks are weighted equally and the portfolio is reb",
+  "url": "https://quantpedia.com/strategies/52-weeks-high-effect-in-stocks/"
+ },
+ {
+  "name": "accrual-anomaly",
+  "title": "Accrual Anomaly",
+  "file": "accrual-anomaly.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of all stocks on NYSE, AMEX, and NASDAQ. Balance sheet based accruals (the non-cash component of earnings) are calculated as: BS_ACC = ( ∆CA – ∆Cash) – ( ∆CL – ∆STD – ∆ITP) – Dep Where: ∆CA = annual change in current assets ∆Cash = change in cash and cash equivalents ∆CL = change in current liabilities ∆STD = change in debt included in current liabilities ∆ITP = change in income taxes payable Dep = annual depreciation and amortization expense Stocks are then sorted into deciles and investor goes long stocks with the lowest accruals and short stocks with the highest accruals. The portfolio is rebalanced yearly during May (after all companies publish their earnings).",
+  "url": "https://quantpedia.com/strategies/accrual-anomaly/"
+ },
+ {
+  "name": "asset-class-momentum-rotational-system",
+  "title": "Asset Class Momentum Rotational System",
+  "file": "asset-class-momentum-rotational-system.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "asset-class-trend-following",
+  "title": "Asset Class Trend Following",
+  "file": "asset-class-trend-following.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "asset-growth-effect",
+  "title": "Asset Growth Effect",
+  "file": "asset-growth-effect.py",
+  "category": "Value & Fundamental",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "betting-against-beta-factor-in-country-equity-indexes",
+  "title": "Betting Against Beta Factor In Country Equity Indexes",
+  "file": "betting-against-beta-factor-in-country-equity-indexes.py",
+  "category": "Volatility & Risk",
+  "description": "The investment universe consists of all country ETFs. The beta for each country is calculated with respect to the MSCI US Equity Index using a 1-year rolling window. ETFs are then ranked in ascending order based on their estimated beta. The ranked ETFs are assigned to one of two portfolios: low beta and high beta. Securities are weighted by the ranked betas, and the portfolios are rebalanced every calendar month. Both portfolios are rescaled to have a beta of one at portfolio formation. The “Betting-Against-Beta” is the zero-cost zero-beta portfolio that is long on the low-beta portfolio and that shorts the high-beta portfolio. There are a lot of simple modifications (like going long on the bottom beta decile and short on the top beta decile), which could probably improve the strategy’s pe",
+  "url": "https://quantpedia.com/strategies/betting-against-beta-factor-in-country-equity-indexes/"
+ },
+ {
+  "name": "betting-against-beta-factor-in-stocks",
+  "title": "Betting Against Beta Factor In Stocks",
+  "file": "betting-against-beta-factor-in-stocks.py",
+  "category": "Volatility & Risk",
+  "description": "The investment universe consists of all stocks from the CRSP database. The beta for each stock is calculated with respect to the MSCI US Equity Index using a 1-year rolling window. Stocks are then ranked in ascending order on the basis of their estimated beta. The ranked stocks are assigned to one of two portfolios: low beta and high beta. Securities are weighted by the ranked betas, and portfolios are rebalanced every calendar month. Both portfolios are rescaled to have a beta of one at portfolio formation. The “Betting-Against-Beta” is the zero-cost zero-beta portfolio that is long on the low-beta portfolio and short on the high-beta portfolio. There are a lot of simple modifications (like going long on the bottom beta decile and short on the top beta decile), which could probably improv",
+  "url": "https://quantpedia.com/strategies/betting-against-beta-factor-in-stocks/"
+ },
+ {
+  "name": "combining-fundamental-fscore-and-equity-short-term-reversals",
+  "title": "Combining Fundamental Fscore And Equity Short Term Reversals",
+  "file": "combining-fundamental-fscore-and-equity-short-term-reversals.py",
+  "category": "Reversal",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "combining-smart-factors-momentum-and-market-portfolio",
+  "title": "Combining Smart Factors Momentum And Market Portfolio",
+  "file": "combining-smart-factors-momentum-and-market-portfolio.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "consistent-momentum-strategy",
+  "title": "Consistent Momentum Strategy",
+  "file": "consistent-momentum-strategy.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of stocks listed at NYSE, AMEX, and NASDAQ, whose price data (at least for the past 7 months) are available at the CRSP database. The investor creates a zero-investment portfolio at the end of the month t, longing stocks that are in the top decile in terms of returns both in the period from t-7 to t-1 and from t-6 to t, while shorting stocks in the bottom decile in both periods (i.e. longing consistent winners and shorting consistent losers). The stocks in the portfolio are weighted equally. The holding period is six months, with no rebalancing during the period. There is a one-month skip between the formation and holding period.",
+  "url": "https://quantpedia.com/strategies/consistent-momentum-strategy/"
+ },
+ {
+  "name": "crude-oil-predicts-equity-returns",
+  "title": "Crude Oil Predicts Equity Returns",
+  "file": "crude-oil-predicts-equity-returns.py",
+  "category": "Asset Allocation & Macro",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "currency-momentum-factor",
+  "title": "Currency Momentum Factor",
+  "file": "currency-momentum-factor.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "currency-value-factor-ppp-strategy",
+  "title": "Currency Value Factor Ppp Strategy",
+  "file": "currency-value-factor-ppp-strategy.py",
+  "category": "Value & Fundamental",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "dispersion-trading",
+  "title": "Dispersion Trading",
+  "file": "dispersion-trading.py",
+  "category": "Volatility & Risk",
+  "description": "The investment universe consists of stocks from the S&P 100 index. Trading vehicles are options on stocks from this index and also options on the index itself. The investor uses analyst forecasts of earnings per share from the Institutional Brokers Estimate System (I/B/E/S) database and computes for each firm the mean absolute difference scaled by an indicator of earnings uncertainty (see page 24 in the source academic paper for detailed methodology). Each month, investor sorts stocks into quintiles based on the size of belief disagreement. He buys puts of stocks with the highest belief disagreement and sells the index puts with Black-Scholes deltas ranging from -0.8 to -0.2. QC Implementation:",
+  "url": "https://quantpedia.com/strategies/dispersion-trading/"
+ },
+ {
+  "name": "dollar-carry-trade",
+  "title": "Dollar Carry Trade",
+  "file": "dollar-carry-trade.py",
+  "category": "Carry & FX",
+  "description": "The investment universe consists of currencies from developed countries (the Euro area, Australia, Canada, Denmark, Japan, New Zealand, Norway, Sweden, Switzerland, and the United Kingdom). The average forward discount (AFD) is calculated for this basket of currencies (each currency has an equal weight). The average 3-month rate could be used instead of the AFD in the calculation. The AFD is then compared to the 3-month US Treasury rate. The investor goes long on the US dollar and goes short on the basket of currencies if the 3-month US Treasury rate is higher than the AFD. The investor goes short on the US dollar and long on the basket of currencies if the 3-month US Treasury rate is higher than the AFD. The portfolio is rebalanced monthly.",
+  "url": "https://quantpedia.com/strategies/dollar-carry-trade/"
+ },
+ {
+  "name": "earnings-announcement-premium",
+  "title": "Earnings Announcement Premium",
+  "file": "earnings-announcement-premium.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of all stocks from the CRSP database. At the beginning of every calendar month, stocks are ranked in ascending order on the basis of the volume concentration ratio, which is defined as the volume of the previous 16 announcement months divided by the total volume in the previous 48 months. The ranked stocks are assigned to one of 5 quintile portfolios. Within each quintile, stocks are assigned to one of two portfolios (expected announcers and expected non-announcers) using the predicted announcement based on the previous year. All stocks are value-weighted within a given portfolio, and portfolios are rebalanced every calendar month to maintain value weights. The investor invests in a long-short portfolio, which is a zero-cost portfolio that holds the portfol",
+  "url": "https://quantpedia.com/strategies/earnings-announcement-premium/"
+ },
+ {
+  "name": "earnings-announcements-combined-with-stock-repurchases",
+  "title": "Earnings Announcements Combined With Stock Repurchases",
+  "file": "earnings-announcements-combined-with-stock-repurchases.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of stocks from NYSE/AMEX/Nasdaq (no ADRs, CEFs or REITs), bottom 25% of firms by market cap are dropped. Each quarter, the investor looks for companies that announce a stock repurchase program (with announced buyback for at least 5% of outstanding stocks) during days -30 to -15 before the earnings announcement date for each company. Investor goes long stocks with announced buybacks during days -10 to +15 around an earnings announcement. The portfolio is equally weighted and rebalanced daily. QC Implementation:",
+  "url": "https://quantpedia.com/strategies/earnings-announcements-combined-with-stock-repurchases/"
+ },
+ {
+  "name": "earnings-quality-factor",
+  "title": "Earnings Quality Factor",
+  "file": "earnings-quality-factor.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of all non-financial stocks from NYSE, Amex and Nasdaq. Big stocks are defined as the largest stocks that make up 90% of the total market cap within the region, while small stocks make up the remaining 10% of the market cap. Investor defines breakpoints by the 30th and 70th percentiles of the multiple “Earnings Quality” ratios between large caps and small caps. The first “Earnings Quality” ratio is defined by cash flow relative to reported earnings. The high-quality earnings firms are characterized by high cash flows (relative to reported earnings) while the low-quality firms are characterized by high reported earnings (relative to cash flow). The second factor is based on return on equity (ROE) to exploit the well-documented “profitability anomaly” by goin",
+  "url": "https://quantpedia.com/strategies/earnings-quality-factor/"
+ },
+ {
+  "name": "esg-factor-momentum-strategy",
+  "title": "Esg Factor Momentum Strategy",
+  "file": "esg-factor-momentum-strategy.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "fed-model",
+  "title": "Fed Model",
+  "file": "fed-model.py",
+  "category": "Value & Fundamental",
+  "description": "Each month, the investor conducts a one-month predictive regression (using all available data up to that date) predicting excess stock market returns using the yield gap as an independent variable. The “Yield gap” is calculated as YG = EY − y, with earnings yield EY ≡ ln (1 ++ E/P) and y = ln (1 ++ Y) is the log 10 year Treasury bond yield. Then, the strategy allocates 100% in the risky asset if the forecasted excess returns are positive, and otherwise, it invests 100% in the risk-free rate.",
+  "url": "https://quantpedia.com/strategies/fed-model/"
+ },
+ {
+  "name": "fx-carry-trade",
+  "title": "Fx Carry Trade",
+  "file": "fx-carry-trade.py",
+  "category": "Carry & FX",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "how-to-use-lexical-density-of-company-filings",
+  "title": "How To Use Lexical Density Of Company Filings",
+  "file": "how-to-use-lexical-density-of-company-filings.py",
+  "category": "Value & Fundamental",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "intraday-seasonality-in-bitcoin",
+  "title": "Intraday Seasonality In Bitcoin",
+  "file": "intraday-seasonality-in-bitcoin.py",
+  "category": "Crypto",
+  "description": "The investment universe consists of Bitcoin and the data are obtained from Gemini exchange. To exploit the seasonality, open a long position in the BTC at 22:00 (UTC +0) and hold it for two hours. The position is closed after the two hour holding period.",
+  "url": "https://quantpedia.com/strategies/intraday-seasonality-in-bitcoin/"
+ },
+ {
+  "name": "january-barometer",
+  "title": "January Barometer",
+  "file": "january-barometer.py",
+  "category": "Calendar & Seasonality",
+  "description": "Invest in the equity market in each January. Stay invested in equity markets (via ETF, fund, or futures) only if January return is positive; otherwise, switch investments to T-Bills.",
+  "url": "https://quantpedia.com/strategies/january-barometer/"
+ },
+ {
+  "name": "low-volatility-factor-effect-in-stocks",
+  "title": "Low Volatility Factor Effect In Stocks",
+  "file": "low-volatility-factor-effect-in-stocks.py",
+  "category": "Volatility & Risk",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "market-sentiment-and-an-overnight-anomaly",
+  "title": "Market Sentiment And An Overnight Anomaly",
+  "file": "market-sentiment-and-an-overnight-anomaly.py",
+  "category": "Calendar & Seasonality",
+  "description": "The investment universe consists of SPY ETF, and the price of SPY, price of VIX and Brain Market Sentiment (BMS) indicator are used to identify the market sentiment. The investor buys SPY ETF and holds it overnight; when the price of SPY is above its 20-day moving average, the price of VIX is below its moving average, and the value of the BMS indicator is greater than its 20-day moving average. Note that the authors suggest using this strategy as an overlay when deciding whether to make a trade rather than using this system on its own. QC Implementation:",
+  "url": "https://quantpedia.com/strategies/market-sentiment-and-an-overnight-anomaly/"
+ },
+ {
+  "name": "momentum-and-reversal-combined-with-volatility-effect-in-stocks",
+  "title": "Momentum And Reversal Combined With Volatility Effect In Stocks",
+  "file": "momentum-and-reversal-combined-with-volatility-effect-in-stocks.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of NYSE, AMEX, and NASDAQ stocks with prices higher than $5 per share. At the beginning of each month, the sample is divided into equal halves, at the size median, and only larger stocks are used. Then each month, realized returns and realized (annualized) volatilities are calculated for each stock for the past six months. One week (seven calendar days) prior to the beginning of each month is skipped to avoid biases due to microstructures. Stocks are then sorted into quintiles based on their realized past returns and past volatility. The investor goes long on stocks from the highest performing quintile from the highest volatility group and short on stocks from the lowest-performing quintile from the highest volatility group. Stocks are equally weighted and ",
+  "url": "https://quantpedia.com/strategies/momentum-and-reversal-combined-with-volatility-effect-in-stocks/"
+ },
+ {
+  "name": "momentum-effect-in-commodities",
+  "title": "Momentum Effect In Commodities",
+  "file": "momentum-effect-in-commodities.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "momentum-factor-and-style-rotation-effect",
+  "title": "Momentum Factor And Style Rotation Effect",
+  "file": "momentum-factor-and-style-rotation-effect.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "momentum-factor-combined-with-asset-growth-effect",
+  "title": "Momentum Factor Combined With Asset Growth Effect",
+  "file": "momentum-factor-combined-with-asset-growth-effect.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of NYSE, AMEX and NASDAQ stocks (data for the backtest in the source paper are from Compustat). Stocks with a market capitalization less than the 20th NYSE percentile (smallest stocks) are removed. The asset growth variable is defined as the yearly percentage change in balance sheet total assets. Data from year t-2 to t-1 are used to calculate asset growth, and July is the cut-off month. Every month, stocks are then sorted into deciles based on asset growth and only stocks with the highest asset growth are used. The next step is to sort stocks from the highest asset growth decile into quintiles, based on their past 11-month return (with the last month’s performance skipped in the calculation). The investor then goes long on stocks with the strongest momentu",
+  "url": "https://quantpedia.com/strategies/momentum-factor-combined-with-asset-growth-effect/"
+ },
+ {
+  "name": "momentum-factor-effect-in-stocks",
+  "title": "Momentum Factor Effect In Stocks",
+  "file": "momentum-factor-effect-in-stocks.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of NYSE, AMEX, and NASDAQ stocks. We define momentum as the past 12-month return, skipping the most recent month’s return (to avoid microstructure and liquidity biases). To capture “momentum”, UMD portfolio goes long stocks that have high relative past one-year returns and short stocks that have low relative past one-year returns.",
+  "url": "https://quantpedia.com/strategies/momentum-factor-effect-in-stocks/"
+ },
+ {
+  "name": "momentum-in-mutual-fund-returns",
+  "title": "Momentum In Mutual Fund Returns",
+  "file": "momentum-in-mutual-fund-returns.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of equity funds from the CRSP Mutual Fund database. This universe is then shrunk to no-load funds (to remove entrance fees). Investors then sort mutual funds based on their past 6-month return and divide them into deciles. The top decile of mutual funds is then picked into an investment portfolio (equally weighted), and funds are held for three months. Other measures of momentum could also be used in sorting (fund’s closeness to 1 year high in NAV and momentum factor loading), and it is highly probable that the combined predictor would have even better results than only the simple 6-month momentum. QC Implementation:",
+  "url": "https://quantpedia.com/strategies/momentum-in-mutual-fund-returns/"
+ },
+ {
+  "name": "option-expiration-week-effect",
+  "title": "Option Expiration Week Effect",
+  "file": "option-expiration-week-effect.py",
+  "category": "Calendar & Seasonality",
+  "description": "Investors choose stocks from the S&P 100 index as his/her investment universe (stocks could be easily tracked via ETF or index fund). He/she then goes long S&P 100 stocks during the option-expiration week and stays in cash during other days.",
+  "url": "https://quantpedia.com/strategies/option-expiration-week-effect/"
+ },
+ {
+  "name": "paired-switching",
+  "title": "Paired Switching",
+  "file": "paired-switching.py",
+  "category": "Pairs & Arbitrage",
+  "description": "This strategy is very flexible. Investors could use stocks, funds, or ETFs as an investment vehicle. We show simple trading rules for a sample strategy from the source research paper. The investor uses two Vanguard funds as his investment vehicles – one equity fund (VFINX) and one government bond",
+  "url": "https://quantpedia.com/strategies/paired-switching/"
+ },
+ {
+  "name": "pairs-trading-with-country-etfs",
+  "title": "Pairs Trading With Country Etfs",
+  "file": "pairs-trading-with-country-etfs.py",
+  "category": "Pairs & Arbitrage",
+  "description": "The investment universe consists of 22 international ETFs. A normalized cumulative total return index is created for each ETF (dividends included), and the starting price during the formation period is set to $1 (price normalization). The selection of pairs is made after a 120 day formation period. Pair’s distance for all ETF pairs is calculated as the sum of squared deviations between two normalized price series. The top 5 pairs with the smallest distance are used in the subsequent 20 day trading period. The strategy is monitored daily, and trade is opened when the divergence between the pairs exceeds 0.5x the historical standard deviation. Investors go long on the undervalued ETF and short on the overvalued ETF. The trade is exited if a pair converges or after 20 days (if the pair does n",
+  "url": "https://quantpedia.com/strategies/pairs-trading-with-country-etfs/"
+ },
+ {
+  "name": "payday-anomaly",
+  "title": "Payday Anomaly",
+  "file": "payday-anomaly.py",
+  "category": "Calendar & Seasonality",
+  "description": "The investment universe consists of the S&P500 index. Simply, buy and hold the index during the 16th day in the month during each month of the year.",
+  "url": "https://quantpedia.com/strategies/payday-anomaly/"
+ },
+ {
+  "name": "rd-expenditures-and-stock-returns",
+  "title": "Rd Expenditures And Stock Returns",
+  "file": "rd-expenditures-and-stock-returns.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of stocks that are listed on NYSE NASDAQ or AMEX. At the end of April, for each stock in the universe, calculate a measure of total R&D expenditures in the past 5 years scaled by the firm’s Market cap (defined on page 7, eq. 1). Go long (short) on the quintile of firms with the highest (lowest) R&D expenditures relative to their Market Cap. Weight the portfolio equally and rebalance next year. The backtested performance of the paper is substituted by our more recent backtest in Quantconnect.",
+  "url": "https://quantpedia.com/strategies/rd-expenditures-and-stock-returns/"
+ },
+ {
+  "name": "rebalancing-premium-in-cryptocurrencies",
+  "title": "Rebalancing Premium In Cryptocurrencies",
+  "file": "rebalancing-premium-in-cryptocurrencies.py",
+  "category": "Crypto",
+  "description": "The investment universe consists of 27 cryptocurrencies: BAT (Basic Attention Token), BTC (Bitcoin), BTG (Bitcoin Gold), DAI (Dai), DATA (Data Coin), DGB (DigiByte), EOS (EIS.io), ETH (Ethereum), FUN (FUN Token), IOTA (Iota), LRC (Loopring token), LTC (Litecoin), MANA (Mana coin), NEO (Neo), OMG (OMG, Formally known as OmiseGo), REQ (Request), SAN (Santiment Network Token), SNT (Status), TRX (Tron), WAX (Wax), XLM (Stellar), XMR (Monero), XRP (Ripple), XVG (Verge), ZEC (Zcash), ZIL (Zilliqa) and ZRX (0x). Two portfolios are created. The first portfolio is the daily rebalanced portfolio of all 27 cryptos to ensure that the assets have equal weights. The second portfolio is not rebalanced at all: an investor buys the equally-weighted crypto portfolio and lets the weights drift. Then the inve",
+  "url": "https://quantpedia.com/strategies/rebalancing-premium-in-cryptocurrencies/"
+ },
+ {
+  "name": "residual-momentum-factor",
+  "title": "Residual Momentum Factor",
+  "file": "residual-momentum-factor.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of all domestic, primary stocks listed on the New York (NYSE), American (AMEX), and NASDAQ stock markets with a price higher than $1. Closed-end funds, REITs, unit trusts, ADRs, and foreign stocks are removed. The 10% largest stocks in terms of market capitalization are then selected for trading. The residual momentum strategy is defined as a zero-investment top-minus-bottom decile portfolio based on ranking stocks every month on their past 12-month residual returns, excluding the most recent month, standardized by the standard deviation of the residual returns over the same period. Residual returns are estimated each month for all stocks over the past 36 months using a regression model. The regression model is calculated every month for all eligible stocks",
+  "url": "https://quantpedia.com/strategies/residual-momentum-factor/"
+ },
+ {
+  "name": "return-asymmetry-effect-in-commodity-futures",
+  "title": "Return Asymmetry Effect In Commodity Futures",
+  "file": "return-asymmetry-effect-in-commodity-futures.py",
+  "category": "Volatility & Risk",
+  "description": "The investment universe consists of 22 commodity futures, namely: soybean oil, corn, cocoa, cotton, feeder cattle, gold, copper, heating oil, coffee, live cattle, lean hogs, natural gas, oats, orange juice, palladium, platinum, soybean, sugar, silver, soybean meal, wheat, and crude oil. Firstly, at the beginning of each month, construct the asymmetry measure (IE) for each commodity based on the latest 260 daily returns using the following formula (the formula originally consists of theoretical density and integrals, however the solution is simple when empirical distribution is utilized): IE = (number of trading days when the daily return is greater than the average plus two standard deviations) – (number of trading days when the daily return is smaller than the average minus two standard d",
+  "url": "https://quantpedia.com/strategies/return-asymmetry-effect-in-commodity-futures/"
+ },
+ {
+  "name": "reversal-during-earnings-announcements",
+  "title": "Reversal During Earnings Announcements",
+  "file": "reversal-during-earnings-announcements.py",
+  "category": "Reversal",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "roa-effect-within-stocks",
+  "title": "Roa Effect Within Stocks",
+  "file": "roa-effect-within-stocks.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe contains all stocks on NYSE and AMEX and Nasdaq with Sales greater than 10 million USD. Stocks are then sorted into two halves based on market capitalization. Each half is then divided into deciles based on Return on assets (ROA) calculated as quarterly earnings (Compustat quarterly item IBQ – income before extraordinary items) divided by one-quarter-lagged assets (item ATQ – total assets). The investor then goes long the top three deciles from each market capitalization group and goes short bottom three deciles. The strategy is rebalanced monthly, and stocks are equally weighted.",
+  "url": "https://quantpedia.com/strategies/roa-effect-within-stocks/"
+ },
+ {
+  "name": "sector-momentum-rotational-system",
+  "title": "Sector Momentum Rotational System",
+  "file": "sector-momentum-rotational-system.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "short-interest-effect-long-short-version",
+  "title": "Short Interest Effect Long Short Version",
+  "file": "short-interest-effect-long-short-version.py",
+  "category": "Value & Fundamental",
+  "description": "All stocks from NYSE, AMEX, and NASDAQ are part of the investment universe. Stocks are then sorted each month into short-interest deciles based on the ratio of short interest to shares outstanding. The investor then goes long on the decile with the lowest short ratio and short on the decile with the highest short ratio. The portfolio is rebalanced monthly, and stocks in the portfolio are weighted equally.",
+  "url": "https://quantpedia.com/strategies/short-interest-effect-long-short-version/"
+ },
+ {
+  "name": "short-term-reversal-in-stocks",
+  "title": "Short Term Reversal In Stocks",
+  "file": "short-term-reversal-in-stocks.py",
+  "category": "Reversal",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "short-term-reversal-with-futures",
+  "title": "Short Term Reversal With Futures",
+  "file": "short-term-reversal-with-futures.py",
+  "category": "Reversal",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "skewness-effect-in-commodities",
+  "title": "Skewness Effect In Commodities",
+  "file": "skewness-effect-in-commodities.py",
+  "category": "Volatility & Risk",
+  "description": "The investment universe consists of 27 futures contracts on commodities. Each month, investor calculates skewness (3rd moment of returns) from daily returns from data going 12 months into the past for all futures. Commodities are then sorted into quintiles and investor goes long quintile containing the commodities with the 20% lowest total skewness and short quintile containing the commodities with the 20% highest total skewness (over a ranking period of 12 months). The resultant portfolio is equally weighted and rebalanced each month.",
+  "url": "https://quantpedia.com/strategies/skewness-effect-in-commodities/"
+ },
+ {
+  "name": "small-capitalization-stocks-premium-anomaly",
+  "title": "Small Capitalization Stocks Premium Anomaly",
+  "file": "small-capitalization-stocks-premium-anomaly.py",
+  "category": "Asset Allocation & Macro",
+  "description": "The investment universe contains all NYSE, AMEX, and NASDAQ stocks. Decile portfolios are formed based on the market capitalization of stocks. To capture “size” effect, SMB portfolio goes long small stocks (lowest decile) and short big stocks (highest decile).",
+  "url": "https://quantpedia.com/strategies/small-capitalization-stocks-premium-anomaly/"
+ },
+ {
+  "name": "soccer-clubs-stocks-arbitrage",
+  "title": "Soccer Clubs Stocks Arbitrage",
+  "file": "soccer-clubs-stocks-arbitrage.py",
+  "category": "Pairs & Arbitrage",
+  "description": "The investment universe consists of liquid soccer clubs’ stocks that are publicly traded. The investor then sells short stocks of clubs that play UEFA Championship matches (or other important matches) at the end of the business day before the match. Stocks are held for one day, and the portfolio of stocks is equally weighted (if there are multiple clubs with matches that day). QC Implementation:",
+  "url": "https://quantpedia.com/strategies/soccer-clubs-stocks-arbitrage/"
+ },
+ {
+  "name": "synthetic-lending-rates-predict-subsequent-market-return",
+  "title": "Synthetic Lending Rates Predict Subsequent Market Return",
+  "file": "synthetic-lending-rates-predict-subsequent-market-return.py",
+  "category": "Asset Allocation & Macro",
+  "description": "The investment universe consists of SPY ETF. Synthetic shorting costs data are obtained from Borrow Intensity Indicators by the CBOE (and includes 4877 stocks/ETFs). The paper utilizes the constant maturities of 45 days. Intraday SPY data are obtained from FirstRate Data. The aggregate (mean) borrow intensity is calculated as equally weighted borrow intensity of each stock/ETF in the sample at day t. The shorting costs data are estimated at a timestamp of 15:57. Calculate the change in the aggregate intensity at day t as the difference of aggregate borrowing intensity at day t and t-1. Buy the SPY ETF at 15:59 if the difference is positive and short the SPY if the difference is negative. The positions are held for one day and are closed at 15:58 at next day. QC Implementation changes:",
+  "url": "https://quantpedia.com/strategies/synthetic-lending-rates-predict-subsequent-market-return/"
+ },
+ {
+  "name": "term-structure-effect-in-commodities",
+  "title": "Term Structure Effect In Commodities",
+  "file": "term-structure-effect-in-commodities.py",
+  "category": "Volatility & Risk",
+  "description": "This simple strategy buys each month the 20% of commodities with the highest roll-returns and shorts the 20% of commodities with the lowest roll-returns and holds the long-short positions for one month. The contracts in each quintile are equally-weighted. The investment universe is all commodity futures contracts.",
+  "url": "https://quantpedia.com/strategies/term-structure-effect-in-commodities/"
+ },
+ {
+  "name": "time-series-momentum-effect",
+  "title": "Time Series Momentum Effect",
+  "file": "time-series-momentum-effect.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of 24 commodity futures, 12 cross-currency pairs (with 9 underlying currencies), 9 developed equity indices, and 13 developed government bond futures. Every month, the investor considers whether the excess return of each asset over the past 12 months is positive or negative and goes long on the contract if it is positive and short if negative. The position size is set to be inversely proportional to the instrument’s volatility. A univariate GARCH model is used to estimated ex-ante volatility in the source paper. However, other simple models could probably be easily used with good results (for example, the easiest one would be using historical volatility instead of estimated volatility). The portfolio is rebalanced monthly.",
+  "url": "https://quantpedia.com/strategies/time-series-momentum-effect/"
+ },
+ {
+  "name": "trading-wti-brent-spread",
+  "title": "Trading Wti Brent Spread",
+  "file": "trading-wti-brent-spread.py",
+  "category": "Pairs & Arbitrage",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "trend-following-effect-in-stocks",
+  "title": "Trend Following Effect In Stocks",
+  "file": "trend-following-effect-in-stocks.py",
+  "category": "Momentum & Trend",
+  "description": "The investment universe consists of US-listed companies. A minimum stock price filter is used to avoid penny stocks, and a minimum daily liquidity filter is used to avoid stocks that are not liquid enough. The entry signal occurs if today’s close is greater than or equal to the highest close during the stock’s entire history. A 10-period average true range trailing stop is used as an exit signal. The investor holds all stocks which satisfy entry criterion and are not stopped out. The portfolio is equally weighted and rebalanced daily. Transaction costs of 0.5% round-turn are deducted from each trade to account for estimated commission and slippage.",
+  "url": "https://quantpedia.com/strategies/trend-following-effect-in-stocks/"
+ },
+ {
+  "name": "turn-of-the-month-in-equity-indexes",
+  "title": "Turn Of The Month In Equity Indexes",
+  "file": "turn-of-the-month-in-equity-indexes.py",
+  "category": "Calendar & Seasonality",
+  "description": "Buy SPY ETF 1 day (some papers say 4 days) before the end of the month and sell the 3rd trading day of the new month at the close.",
+  "url": "https://quantpedia.com/strategies/turn-of-the-month-in-equity-indexes/"
+ },
+ {
+  "name": "value-and-momentum-factors-across-asset-classes",
+  "title": "Value And Momentum Factors Across Asset Classes",
+  "file": "value-and-momentum-factors-across-asset-classes.py",
+  "category": "Momentum & Trend",
+  "description": "",
+  "url": ""
+ },
+ {
+  "name": "value-book-to-market-factor",
+  "title": "Value Book To Market Factor",
+  "file": "value-book-to-market-factor.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe contains all NYSE, AMEX, and NASDAQ stocks. To represent “value” investing, HML portfolio goes long high book-to-price stocks and short, low book-to-price stocks. In this strategy, we show the results for regular HML which is simply the average of the portfolio returns of HML small (which goes long cheap and short expensive only among small stocks) and HML large (which goes long cheap and short expensive only among large caps). The portfolio is equal-weighted and rebalanced monthly.",
+  "url": "https://quantpedia.com/strategies/value-book-to-market-factor/"
+ },
+ {
+  "name": "value-factor-effect-within-countries",
+  "title": "Value Factor Effect Within Countries",
+  "file": "value-factor-effect-within-countries.py",
+  "category": "Value & Fundamental",
+  "description": "The investment universe consists of 32 countries with easily accessible equity markets (via ETFs, for example). At the end of every year, the investor calculates Shiller’s “CAPE” Cyclically Adjusted PE) ratio, for each country in his investment universe. CAPE is the ratio of the real price of the equity market (adjusted for inflation) to the 10-year average of the country’s equity index (again adjusted for inflation). The whole methodology is explained well on Shiller’s home page (http://www.econ.yale.edu/~shiller/data.htm) or http://turnkeyanalyst.com/2011/10/the-shiller-pe-ratio/). The investor then invests in the cheapest 33% of countries from his sample if those countries have a CAPE below 15. The portfolio is equally weighted (the investor holds 0% cash instead of countries with a CAP",
+  "url": "https://quantpedia.com/strategies/value-factor-effect-within-countries/"
+ },
+ {
+  "name": "volatility-risk-premium-effect",
+  "title": "Volatility Risk Premium Effect",
+  "file": "volatility-risk-premium-effect.py",
+  "category": "Volatility & Risk",
+  "description": "Each month, at-the-money straddle, with one month until maturity, is sold at the bid price with a 5% option premium, and an offsetting 15% out-of-the-money puts are bought (at the ask price) as insurance against a market crash. The remaining cash and received option premium are invested in the index. The strategy is rebalanced monthly.",
+  "url": "https://quantpedia.com/strategies/volatility-risk-premium-effect/"
+ }
+]

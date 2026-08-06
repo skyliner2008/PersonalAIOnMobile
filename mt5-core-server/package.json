@@ -10,9 +10,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "analyze": "node scripts/advanced_analytics.mjs"
+    "analyze": "node scripts/advanced_analytics.mjs",
+    "analytics:gate": "node scripts/gate_analytics.mjs",
+    "analytics:audit": "node scripts/gate_flow_audit.mjs",
+    "analytics:help": "node scripts/analytics_help.mjs",
+    "analyze:logs": "python scripts/analyze_logs.py",
+    "analyze:deep": "python scripts/deep_analysis.py"
   },
   "dependencies": {
+    "@google/adk": "^1.2.0",
     "@google/generative-ai": "^0.24.1",
     "@huggingface/transformers": "^4.2.0",
     "better-sqlite3": "^12.6.2",

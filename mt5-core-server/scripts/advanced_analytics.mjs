@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 
 // การใช้งาน: node scripts/advanced_analytics.mjs [YYYY-MM-DD]
@@ -7,6 +7,19 @@ import { join } from 'path';
 
 const targetDate = process.argv[2] || null;
 const dbPath = join(process.cwd(), 'data', 'mt5-core.db');
+const REPORT_TIMEZONE = 'Asia/Bangkok';
+
+function localDayRangeMs(dateKey) {
+  // Trading logs are keyed by Asia/Bangkok local day, so date-specific
+  // analytics must use the same operational day instead of UTC midnight.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error(`Invalid date format: ${dateKey}. Expected YYYY-MM-DD`);
+  }
+  return {
+    startTs: new Date(`${dateKey}T00:00:00.000+07:00`).getTime(),
+    endTs: new Date(`${dateKey}T23:59:59.999+07:00`).getTime(),
+  };
+}
 
 if (!existsSync(dbPath)) {
   console.error(`❌ ไม่พบฐานข้อมูลที่: ${dbPath}`);
@@ -33,9 +46,7 @@ let journalQuery = `
 
 const params = [];
 if (targetDate) {
-  // แปลง YYYY-MM-DD เป็น timestamp
-  const startTs = new Date(`${targetDate}T00:00:00Z`).getTime();
-  const endTs = new Date(`${targetDate}T23:59:59Z`).getTime();
+  const { startTs, endTs } = localDayRangeMs(targetDate);
   journalQuery += ` AND created_at >= ? AND created_at <= ?`;
   params.push(startTs, endTs);
 }
@@ -157,8 +168,7 @@ let mgmtQuery = `
 `;
 const mgmtParams = [];
 if (targetDate) {
-  const startTs = new Date(`${targetDate}T00:00:00Z`).getTime();
-  const endTs = new Date(`${targetDate}T23:59:59Z`).getTime();
+  const { startTs, endTs } = localDayRangeMs(targetDate);
   mgmtQuery += ` AND created_at >= ? AND created_at <= ?`;
   mgmtParams.push(startTs, endTs);
 }
@@ -176,53 +186,81 @@ if (mgmtActions.length > 0) {
 }
 console.log();
 
-// 3. วิเคราะห์อัตราการถูกปฏิเสธ (SKIP/BLOCK) จาก JSONL Log
-if (targetDate) {
-  const logPath = join(process.cwd(), 'data', 'trade_decision_logs', `${targetDate}.jsonl`);
-  if (existsSync(logPath)) {
-    console.log('🛑 [4] DECISION GATE ANALYSIS (SKIP REASONS)');
-    const raw = readFileSync(logPath, 'utf-8');
-    const lines = raw.trim().split('\n').filter(l => l.trim());
-    
-    let totalCycles = 0;
-    let totalSkips = 0;
-    const skipCategories = {};
+// 3. วิเคราะห์อัตราการถูกปฏิเสธ (SKIP/BLOCK) จาก DB (auto_trading_decision_feed)
+//    ใช้ DB แทน JSONL → เร็วกว่า, แม่นยำกว่า, รองรับ All-Time
+{
+  console.log('🛑 [4] DECISION GATE ANALYSIS (DB-POWERED)');
 
-    lines.forEach(line => {
-      try {
-        const j = JSON.parse(line);
-        totalCycles++;
-        if (j.side === 'SKIP' || j.decisionType === 'ORDER_BLOCKED') {
-          totalSkips++;
-          let reason = j.riskGate || 'Unknown';
-          // Clean up reason text for aggregation
-          if (reason.includes('MTF zone gate')) reason = 'MTF Zone Gate / Premium-Discount Block';
-          else if (reason.includes('Zone-Aware Gate')) reason = 'Zone-Aware Guard (Wait for better edge)';
-          else if (reason.includes('AI_UNAVAILABLE')) reason = 'AI Offline / EA-Only Fallback Guard';
-          else if (reason.includes('[V25]')) reason = 'V25 Wall Engine Veto';
-          else if (reason.includes('EA-ONLY')) reason = 'EA-Only Strict Policy';
-          else if (reason.includes('recent opposite signal')) reason = 'Opposite Signal Cooldown';
-          else reason = reason.substring(0, 60) + '...';
+  const CATEGORY_LABELS = {
+    'ZONE_GATE': 'MTF Zone Gate / Premium-Discount Block',
+    'RISK_GATE': 'Risk Parameters Gate',
+    'PROXIMITY_GATE': 'Zone-Aware Guard (Wait for Better Edge)',
+    'EA_FALLBACK_CONFIDENCE_LOW': 'AI Offline / EA-Only Fallback Guard',
+    'DECISION_SIDE_GUARD': 'Decision Side Guard / Technical Signal Conflict',
+    'M15_SMC_PRESSURE': 'M15 SMC Pressure Guard',
+    'ANTI_HEDGE': 'Anti-Hedge / Opposite Position Guard',
+    'FITNESS_GATE': 'Fitness Below Minimum',
+    'V25_ONLY_GATE': 'V25 Wall Engine Veto',
+    'SEQUENTIAL_DUPLICATE': 'Sequential Entry / Duplicate Block',
+    'RRR_OR_REWARD_RISK': 'RRR / Reward-Risk Filter',
+    'FVG_ALIGNMENT': 'FVG Alignment Block',
+    'NO_DETERMINISTIC_SIGNAL': 'No Deterministic Signal',
+    'ORDER_SEND_FAILED': 'Order Send Failed',
+    'MARKET_CLOSED': 'Market Closed / Off-Hours',
+    'ENTRY_DRIFT': 'Entry Drift / Slippage Guard',
+    'RSI_EXTREME': 'RSI Overbought/Oversold Gate',
+    'SKIP_OTHER': 'Other Skip',
+  };
 
-          skipCategories[reason] = (skipCategories[reason] || 0) + 1;
-        }
-      } catch (e) {}
-    });
+  let totalQuery = `SELECT COUNT(*) AS cnt FROM auto_trading_decision_feed`;
+  const normalizedCategoryExpr = `
+    CASE
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%MARKET_CLOSED%' THEN 'MARKET_CLOSED'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%ENTRY_DRIFT%' OR UPPER(COALESCE(risk_gate, '')) LIKE '%SLIPPAGE%' THEN 'ENTRY_DRIFT'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%NO_DETERMINISTIC_SIGNAL%' THEN 'NO_DETERMINISTIC_SIGNAL'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%EA_FALLBACK_CONFIDENCE_LOW%' THEN 'EA_FALLBACK_CONFIDENCE_LOW'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%DECISION SIDE GUARD%' THEN 'DECISION_SIDE_GUARD'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%M15 SMC PRESSURE GUARD%' THEN 'M15_SMC_PRESSURE'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%ANTI-HEDGE%' OR UPPER(COALESCE(risk_gate, '')) LIKE '%ANTI HEDGE%' THEN 'ANTI_HEDGE'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%FITNESS%BELOW MIN%' THEN 'FITNESS_GATE'
+      WHEN UPPER(COALESCE(risk_gate, '')) LIKE '%RSI%OVERBOUGHT%' OR UPPER(COALESCE(risk_gate, '')) LIKE '%RSI%OVERSOLD%' THEN 'RSI_EXTREME'
+      ELSE COALESCE(block_category, 'UNKNOWN')
+    END
+  `;
 
-    console.log(`  Total Market Cycles : ${totalCycles}`);
-    console.log(`  Trades Skipped      : ${totalSkips} (${totalCycles > 0 ? ((totalSkips/totalCycles)*100).toFixed(1) : 0}% rejection rate)`);
-    console.log(`  Top Reject Reasons  :`);
-    Object.keys(skipCategories).sort((a,b) => skipCategories[b] - skipCategories[a]).slice(0, 7).forEach(r => {
-      const pct = ((skipCategories[r] / totalSkips) * 100).toFixed(1);
-      console.log(`    - ${String(skipCategories[r]).padStart(4)}x (${pct.padStart(4)}%) : ${r}`);
-    });
-  } else {
-    console.log(`🛑 [4] DECISION GATE ANALYSIS`);
-    console.log(`  No JSONL log file found for ${targetDate} at ${logPath}`);
+  let skipQuery = `
+    SELECT ${normalizedCategoryExpr} AS cat, COUNT(*) AS cnt
+    FROM auto_trading_decision_feed
+    WHERE (decision_type = 'ORDER_BLOCKED' OR side = 'SKIP')
+  `;
+  let skipTotalQuery = `
+    SELECT COUNT(*) AS cnt FROM auto_trading_decision_feed
+    WHERE (decision_type = 'ORDER_BLOCKED' OR side = 'SKIP')
+  `;
+
+  const gateParams = [];
+  if (targetDate) {
+    const { startTs, endTs } = localDayRangeMs(targetDate);
+    const dateFilter = ` AND created_at >= ? AND created_at <= ?`;
+    totalQuery += ` WHERE created_at >= ? AND created_at <= ?`;
+    skipQuery += dateFilter;
+    skipTotalQuery += dateFilter;
+    gateParams.push(startTs, endTs);
   }
-} else {
-  console.log('🛑 [4] DECISION GATE ANALYSIS');
-  console.log('  Please specify a date (YYYY-MM-DD) to analyze cycle log skips.');
+  skipQuery += ` GROUP BY cat ORDER BY cnt DESC`;
+
+  const totalCycles = db.prepare(totalQuery).get(...gateParams)?.cnt ?? 0;
+  const totalSkips = db.prepare(skipTotalQuery).get(...gateParams)?.cnt ?? 0;
+  const skipRows = db.prepare(skipQuery).all(...gateParams);
+
+  console.log(`  Total Market Cycles : ${totalCycles}`);
+  console.log(`  Trades Skipped      : ${totalSkips} (${totalCycles > 0 ? ((totalSkips/totalCycles)*100).toFixed(1) : 0}% rejection rate)`);
+  console.log(`  Top Reject Reasons  :`);
+  skipRows.slice(0, 10).forEach(r => {
+    const pct = totalSkips > 0 ? ((r.cnt / totalSkips) * 100).toFixed(1) : '0.0';
+    const label = CATEGORY_LABELS[r.cat] || r.cat;
+    console.log(`    - ${String(r.cnt).padStart(5)}x (${pct.padStart(5)}%) : ${label}`);
+  });
 }
 
 console.log('\n==================================================');

@@ -39,6 +39,10 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           System
         </button>
+        <button class="nav-item" data-view="analytics">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          Analytics
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -311,11 +315,21 @@
                   <span>V25 Adaptive</span>
                   <label class="switch"><input id="v25Toggle" type="checkbox"><i></i></label>
                 </div>
-                <div class="toggle-box">
-                  <span>V25 Only</span>
-                  <label class="switch"><input id="v25OnlyToggle" type="checkbox"><i></i></label>
-                </div>
               </div>
+            </div>
+
+            <div class="bento-item span-3">
+              <div class="card-header">
+                <h3>Execution Gates</h3>
+              </div>
+              <div class="settings-grid" id="gateTogglesGrid"></div>
+            </div>
+
+            <div class="bento-item span-3">
+              <div class="card-header">
+                <h3>Strategy Switches</h3>
+              </div>
+              <div class="settings-grid" id="strategyTogglesGrid"></div>
             </div>
           </div>
         </section>
@@ -361,6 +375,28 @@
           </div>
         </section>
 
+        <!-- VIEW: Analytics -->
+        <section class="view" id="view-analytics">
+          <div class="bento-grid">
+            <div class="bento-item span-3">
+              <div class="card-header">
+                <h3>Analytics Tools</h3>
+              </div>
+              <div class="toggles-row" style="margin-bottom: 15px;">
+                <button id="btnRunAnalyze" class="btn-primary">Run Analyze (All-Time)</button>
+                <button id="btnRunGateSummary" class="btn-primary">Gate Analytics (Summary)</button>
+                <div class="input-row">
+                  <input type="text" id="gateCategoryInput" placeholder="ZONE_GATE, RISK_GATE...">
+                  <button id="btnRunGateCategory" class="btn-secondary">Run Gate Detail</button>
+                </div>
+              </div>
+              <div class="log-container" style="height: 500px; background: #111; color: #0f0; padding: 15px; overflow-y: auto; font-family: 'Fira Code', monospace; white-space: pre-wrap;" id="analyticsOutput">
+                Ready to run analytics...
+              </div>
+            </div>
+          </div>
+        </section>
+
       </div>
     </main>
   </div>
@@ -369,6 +405,6 @@
   <div id="toast" class="toast">Message</div>
 
   <!-- Dashboard Logic -->
-  <script src="dashboard.js?v=11"></script>
+  <script src="dashboard.js?v=12"></script>
 </body>
 </html>

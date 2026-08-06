@@ -28,4 +28,26 @@ interface SideEffectDelegate {
 
     /** บันทึกเครื่องมือ (Tool/Skill) ที่สร้างโดย Agent */
     suspend fun onSaveAgentTool(filename: String, jsonContent: String)
+
+    /**
+     * อัปเดตตัวตนของ AI agent หรือผู้ใช้ (จาก tool `identity_update`)
+     * @param target "agent" | "user"
+     * @param field  agent: name/creature/vibe/gender — user: name/call_name/notes
+     * @return ข้อความยืนยันผลลัพธ์ (จะถูกส่งกลับเข้า tool loop)
+     */
+    suspend fun onUpdateIdentity(target: String, field: String, value: String): String
+
+    /**
+     * สร้าง/ลบการแจ้งเตือนอัตโนมัติ (จาก tool `automation_manage_alerts`)
+     * @param args อาร์กิวเมนต์จาก tool call (action, name, symbol, condition_*, interval_minutes, alert_id)
+     * @return ข้อความยืนยันผลลัพธ์ (จะถูกส่งกลับเข้า tool loop)
+     */
+    suspend fun onManageAlerts(args: Map<String, String>): String
+
+    /**
+     * สร้าง/ลบ/list งานตามเวลา (จาก tool `automation_manage_schedule`)
+     * @param args อาร์กิวเมนต์จาก tool call (action, name, prompt, schedule_type, time_hhmm, run_at, in_minutes, task_id)
+     * @return ข้อความยืนยันผลลัพธ์ (จะถูกส่งกลับเข้า tool loop)
+     */
+    suspend fun onManageSchedule(args: Map<String, String>): String
 }

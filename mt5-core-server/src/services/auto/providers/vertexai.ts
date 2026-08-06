@@ -26,6 +26,7 @@ import {
   fitDimensions,
   fetchWithTimeout,
 } from './types.js';
+import { atLog, atError } from '../utils.js';
 
 // ─── ADC Token Manager ──────────────────────────────────────────────────────
 
@@ -176,18 +177,80 @@ class VertexAIProvider implements ProviderClient {
     options: GenerateOptions = {},
   ): Promise<GenerateResult> {
     const token = await getAccessToken();
-    const body: any = {
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    };
-    if (options.systemPrompt) {
-      body.systemInstruction = { role: 'system', parts: [{ text: options.systemPrompt }] };
+    const body: any = {};
+
+    if (options.messages && options.messages.length > 0) {
+      body.contents = options.messages.map((msg: any) => {
+        // Vertex AI only accepts 'user' and 'model' as roles.
+        // Tool responses (role 'tool') must be sent as 'user' role.
+        const role = msg.role === 'assistant' || msg.role === 'model' ? 'model' : 'user';
+
+        // Extract parts array directly from client if available, or fallback to content
+        let parts = msg.parts;
+        if (!Array.isArray(parts) || parts.length === 0) {
+          parts = [];
+          if (msg.content) {
+            parts.push({ text: msg.content });
+          }
+          if (msg.toolCalls && msg.toolCalls.length > 0) {
+            msg.toolCalls.forEach((tc: any) => {
+              parts.push({
+                functionCall: {
+                  name: tc.name,
+                  args: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments
+                }
+              });
+            });
+          }
+        }
+
+        // Clean parts to ensure no empty text parts reach Vertex AI (which causes 400 Model input cannot be empty)
+        parts = parts.filter((p: any) => {
+          if (p.text !== undefined && p.text !== null) {
+            return p.text.trim() !== '';
+          }
+          return true;
+        });
+
+        // Vertex AI requires at least one part per message. If empty, provide a fallback.
+        if (parts.length === 0) {
+          parts = [{ text: ' ' }];
+        }
+
+        return {
+          role,
+          parts
+        };
+      });
+    } else {
+      body.contents = [{ role: 'user', parts: [{ text: prompt && prompt.trim() !== '' ? prompt : ' ' }] }];
     }
+
+    if (options.systemPrompt && options.systemPrompt.trim() !== '') {
+      body.systemInstruction = { parts: [{ text: options.systemPrompt }] };
+    }
+
+    if (options.tools && options.tools.length > 0) {
+      body.tools = [{
+        functionDeclarations: options.tools.map((t: any) => {
+          const hasParams = t.parameters && typeof t.parameters === 'object' && Object.keys(t.parameters).length > 0;
+          return {
+            name: t.name,
+            description: t.description,
+            parameters: hasParams ? t.parameters : undefined
+          };
+        })
+      }];
+    }
+
     body.generationConfig = {
       temperature: options.temperature ?? 0.4,
       maxOutputTokens: options.maxOutputTokens,
       responseMimeType: options.jsonMode ? 'application/json' : undefined,
     };
     const url = `${baseUrl()}/${await modelPath(model)}:generateContent`;
+    atLog(`[vertexai] generate URL: ${url}`);
+    atLog(`[vertexai] generate body: ${JSON.stringify(body, null, 2)}`);
     const res = await fetchWithTimeout(url, {
       method: 'POST',
       headers: {
@@ -202,12 +265,22 @@ class VertexAIProvider implements ProviderClient {
       throw new Error(`vertexai ${model} HTTP ${res.status} ${detail.slice(0, 240)}`);
     }
     const json: any = await res.json();
-    const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || '').join('') || '';
+    const parts = json?.candidates?.[0]?.content?.parts || [];
+    const text = parts.map((p: any) => p?.text || '').join('') || '';
+    const functionCalls = parts
+      .filter((p: any) => p?.functionCall)
+      .map((p: any) => ({
+        id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name: p.functionCall.name,
+        arguments: typeof p.functionCall.args === 'object' ? JSON.stringify(p.functionCall.args) : p.functionCall.args
+      }));
+
     return {
       text,
       modelUsed: model,
       promptTokens: json?.usageMetadata?.promptTokenCount,
       completionTokens: json?.usageMetadata?.candidatesTokenCount,
+      functionCalls: functionCalls.length > 0 ? functionCalls : undefined
     };
   }
 

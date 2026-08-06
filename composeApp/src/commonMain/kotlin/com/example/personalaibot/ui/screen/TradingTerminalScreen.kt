@@ -906,47 +906,70 @@ private fun HeroPnlCard(runningPnl: Double, currency: String, equity: Double, la
     val positive = runningPnl >= 0.0
     val accent = if (positive) BuyGreen else SellRed
     val gradient = Brush.verticalGradient(
-        listOf(accent.copy(alpha = 0.22f), PanelSurface)
+        listOf(accent.copy(alpha = 0.35f), JarvisTheme.Card.copy(alpha = 0.9f))
     )
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         modifier = Modifier.fillMaxWidth()
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(gradient, RoundedCornerShape(14.dp))
-                .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .background(gradient, RoundedCornerShape(16.dp))
+                .border(1.dp, accent.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (positive) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
-                        contentDescription = null,
-                        tint = accent,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("RUNNING PnL", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = formatMoney(runningPnl, currency),
-                    color = accent,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Equity ${formatMoney(equity, currency)}", color = Color.White.copy(alpha = 0.65f), fontSize = 11.sp)
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(accent.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (positive) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("LIVE PnL", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, letterSpacing = 2.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.weight(1f))
-                    Text(
-                        text = if (lastSyncAt > 0) "synced ${formatRelativeTs(lastSyncAt)}" else "not synced",
-                        color = Color.White.copy(alpha = 0.45f),
-                        fontSize = 10.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (lastSyncAt > 0) PositiveGreen.copy(alpha = 0.2f) else NegativeRed.copy(alpha = 0.2f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (lastSyncAt > 0) "SYNCED" else "OFFLINE",
+                            color = if (lastSyncAt > 0) PositiveGreen else NegativeRed,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = formatSignedMoney(runningPnl, currency),
+                    color = accent,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Equity", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(formatMoney(equity, currency), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    if (lastSyncAt > 0) {
+                        Text("updated ${formatRelativeTs(lastSyncAt)}", color = Color.White.copy(alpha = 0.45f), fontSize = 10.sp)
+                    }
                 }
             }
         }
@@ -1419,57 +1442,82 @@ private fun PositionCard(
     val pnlColor = if (row.netPnl >= 0) PositiveGreen else NegativeRed
 
     Card(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = JarvisTheme.Card),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().border(1.dp, OutlineSubtle, RoundedCornerShape(12.dp))
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Header Row
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(sideColor.copy(alpha = 0.18f))
                         .border(1.dp, sideColor.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         if (isBuy) "BUY" else "SELL",
                         color = sideColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.sp
                     )
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(row.symbol, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text("#${row.ticket} · ${formatVolume(row.volume)} lot", color = Color.White.copy(alpha = 0.55f), fontSize = 10.sp)
+                    Text(row.symbol, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("#${row.ticket} · ${formatVolume(row.volume)} lot", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(formatSignedMoney(row.netPnl), color = pnlColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(formatSignedMoney(row.netPnl), color = pnlColor, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                     if (row.swap != 0.0 || row.commission != 0.0) {
-                        Text("fee ${formatSignedMoney(row.swap + row.commission)}", color = Color.White.copy(alpha = 0.4f), fontSize = 8.sp)
+                        Text("fee ${formatSignedMoney(row.swap + row.commission)}", color = Color.White.copy(alpha = 0.4f), fontSize = 9.sp)
                     }
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth()) {
+            // Visual Risk/Reward Bar (if SL/TP exist)
+            if (row.sl > 0.0 && row.tp > 0.0) {
+                val totalDist = kotlin.math.abs(row.tp - row.sl)
+                if (totalDist > 0) {
+                    val currentDist = kotlin.math.abs(row.priceCurrent - row.sl)
+                    val progress = (currentDist / totalDist).toFloat().coerceIn(0f, 1f)
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("SL", color = NegativeRed, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("TP", color = PositiveGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            color = JarvisTheme.Cyan,
+                            trackColor = OutlineSubtle,
+                            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))
+                        )
+                    }
+                }
+            }
+
+            // Price Labels
+            Row(modifier = Modifier.fillMaxWidth().background(PanelSurfaceHi, RoundedCornerShape(8.dp)).padding(8.dp)) {
                 MiniLabel(modifier = Modifier.weight(1f), label = "Open", value = formatPrice(row.priceOpen))
                 MiniLabel(modifier = Modifier.weight(1f), label = "Current", value = formatPrice(row.priceCurrent))
                 MiniLabel(modifier = Modifier.weight(1f), label = "SL", value = if (row.sl > 0) formatPrice(row.sl) else "—")
                 MiniLabel(modifier = Modifier.weight(1f), label = "TP", value = if (row.tp > 0) formatPrice(row.tp) else "—")
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            // Actions
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 SoftButton(
                     modifier = Modifier.weight(1f),
-                    text = "Edit",
+                    text = "Edit Position",
                     color = JarvisTheme.Cyan,
                     onClick = onEdit
                 )
                 SoftButton(
                     modifier = Modifier.weight(1f),
-                    text = "Close",
+                    text = "Close Position",
                     color = NegativeRed,
                     onClick = onClose
                 )

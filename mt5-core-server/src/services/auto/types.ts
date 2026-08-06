@@ -14,9 +14,53 @@ export type StrategyType =
   | 'SMC_FVG_REVERSAL'
   | 'SMC_FVG_CONTINUATION'
   | 'SMC_FVG_MAGNET_SCALP'
+  | 'SMC_WALL_BREAK_SCALP'
   | 'SMC_RSI_DIVERGENCE'
   | 'HOLD_CASH';
 
+export const DEFAULT_GATE_TOGGLES = {
+  marketTradabilityGate: true,
+  preAiPositionCapGate: true,
+  unifiedZoneGate: true,
+  eaFallbackConfidenceGate: true,
+  eaFallbackRrrGate: true,
+  decisionSideGuard: true,
+  slDistanceGuard: true,
+  counterTrendGuard: true,
+  ltfConsensusGuard: true,
+  proximityGate: true,
+  m15SmcPressureGate: true,
+  fvgFillGate: true,
+  sequentialEntryGate: true,
+  v25OnlyGate: true,
+  v25BreakoutGuard: true,
+  executionQualityGate: true,
+  riskParamsGate: true,
+  closeWeakestGate: true,
+  orderPreflightGate: true,
+  postTpCooldownGate: true,
+} as const;
+
+export const DEFAULT_STRATEGY_TOGGLES = {
+  SCALPING: true,
+  SWING: true,
+  GRID: true,
+  TRAILING: true,
+  TREND_FOLLOW: true,
+  MEAN_REVERSION: true,
+  BREAKOUT: true,
+  RANGE: true,
+  SMC_FVG_SCALP: true,
+  SMC_FVG_REVERSAL: true,
+  SMC_FVG_CONTINUATION: true,
+  SMC_FVG_MAGNET_SCALP: true,
+  SMC_WALL_BREAK_SCALP: true,
+  SMC_RSI_DIVERGENCE: true,
+  V25_PLAYBOOKS: true,
+} as const;
+
+export type GateToggleKey = keyof typeof DEFAULT_GATE_TOGGLES;
+export type StrategyToggleKey = keyof typeof DEFAULT_STRATEGY_TOGGLES;
 
 export interface AgentModelChoice {
   provider: 'gemini' | 'openai' | 'claude' | 'openrouter' | 'ollama' | 'native' | 'minimax' | 'vertexai';
@@ -25,6 +69,12 @@ export interface AgentModelChoice {
 }
 
 export type AutoTradingConfig = {
+  /**
+   * Runtime decision engine.
+   * M15_WALL_SCALPING is the simplified core: IndicatorPipeline/PriceMap only,
+   * M15-centered wall map, SCALPING entries, no AI/legacy gate cascade.
+   */
+  engineMode?: 'M15_WALL_SCALPING' | 'LEGACY_COMPLEX';
   provider?: string;
   watchlist: string[];
   timeframe: string;
@@ -104,6 +154,18 @@ export type AutoTradingConfig = {
     scalpTrailAfterR?: number;
     scalpStackBreakEvenTriggerR?: number;
     scalpStackTrailAfterR?: number;
+    enableEarlyBreakeven?: boolean;
+    earlyBreakevenR?: number;
+    enableEarlyInvalidation?: boolean;
+    earlyInvalidationR?: number;
+    earlyInvalidationCloseR?: number;
+    earlyInvalidationMinAgeMs?: number;
+    earlyInvalidationMaxPeakR?: number;
+    eaOnlyMinConfidence?: number;
+    enableEaOnlyLtfConsensusGuard?: boolean;
+    ltfConsensusGuardMinConfluence?: number;
+    postTakeProfitCooldownMs?: number;
+    postTakeProfitReentryMinDistanceXAU?: number;
     reduceLossThresholdR?: number;
     closeLossThresholdR?: number;
     scaleInLossThresholdR?: number;
@@ -151,11 +213,16 @@ export type AutoTradingConfig = {
     sequentialMinEntryDistanceXAU?: number;
     sequentialMinEntryDistanceAtrMul?: number;
     sequentialDuplicateIntentTtlMs?: number;
+    meanReversionDuplicateIntentTtlMs?: number;
+    meanReversionMaxRrr?: number;
     scaleInMinEntryDistanceXAU?: number;
     scaleInMinEntryDistanceAtrMul?: number;
     scaleInRequiresSafeOrLossGate?: boolean;
     // V24.0 - Fade-the-Level Proximity Gate
     enableProximityGate?: boolean;
+    enableScalpM15PressureGuard?: boolean;
+    gateToggles?: Partial<Record<GateToggleKey | string, boolean>>;
+    strategyToggles?: Partial<Record<StrategyToggleKey | StrategyType | string, boolean>>;
     proximityMaxPip?: number;
     proximityUnconditionalStars?: number;
     proximityConditionalStars?: number;
@@ -175,8 +242,13 @@ export type AutoTradingConfig = {
     requireBasketBeBeforeClose?: boolean;
     // V25.0 - Real-Time Wall Engine
     v25?: {
+      enabled?: boolean;
       enable?: boolean;
       enableV25Only?: boolean;
+      unifiedDecisionPath?: boolean;
+      unifiedCandidateTtlMs?: number;
+      unifiedPb1CandidateTtlMs?: number;
+      legacyDirectExecution?: boolean;
       allowV24DirectWhenV25Aligned?: boolean;
       allowV24DirectOnV25Approach?: boolean;
       allowV24TrendFollowDirectWhenV25Stale?: boolean;
@@ -206,6 +278,27 @@ export type AutoTradingConfig = {
       minWallStarsSwing?: number;
       requireFreshOppositeFvg?: boolean;
       barCloseEventBus?: boolean;
+    };
+    simpleScalping?: {
+      enabled?: boolean;
+      primaryTimeframe?: 'M15';
+      timeframes?: string[];
+      candleCount?: number;
+      minWallStars?: number;
+      targetWallMinStars?: number;
+      entryProximityAtrMul?: number;
+      slBufferAtrMul?: number;
+      tpBufferAtrMul?: number;
+      minRrr?: number;
+      maxRiskAtrMul?: number;
+      minRewardAtrMul?: number;
+      maxPositionsPerSymbol?: number;
+      m15FvgMaxAgeBars?: number;
+      fvgMaxDriftAtrMul?: number;
+      maxDailyLossesPerSymbol?: number;
+      maxConsecutiveLossesPerSymbol?: number;
+      allowBuy?: boolean;
+      allowSell?: boolean;
     };
   };
   aiModel?: string;
@@ -439,6 +532,7 @@ export type AnalysisSummary = {
   sma50?: number | null;
   ema20?: number | null;
   smc?: any;
+  candles?: any[];
 };
 
 export type JournalRow = {
@@ -478,6 +572,9 @@ export type JournalRow = {
   qualityFlags?: string[];
   learningEligible?: boolean;
   dataVersion?: number;
+  // V26.15: Peak tracking — max profit/loss R during order lifetime
+  peakProfitR?: number | null;
+  maxDrawdownR?: number | null;
 };
 
 export type ManagementJournalRow = {

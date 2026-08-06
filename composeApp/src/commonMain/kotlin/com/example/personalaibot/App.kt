@@ -107,6 +107,12 @@ fun App(
     val chartHideSideToolbar by viewModel.chartHideSideToolbar.collectAsStateWithLifecycle()
     val chartRefreshToken by viewModel.chartRefreshToken.collectAsStateWithLifecycle()
     val jobs by viewModel.activeJobs.collectAsStateWithLifecycle()
+    val scheduledTasks by viewModel.scheduledTasks.collectAsStateWithLifecycle()
+    val alertTestRunning by viewModel.alertTestRunning.collectAsStateWithLifecycle()
+    val alertTestStatus by viewModel.alertTestStatus.collectAsStateWithLifecycle()
+    val alertTestResults by viewModel.alertTestResults.collectAsStateWithLifecycle()
+    val alertAiSummary by viewModel.alertAiSummaryEnabled.collectAsStateWithLifecycle()
+    val alertVoice by viewModel.alertVoiceEnabled.collectAsStateWithLifecycle()
     val mt5BridgeBaseUrl by viewModel.mt5BridgeBaseUrl.collectAsStateWithLifecycle()
     val mt5AuthToken by viewModel.mt5AuthToken.collectAsStateWithLifecycle()
     val mt5PairingStatus by viewModel.mt5PairingStatus.collectAsStateWithLifecycle()
@@ -299,8 +305,26 @@ fun App(
                     showAutomation -> {
                         AutomationScreen(
                             jobs = jobs,
+                            scheduledTasks = scheduledTasks,
+                            alertAiSummary = alertAiSummary,
+                            alertVoice = alertVoice,
+                            onAlertAiSummaryChange = { viewModel.setAlertAiSummaryEnabled(it) },
+                            onAlertVoiceChange = { viewModel.setAlertVoiceEnabled(it) },
                             onDelete = { viewModel.automationManager.deleteJob(it) },
-                            onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) }
+                            onDeleteTask = { viewModel.automationManager.deleteScheduledTask(it) },
+                            onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) },
+                            onUpdateCondition = { id, cond -> viewModel.automationManager.updateCondition(id, cond) },
+                            onRename = { id, name -> viewModel.automationManager.renameJob(id, name) },
+                            alertTestRunning = alertTestRunning,
+                            alertTestStatus = alertTestStatus,
+                            alertTestResults = alertTestResults,
+                            onRunTest = { viewModel.runAlertDataTest() },
+                            onCreateAlert = { name, symbol, toolName, field, op, value, interval ->
+                                viewModel.createAlert(name, symbol, toolName, field, op, value, interval)
+                            },
+                            onCreateScheduledTask = { name, prompt, type, runAt, hhmm ->
+                                viewModel.createScheduledTask(name, prompt, type, runAt, hhmm)
+                            }
                         )
                     }
 

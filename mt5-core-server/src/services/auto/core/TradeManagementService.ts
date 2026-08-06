@@ -87,16 +87,20 @@ class TradeManagementService {
     const forcedClose = aiManagement === 'CLOSE' && aiConfidence >= defenseConfidence;
     const targetTicket = aiDecision?.target_ticket;
 
-    const marketSide =
-      analysis.confluence < adverseConfluence ? 'SKIP' :
+    const rawMarketSide =
       analysis.bias === 'BULL' ? 'BUY' :
       analysis.bias === 'BEAR' ? 'SELL' :
       'SKIP';
+    const marketSide = analysis.confluence < adverseConfluence ? 'SKIP' : rawMarketSide;
 
     const marketOpposesNet =
       cluster.netSide !== 'FLAT' &&
       marketSide !== 'SKIP' &&
       marketSide !== cluster.netSide;
+    const rawMarketOpposesNet =
+      cluster.netSide !== 'FLAT' &&
+      rawMarketSide !== 'SKIP' &&
+      rawMarketSide !== cluster.netSide;
     const marketAlignsWithNet =
       cluster.netSide !== 'FLAT' &&
       marketSide !== 'SKIP' &&
@@ -293,6 +297,56 @@ class TradeManagementService {
 
     if (finalMode === 'HOLD' && isScaleInIntent && isAiDefenseForScaleIn) {
         finalMode = 'SCALE_IN';
+    }
+
+    // Fast invalidation for entries that failed immediately. This keeps V25
+    // wall-touch/scalp/breakout orders from waiting for the full SL after the
+    // market moves against the original proof.
+    if ((adaptive.enableEarlyInvalidation ?? true) && worst?.position && !worst.isSafe) {
+      const strategyText = String(worst.journal?.strategy ?? '').toUpperCase();
+      const isFastInvalidationStrategy =
+        strategyText.startsWith('V25_') ||
+        strategyText.includes('SCALP') ||
+        strategyText.includes('BREAKOUT') ||
+        strategyText.includes('MOMENTUM') ||
+        strategyText === 'MEAN_REVERSION';
+      const rawOpposesWorst =
+        rawMarketSide !== 'SKIP' &&
+        rawMarketSide !== worst.position.side;
+      const openedAtMs = worst.position.openedAtMs ?? worst.journal?.createdAt ?? 0;
+      const ageMs = openedAtMs > 0 ? Date.now() - openedAtMs : Number.POSITIVE_INFINITY;
+      const minAgeMs = adaptive.earlyInvalidationMinAgeMs ?? 90_000;
+      const reduceAtR = adaptive.earlyInvalidationR ?? -0.45;
+      const closeAtR = adaptive.earlyInvalidationCloseR ?? -0.65;
+      const invalidationConfirmed = isFastInvalidationStrategy || rawOpposesWorst || rawMarketOpposesNet;
+
+      if (ageMs >= minAgeMs && invalidationConfirmed && worst.r <= closeAtR) {
+        managementEventsTotal.inc({ symbol: cluster.symbol, event: 'early_invalidation_close' });
+        return {
+          mode: 'CLOSE',
+          summary: `Early invalidation close ${cluster.symbol} #${worst.position.ticket}`,
+          reason: `Trade proof failed early: ${round2(worst.r)}R <= ${closeAtR}R after ${round1(ageMs / 1000)}s, strategy=${strategyText || 'unknown'}, market=${rawMarketSide}. Closing before full SL.`,
+          ticket: worst.position.ticket,
+          closeVolume: worst.position.volume,
+          allowOverLimitDefense: false,
+          playbook,
+        };
+      }
+
+      if (ageMs >= minAgeMs && invalidationConfirmed && worst.r <= reduceAtR) {
+        const minCloseVolume = cfg.risk.minLotStep ?? cfg.risk.minLot ?? 0.01;
+        const closeVolume = round2(Math.max(minCloseVolume, worst.position.volume * 0.5));
+        managementEventsTotal.inc({ symbol: cluster.symbol, event: 'early_invalidation_reduce' });
+        return {
+          mode: 'REDUCE',
+          summary: `Early invalidation reduce ${cluster.symbol} #${worst.position.ticket}`,
+          reason: `Trade proof weakening: ${round2(worst.r)}R <= ${reduceAtR}R after ${round1(ageMs / 1000)}s, strategy=${strategyText || 'unknown'}, market=${rawMarketSide}. Reducing risk before SL.`,
+          ticket: worst.position.ticket,
+          closeVolume: Math.min(worst.position.volume, closeVolume),
+          allowOverLimitDefense: false,
+          playbook,
+        };
+      }
     }
 
     // --- PORTFOLIO-PROTECTION RULES (2026-04-24) ---------------------------
@@ -505,8 +559,10 @@ class TradeManagementService {
     if (worst?.position && worstLossR > 0) {
         const r = worstLossR;
         const journal = worst.journal;
-        const isScalp = journal?.strategy === 'SCALPING' || journal?.strategy === 'MEAN_REVERSION'
-                     || String(journal?.strategy ?? '').toUpperCase().includes('SCALP');
+        const strategyText = String(journal?.strategy ?? '').toUpperCase();
+        const isScalp = strategyText === 'SCALPING' || strategyText === 'MEAN_REVERSION'
+                     || strategyText.includes('SCALP')
+                     || strategyText.startsWith('V25_');
 
         // --- P2.1: Staged BE/Trail System ---
         // Stage 1 (1R):     25% partial close + move SL to BE
@@ -524,7 +580,7 @@ class TradeManagementService {
             // letting it bleed back through the wider Stage-3 trail.
             const goldenTightR = (adaptive.goldenThresholdR ?? 2.0) + 1.0;
             const goldenTrailMultiplier = adaptive.goldenTrailMultiplier ?? 0.7;
-            if (r >= goldenTightR && !openJournalForSymbol.some(j => j.aiReview?.includes('TRAIL_GOLD'))) {
+            if (r >= goldenTightR && !openJournalForSymbol.some(j => j.mt5Ticket === worst.position.ticket && j.aiReview?.includes('TRAIL_GOLD'))) {
                 const slRisk = Math.abs((journal?.sl ?? 0) - (journal?.entry ?? worst.position.priceOpen));
                 const trailDistance = slRisk > 0 ? slRisk * goldenTrailMultiplier : worst.position.priceOpen * 0.0015;
                 const trailSl = worst.position.side === 'BUY'
@@ -542,7 +598,7 @@ class TradeManagementService {
             }
 
             // Stage 3: Trail at 3R+ (ATR×1.5 trailing stop)
-            if (r >= 3.0 && !openJournalForSymbol.some(j => j.aiReview?.includes('TRAIL_3R'))) {
+            if (r >= 3.0 && !openJournalForSymbol.some(j => j.mt5Ticket === worst.position.ticket && j.aiReview?.includes('TRAIL_3R'))) {
                 // Use ATR from analysis if available, otherwise estimate from journal risk
                 const slRisk = Math.abs((journal?.sl ?? 0) - (journal?.entry ?? worst.position.priceOpen));
                 const trailDistance = slRisk > 0 ? slRisk * 1.5 : worst.position.priceOpen * 0.003;
@@ -561,7 +617,7 @@ class TradeManagementService {
             }
 
             // Stage 2: Partial 50% at 2R + trail SL at entry + ATR
-            if (r >= 2.0 && cluster.positions.length > 0 && !openJournalForSymbol.some(j => j.aiReview?.includes('PARTIAL_2R'))) {
+            if (r >= 2.0 && cluster.positions.length > 0 && !openJournalForSymbol.some(j => j.mt5Ticket === worst.position.ticket && j.aiReview?.includes('PARTIAL_2R'))) {
                 const closeVolume = round2(Math.max(cfg.risk.minLotStep, worst.position.volume * 0.5));
                 managementEventsTotal.inc({ symbol: cluster.symbol, event: 'staged_partial' });
                 return {
@@ -575,7 +631,7 @@ class TradeManagementService {
             }
 
             // Stage 1: Partial 25% at 1R + move SL to BE
-            if (r >= 1.0 && cluster.positions.length > 0 && !openJournalForSymbol.some(j => j.aiReview?.includes('PARTIAL_1R'))) {
+            if (r >= 1.0 && cluster.positions.length > 0 && !openJournalForSymbol.some(j => j.mt5Ticket === worst.position.ticket && j.aiReview?.includes('PARTIAL_1R'))) {
                 const closeVolume = round2(Math.max(cfg.risk.minLotStep, worst.position.volume * 0.25));
                 managementEventsTotal.inc({ symbol: cluster.symbol, event: 'staged_partial' });
                 return {
@@ -592,12 +648,19 @@ class TradeManagementService {
         // Break Even Logic (BE) — fallback when staged partials disabled
         const posEntry = worst.position.priceOpen > 0 ? worst.position.priceOpen : (journal?.entry ?? 0);
         const posSl = journal?.sl ?? worst.position.sl;
-        if (r >= 0.5 && posSl && posEntry && posSl !== posEntry) {
-            if (isScalp || r >= 0.8) {
+        const earlyBeR = adaptive.earlyBreakevenR ?? (isScalp ? 0.35 : 0.4);
+        const beTriggerR = isScalp
+            ? Math.min(0.5, adaptive.scalpBreakEvenTriggerR ?? earlyBeR)
+            : earlyBeR;
+        const allowEarlyBe =
+            (adaptive.enableEarlyBreakeven ?? true) &&
+            (cluster.symbol.toUpperCase().includes('XAU') || isScalp || analysis.regime === 'RANGING' || analysis.regime === 'VOLATILE_BREAKOUT');
+        if (r >= beTriggerR && posSl && posEntry && posSl !== posEntry) {
+            if (allowEarlyBe || isScalp || r >= 0.8) {
                 return {
                     mode: 'BREAKEVEN',
                     summary: `Move to BE (${round2(r)}R reached)`,
-                    reason: `Locking entry as trade is moving in favor | Strategy: ${journal?.strategy ?? 'unknown'}`,
+                    reason: `Locking entry as trade is moving in favor at ${round2(r)}R (trigger=${round2(beTriggerR)}R) | Strategy: ${journal?.strategy ?? 'unknown'}`,
                     ticket: worst.position.ticket,
                     playbook,
                 };

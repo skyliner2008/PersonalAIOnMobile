@@ -130,10 +130,17 @@ class AndroidLocalOnnxManager(
             val inputIdsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(inputIds), shape)
             val attentionMaskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(attentionMask), shape)
 
-            val inputs = mapOf(
+            // สร้าง inputs ตามที่โมเดลประกาศไว้จริง — บาง export ต้องการ token_type_ids
+            // (ถ้าโมเดลต้องการแต่เราไม่ส่ง session.run จะ throw → embedding ว่างเงียบๆ)
+            val tokenTypeTensor = if (session.inputNames.contains("token_type_ids")) {
+                OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(tokenIds.size) { 0L }), shape)
+            } else null
+
+            val inputs = mutableMapOf<String, OnnxTensor>(
                 "input_ids" to inputIdsTensor,
                 "attention_mask" to attentionMaskTensor
             )
+            tokenTypeTensor?.let { inputs["token_type_ids"] = it }
 
             // 3. Run Inference
             val result = session.run(inputs)
@@ -163,6 +170,7 @@ class AndroidLocalOnnxManager(
 
             inputIdsTensor.close()
             attentionMaskTensor.close()
+            tokenTypeTensor?.close()
             result.close()
             embeddings
         } catch (e: Exception) {

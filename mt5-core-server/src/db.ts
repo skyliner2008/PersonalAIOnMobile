@@ -383,6 +383,9 @@ export function initDb(): Database.Database {
   addJournalColumn('quality_flags_json', `quality_flags_json TEXT NOT NULL DEFAULT '[]'`);
   addJournalColumn('learning_eligible', `learning_eligible INTEGER NOT NULL DEFAULT 1`);
   addJournalColumn('data_version', `data_version INTEGER NOT NULL DEFAULT 1`);
+  // V26.15: Peak profit/loss tracking
+  addJournalColumn('peak_profit_r', `peak_profit_r REAL`);
+  addJournalColumn('max_drawdown_r', `max_drawdown_r REAL`);
   _db.exec(`CREATE INDEX IF NOT EXISTS idx_auto_trading_journal_learning ON auto_trading_journal(learning_eligible, outcome, updated_at DESC)`);
   _db.exec(`CREATE INDEX IF NOT EXISTS idx_auto_trading_journal_ticket ON auto_trading_journal(mt5_ticket)`);
 

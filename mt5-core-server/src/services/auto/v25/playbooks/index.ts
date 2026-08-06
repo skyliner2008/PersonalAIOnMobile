@@ -517,6 +517,17 @@ class PlaybookSelectorImpl {
     const cont = snap.smc?.structure?.continuationCount ?? 0;
     const regime = (dir === 'BULLISH' || dir === 'BEARISH') && cont > 0 ? 'TRENDING' : 'RANGING';
     let mandate: DirectionalMandate = { side: null, source: 'none', reason: 'not evaluated', stale: true, decision: null };
+    const unifiedCandidateMode = persistenceService.loadConfig().adaptive?.v25?.unifiedDecisionPath !== false;
+
+    if (unifiedCandidateMode) {
+      mandate = {
+        side: null,
+        source: 'none',
+        reason: `${upper} unified candidate mode: AutoEngine will arbitrate V25 side`,
+        stale: false,
+        decision: null,
+      };
+    } else {
 
     // ── V25.3 AI Bias Alignment Gate ──────────────────────────────────────
     // V25 operates on pure wall mechanics (price hits wall → trade reversal).
@@ -585,6 +596,7 @@ class PlaybookSelectorImpl {
         }
       }
     } catch { /* best-effort - if mandate lookup fails, keep the legacy bias gate result */ }
+    }
 
     const tries: Array<{ name: string; result: PlaybookEvalResult }> = [];
 
@@ -614,13 +626,18 @@ class PlaybookSelectorImpl {
     this.stats.plansEmitted++;
     this.recordPlan(upper, winner.result.plan!);
     const sysConfigLog = persistenceService.loadConfig();
-    const isShadowLog = sysConfigLog.adaptive?.v25?.enableV25Only === true ? false : this.config.shadowOnly;
-    const modeLabel = isShadowLog ? 'shadow - no order' : 'live';
+    const unifiedDecisionPath = sysConfigLog.adaptive?.v25?.unifiedDecisionPath !== false;
+    const legacyDirectExecution = sysConfigLog.adaptive?.v25?.legacyDirectExecution === true && sysConfigLog.adaptive?.v25?.enableV25Only === true;
+    const isShadowLog = unifiedDecisionPath || !legacyDirectExecution ? true : this.config.shadowOnly;
+    const modeLabel = unifiedDecisionPath ? 'candidate - unified pipeline' : isShadowLog ? 'shadow - no order' : 'live';
     atLog(`[V25] 🎯 ${winner.name} ${upper} ${side} entry=${winner.result.plan!.entry.toFixed(2)} sl=${winner.result.plan!.sl.toFixed(2)} tp=${winner.result.plan!.tp.toFixed(2)} rrr=${winner.result.plan!.rrr.toFixed(2)} (${modeLabel})`);
 
-    // Phase D hook: if !shadowOnly we'd hand off to TradingExecutionService here.
+    // Unified mode records candidates only. AutoEngine is the single live order
+    // path and will consume fresh candidates on the next decision cycle.
     const sysConfig = persistenceService.loadConfig();
-    const isShadow = sysConfig.adaptive?.v25?.enableV25Only === true ? false : this.config.shadowOnly;
+    const isUnified = sysConfig.adaptive?.v25?.unifiedDecisionPath !== false;
+    const directLegacy = sysConfig.adaptive?.v25?.legacyDirectExecution === true && sysConfig.adaptive?.v25?.enableV25Only === true;
+    const isShadow = isUnified || !directLegacy ? true : this.config.shadowOnly;
     
     if (!isShadow && winner.result.plan) {
       const plan = winner.result.plan;

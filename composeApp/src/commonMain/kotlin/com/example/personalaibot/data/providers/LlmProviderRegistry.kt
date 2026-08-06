@@ -70,8 +70,9 @@ class LlmProviderRegistry(private val client: HttpClient) {
         projectId: String? = null,
         location: String = "us-central1"
     ) {
-        if (serverBaseUrl.isBlank() && directApiKey.isNullOrBlank()) return
-        register(VertexAILlmProvider(client, serverBaseUrl, clientToken, directApiKey, projectId, location))
+        if (serverBaseUrl.isBlank()) return
+        // ADK Server Provider
+        register(AdkServerLlmProvider(client, serverBaseUrl, clientToken))
     }
 
     /** ลงทะเบียน Firebase Vertex AI (เฉพาะ Android) */

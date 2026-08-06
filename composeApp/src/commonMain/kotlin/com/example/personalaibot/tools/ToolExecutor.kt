@@ -2,6 +2,7 @@ package com.example.personalaibot.tools
 
 import com.example.personalaibot.tools.trading.TradingToolExecutor
 import com.example.personalaibot.tools.camera.CameraToolExecutor
+import com.example.personalaibot.tools.system.SystemToolExecutor
 import io.ktor.client.*
 import kotlinx.datetime.*
 import kotlin.math.*
@@ -12,6 +13,10 @@ import kotlin.math.*
  * ทุก built-in tool ถูก implement ที่นี่ใน pure Kotlin/KMP
  * Trading tools route ไปยัง TradingToolExecutor
  * Custom skills จะถูก route ไปยัง Gemini พร้อม systemPromptAddon ของ skill
+ *
+ * หมายเหตุ lifecycle: object singleton นี้ถูก init ครั้งเดียวจาก JarvisOrchestrator
+ * (init / initFileHandler / setSideEffectDelegate ควรเรียกก่อน execute เสมอ)
+ * หากอนาคตต้องสร้าง Orchestrator หลาย instance พร้อมกัน ให้ refactor เป็น injectable class
  */
 object ToolExecutor {
     data class Mt5RuntimeConfig(
@@ -30,6 +35,9 @@ object ToolExecutor {
     private var _cameraExecutor: CameraToolExecutor? = null
     private var _mt5RuntimeConfigProvider: (() -> Mt5RuntimeConfig)? = null
 
+    // Executor สำหรับ System tools (diagnostics / connectivity / create custom tool)
+    private var _systemExecutor: SystemToolExecutor? = null
+
     // Delegate สำหรับ Side-effects (Memory, Reminders, UI)
     private var _sideEffectDelegate: SideEffectDelegate? = null
 
@@ -43,6 +51,10 @@ object ToolExecutor {
 
     fun initCameraExecutor(executor: CameraToolExecutor) {
         _cameraExecutor = executor
+    }
+
+    fun initSystemExecutor(executor: SystemToolExecutor) {
+        _systemExecutor = executor
     }
 
     fun setSideEffectDelegate(delegate: SideEffectDelegate) {
@@ -68,6 +80,17 @@ object ToolExecutor {
             }
             val routedArgs = enrichMt5Args(routedToolName, call.args)
             val result = when {
+                // ─── Automation Alerts (intercept ก่อน trading — ใช้ AutomationManager ผ่าน delegate) ──
+                routedToolName == "automation_manage_alerts" -> executeManageAlerts(routedArgs)
+                // ─── Scheduled Tasks (งานตามเวลา — ปลุก AI เมื่อถึงเวลา) ──
+                routedToolName == "automation_manage_schedule" -> executeManageSchedule(routedArgs)
+                // ─── Live Control (Vision/Voice) — intercept ก่อน camera branch ──
+                routedToolName in liveControlToolNames -> executeLiveControl(routedToolName, routedArgs)
+                // ─── System Tools (Diagnostics / Connectivity / Create Tool) ────
+                ToolRegistry.isSystemTool(routedToolName) -> {
+                    _systemExecutor?.execute(routedToolName, routedArgs)
+                        ?: "⚠️ System module ยังไม่พร้อมใช้งาน (SystemToolExecutor ยังไม่ถูก init)"
+                }
                 // ─── Trading Tools ─────────────────────────────────────────
                 ToolRegistry.isTradingTool(routedToolName) -> {
                     val trader = _tradingExecutor
@@ -84,6 +107,10 @@ object ToolExecutor {
                     _cameraExecutor?.execute(routedToolName, routedArgs)
                         ?: "⚠️ ระบบกล้องยังไม่พร้อม กรุณาเปิดกล้องก่อนใช้งาน"
                 }
+                // ─── Strategy Library (Quantpedia knowledge base) ──────────
+                ToolRegistry.isStrategyTool(routedToolName) -> {
+                    com.example.personalaibot.tools.strategy.StrategyToolExecutor.execute(routedToolName, routedArgs)
+                }
                 // ─── Built-in Tools ────────────────────────────────────────
                 else -> when (routedToolName) {
                 "get_current_datetime" -> executeDateTime()
@@ -96,6 +123,8 @@ object ToolExecutor {
                 "translate_text"       -> executeTranslate(routedArgs)
                 "summarize_text"       -> executeSummarize(routedArgs)
                 "search_web"           -> executeSearchWeb(routedArgs["query"] ?: "")
+                "identity_update"      -> executeIdentityUpdate(routedArgs)
+                "analyze_and_display_report" -> executeDisplayReport(routedArgs)
                 else                   -> executeCustomSkill(ToolCall(routedToolName, routedArgs))
                 } // end inner when
             } // end outer when
@@ -215,9 +244,25 @@ object ToolExecutor {
         return "บันทึกข้อมูลเรียบร้อยแล้ว: $key = $value"
     }
 
-    private fun executeRecallMemory(query: String, memoryContext: String): String {
+    /**
+     * recall_memory — ใช้ semantic search (embedding) ผ่าน SideEffectDelegate เป็นหลัก
+     * fallback เป็น substring match ใน memoryContext เมื่อยังไม่มี delegate
+     */
+    private suspend fun executeRecallMemory(query: String, memoryContext: String): String {
+        if (query.isBlank()) return "ต้องระบุ query"
+
+        // Primary: semantic search ด้วย embedding (JarvisMemoryManager Archival layer)
+        val delegate = _sideEffectDelegate
+        if (delegate != null) {
+            return try {
+                delegate.onRecallMemory(query)
+            } catch (e: Exception) {
+                "ค้นหา memory ไม่สำเร็จ: ${e.message}"
+            }
+        }
+
+        // Fallback: substring match ใน context ที่ส่งมา
         if (memoryContext.isBlank()) return "ยังไม่มีข้อมูลใน memory"
-        // Search for relevant lines in context
         val lines = memoryContext.lines()
         val relevant = lines.filter { line ->
             query.lowercase().split(" ").any { word -> line.lowercase().contains(word) }
@@ -292,11 +337,91 @@ object ToolExecutor {
         return "WEB_SEARCH_REQUEST::query=$query"
     }
 
+    /** identity_update — อัปเดตตัวตน AI/ผู้ใช้ผ่าน SideEffectDelegate (persist ลง Core Memory) */
+    private suspend fun executeIdentityUpdate(args: Map<String, String>): String {
+        val target = args["target"] ?: return "ต้องระบุ target (agent หรือ user)"
+        val field  = args["field"]  ?: return "ต้องระบุ field"
+        val value  = args["value"]  ?: return "ต้องระบุ value"
+        val delegate = _sideEffectDelegate ?: return "⚠️ ระบบ identity ยังไม่พร้อมใช้งาน"
+        return delegate.onUpdateIdentity(target, field, value)
+    }
+
+    /**
+     * executeCustomSkill — custom tool ที่ Agent สร้างเอง (ผ่าน system_create_agent_tool)
+     * คืน systemPromptAddon ของ tool กลับเข้า tool loop ให้ model ทำตามขั้นตอน
+     * (model สามารถเรียก tool จริงอื่นประกอบได้ เช่น trading_price แล้วค่อยสรุปผล)
+     */
     private suspend fun executeCustomSkill(call: ToolCall): String {
         val skill = ToolRegistry.getSkill(call.name)
-            ?: return "ไม่พบ skill '${call.name}'"
-        // สำหรับ Phase ถัดไป: จัดการ Skill ผ่าน delegate
-        return "กำลังดึงข้อมูลจากทักษะ '${skill.name}'..."
+            ?: return "❌ ไม่พบเครื่องมือ '${call.name}' ในระบบ — หากผู้ใช้ต้องการเครื่องมือนี้ " +
+                    "ให้สร้างใหม่ด้วย system_create_agent_tool"
+        return buildString {
+            append("🛠️ เปิดใช้งานเครื่องมือ '${skill.name}' แล้ว\n")
+            append("ให้ทำตามคำสั่งของเครื่องมือนี้เพื่อประมวลผลคำขอของผู้ใช้ต่อทันที ")
+            append("(เรียกใช้ tool อื่นประกอบได้ตามความเหมาะสม แล้วสรุปผลให้ผู้ใช้):\n\n")
+            append(skill.systemPromptAddon)
+        }
+    }
+
+    // ─── Live Control (Vision / Voice) ──────────────────────────────────────
+
+    /** เครื่องมือกลุ่มนี้ถูก declare อยู่ใน _cameraTools แต่ทำงานผ่าน delegate ไม่ใช่ CameraToolExecutor */
+    private val liveControlToolNames = setOf(
+        "vision_activate", "vision_deactivate", "voice_get_profiles", "voice_set_profile"
+    )
+
+    private suspend fun executeLiveControl(toolName: String, args: Map<String, String>): String {
+        val delegate = _sideEffectDelegate
+        return when (toolName) {
+            "vision_activate" -> {
+                if (delegate == null) return "⚠️ ระบบ Vision ยังไม่พร้อมใช้งาน"
+                delegate.onVisionToggle(true)
+                "✅ เปิดระบบมองเห็น (Vision) แล้ว — กล้องจะสตรีมภาพให้วิเคราะห์แบบเรียลไทม์"
+            }
+            "vision_deactivate" -> {
+                if (delegate == null) return "⚠️ ระบบ Vision ยังไม่พร้อมใช้งาน"
+                delegate.onVisionToggle(false)
+                "✅ ปิดระบบมองเห็น (Vision) แล้ว"
+            }
+            "voice_get_profiles" ->
+                "📋 รายชื่อเสียงที่ใช้ได้:\n${com.example.personalaibot.data.GeminiVoiceProfiles.getVoiceListSummary()}"
+            "voice_set_profile" -> {
+                val name = args["name"]?.trim()
+                if (name.isNullOrBlank()) return "❌ กรุณาระบุชื่อเสียง (เรียก voice_get_profiles เพื่อดูรายชื่อ)"
+                if (delegate == null) return "⚠️ ระบบเปลี่ยนเสียงยังไม่พร้อมใช้งาน"
+                delegate.onVoiceChange(name)
+                "✅ กำลังเปลี่ยนเสียงเป็น '$name' — ระบบเสียงจะ reconnect สั้นๆ เพื่อใช้เสียงใหม่"
+            }
+            else -> "❌ ไม่รู้จัก live control tool: $toolName"
+        }
+    }
+
+    // ─── Report Display ──────────────────────────────────────────────────────
+
+    /**
+     * analyze_and_display_report — ส่งรายงาน markdown ยาวไปแสดงในแชทผ่าน delegate
+     * แล้วคืนคำสั่งให้ model พูด/ตอบเฉพาะสรุปสั้นๆ (กัน model อ่านตารางออกเสียงจนเสียงขาด)
+     */
+    private suspend fun executeDisplayReport(args: Map<String, String>): String {
+        val markdown = args["detailed_markdown"] ?: return "❌ ต้องระบุ detailed_markdown"
+        val voiceSummary = args["voice_summary"] ?: ""
+        _sideEffectDelegate?.onDisplayReport(markdown, voiceSummary)
+        return "✅ รายงานฉบับเต็มถูกส่งแสดงในแชทแล้ว — ให้ตอบผู้ใช้ด้วยสรุปสั้นๆ เป็นประโยคสนทนาเท่านั้น " +
+               "(อ้างอิง: $voiceSummary) ห้ามอ่านรายงานหรือตารางซ้ำออกเสียงเด็ดขาด"
+    }
+
+    // ─── Automation Alerts ───────────────────────────────────────────────────
+
+    private suspend fun executeManageAlerts(args: Map<String, String>): String {
+        val delegate = _sideEffectDelegate
+            ?: return "⚠️ ระบบ Automation ยังไม่พร้อมใช้งาน"
+        return delegate.onManageAlerts(args)
+    }
+
+    private suspend fun executeManageSchedule(args: Map<String, String>): String {
+        val delegate = _sideEffectDelegate
+            ?: return "⚠️ ระบบ Automation ยังไม่พร้อมใช้งาน"
+        return delegate.onManageSchedule(args)
     }
 
     // ─── Math Evaluator ──────────────────────────────────────────────────────

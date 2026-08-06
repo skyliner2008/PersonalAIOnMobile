@@ -3,6 +3,7 @@ package com.example.personalaibot.tools
 import com.example.personalaibot.tools.trading.TradingToolDefinitions
 import com.example.personalaibot.tools.trading.SmcToolDefinitions
 import com.example.personalaibot.tools.file.FileToolDefinitions
+import com.example.personalaibot.tools.strategy.StrategyToolDefinitions
 import kotlinx.serialization.json.*
 
 object ToolRegistry {
@@ -165,6 +166,21 @@ object ToolRegistry {
                 required = listOf("query")
             )
         ))
+        put("identity_update", FunctionDeclaration(
+            name = "identity_update",
+            description = """Updates the AI agent's or user's identity profile. Use when the user asks to change your name/personality/style or how you address them (e.g., 'เปลี่ยนชื่อเป็น...', 'เรียกฉันว่าบอส', 'พูดตลกๆ หน่อย', 'เป็นเพศหญิง').
+                |agent fields: name (ชื่อ AI), creature (บทบาท/สายพันธุ์), vibe (บุคลิก/น้ำเสียง), gender (เพศ)
+                |user fields: name (ชื่อจริงผู้ใช้), call_name (การเรียกผู้ใช้), notes (หมายเหตุ เช่น ภาษาที่ใช้)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "target" to ParameterProperty("STRING", "Whose identity to update", enum = listOf("agent", "user")),
+                    "field"  to ParameterProperty("STRING", "Field to update — agent: name, creature, vibe, gender | user: name, call_name, notes"),
+                    "value"  to ParameterProperty("STRING", "New value for the field")
+                ),
+                required = listOf("target", "field", "value")
+            )
+        ))
         put("system_create_agent_tool", FunctionDeclaration(
             name = "system_create_agent_tool",
             description = "Creates a new custom tool/skill for the Agent by generating a JSON definition. Use this when the user asks you to create a new indicator, strategy, or capability. The tool will be saved locally and become available in the mobile app.",
@@ -188,6 +204,20 @@ object ToolRegistry {
             name = "system_check_connectivity",
             description = "Checks the internet connection and connectivity to key financial APIs (Yahoo, TradingView).",
             parameters = null
+        ))
+        put("analyze_and_display_report", FunctionDeclaration(
+            name = "analyze_and_display_report",
+            description = """Displays a detailed markdown report in the chat UI while you continue speaking a short voice summary.
+                |IMPORTANT for Live Voice mode: whenever the answer requires long details, tables, or many numbers, call this tool with the full markdown report, then speak ONLY a short conversational summary (2-4 sentences) of the key findings. Never read tables aloud.
+                |Use after gathering data from other tools (trading analysis, SMC, news, etc.).""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "detailed_markdown" to ParameterProperty("STRING", "The full markdown report to display in the chat (tables, headers, bullet points allowed here)."),
+                    "voice_summary" to ParameterProperty("STRING", "A short 2-4 sentence conversational Thai summary of the key findings (this is what you speak).")
+                ),
+                required = listOf("detailed_markdown", "voice_summary")
+            )
         ))
         put("mt5_place_order", FunctionDeclaration(
             name = "mt5_place_order",
@@ -221,8 +251,10 @@ object ToolRegistry {
         ))
     }
 
-    private val _customTools = mutableMapOf<String, FunctionDeclaration>()
-    private val _skills = mutableMapOf<String, SkillDescriptor>()
+    // Copy-on-write immutable maps — mutation เกิดเฉพาะตอน register (เหตุการณ์หายาก)
+    // ผู้อ่านจะไม่เห็น map ที่ถูกแก้ครึ่งทาง แม้ถูกเรียกจากหลาย coroutine พร้อมกัน
+    private var _customTools: Map<String, FunctionDeclaration> = emptyMap()
+    private var _skills: Map<String, SkillDescriptor> = emptyMap()
 
     // ─── Trading Tools (Real-time, TA, Sentiment, News) ──────────────────────
     private val supportedTradingToolNames = setOf(
@@ -242,10 +274,13 @@ object ToolRegistry {
         // V16.0 Advanced Suite
         "trading_fundamental_analysis",
         "trading_fear_greed",
+        "trading_crypto_overview",
         "trading_macro_calendar",
+        "trading_economic_data",
         "trading_correlation_matrix",
         "trading_position_sizing",
         "automation_manage_alerts",
+        "automation_manage_schedule",
         "trading_deep_analysis_suite",
         "trading_harmonic_scan",
         "trading_elliot_modern_analysis"
@@ -308,12 +343,17 @@ object ToolRegistry {
     private val _fileTools: Map<String, FunctionDeclaration> =
         FileToolDefinitions.allDefinitions.associateBy { it.name }
 
+    // ─── Strategy Library (Quantpedia knowledge base) ────────────────────────
+    private val _strategyTools: Map<String, FunctionDeclaration> =
+        StrategyToolDefinitions.allDefinitions.associateBy { it.name }
+
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
                                _mt5Tools.values.toList() +
                                _smcTools.values.toList() +
                                _fileTools.values.toList() +
+                               _strategyTools.values.toList() +
                                _cameraTools.values.toList() +
                                _customTools.values.toList() +
                                _skills.values.map { skill ->
@@ -326,7 +366,7 @@ object ToolRegistry {
     )
 
     fun allToolNames(): Set<String> =
-        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
+        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _strategyTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
 
     fun isTradingTool(name: String): Boolean =
         name in _tradingTools || name in _smcTools || name in _mt5Tools
@@ -337,6 +377,9 @@ object ToolRegistry {
     fun isFileTool(name: String): Boolean =
         name in _fileTools
 
+    fun isStrategyTool(name: String): Boolean =
+        name in _strategyTools
+
     fun isCameraTool(name: String): Boolean =
         name in _cameraTools
 
@@ -344,11 +387,11 @@ object ToolRegistry {
         name.startsWith("system_")
 
     fun registerCustomTool(decl: FunctionDeclaration) {
-        _customTools[decl.name] = decl
+        _customTools = _customTools + (decl.name to decl)
     }
 
     fun registerSkill(skill: SkillDescriptor) {
-        _skills[skill.name] = skill
+        _skills = _skills + (skill.name to skill)
     }
 
     fun getSkill(name: String): SkillDescriptor? = _skills[name]
@@ -486,6 +529,7 @@ object ToolRegistry {
         ToolCategory("📊 Trading Tools", "📊", _tradingTools.values.toList()),
         ToolCategory("🔗 MT5 Bridge", "🔗", _mt5Tools.values.toList()),
         ToolCategory("📈 SMC Tools", "📈", _smcTools.values.toList()),
+        ToolCategory("📚 Strategy Library", "📚", _strategyTools.values.toList()),
         ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
         ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList()),
         ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList()),
@@ -493,5 +537,5 @@ object ToolRegistry {
     )
 
     fun totalToolCount(): Int =
-        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _cameraTools.size + _customTools.size
+        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _strategyTools.size + _cameraTools.size + _customTools.size
 }

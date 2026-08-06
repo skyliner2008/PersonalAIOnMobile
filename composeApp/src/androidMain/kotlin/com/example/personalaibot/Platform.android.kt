@@ -22,6 +22,10 @@ actual fun createHttpClient(): HttpClient = HttpClient(OkHttp) {
             connectTimeout(60, TimeUnit.SECONDS)
             readTimeout(90, TimeUnit.SECONDS)
             writeTimeout(60, TimeUnit.SECONDS)
+            // บังคับ HTTP/1.1 — CDN ของ FRED (fred.stlouisfed.org) reset HTTP/2 stream
+            // ("stream was reset: INTERNAL_ERROR") ทำให้ดึงข้อมูลเศรษฐกิจไม่ได้
+            // endpoint อื่นทำงานบน HTTP/1.1 ได้ปกติ (WebSocket ใช้ HTTP/1.1 upgrade อยู่แล้ว)
+            protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         }
     }
     install(HttpTimeout) {

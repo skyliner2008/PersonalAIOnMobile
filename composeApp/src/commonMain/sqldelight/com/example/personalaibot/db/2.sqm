@@ -1,0 +1,11 @@
+-- Migration v2 → v3: แก้ KnowledgeEdge ซ้ำ (INSERT OR IGNORE เดิมไม่มี constraint ให้ทำงาน)
+-- 1) ลบ edge ที่ซ้ำกันออก เก็บ row ที่ id น้อยสุดไว้
+DELETE FROM KnowledgeEdge
+WHERE id NOT IN (
+    SELECT MIN(id) FROM KnowledgeEdge
+    GROUP BY source_id, target_id, relation
+);
+
+-- 2) สร้าง UNIQUE index กันซ้ำในอนาคต (INSERT OR IGNORE จะ dedupe ได้จริง)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledgeedge_unique
+ON KnowledgeEdge(source_id, target_id, relation);

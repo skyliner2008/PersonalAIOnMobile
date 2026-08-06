@@ -41,21 +41,10 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
         database.jarvisDatabaseQueries.getRecentHistory(limit).executeAsList()
     }
 
-    /**
-     * ดึง conversation history สำหรับส่งเป็น context ให้ Gemini API
-     * เรียงจากเก่าสุดไปใหม่สุด ไม่รวม message ล่าสุด (ที่กำลังส่ง)
-     */
-    suspend fun getConversationContext(maxTurns: Int = 10): List<ConversationTurn> =
-        withContext(Dispatchers.IO) {
-            val limit = (maxTurns * 2).toLong()
-            val rows = database.jarvisDatabaseQueries
-                .getRecentHistory(limit)
-                .executeAsList()
-
-            rows.drop(1)
-                .reversed()
-                .map { row -> ConversationTurn(role = row.role, content = row.content) }
-        }
+    /** จำนวนข้อความทั้งหมดใน Working Memory — ใช้ตัดสิน auto sleep cycle */
+    suspend fun getMessageCount(): Long = withContext(Dispatchers.IO) {
+        database.jarvisDatabaseQueries.countMessages().executeAsOne()
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // LAYER 1: Core Memory — ข้อมูล user ที่ Jarvis ต้องจำเสมอ
@@ -112,25 +101,23 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
     }
 
     /**
-     * วิเคราะห์บทสนทนาและสกัด Core Memory facts อัตโนมัติ
-     * (heuristic-based extraction — Phase 3+ จะใช้ LLM extraction)
+     * วิเคราะห์บทสนทนาและสกัด facts อัตโนมัติ (heuristic-based)
+     *
+     * ⚠️ ห้ามเขียน key ที่เป็นของระบบ CORE_IDENTITY (user_name, user_call_name,
+     * user_notes, agent_*) — identity จัดการผ่าน identity_update tool / Settings เท่านั้น
+     * เดิม heuristic จับชื่อด้วย regex แล้วทับ "บอส" ที่ผู้ใช้ตั้งไว้ (บั๊ก B2)
+     * ✅ สกัดเฉพาะจากข้อความของผู้ใช้ ไม่เอาคำตอบของ AI มาปน (กัน false positive
+     * เช่น AI พูดถึง "doctor" แล้วไปเซ็ตอาชีพผู้ใช้)
      */
-    suspend fun extractAndUpdateCoreMemory(userMessage: String, aiResponse: String) {
+    suspend fun extractAndUpdateCoreMemory(userMessage: String, @Suppress("UNUSED_PARAMETER") aiResponse: String) {
         withContext(Dispatchers.IO) {
-            val combined = "$userMessage $aiResponse".lowercase()
+            val userText = userMessage.lowercase()
 
-            // ตรวจจับชื่อผู้ใช้
-            extractName(userMessage)?.let { setCoreMemory("user_name", it) }
-
-            // ตรวจจับภาษาที่ใช้
-            val langKey = detectLanguagePreference(userMessage)
-            if (langKey != null) setCoreMemory("language", langKey)
-
-            // ตรวจจับอาชีพ
-            extractOccupation(combined)?.let { setCoreMemory("occupation", it) }
+            // ตรวจจับอาชีพ (เฉพาะสิ่งที่ผู้ใช้พูดเอง)
+            extractOccupation(userText)?.let { setCoreMemory("occupation", it) }
 
             // ตรวจจับ interests จาก keywords
-            extractInterests(combined)?.let { interest ->
+            extractInterests(userText)?.let { interest ->
                 val existing = database.jarvisDatabaseQueries
                     .getCoreMemoryByKey("interests")
                     .executeAsOneOrNull() ?: ""
@@ -138,25 +125,6 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                               else "$existing, $interest".trimStart(',', ' ')
                 if (updated.isNotBlank()) setCoreMemory("interests", updated)
             }
-        }
-    }
-
-    private fun extractName(text: String): String? {
-        val patterns = listOf(
-            Regex("(?:ชื่อ|ผม|ฉัน|หนู|เรา)[\\s]+([ก-๙a-zA-Z]{2,15})"),
-            Regex("(?:my name is|i am|i'm|call me)\\s+([a-zA-Z]{2,20})", RegexOption.IGNORE_CASE),
-            Regex("(?:เรียกฉันว่า|เรียกว่า)\\s+([ก-๙a-zA-Z]{2,15})")
-        )
-        return patterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1)?.trim() }
-    }
-
-    private fun detectLanguagePreference(text: String): String? {
-        val thaiCount = text.count { it in 'ก'..'๙' }
-        val engCount = text.count { it.isLetter() && it !in 'ก'..'๙' }
-        return when {
-            thaiCount > engCount * 2 -> "ภาษาไทย"
-            engCount > thaiCount * 2 -> "English"
-            else -> "ไทย/English (ผสม)"
         }
     }
 
@@ -248,11 +216,6 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
             } else null
         }.sortedByDescending { it.second }
          .take(limit)
-
-        scoredFacts.forEach { (content, score) ->
-            // Update access count as a side effect
-            // (In a real app, we'd find the ID)
-        }
 
         scoredFacts.map { it.first }
     }
@@ -428,6 +391,37 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                 }
             }
         }
+    }
+
+    /**
+     * GraphRAG Retrieval — ดึงความสัมพันธ์จาก Knowledge Graph ที่เกี่ยวกับ query
+     *
+     * เดิม graph เป็น write-only (สร้างทุก turn แต่ไม่เคยถูกอ่าน — บั๊ก B3)
+     * ฟังก์ชันนี้ทำให้ Layer 4 มีผลจริง: match keywords ของ query กับ nodes
+     * แล้วดึง edges (เรียงตาม weight) ออกมาเป็นบริบท
+     *
+     * @return ข้อความบริบท เช่น "- python: co_occurs → trading (w=2.5)" หรือ "" ถ้าไม่พบ
+     */
+    suspend fun getGraphContext(query: String, maxItems: Int = 5): String = withContext(Dispatchers.IO) {
+        val keywords = extractKeywords(query)
+        if (keywords.isEmpty()) return@withContext ""
+
+        buildString {
+            var count = 0
+            for (kw in keywords) {
+                if (count >= maxItems) break
+                val node = database.jarvisDatabaseQueries.getNodeByName(kw).executeAsOneOrNull()
+                    ?: continue
+                val edges = database.jarvisDatabaseQueries.getEdgesFrom(node.id).executeAsList()
+                if (edges.isEmpty()) continue
+                val rels = edges
+                    .sortedByDescending { it.weight }
+                    .take(3)
+                    .joinToString { edge -> "${edge.relation} → ${edge.target_name} (w=${"%.1f".format(edge.weight)})" }
+                appendLine("- ${node.name} (${node.node_type}): $rels")
+                count++
+            }
+        }.trimEnd()
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -616,7 +610,18 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                     }
                 }
 
-                // 5. Delete processed messages from Working Memory
+                // 5. Archive raw transcript ก่อนลบ — กันข้อมูลดิบหายถาวร
+                //    ถ้า LLM consolidation ให้ผลเพี้ยน/หลอน
+                val transcriptArchive = if (transcript.length > 20000) {
+                    transcript.take(20000) + "\n...[truncated]"
+                } else transcript
+                archiveFact(
+                    content = "Raw Transcript (pre-sleep): $transcriptArchive",
+                    sourceRole = "system",
+                    importance = 0.2f
+                )
+
+                // 6. Delete processed messages from Working Memory
                 val messageIds = oldMessages.map { it.id }
                 if (messageIds.isNotEmpty()) {
                     database.jarvisDatabaseQueries.deleteMessagesByIds(messageIds)

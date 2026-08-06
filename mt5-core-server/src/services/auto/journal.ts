@@ -79,6 +79,37 @@ function hasExitMarker(deal: Record<string, unknown>): boolean {
   return entryCode === 1 || entryCode === 3;
 }
 
+function hasEntryMarker(deal: Record<string, unknown>): boolean {
+  const entryValue = deal.entry ?? deal.deal_entry ?? deal.entry_type ?? deal.dealEntry ?? deal.type_entry ?? deal.typeEntry;
+  const entry = asString(entryValue).toUpperCase();
+  if (entry.includes('IN') || entry.includes('OPEN')) return !hasExitMarker(deal);
+  const entryCode = asNumber(entryValue, -1);
+  return entryCode === 0;
+}
+
+function dealMatchesJournal(row: JournalRow, deal: Record<string, unknown>): boolean {
+  const ticket = row.mt5Ticket;
+  const candidates = [
+    asNumber(deal.ticket, -1),
+    asNumber(deal.deal, -1),
+    asNumber(deal.deal_ticket, -1),
+    asNumber(deal.dealTicket, -1),
+    asNumber(deal.position, -1),
+    asNumber(deal.position_ticket, -1),
+    asNumber(deal.positionTicket, -1),
+    asNumber(deal.position_id, -1),
+    asNumber(deal.positionId, -1),
+    asNumber(deal.positionID, -1),
+    asNumber(deal.order, -1),
+    asNumber(deal.order_ticket, -1),
+    asNumber(deal.orderTicket, -1),
+  ];
+  if (ticket !== null && candidates.includes(ticket)) return true;
+  const symbolMatches = asString(deal.symbol).toUpperCase() === row.symbol.toUpperCase();
+  const commentMatches = JSON.stringify(deal).includes(row.decisionId);
+  return symbolMatches && commentMatches;
+}
+
 function hasCloseReasonMarker(deal: Record<string, unknown>): boolean {
   const reason = asString(deal.reason ?? deal.close_reason ?? deal.closeReason ?? deal.exit_reason ?? deal.exitReason).toUpperCase();
   return (
@@ -136,6 +167,45 @@ export function extractDealClosePrice(deal: Record<string, unknown> | undefined)
   return null;
 }
 
+export function extractDealTimeMs(deal: Record<string, unknown> | undefined): number | null {
+  if (!deal) return null;
+  for (const key of ['time_msc', 'timeMsc', 'time_ms', 'timeMs', 'created_at', 'createdAt']) {
+    const value = asNumber((deal as any)[key], Number.NaN);
+    if (Number.isFinite(value) && value > 0) return value < 1e12 ? value * 1000 : value;
+  }
+  for (const key of ['time', 'timestamp']) {
+    const value = asNumber((deal as any)[key], Number.NaN);
+    if (Number.isFinite(value) && value > 0) return value < 1e12 ? value * 1000 : value;
+  }
+  return null;
+}
+
+export function resolveDealCloseAtMs(deal: Record<string, unknown> | undefined, now = Date.now()): number {
+  const dealTime = extractDealTimeMs(deal);
+  // Some MT5 bridges expose broker-local history timestamps. If that value is
+  // ahead of the server clock, keep a truthful sync time instead of persisting
+  // a future close_at.
+  if (!dealTime || dealTime > now + 60_000) return now;
+  return dealTime;
+}
+
+export function extractHistoryOpenPrice(row: JournalRow, history: Record<string, unknown>[]): number | null {
+  const matches = history
+    .filter((deal) => dealMatchesJournal(row, deal))
+    .filter((deal) => hasEntryMarker(deal))
+    .sort((a, b) => {
+      const ta = extractDealTimeMs(a) ?? 0;
+      const tb = extractDealTimeMs(b) ?? 0;
+      return ta - tb;
+    });
+
+  for (const deal of matches) {
+    const price = extractDealClosePrice(deal);
+    if (price !== null) return price;
+  }
+  return null;
+}
+
 export function classifyOutcome(profit: number, profitR: number | null): TradeOutcome {
   const cashEpsilon = 0.005;
   const rEpsilon = 0.05;
@@ -147,28 +217,7 @@ export function classifyOutcome(profit: number, profitR: number | null): TradeOu
 }
 
 export function matchHistoryDeal(row: JournalRow, history: Record<string, unknown>[]): Record<string, unknown> | undefined {
-  const ticket = row.mt5Ticket;
-  const matches = history.filter((deal) => {
-    const candidates = [
-      asNumber(deal.ticket, -1),
-      asNumber(deal.deal, -1),
-      asNumber(deal.deal_ticket, -1),
-      asNumber(deal.dealTicket, -1),
-      asNumber(deal.position, -1),
-      asNumber(deal.position_ticket, -1),
-      asNumber(deal.positionTicket, -1),
-      asNumber(deal.position_id, -1),
-      asNumber(deal.positionId, -1),
-      asNumber(deal.positionID, -1),
-      asNumber(deal.order, -1),
-      asNumber(deal.order_ticket, -1),
-      asNumber(deal.orderTicket, -1),
-    ];
-    if (ticket !== null && candidates.includes(ticket)) return true;
-    const symbolMatches = asString(deal.symbol).toUpperCase() === row.symbol.toUpperCase();
-    const commentMatches = JSON.stringify(deal).includes(row.decisionId);
-    return symbolMatches && commentMatches;
-  });
+  const matches = history.filter((deal) => dealMatchesJournal(row, deal));
   if (matches.length === 0) return undefined;
 
   // MT5 history often contains both entry and exit deals for the same order/position.

@@ -72,9 +72,9 @@ class JarvisViewModel(
     private val defaultMt5BridgeBaseUrl =
         "https://parallelepipedonal-katy-nondeprecatingly.ngrok-free.dev"
 
-    private val database = createDatabase(driverFactory)
+    private val database = createDatabase(driverFactory).also { JarvisDatabaseHolder.install(it) }
     private val memoryManager = JarvisMemoryManager(database)
-    val automationManager = AutomationManager(database)
+    val automationManager = JarvisDatabaseHolder.getAutomationManager()
     private val client = createHttpClient()
     val autoTrading by lazy { AutoTradingViewModel(
         scope = viewModelScope,
@@ -101,6 +101,107 @@ class JarvisViewModel(
 
     private val _apiKey = MutableStateFlow("")
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
+
+    // ─── Alert / Scheduled Task notification settings (อ่าน-เขียน AppSetting) ──
+    private val _alertAiSummaryEnabled = MutableStateFlow(true)
+    val alertAiSummaryEnabled: StateFlow<Boolean> = _alertAiSummaryEnabled.asStateFlow()
+
+    private val _alertVoiceEnabled = MutableStateFlow(false)
+    val alertVoiceEnabled: StateFlow<Boolean> = _alertVoiceEnabled.asStateFlow()
+
+    val scheduledTasks = automationManager.scheduledTasks
+
+    fun setAlertAiSummaryEnabled(enabled: Boolean) {
+        _alertAiSummaryEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("alert_ai_summary", enabled.toString())
+        }
+    }
+
+    fun setAlertVoiceEnabled(enabled: Boolean) {
+        _alertVoiceEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("alert_voice", enabled.toString())
+        }
+    }
+
+    // ─── Alert Auto Test (🧪 ทดสอบดึงข้อมูลทุก tool) ─────────────────────
+
+    private val _alertTestRunning = MutableStateFlow(false)
+    val alertTestRunning: StateFlow<Boolean> = _alertTestRunning.asStateFlow()
+
+    private val _alertTestStatus = MutableStateFlow("")
+    val alertTestStatus: StateFlow<String> = _alertTestStatus.asStateFlow()
+
+    private val _alertTestResults = MutableStateFlow<List<com.example.personalaibot.automation.AlertDataTester.TestResult>>(emptyList())
+    val alertTestResults: StateFlow<List<com.example.personalaibot.automation.AlertDataTester.TestResult>> = _alertTestResults.asStateFlow()
+
+    fun runAlertDataTest() {
+        if (_alertTestRunning.value) return
+        _alertTestRunning.value = true
+        _alertTestResults.value = emptyList()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                com.example.personalaibot.automation.AlertDataTester(client).runFullTest("XAUUSD") { status, done ->
+                    _alertTestStatus.value = status
+                    _alertTestResults.value = done
+                }
+            } catch (e: Exception) {
+                _alertTestStatus.value = "❌ ทดสอบล้มเหลว: ${e.message}"
+            } finally {
+                _alertTestRunning.value = false
+            }
+        }
+    }
+
+    fun createAlert(
+        name: String,
+        symbol: String,
+        toolName: String,
+        field: String,
+        op: String,
+        value: String,
+        interval: Long
+    ) {
+        val operator = when (op) {
+            ">" -> com.example.personalaibot.automation.ConditionOperator.GT
+            "<" -> com.example.personalaibot.automation.ConditionOperator.LT
+            ">=" -> com.example.personalaibot.automation.ConditionOperator.GTE
+            "<=" -> com.example.personalaibot.automation.ConditionOperator.LTE
+            "==" -> com.example.personalaibot.automation.ConditionOperator.EQ
+            "contains" -> com.example.personalaibot.automation.ConditionOperator.CONTAINS
+            else -> com.example.personalaibot.automation.ConditionOperator.GTE
+        }
+        val condition = com.example.personalaibot.automation.AutomationCondition(
+            field = field,
+            operator = operator,
+            value = value
+        )
+        automationManager.registerJob(
+            name = name,
+            symbol = symbol,
+            exchange = null,
+            toolName = toolName,
+            condition = condition,
+            intervalMinutes = interval
+        )
+    }
+
+    fun createScheduledTask(
+        name: String,
+        prompt: String,
+        type: String,
+        runAt: Long,
+        hhmm: String?
+    ) {
+        automationManager.registerScheduledTask(
+            name = name,
+            prompt = prompt,
+            scheduleType = type,
+            runAt = runAt,
+            timeHhmm = hhmm
+        )
+    }
 
     private val _selectedModel = MutableStateFlow(defaultMainModel)
     val selectedModel: StateFlow<String> = _selectedModel.asStateFlow()
@@ -319,7 +420,7 @@ class JarvisViewModel(
     private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
 
     init {
-        JarvisDatabaseHolder.install(database)
+        // Bridge camera frames to the unified Live session in the orchestrator
 
         // Bridge camera frames to the unified Live session in the orchestrator
         cameraService.onLiveFrameReady = { jpegBase64 ->
@@ -786,6 +887,28 @@ class JarvisViewModel(
                 minimaxKey = minimax
             )
         }
+    }
+
+    fun updateIdentity(
+        agentName: String,
+        agentCreature: String,
+        agentVibe: String,
+        agentGender: String,
+        userName: String,
+        userCallName: String,
+        userNotes: String,
+    ) {
+        com.example.personalaibot.ai.JarvisPersona.updateIdentity(
+            com.example.personalaibot.ai.JarvisPersona.IdentityConfig(
+                agentName = agentName,
+                agentCreature = agentCreature,
+                agentVibe = agentVibe,
+                agentGender = agentGender,
+                userName = userName,
+                userCallName = userCallName,
+                userNotes = userNotes
+            )
+        )
     }
 
     fun toggleCamera() {

@@ -3,7 +3,7 @@
 ศูนย์รวมเอกสารของโปรเจค `PersonalAIBot (JARVIS)` — Professional AI Trading Platform แบบ Self-Hosted บน Android/iOS  
 ใช้เป็น **สมองส่วนนอก (External Brain)** สำหรับทั้งการพัฒนาแอปและระบบเทรดอัตโนมัติ
 
-> **อัพเดทล่าสุด**: 2026-05-01 — V20.0 Per-Agent Model Ranking, Agent Coordination Audit
+> **อัพเดทล่าสุด**: 2026-05-23 — V26.27 Deep Decoupling of AutoTradingService (Sub-Engines)
 
 ---
 
@@ -71,6 +71,11 @@
 - [[18_V20_Agent_Coordination_Audit]] — Agent Flow, Interaction Matrix, ปัญหาที่พบ
 - [[Smart_Fallback_and_Token_Management]] — Token Cost Optimization
 
+**Modularization & Decoupling**:
+- [[55_UnifiedZoneExecutionQuality_V2625]] — การบูรณาการลดรูปเกตควบคุม (Gate Simplification) และปรับปรุงประสิทธิภาพการกรองออเดอร์
+- [[56_ModularCodebaseRefactoring_V2626]] — แผนภาพโมดูลย่อยและการย้าย Helpers รอบแรก
+- [[57_DeepDecoupling_AutoTradingService_V2627]] — การแยก 4 เมธอดขนาดยักษ์เป็น Sub-Engines เพื่อประสิทธิภาพและความปลอดภัยสูง
+
 ### 08 Charts Hub
 - เอกสารอ้างอิง Lightweight Charts API
 
@@ -99,6 +104,7 @@
 3. [[16_Complete_Code_Logic_V19.6]] — Code Logic ทั้งระบบ
 4. [[17_PerAgent_ModelRanking_V20]] — Per-Agent Model Ranking
 5. [[18_V20_Agent_Coordination_Audit]] — Agent Coordination Audit
+6. [[57_DeepDecoupling_AutoTradingService_V2627]] — สถาปัตยกรรมแบบ Modular Sub-Engines
 
 ### 🧠 เข้าใจ Memory และ AI
 1. [[memory_strategy]] → [[LocalEmbeddingSystem]]

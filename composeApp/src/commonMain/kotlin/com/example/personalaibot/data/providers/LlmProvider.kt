@@ -120,7 +120,9 @@ data class LlmModelInfo(
     val isFree: Boolean = false,
     val pricing: LlmPricing? = null,
     val supportsFunctions: Boolean = false,
-    val supportsVision: Boolean = false
+    val supportsVision: Boolean = false,
+    /** true เฉพาะ models ที่รองรับ Live / Realtime voice session (Gemini Live, OpenAI Realtime ฯลฯ) */
+    val supportsLive: Boolean = false
 )
 
 /** Pricing info สำหรับ model */

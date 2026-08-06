@@ -175,7 +175,46 @@ class MinimaxLlmProvider(
         }
     }
 
-    override suspend fun listModels(): List<LlmModel> {
+    override suspend fun generate(
+        messages: List<LlmMessage>,
+        options: LlmOptions,
+    ): LlmResult {
+        val model = options.model ?: "abab6.5s-chat"
+        val body = buildJsonObject {
+            put("model", model)
+            put("stream", false)
+            put("temperature", options.temperature.toDouble())
+            options.maxTokens?.let { put("max_tokens", it) }
+            putJsonArray("messages") {
+                options.systemPrompt?.let { sys ->
+                    addJsonObject { put("role", "system"); put("content", sys) }
+                }
+                messages.forEach { msg ->
+                    addJsonObject { putOpenAiMessage(msg) }
+                }
+            }
+        }
+        return try {
+            val response = client.post("$baseUrl/chat/completions") {
+                header("Authorization", "Bearer $apiKey")
+                contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+            val respJson = json.parseToJsonElement(response.body<String>()).jsonObject
+            val choice = respJson["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+            val message = choice?.get("message")?.jsonObject
+            LlmResult(
+                text = message?.get("content")?.jsonPrimitive?.contentOrNull ?: "",
+                modelUsed = model,
+                finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
+            )
+        } catch (e: Exception) {
+            logError("MiniMax", "Generate failed: ${e.message}")
+            LlmResult(text = "⚠️ MiniMax Error: ${e.message}", modelUsed = model)
+        }
+    }
+
+    override suspend fun listModels(apiKey: String): List<LlmModelInfo> {
         return try {
             val response = client.get("$baseUrl/models") {
                 header("Authorization", "Bearer $apiKey")
@@ -186,7 +225,7 @@ class MinimaxLlmProvider(
                 data.mapNotNull {
                     val m = it.jsonObject
                     val id = m["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    LlmModel(id, id)
+                    LlmModelInfo(id = id, displayName = id)
                 }
             } else fallbackModels()
         } catch (e: Exception) {
@@ -195,11 +234,11 @@ class MinimaxLlmProvider(
     }
 
     private fun fallbackModels() = listOf(
-        LlmModel("abab6.5s-chat", "abab6.5s-chat"),
-        LlmModel("abab6.5-chat", "abab6.5-chat"),
-        LlmModel("MiniMax-M2.7", "MiniMax-M2.7"),
-        LlmModel("MiniMax-M2.5", "MiniMax-M2.5")
+        LlmModelInfo(id = "abab6.5s-chat", displayName = "abab6.5s-chat"),
+        LlmModelInfo(id = "abab6.5-chat", displayName = "abab6.5-chat"),
+        LlmModelInfo(id = "MiniMax-M2.7", displayName = "MiniMax-M2.7"),
+        LlmModelInfo(id = "MiniMax-M2.5", displayName = "MiniMax-M2.5")
     )
 
-    override fun isAvailable(): Boolean = apiKey.isNotBlank()
+    override suspend fun isAvailable(): Boolean = apiKey.isNotBlank()
 }

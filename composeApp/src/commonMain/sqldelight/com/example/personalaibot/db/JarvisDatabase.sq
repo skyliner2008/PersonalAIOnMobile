@@ -267,6 +267,17 @@ UPDATE AlertJob SET is_triggered = ?, last_value = ?, last_run_at = ? WHERE id =
 updateAlertJobInterval:
 UPDATE AlertJob SET interval_minutes = ? WHERE id = ?;
 
+updateAlertJobCheckResult:
+UPDATE AlertJob SET last_value = ?, last_run_at = ? WHERE id = ?;
+
+-- แก้ไขเงื่อนไข (เช่น ค่าราคาเป้าหมาย) และรีเซ็ตสถานะ trigger ให้เริ่มเฝ้าดูใหม่
+updateAlertJobCondition:
+UPDATE AlertJob SET condition_json = ?, is_triggered = 0, last_value = NULL WHERE id = ?;
+
+-- เปลี่ยนชื่อ job (ชื่อนี้ถูกใช้ในหัว notification และบริบทที่ AI พูด)
+updateAlertJobName:
+UPDATE AlertJob SET name = ? WHERE id = ?;
+
 deleteAlertJob:
 DELETE FROM AlertJob WHERE id = ?;
 
@@ -480,3 +491,46 @@ GROUP BY analyzers_used;
 
 deleteOldAutoTrades:
 DELETE FROM AutoTradeJournal WHERE created_at < ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- ScheduledTask — งานตามเวลา (one-shot / daily) ที่ AI agent จัดการ
+--   one_time: ยิงครั้งเดียวเมื่อ run_at ถึง แล้วปิดตัวเอง
+--   daily:    ยิงทุกวันเมื่อถึงเวลา time_hhmm (กันยิงซ้ำด้วย last_fired_date)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ScheduledTask (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,            -- คำสั่งที่จะส่งให้ AI ประมวลผลเมื่อถึงเวลา
+    schedule_type TEXT NOT NULL,     -- "one_time" | "daily"
+    run_at INTEGER NOT NULL DEFAULT 0, -- epoch millis (one_time)
+    time_hhmm TEXT,                  -- "08:30" (daily, เวลาท้องถิ่น)
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_fired_date TEXT,            -- "2026-07-30" กัน daily ยิงซ้ำในวันเดียว
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ScheduledTask
+-- ═══════════════════════════════════════════════════════════════
+insertScheduledTask:
+INSERT INTO ScheduledTask(name, prompt, schedule_type, run_at, time_hhmm, created_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+getAllActiveScheduledTasks:
+SELECT * FROM ScheduledTask WHERE is_active = 1;
+
+deleteScheduledTask:
+DELETE FROM ScheduledTask WHERE id = ?;
+
+deactivateScheduledTask:
+UPDATE ScheduledTask SET is_active = 0 WHERE id = ?;
+
+markScheduledTaskFired:
+UPDATE ScheduledTask SET last_fired_date = ? WHERE id = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Index: กัน KnowledgeEdge ซ้ำ — ทำให้ INSERT OR IGNORE dedupe ได้จริง
+-- (fresh install ได้จากไฟล์นี้โดยตรง; install เก่าได้จาก migration 2.sqm)
+-- ═══════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledgeedge_unique
+ON KnowledgeEdge(source_id, target_id, relation);

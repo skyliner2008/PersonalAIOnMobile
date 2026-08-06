@@ -9,7 +9,9 @@ import {
   JournalRow, 
   LearnSummary, 
   ManagementJournalRow,
-  PlaybookScores
+  PlaybookScores,
+  DEFAULT_GATE_TOGGLES,
+  DEFAULT_STRATEGY_TOGGLES,
 } from '../types.js';
 import { 
   classifyOutcome,
@@ -130,17 +132,18 @@ function evaluateDecisionQuality(payload: Record<string, unknown>): DataQuality 
 }
 
 export const defaultConfig: AutoTradingConfig = {
+  engineMode: 'M15_WALL_SCALPING',
   watchlist: ['XAUUSD'],
   timeframe: 'M15',
-  tickIntervalMs: 300_000,
+  tickIntervalMs: 60_000,
   manageIntervalMs: 30_000,
   learnIntervalMs: 6 * 60 * 60_000,
   minConfluence: 45,
   minFitness: 40,
-  minRRR: 1.5,
+  minRRR: 1.15,
   enableLiveTrading: false,
-  enableAiMode: true,       // V23.0: default = AI supervisor mode
-  preferredStrategies: [],
+  enableAiMode: false,
+  preferredStrategies: ['SCALPING'],
   symbolBlacklist: [],
   // 2026-05-08 V24.1 Fix: ลด BE/Trail trigger จาก 1.0R → 0.5R เพราะ live log แสดงว่า
   // positions float -0.6R ถึง +0.1R เป็นชั่วโมง ไม่เคยถึง +1R เลย → BE/TRAIL
@@ -193,9 +196,9 @@ export const defaultConfig: AutoTradingConfig = {
     riskPerTradePctOverride: {},
   },
   strategy: {
-    minRRR: 1.5,
+    minRRR: 1.15,
     minConfluence: 60,
-    scalpingRRR: 1.2,
+    scalpingRRR: 1.15,
     swingRRR: 2.5,
     gridLegs: 5,
     gridStepPct: 0.4,
@@ -235,7 +238,10 @@ export const defaultConfig: AutoTradingConfig = {
     decisionOverrideConfidenceMin: 75,
     useMultiAgent: false,
     // V24.0 (2026-05-07) — Fade-the-Level + Sequential Entry + Basket BE
+    gateToggles: { ...DEFAULT_GATE_TOGGLES },
+    strategyToggles: { ...DEFAULT_STRATEGY_TOGGLES },
     enableProximityGate: true,
+    enableScalpM15PressureGuard: true,
     proximityMaxPip: 100,                // XAUUSD ~ $1.00, XBTUSD ~ $100
     zoneContinuationConfluenceMin: 68,
     zoneBreakoutConfluenceMin: 55,
@@ -249,14 +255,55 @@ export const defaultConfig: AutoTradingConfig = {
     enableSequentialEntry: true,
     sequentialAddOnLossPct: 0.25,        // ขาดทุน 25% ของ SL → เปิดไม้แก้ได้
     recoveryTriggerPct: 0.25,            // sync กับ sequentialAddOnLossPct
+    sequentialDuplicateIntentTtlMs: 300_000,
+    meanReversionDuplicateIntentTtlMs: 900_000,
+    meanReversionMaxRrr: 1.5,   // V26.15: tightened from 1.8 — analytics showed MR losing $34.25 net despite 62.5% WR
+    enableEarlyBreakeven: true,
+    earlyBreakevenR: 0.3,
+    enableEarlyInvalidation: true,
+    earlyInvalidationR: -0.35,
+    earlyInvalidationCloseR: -0.5,
+    earlyInvalidationMinAgeMs: 90_000,
+    earlyInvalidationMaxPeakR: 0.25,
+    eaOnlyMinConfidence: 55,
+    enableEaOnlyLtfConsensusGuard: true,
+    ltfConsensusGuardMinConfluence: 55,
+    postTakeProfitCooldownMs: 30 * 60_000,
+    postTakeProfitReentryMinDistanceXAU: 6.0,
     scaleInMinEntryDistanceXAU: 2.0,
     scaleInMinEntryDistanceAtrMul: 0.04,
     scaleInRequiresSafeOrLossGate: true,
     v25: {
+      enabled: false,
+      unifiedDecisionPath: true,
+      unifiedCandidateTtlMs: 120_000,
+      unifiedPb1CandidateTtlMs: 30_000,
+      legacyDirectExecution: false,
       hybridDirectMaxStateAgeMs: 180_000,
       allowV24TrendFollowDirectWhenV25Stale: true,
       hybridTrendFollowMinConfluence: 80,
       hybridTrendFollowMaxOpposingWallAtrMul: 0.5,
+      compactScalpBracket: true,
+      compactScalpMaxRiskAtrMul: 0.16,
+      compactScalpMinRiskXAU: 3.0,
+      compactScalpRrr: 1.35,
+    },
+    simpleScalping: {
+      enabled: true,
+      primaryTimeframe: 'M15',
+      timeframes: ['M1', 'M5', 'M15', 'M30', 'H1', 'H4'],
+      candleCount: 220,
+      minWallStars: 2,
+      targetWallMinStars: 2,
+      entryProximityAtrMul: 0.22,
+      slBufferAtrMul: 0.08,
+      tpBufferAtrMul: 0.06,
+      minRrr: 1.15,
+      maxRiskAtrMul: 0.45,
+      minRewardAtrMul: 0.12,
+      maxPositionsPerSymbol: 1,
+      allowBuy: true,
+      allowSell: true,
     },
     requireBasketBeBeforeClose: true,
   },
@@ -493,12 +540,14 @@ class PersistenceService {
         entry, sl, tp, volume, risk_pct, rrr, regime, market_snapshot, was_executed, mt5_ticket,
         close_reason, close_price, close_at, profit, profit_r, outcome, ai_review, model_id,
         decision_feed_id, management_count, quality_score, quality_flags_json, learning_eligible, data_version,
+        peak_profit_r, max_drawdown_r,
         created_at, updated_at
       ) VALUES (
         @decisionId, @symbol, @timeframe, @side, @strategy, @analyzersUsed, @signalsJson, @confluenceScore,
         @entry, @sl, @tp, @volume, @riskPct, @rrr, @regime, @marketSnapshot, @wasExecuted, @mt5Ticket,
         @closeReason, @closePrice, @closeAt, @profit, @profitR, @outcome, @aiReview, @modelId,
         @decisionFeedId, @managementCount, @qualityScore, @qualityFlagsJson, @learningEligible, @dataVersion,
+        @peakProfitR, @maxDrawdownR,
         @createdAt, @updatedAt
       )
       ON CONFLICT(decision_id) DO UPDATE SET
@@ -531,6 +580,8 @@ class PersistenceService {
         quality_flags_json = excluded.quality_flags_json,
         learning_eligible = excluded.learning_eligible,
         data_version = excluded.data_version,
+        peak_profit_r = excluded.peak_profit_r,
+        max_drawdown_r = excluded.max_drawdown_r,
         updated_at = excluded.updated_at`
     ).run({
       ...row,
@@ -541,6 +592,8 @@ class PersistenceService {
       qualityFlagsJson: JSON.stringify(q.flags),
       learningEligible: q.eligible ? 1 : 0,
       dataVersion: 2,
+      peakProfitR: row.peakProfitR ?? null,
+      maxDrawdownR: row.maxDrawdownR ?? null,
     });
     if (linkedDecision?.id) {
       const journal = db.prepare(`SELECT id FROM auto_trading_journal WHERE decision_id = ?`).get(row.decisionId) as { id: number } | undefined;
@@ -914,9 +967,21 @@ class PersistenceService {
       adaptive: {
         ...(base.adaptive || {}),
         ...(next.adaptive || {}),
+        gateToggles: {
+          ...((base.adaptive || {}).gateToggles || {}),
+          ...((next.adaptive || {}).gateToggles || {}),
+        },
+        strategyToggles: {
+          ...((base.adaptive || {}).strategyToggles || {}),
+          ...((next.adaptive || {}).strategyToggles || {}),
+        },
         v25: {
           ...((base.adaptive || {}).v25 || {}),
           ...((next.adaptive || {}).v25 || {}),
+        },
+        simpleScalping: {
+          ...((base.adaptive || {}).simpleScalping || {}),
+          ...((next.adaptive || {}).simpleScalping || {}),
         },
       },
       aiModel: next.aiModel || base.aiModel,
@@ -990,6 +1055,8 @@ class PersistenceService {
       qualityFlags: safeJsonParse(row.quality_flags_json, [] as string[]),
       learningEligible: row.learning_eligible === null || row.learning_eligible === undefined ? true : Number(row.learning_eligible) === 1,
       dataVersion: row.data_version === null || row.data_version === undefined ? 1 : asNumber(row.data_version),
+      peakProfitR: row.peak_profit_r === null || row.peak_profit_r === undefined ? null : asNumber(row.peak_profit_r),
+      maxDrawdownR: row.max_drawdown_r === null || row.max_drawdown_r === undefined ? null : asNumber(row.max_drawdown_r),
       createdAt: asNumber(row.created_at),
       updatedAt: asNumber(row.updated_at),
     };

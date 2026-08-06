@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dark-bg: #0f111a;
+  --color-dark-panel: #1a1d2d;
+  --color-brand-blue: #3b82f6;
+  --color-brand-purple: #8b5cf6;
+}
+
+body {
+  background-color: var(--color-dark-bg);
+  color: #f8fafc;
+}

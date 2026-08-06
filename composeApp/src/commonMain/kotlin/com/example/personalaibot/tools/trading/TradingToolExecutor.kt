@@ -34,6 +34,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
 
     private val api = TradingApiService(client)
     private val smcExecutor = SmcToolExecutor(client)
+    private val advancedEngine = AdvancedTradingEngine(SmcApiService(client))
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
@@ -83,6 +84,10 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "trading_deep_analysis_suite"    -> executeDeepAnalysisSuite(args)
             "trading_fundamental_analysis"   -> executeFundamentalAnalysis(args)
             "trading_fear_greed"             -> executeFearGreed(args)
+            "trading_crypto_overview"        -> executeCryptoOverview(args)
+            "trading_position_sizing"        -> executePositionSizing(args)
+            "trading_correlation_matrix"     -> executeCorrelationMatrix(args)
+            "trading_economic_data"          -> executeEconomicData(args)
             // ─── SMC (Smart Money Concepts) Tools ──────────────────────────────
             "trading_smc_analysis",
             "trading_smc_sweeps",
@@ -94,6 +99,227 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     }
 
     // ─── Implementations ──────────────────────────────────────────────────────
+
+    /**
+     * trading_position_sizing — คำนวณขนาดไม้จากความเสี่ยง (pure math, ไม่ต้องเรียก API)
+     * units = (balance × risk%) / |entry − stop_loss|
+     */
+    private fun executePositionSizing(args: Map<String, String>): String {
+        val balance = args["balance"]?.toDoubleOrNull() ?: 10_000.0
+        val riskPct = args["risk_pct"]?.toDoubleOrNull() ?: 1.0
+        val entry   = args["entry"]?.toDoubleOrNull() ?: return "Missing entry"
+        val stopLoss = args["stop_loss"]?.toDoubleOrNull() ?: return "Missing stop_loss"
+
+        val riskPerUnit = kotlin.math.abs(entry - stopLoss)
+        if (riskPerUnit == 0.0) return "❌ entry กับ stop_loss ต้องไม่เท่ากัน"
+        if (riskPct <= 0.0 || riskPct > 100.0) return "❌ risk_pct ต้องอยู่ระหว่าง 0–100"
+
+        val riskAmount   = balance * riskPct / 100.0
+        val units        = riskAmount / riskPerUnit
+        val positionValue = units * entry
+        val leverage     = positionValue / balance
+        val stopPct      = riskPerUnit / entry * 100.0
+        val direction    = if (stopLoss < entry) "LONG" else "SHORT"
+
+        return buildString {
+            append("## 📐 Position Sizing Calculator\n\n")
+            append("- **ทิศทาง**: $direction (entry $entry, stop $stopLoss)\n")
+            append("- **เงินทุน**: ${"%,.2f".format(balance)}\n")
+            append("- **ความเสี่ยงต่อไม้**: ${"%.2f".format(riskPct)}% = ${"%,.2f".format(riskAmount)}\n")
+            append("- **ระยะ Stop Loss**: ${"%.4f".format(riskPerUnit)} (${"%.2f".format(stopPct)}% จาก entry)\n\n")
+            append("### ✅ ผลลัพธ์\n")
+            append("- **ขนาดที่ควรเปิด (Units)**: ${"%,.4f".format(units)}\n")
+            append("- **มูลค่าสัญญา (Notional)**: ${"%,.2f".format(positionValue)}\n")
+            append("- **Leverage ที่ต้องใช้**: ${"%.2f".format(leverage)}x\n\n")
+            if (leverage > 1.0) {
+                append("⚠️ ไม้นี้ต้องใช้ leverage ${"%.2f".format(leverage)}x — หากโบรกเกอร์จำกัด leverage ")
+                append("ให้ลดขนาดเหลือ ${"%,.4f".format(balance / riskPerUnit)} units (เสี่ยง ${"%,.2f".format(balance * stopPct / 100)})\n")
+            }
+        }
+    }
+
+    /**
+     * trading_correlation_matrix — Pearson correlation ของ daily returns ระหว่าง symbols
+     * ดึงข้อมูลย้อนหลังจาก Yahoo chart API (closes รายวัน)
+     */
+    private suspend fun executeCorrelationMatrix(args: Map<String, String>): String {
+        val symbols = (args["symbols"] ?: "BTC-USD,GC=F,^GSPC,EURUSD=X")
+            .split(",").map { it.trim() }.filter { it.isNotBlank() }.take(6)
+        if (symbols.size < 2) return "❌ ต้องระบุอย่างน้อย 2 symbols (คั่นด้วย comma)"
+        val days = (args["days"]?.toIntOrNull() ?: 30).coerceIn(7, 365)
+
+        // ดึง closes ของแต่ละ symbol
+        val seriesMap = mutableMapOf<String, List<Double>>()
+        val failed = mutableListOf<String>()
+        symbols.forEach { sym ->
+            val closes = fetchYahooDailyCloses(sym, days)
+            if (closes != null && closes.size >= 5) seriesMap[sym] = closes else failed.add(sym)
+        }
+        if (seriesMap.size < 2) {
+            return "❌ ดึงข้อมูลย้อนหลังไม่สำเร็จสำหรับ: ${(failed + seriesMap.keys.filter { seriesMap[it]!!.size < 5 }).joinToString(", ")}"
+        }
+
+        // คำนวณ daily returns แล้วจับคู่ความยาวให้เท่ากัน (ใช้จำนวนวันที่น้อยสุด)
+        val returnsMap = seriesMap.mapValues { (_, closes) ->
+            closes.zipWithNext { a, b -> if (a != 0.0) (b - a) / a else 0.0 }
+        }
+        val minLen = returnsMap.values.minOf { it.size }
+        val aligned = returnsMap.mapValues { (_, r) -> r.takeLast(minLen) }
+
+        val keys = aligned.keys.toList()
+        return buildString {
+            append("## 🔗 Correlation Matrix (daily returns, ${minLen} วัน)\n\n")
+            keys.forEach { append("- **$it**\n") }
+            append("\n| | ${keys.joinToString(" | ")} |\n")
+            append("|${"---|".repeat(keys.size + 1)}\n")
+            keys.forEach { a ->
+                append("| $a |")
+                keys.forEach { b ->
+                    val c = pearson(aligned[a]!!, aligned[b]!!)
+                    append(" ${"%.2f".format(c)} |")
+                }
+                append("\n")
+            }
+            append("\nอ่านค่า: ใกล้ 1.0 = เคลื่อนไหวทิศเดียวกัน, ใกล้ -1.0 = สวนทางกัน, ใกล้ 0 = ไม่เกี่ยวข้อง\n")
+            if (failed.isNotEmpty()) append("\n⚠️ ข้าม symbol ที่ดึงข้อมูลไม่ได้: ${failed.joinToString(", ")}")
+        }
+    }
+
+    private suspend fun fetchYahooDailyCloses(symbol: String, days: Int): List<Double>? {
+        return try {
+            val url = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol"
+            val response = client.get(url) {
+                url {
+                    parameters.append("interval", "1d")
+                    parameters.append("range", "${days}d")
+                }
+                header("User-Agent", "Mozilla/5.0")
+            }
+            if (!response.status.value.toString().startsWith("2")) return null
+            val root = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val result = root["chart"]?.jsonObject?.get("result")?.jsonArray?.firstOrNull()?.jsonObject
+                ?: return null
+            val closes = result["indicators"]?.jsonObject?.get("quote")?.jsonArray
+                ?.firstOrNull()?.jsonObject?.get("close")?.jsonArray ?: return null
+            closes.mapNotNull { it.jsonPrimitive.doubleOrNull }
+        } catch (e: Exception) {
+            logDebug("TradingExecutor", "fetchYahooDailyCloses($symbol) failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun pearson(x: List<Double>, y: List<Double>): Double {
+        val n = minOf(x.size, y.size)
+        if (n < 3) return 0.0
+        val xs = x.take(n); val ys = y.take(n)
+        val meanX = xs.average(); val meanY = ys.average()
+        var num = 0.0; var denX = 0.0; var denY = 0.0
+        for (i in 0 until n) {
+            val dx = xs[i] - meanX; val dy = ys[i] - meanY
+            num += dx * dy; denX += dx * dx; denY += dy * dy
+        }
+        val den = kotlin.math.sqrt(denX * denY)
+        return if (den == 0.0) 0.0 else num / den
+    }
+
+    // ─── US Economic Data (FRED) ─────────────────────────────────────────────
+
+    /** preset name → (FRED series id, คำอธิบายภาษาไทย) */
+    private val fredPresets = mapOf(
+        "gdp"          to ("GDP" to "GDP สหรัฐฯ (พันล้าน USD, รายไตรมาส)"),
+        "gdp_growth"   to ("A191RO1Q156NBEA" to "อัตราการเติบโต GDP (%, รายไตรมาส)"),
+        "cpi"          to ("CPIAUCSL" to "ดัชนีราคาผู้บริโภค CPI (Index 1982-84=100)"),
+        "core_cpi"     to ("CPILFESL" to "Core CPI — ไม่รวมอาหาร/พลังงาน (Index)"),
+        "pce"          to ("PCEPI" to "PCE Price Index — เงินเฟ้อที่ Fed ใช้วัด (Index)"),
+        "unemployment" to ("UNRATE" to "อัตราการว่างงาน (%)"),
+        "nfp"          to ("PAYEMS" to "Nonfarm Payrolls (พันตำแหน่ง)"),
+        "fedfunds"     to ("FEDFUNDS" to "อัตราดอกเบี้ย Fed Funds (%)"),
+        "10y"          to ("DGS10" to "Bond Yield 10 ปี (%)"),
+        "2y"           to ("DGS2" to "Bond Yield 2 ปี (%)"),
+        "m2"           to ("M2SL" to "ปริมาณเงิน M2 (พันล้าน USD)"),
+        "retail"       to ("RSAFS" to "ยอดค้าปลีก (ล้าน USD)"),
+        "housing"      to ("HOUST" to "Housing Starts (พันยูนิต)"),
+        "sentiment"    to ("UMCSENT" to "ความเชื่อมั่นผู้บริโภค U. of Michigan (Index)"),
+        "indpro"       to ("INDPRO" to "ดัชนีการผลิตภาคอุตสาหกรรม (Index)"),
+        "claims"       to ("ICSA" to "Initial Jobless Claims รายสัปดาห์ (ราย)")
+    )
+
+    /**
+     * trading_economic_data — ตัวเลขเศรษฐกิจมหภาคสหรัฐฯ จาก FRED
+     * series = preset / FRED id / "overview" (สรุป 4 ตัวชี้วัดหลัก)
+     */
+    private suspend fun executeEconomicData(args: Map<String, String>): String {
+        val seriesArg = args["series"]?.trim()?.lowercase()
+            ?: return "❌ ต้องระบุ series (เช่น gdp, cpi, unemployment, fedfunds, overview)"
+        val limit = (args["limit"]?.toIntOrNull() ?: 12).coerceIn(3, 60)
+        val apiKey = args["api_key"]?.trim().takeUnless { it.isNullOrBlank() }
+
+        if (seriesArg in listOf("overview", "all", "ภาพรวม")) {
+            return executeEconomicOverview(limit, apiKey)
+        }
+
+        val (seriesId, label) = fredPresets[seriesArg]
+            ?: (seriesArg.uppercase() to "FRED Series: ${seriesArg.uppercase()}")
+
+        val obs = api.getFredSeriesObservations(seriesId, apiKey)
+            ?: return "❌ ดึงข้อมูล $seriesId จาก FRED ไม่สำเร็จ (series id อาจไม่ถูกต้อง หรือ FRED ไม่ตอบสนอง)"
+
+        return formatFredReport(seriesId, label, obs.takeLast(limit))
+    }
+
+    private suspend fun executeEconomicOverview(limit: Int, apiKey: String?): String {
+        val keys = listOf("gdp_growth", "cpi", "unemployment", "fedfunds")
+        val sb = StringBuilder("## 🇺🇸 ภาพรวมเศรษฐกิจสหรัฐฯ (FRED Overview)\n\n")
+        keys.forEach { key ->
+            val (id, label) = fredPresets.getValue(key)
+            val obs = api.getFredSeriesObservations(id, apiKey)
+            if (obs == null) {
+                sb.append("- **$label**: ดึงข้อมูลไม่สำเร็จ\n")
+            } else {
+                val w = obs.takeLast(limit)
+                val latest = w.last()
+                val prev = w.dropLast(1).lastOrNull()
+                val trend = if (prev != null) {
+                    val d = latest.second - prev.second
+                    when {
+                        d > 0 -> "🔺 +${"%.2f".format(d)}"
+                        d < 0 -> "🔻 ${"%.2f".format(d)}"
+                        else -> "➖ คงที่"
+                    }
+                } else "—"
+                sb.append("- **$label**: ${"%,.2f".format(latest.second)} (${latest.first}) $trend จากช่วงก่อน\n")
+            }
+        }
+        sb.append("\n_ดูรายละเอียดแต่ละตัวได้ด้วย trading_economic_data + series เฉพาะทาง_")
+        return sb.toString()
+    }
+
+    private fun formatFredReport(seriesId: String, label: String, window: List<Pair<String, Double>>): String {
+        val latest = window.last()
+        val prev = window.dropLast(1).lastOrNull()
+        val change = prev?.let { latest.second - it.second }
+        val changePct = prev?.takeIf { it.second != 0.0 }?.let { (latest.second - it.second) / it.second * 100.0 }
+        val hi = window.maxOf { it.second }
+        val lo = window.minOf { it.second }
+
+        return buildString {
+            append("## 🇺🇸 $label\n")
+            append("**FRED Series:** $seriesId | **Source:** Federal Reserve Economic Data (FRED)\n\n")
+            append("### ค่าล่าสุด\n")
+            append("- **${"%,.2f".format(latest.second)}** (ณ ${latest.first})\n")
+            if (change != null) {
+                val arrow = if (change > 0) "🔺" else if (change < 0) "🔻" else "➖"
+                append("- เปลี่ยนจากช่วงก่อน (${prev!!.first}): $arrow ${"%+.2f".format(change)}")
+                changePct?.let { append(" (${"%+.2f".format(it)}%)") }
+                append("\n")
+            }
+            append("- กรอบ ${window.size} ช่วง: ต่ำสุด ${"%,.2f".format(lo)} — สูงสุด ${"%,.2f".format(hi)}\n\n")
+            append("### อนุกรมย้อนหลัง\n")
+            window.asReversed().forEach { (date, v) ->
+                append("- $date : ${"%,.2f".format(v)}\n")
+            }
+        }
+    }
 
     private suspend fun executeDeepAnalysisSuite(args: Map<String, String>): String {
         val symbol = args["symbol"] ?: return "Missing symbol"
@@ -114,7 +340,30 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val body = response.bodyAsText()
             "═══ Deep Analysis Suite: $symbol $tf ═══\n$body"
         } catch (e: Exception) {
-            "Deep analysis error: ${e.message}"
+            // Local fallback — คำนวณเองบนเครื่องด้วย AdvancedTradingEngine
+            // (แหล่งเดียวกับที่ background automation ใช้ ทำให้พฤติกรรมตรงกัน)
+            logDebug("TradingTool", "Deep analysis bridge failed (${e.message}) — using local engine")
+            val result = try {
+                advancedEngine.analyze(symbol, tf.lowercase())
+            } catch (e2: Exception) {
+                logDebug("TradingTool", "Local deep analysis failed: ${e2.message}")
+                null
+            }
+            if (result == null) {
+                return "⚠️ Deep analysis ไม่สำเร็จทั้ง bridge และ local engine (${e.message})"
+            }
+            buildString {
+                appendLine("═══ Deep Analysis Suite (Local Engine): ${result.symbol} ${result.interval} ═══")
+                appendLine("💵 ราคาปัจจุบัน: ${result.currentPrice}")
+                appendLine("🏛️ LSD Trend: ${result.lsdTrend.state} (Confluence TF: ${result.lsdTrend.confluenceTF}/4)")
+                appendLine("📦 Orderflow: ${result.orderflow.deltaLabel} (Δ ${"%.2f".format(result.orderflow.lastDelta)})")
+                appendLine("🌀 Momentum: ${result.momentum.signal}${if (result.momentum.isSqueeze) " (SQUEEZE!)" else ""}")
+                val hot = result.fiboStrength.filter { it.isHot }
+                if (hot.isNotEmpty()) {
+                    appendLine("🎯 Fibo Hot Zones: " + hot.joinToString { "${it.label} (${it.score}/10)" })
+                }
+                appendLine("⭐ Summary Score: ${result.summaryScore}/100")
+            }
         }
     }
 
@@ -164,79 +413,98 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         }
     }
 
-    private suspend fun executeFearGreed(args: Map<String, String>): String {
-        // 🔄 Smart Base URL Detection
-        val baseUrl = args["endpoint"]?.trim()
-            ?: args["server_url"]?.trim()?.removeSuffix("/")?.let { "$it/api/mt5/auto" }
-            ?: "http://127.0.0.1:8090/api/mt5/auto"
+    /**
+     * trading_fear_greed — Crypto Fear & Greed Index ตัวจริงจาก alternative.me
+     * (เดิมผูกกับ MT5 server analytics ซึ่งไม่ใช่ดัชนีจริงและพังเมื่อ server ออฟไลน์)
+     */
+    private suspend fun executeFearGreed(@Suppress("UNUSED_PARAMETER") args: Map<String, String>): String {
+        val fng = api.getFearGreedIndex(7)
+        fng["error"]?.let { return "⚠️ ดึง Fear & Greed Index ไม่สำเร็จ ($it)" }
 
-        val token = args["token"]?.trim().orEmpty()
+        val value = fng["value"]?.toIntOrNull() ?: 0
+        val classification = fng["classification"] ?: "Unknown"
+        val trend = fng["trend"].orEmpty().split(",").mapNotNull { it.toIntOrNull() }
 
-        return try {
-            logDebug("TradingTool", "FearGreed fetching from: $baseUrl")
+        val emoji = when {
+            value <= 24 -> "😱"; value <= 44 -> "😨"
+            value <= 55 -> "😐"; value <= 74 -> "😃"; else -> "🤑"
+        }
+        val thaiLabel = when {
+            value <= 24 -> "Extreme Fear — ตลาดหวาดกลัวสุดขีด (มักเป็นจังหวะสะสมของนักลงทุน contrarian)"
+            value <= 44 -> "Fear — ตลาดกังวล แรงขายยังคุมเกม"
+            value <= 55 -> "Neutral — ตลาดสมดุล ไม่มีอารมณ์ครอบงำ"
+            value <= 74 -> "Greed — ตลาดเริ่มโลภ โมเมนตัมฝั่งซื้อแข็งแรง"
+            else -> "Extreme Greed — ตลาดโลภสุดขีด ระวังจุดฟองสบู่/การทำกำไรรุนแรง"
+        }
 
-            // Fetch both Performance and Quality Metrics
-            val analyticsUrl = if (baseUrl.endsWith("/analytics")) baseUrl else "$baseUrl/analytics"
-            val qualityUrl   = if (baseUrl.endsWith("/metrics/quality")) baseUrl else "$baseUrl/metrics/quality"
-
-            // ใช้ Response เป็น String เปล่าถ้าดึงไม่ได้ แทนที่จะปล่อยให้ Exception หลุด
-            val analyticsBody = try {
-                client.get(analyticsUrl) {
-                    if (token.isNotBlank()) {
-                        header(HttpHeaders.Authorization, "Bearer $token")
-                        header("X-Client-Token", token)
-                    }
-                }.bodyAsText()
-            } catch (e: Exception) {
-                logDebug("TradingTool", "Analytics fetch failed: ${e.message}")
-                "{}"
+        return buildString {
+            appendLine("🌡️ **Crypto Fear & Greed Index (alternative.me — Real-time)**")
+            appendLine("=".repeat(45))
+            appendLine("$emoji **ค่าปัจจุบัน: $value/100 — $classification**")
+            appendLine("📖 การตีความ: $thaiLabel")
+            if (trend.size >= 2) {
+                val newest = trend.first(); val oldest = trend.last()
+                val dir = when {
+                    newest > oldest + 3 -> "📈 อารมณ์ตลาดกำลังดีขึ้น"
+                    newest < oldest - 3 -> "📉 อารมณ์ตลาดกำลังแย่ลง"
+                    else -> "➡️ อารมณ์ตลาดทรงตัว"
+                }
+                appendLine("📊 อนุกรม ${trend.size} วัน (ใหม่→เก่า): ${trend.joinToString(", ")}")
+                appendLine("🧭 ทิศทาง: $dir ($oldest → $newest)")
             }
+        }
+    }
 
-            val qualityBody = try {
-                client.get(qualityUrl) {
-                    if (token.isNotBlank()) {
-                        header(HttpHeaders.Authorization, "Bearer $token")
-                        header("X-Client-Token", token)
-                    }
-                }.bodyAsText()
-            } catch (e: Exception) {
-                logDebug("TradingTool", "Quality metrics fetch failed: ${e.message}")
-                "{}"
+    /**
+     * trading_crypto_overview — ภาพรวมตลาดคริปโตจาก CoinGecko (ฟรี ไม่ต้องใช้ API Key)
+     * market cap รวม, BTC/ETH dominance, volume 24h, เหรียญ trending + Fear & Greed ประกอบ
+     */
+    private suspend fun executeCryptoOverview(@Suppress("UNUSED_PARAMETER") args: Map<String, String>): String {
+        val global = api.getCryptoGlobal()
+        global["error"]?.let { return "⚠️ ดึงข้อมูลตลาดคริปโตไม่สำเร็จ ($it)" }
+
+        fun fmtUsd(raw: String): String {
+            val v = raw.toDoubleOrNull() ?: return raw
+            return when {
+                v >= 1e12 -> "$${"%.2f".format(v / 1e12)}T"
+                v >= 1e9  -> "$${"%.2f".format(v / 1e9)}B"
+                v >= 1e6  -> "$${"%.2f".format(v / 1e6)}M"
+                else -> "$${"%,.0f".format(v)}"
             }
+        }
 
-            if (analyticsBody == "{}" && qualityBody == "{}") {
-                return "⚠️ ระบบไม่สามารถดึงข้อมูล Analytics จาก Server ได้ในขณะนี้ ($baseUrl)"
+        val mcapChange = global["market_cap_change_24h"]?.toDoubleOrNull()
+        val btcDom = global["btc_dominance"]?.toDoubleOrNull()
+        val ethDom = global["eth_dominance"]?.toDoubleOrNull()
+        val trending = api.getCryptoTrending().take(5)
+        val fng = api.getFearGreedIndex(1)
+
+        return buildString {
+            appendLine("🪙 **ภาพรวมตลาดคริปโต (CoinGecko — Real-time)**")
+            appendLine("=".repeat(45))
+            appendLine("💰 Market Cap รวม: **${fmtUsd(global["total_market_cap_usd"] ?: "-")}** (${if ((mcapChange ?: 0.0) >= 0) "+" else ""}${"%.2f".format(mcapChange ?: 0.0)}% / 24h)")
+            appendLine("📊 Volume 24h: ${fmtUsd(global["total_volume_24h_usd"] ?: "-")}")
+            appendLine("₿ BTC Dominance: ${"%.1f".format(btcDom ?: 0.0)}%  |  Ξ ETH Dominance: ${"%.1f".format(ethDom ?: 0.0)}%")
+            appendLine("🏷️ เหรียญที่ active: ${global["active_cryptocurrencies"]}  |  ตลาด: ${global["markets"]}")
+            if (mcapChange != null) {
+                val mood = when {
+                    mcapChange >= 2.0 -> "🟢 ตลาดเขียวแข็งแรง เงินไหลเข้า"
+                    mcapChange >= 0.0 -> "🟢 ตลาดเขียวเล็กน้อย"
+                    mcapChange <= -2.0 -> "🔴 ตลาดแดงแรง เงินไหลออก ระวังแรงขายต่อเนื่อง"
+                    else -> "🔴 ตลาดแดงเล็กน้อย"
+                }
+                appendLine("🧭 สภาพตลาด: $mood")
             }
-
-            val prompt = """
-                Analyze the following internal system metrics to determine the Market Fear & Greed status.
-
-                Performance Analytics:
-                $analyticsBody
-
-                System Quality & Rejection Metrics:
-                $qualityBody
-
-                Output Specification:
-                1. Calculated Fear & Greed Index (0-100).
-                2. Market Sentiment Label (Extremely Fearful to Extremely Greedy).
-                3. Analysis of 'System Stress' (Are trades being rejected or blocked frequently?).
-                4. Strategic recommendation based on current sentiment and system health.
-
-                Please respond in Thai.
-            """.trimIndent()
-
-            val aiAnalysis = try {
-                geminiService.generateResponse(
-                    prompt = prompt,
-                    history = emptyList(),
-                    intentAddon = "You are a market psychologist. Analyze trade data and system behaviors to gauge the underlying fear/greed."
-                )
-            } catch (e: Exception) { "AI Synthesis failed: ${e.message}" }
-
-            "🌡️ **Market Fear & Greed Index (System Analysis)**\n" + "=".repeat(45) + "\n" + aiAnalysis
-        } catch (e: Exception) {
-            "Sentiment analytics error: ${e.message}"
+            if (fng["error"] == null) {
+                appendLine("🌡️ Fear & Greed: ${fng["value"]}/100 (${fng["classification"]})")
+            }
+            if (trending.isNotEmpty()) {
+                appendLine()
+                appendLine("🔥 **เหรียญ Trending (คนค้นหามากสุด):**")
+                trending.forEach { t ->
+                    appendLine("- ${t["name"]} (${t["symbol"]}) — Rank #${t["market_cap_rank"]}")
+                }
+            }
         }
     }
 
@@ -522,7 +790,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         } catch (_: Exception) { "Analysis unavailable." }
 
         return buildString {
-            appendLine("📅 **Economic Calendar (FXStreet Insights)**")
+            appendLine("📅 **Economic Calendar สัปดาห์นี้ (ForexFactory — Real-time, เวลาไทย)**")
             appendLine("-".repeat(40))
             events.forEach { e ->
                 val emoji = when(e["impact"]?.lowercase()) {

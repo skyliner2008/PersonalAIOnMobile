@@ -321,6 +321,21 @@ class OpenRouterLlmProvider(
                     val completionPer1M = completionPrice * 1_000_000
                     val isFree = promptPrice == 0.0 && completionPrice == 0.0
 
+                    // อ่าน capability จริงจาก API แทนการเดาจากชื่อ:
+                    // - supported_parameters มี "tools" → รองรับ function calling
+                    // - architecture.input_modalities มี "image" → รองรับ vision
+                    val supportedParams = obj["supported_parameters"]?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    val inputModalities = obj["architecture"]?.jsonObject
+                        ?.get("input_modalities")?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    val supportsTools = if (supportedParams.isNotEmpty()) {
+                        "tools" in supportedParams
+                    } else {
+                        // fallback heuristic สำหรับ API เวอร์ชันเก่าที่ไม่มี field นี้
+                        id.contains("gpt") || id.contains("claude") || id.contains("gemini")
+                    }
+
                     LlmModelInfo(
                         id = id,
                         displayName = name,
@@ -330,7 +345,8 @@ class OpenRouterLlmProvider(
                             promptPer1M = promptPer1M,
                             completionPer1M = completionPer1M
                         ),
-                        supportsFunctions = id.contains("gpt") || id.contains("claude") || id.contains("gemini")
+                        supportsFunctions = supportsTools,
+                        supportsVision = "image" in inputModalities
                     )
                 } catch (e: Exception) {
                     logError("OpenRouter", "Failed to parse model: ${e.message}")

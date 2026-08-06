@@ -86,17 +86,38 @@ class GeminiLlmProvider(
             val respText: String = response.body()
             val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
             val modelList = json.decodeFromString<com.example.personalaibot.data.ModelListResponse>(respText)
-            modelList.models.filter {
-                it.supportedGenerationMethods?.contains("generateContent") == true
+            val mappedList = modelList.models.filter {
+                // รวม models ที่รองรับ generateContent (chat ปกติ) หรือ bidiGenerateContent (live)
+                val methods = it.supportedGenerationMethods ?: emptyList()
+                methods.contains("generateContent") || methods.contains("bidiGenerateContent")
             }.map { model ->
+                val methods = model.supportedGenerationMethods ?: emptyList()
+                val nameLC = model.name.lowercase().removePrefix("models/")
+                // ตรวจ live capability: ใช้ API field เป็นหลัก + fallback keyword
+                val isLive = methods.contains("bidiGenerateContent")
+                    || nameLC.contains("live")
+                    || nameLC.contains("native-audio")
+                    || nameLC.contains("realtime")
                 LlmModelInfo(
                     id = model.name.removePrefix("models/"),
                     displayName = model.displayName ?: model.name,
                     contextLength = model.inputTokenLimit ?: 0,
                     supportsFunctions = com.example.personalaibot.data.ModelConfig.supportsNativeTools(model.name),
-                    supportsVision = model.name.contains("vision") || model.name.contains("pro") || model.name.contains("flash")
+                    supportsVision = nameLC.contains("vision") || nameLC.contains("pro") || nameLC.contains("flash"),
+                    supportsLive = isLive
                 )
             }
+            
+            // Inject Preview Models ที่ /v1beta/models มักไม่คืนมา
+            // ⚠️ MAINTENANCE: รายการนี้ hardcode — ตรวจสอบกับ Gemini API docs เป็นระยะ
+            // (models ที่ถูก deprecate จะยังโผล่ใน list แต่เรียกใช้จริงไม่ได้)
+            val knownPreviews = listOf(
+                LlmModelInfo("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live Preview", supportsVision = true, supportsLive = true),
+                LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio", supportsVision = true, supportsLive = true),
+                LlmModelInfo("gemini-3.5-live-translate-preview", "Gemini 3.5 Live Translate Preview", supportsVision = false, supportsLive = true)
+            )
+            val existingIds = mappedList.map { it.id }.toSet()
+            mappedList + knownPreviews.filter { it.id !in existingIds }
         } catch (e: Exception) {
             logError("GeminiLlm", "Failed to list models: ${e.message}", e)
             emptyList()
