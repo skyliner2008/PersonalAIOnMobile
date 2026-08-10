@@ -48,7 +48,9 @@ object FileToolDefinitions {
             name = "file_write",
             description = """[FILES] เขียนเนื้อหาลงไฟล์ หรือสร้างไฟล์ใหม่
                 |ใช้เพื่อจดบันทึก, แก้ไข config หรือสร้างรายงาน
-                |ตัวอย่าง: "บันทึกสรุปการประชุมลงไฟล์ summary.txt", "สร้างไฟล์ Hello.kt" """.trimMargin(),
+                |ตัวอย่าง: "บันทึกสรุปการประชุมลงไฟล์ summary.txt", "สร้างไฟล์ Hello.kt"
+                |[EXCEL] ถ้า path ลงท้าย .xlsx จะสร้างไฟล์ Excel จริง — ส่ง content เป็น CSV (คอลัมน์คั่นด้วย comma, บรรทัดละ 1 แถว, แถวแรกคือหัวตาราง) ตัวเลขจะถูกเก็บเป็น numeric cell อัตโนมัติ เหมาะทำตารางรายรับ-รายจ่าย/รายงาน
+                |ตัวอย่าง content สำหรับ .xlsx: "วันที่,รายการ,จำนวนเงิน\n08/08,ค่าอาหาร,549.00" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(

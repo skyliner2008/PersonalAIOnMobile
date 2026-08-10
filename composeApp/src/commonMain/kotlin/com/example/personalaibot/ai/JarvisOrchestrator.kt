@@ -3,6 +3,8 @@ package com.example.personalaibot.ai
 import com.example.personalaibot.data.ConversationTurn
 import com.example.personalaibot.data.GeminiModel
 import com.example.personalaibot.data.GeminiService
+import com.example.personalaibot.data.GeminiVoiceProfiles
+import com.example.personalaibot.data.VoiceGender
 import com.example.personalaibot.data.LiveGeminiService
 import com.example.personalaibot.data.embedding.EmbeddingProviderRegistry
 import com.example.personalaibot.data.providers.*
@@ -73,6 +75,30 @@ class JarvisOrchestrator(
 
     fun getGeminiService() = geminiService
 
+    /** ผล auto-test: providerId → set ของ model id ที่เทสผ่านจริง (ว่าง = ยังไม่เคยเทส → ใช้ heuristic) */
+    private var testedChatOkModels: Map<String, Set<String>> = emptyMap()
+    private var testedToolsOkModels: Map<String, Set<String>> = emptyMap()
+
+    fun updateModelCaps(caps: Map<String, com.example.personalaibot.data.providers.ModelAutoTester.ModelCapability>) {
+        fun group(predicate: (com.example.personalaibot.data.providers.ModelAutoTester.ModelCapability) -> Boolean) =
+            caps.filterValues(predicate).keys
+                .map { it.substringBefore("/") to it.substringAfter("/") }
+                .groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
+        testedChatOkModels = group { it.chatOk }
+        testedToolsOkModels = group { it.chatOk && it.toolsOk }
+        com.example.personalaibot.logDebug("Orchestrator", "Model caps loaded: tools-ok = ${testedToolsOkModels.mapValues { it.value.size }}")
+    }
+
+    /** ตั้ง fallback chain ของ Gemini จาก Settings (empty = กลับไปใช้ default ModelConfig) */
+    fun updateGeminiFallbackChain(models: List<String>) {
+        geminiService.fallbackModelsOverride = models.ifEmpty { null }
+        com.example.personalaibot.logDebug("Orchestrator", "Gemini fallback chain = ${models.ifEmpty { com.example.personalaibot.data.ModelConfig.GEMINI_FALLBACK_MODELS }}")
+    }    /** ตั้ง list Gemini API keys สำหรับ rotation เมื่อ key ปัจจุบันติดลิมิต (multi free-tier accounts) */
+    fun updateGeminiApiKeys(keys: List<String>) {
+        geminiService.apiKeysOverride = keys.filter { it.isNotBlank() }
+        com.example.personalaibot.logDebug("Orchestrator", "Gemini API keys for rotation: ${keys.size} key(s)")
+    }
+
     fun updateConfig(
         newApiKey: String,
         newModelName: String,
@@ -131,22 +157,27 @@ class JarvisOrchestrator(
         claudeKey: String = "",
         openRouterKey: String = "",
         minimaxKey: String = "",
-        liteLlmUrl: String = ""
+        liteLlmUrl: String = "",
+        groqKey: String = "",
+        nvidiaNimKey: String = ""
     ) {
         if (openaiKey.isNotBlank()) llmRegistry.registerOpenAI(openaiKey)
         if (claudeKey.isNotBlank()) llmRegistry.registerClaude(claudeKey)
         if (openRouterKey.isNotBlank()) llmRegistry.registerOpenRouter(openRouterKey)
         if (minimaxKey.isNotBlank()) llmRegistry.registerMinimax(minimaxKey)
         if (liteLlmUrl.isNotBlank()) llmRegistry.registerLiteLlm(liteLlmUrl)
+        if (groqKey.isNotBlank()) llmRegistry.registerGroq(groqKey)
+        if (nvidiaNimKey.isNotBlank()) llmRegistry.registerNvidiaNim(nvidiaNimKey)
     }
 
     fun chatWithHistory(
         text: String,
         historySnapshot: List<Pair<String, String>> = emptyList(),
-        coreContext: String = ""
+        coreContext: String = "",
+        attachments: List<com.example.personalaibot.data.InlineData> = emptyList()
     ): Flow<String> {
         val providerId = if (modelName.contains("/")) modelName.substringBefore("/") else "gemini"
-        com.example.personalaibot.logDebug("Orchestrator", "Chat Request: modelName='$modelName', resolvedProviderId='$providerId', internalApiKeyLength=${apiKey.length}")
+        com.example.personalaibot.logDebug("Orchestrator", "Chat Request: modelName='$modelName', resolvedProviderId='$providerId', internalApiKeyLength=${apiKey.length}, attachments=${attachments.size}")
 
         if (providerId == "gemini") {
             com.example.personalaibot.logDebug("Orchestrator", "Routing to GeminiService")
@@ -154,16 +185,111 @@ class JarvisOrchestrator(
                 ConversationTurn(role = role, content = content)
             }
             val intent = IntentClassifier.classify(text)
-            return geminiService.generateResponseWithTools(
-                prompt = text,
-                history = history,
-                intentAddon = IntentClassifier.getSystemPromptAddon(intent),
-                coreContext = coreContext,
-                enableGrounding = false
-            )
+            return kotlinx.coroutines.flow.flow {
+                geminiService.generateResponseWithTools(
+                    prompt = text,
+                    history = history,
+                    intentAddon = IntentClassifier.getSystemPromptAddon(intent),
+                    coreContext = coreContext,
+                    enableGrounding = false,
+                    initialFiles = attachments
+                ).collect { emit(it) }
+
+                // ─── Cross-provider fallback (ชั้นสุดท้าย) ──────────────────
+                // Gemini ตายทั้ง chain (ทุก key + ทุกโมเดล) → ไล่ provider ฟรีอื่น
+                // หมายเหตุ: Live mode ไม่ได้ใช้ path นี้ — LiveToolBridge execute tools เองตรงๆ
+                if (geminiService.lastFatalError != null) {
+                    com.example.personalaibot.logError("Orchestrator", "Gemini fatal — starting cross-provider fallback: ${geminiService.lastFatalError}")
+                    emit("\n\n🌐 Gemini ใช้ไม่ได้ทั้งหมด — กำลังสลับไป provider สำรอง…\n")
+                    chatWithCrossProviderFallback(text, historySnapshot, coreContext).collect { emit(it) }
+                }
+            }
         } else {
+            if (attachments.isNotEmpty()) {
+                com.example.personalaibot.logDebug("Orchestrator", "⚠️ attachments ignored — external provider path does not support inline files yet")
+            }
             com.example.personalaibot.logDebug("Orchestrator", "Routing to external provider: $providerId")
             return chatWithExternalProvider(providerId, text, historySnapshot, coreContext)
+        }
+    }
+
+    /**
+     * Cross-provider fallback (ชั้นสุดท้ายเมื่อ Gemini ตายทั้ง chain)
+     * ไล่ provider ฟรีตามลำดับ: Groq → NVIDIA NIM → OpenRouter → MiniMax
+     * เงื่อนไขเลือก model: ต้องรองรับ function calling (tools ของเราใช้ได้ต่อ) และฟรี
+     * — buffer ผลลัพธ์ทั้งก้อนก่อน emit เพื่อตรวจว่าสำเร็จจริง ไม่งั้นไล่ provider ถัดไป
+     */
+    private fun chatWithCrossProviderFallback(
+        text: String,
+        historySnapshot: List<Pair<String, String>>,
+        coreContext: String
+    ): Flow<String> = kotlinx.coroutines.flow.flow {
+        // ไล่ provider ฟรีตามลำดับ (2026-08-08: ตัด NIM ออก — โมเดลส่วนใหญ่ช้า/404)
+        val order = listOf("groq", "openrouter", "minimax")
+        var answered = false
+
+        for (pid in order) {
+            val provider = llmRegistry.getProvider(pid) ?: continue
+            if (!provider.isAvailable()) continue
+
+            // candidate models: รองรับ tools + ฟรี — ลองทีละตัวสูงสุด 3 ตัว
+            // เคสจริง: NIM /models คืนโมเดลที่ account ไม่มีสิทธิ์เรียก (404) ต้องไล่ตัวถัดไป
+            val candidates = try {
+                val models = llmRegistry.listModels(pid, apiKey, freeOnly = true)
+                val toolModels = models.filter { it.supportsFunctions }
+                val allIds = (toolModels.ifEmpty { models }).map { it.id }.distinct()
+                val testedChat = testedChatOkModels[pid]
+                if (testedChat != null) {
+                    // เคย auto-test แล้ว → ใช้เฉพาะตัวที่เทสผ่านจริง: tools-ok ก่อน ตามด้วย chat-only
+                    val toolsOk = testedToolsOkModels[pid].orEmpty()
+                    val tested = allIds.filter { it in testedChat }
+                    (tested.filter { it in toolsOk } + tested.filter { it !in toolsOk }).take(3)
+                } else {
+                    // ยังไม่เคยเทส → heuristic: โมเดลที่พิสูจน์แล้ว (Groq 2026-08-08) + free ตัวดังของ OpenRouter
+                    val preferred = listOf(
+                        "llama-3.3-70b-versatile", "qwen3.6", "llama-3.3-70b", "qwen3",
+                        "deepseek", "gemini", "llama", "qwen", "mistral"
+                    )
+                    allIds.sortedBy { id -> preferred.indexOfFirst { id.contains(it, ignoreCase = true) }.let { if (it < 0) Int.MAX_VALUE else it } }
+                        .take(3)
+                }
+            } catch (e: Exception) {
+                com.example.personalaibot.logError("Orchestrator", "Fallback: listModels $pid failed: ${e.message}")
+                emptyList()
+            }
+            if (candidates.isEmpty()) {
+                com.example.personalaibot.logDebug("Orchestrator", "Fallback: no usable model for $pid — skip")
+                continue
+            }
+
+            for (modelId in candidates) {
+                com.example.personalaibot.logDebug("Orchestrator", "Fallback: trying $pid/$modelId")
+                val buf = StringBuilder()
+                var failed = false
+                try {
+                    chatWithExternalProvider(pid, text, historySnapshot, coreContext, modelOverride = modelId)
+                        .collect { chunk ->
+                            if (chunk.contains("⚠️")) failed = true
+                            buf.append(chunk)
+                        }
+                } catch (e: Exception) {
+                    failed = true
+                    com.example.personalaibot.logError("Orchestrator", "Fallback: $pid/$modelId threw: ${e.message}")
+                }
+
+                if (!failed && buf.isNotBlank()) {
+                    emit("🔄 Gemini ใช้ไม่ได้ — ใช้ `$pid/$modelId` ตอบแทนชั่วคราว\n")
+                    emit(buf.toString())
+                    answered = true
+                    break
+                }
+                com.example.personalaibot.logError("Orchestrator", "Fallback: $pid/$modelId failed — trying next model")
+            }
+            if (answered) break
+        }
+
+        if (!answered) {
+            emit("⚠️ Provider สำรองทั้งหมดใช้ไม่ได้ในตอนนี้ — กรุณาตรวจสอบ API keys (Gemini/Groq/NIM/OpenRouter) ใน Settings หรือลองใหม่ภายหลัง")
         }
     }
 
@@ -171,7 +297,8 @@ class JarvisOrchestrator(
         providerId: String,
         text: String,
         historySnapshot: List<Pair<String, String>>,
-        coreContext: String
+        coreContext: String,
+        modelOverride: String? = null
     ): Flow<String> = kotlinx.coroutines.flow.flow {
         com.example.personalaibot.logDebug("Orchestrator", "External Chat: providerId=$providerId, model=$modelName")
         val provider = llmRegistry.getProvider(providerId)
@@ -194,7 +321,8 @@ class JarvisOrchestrator(
 
         // --- Context Pruning (Token Saving) ---
         // 1. Truncate coreContext (long-term memories) to prevent context bloat
-        val maxCoreContextChars = 15000
+        // ลดจาก 15000 → 6000: เคสจริง Groq free tier TPM 8K ได้ 413 เพราะ payload ใหญ่เกิน
+        val maxCoreContextChars = 6000
         val prunedCoreContext = if (coreContext.length > maxCoreContextChars) {
             coreContext.take(maxCoreContextChars) + "\n...[Memories truncated to save tokens]..."
         } else coreContext
@@ -204,10 +332,19 @@ class JarvisOrchestrator(
             appendLine(JarvisPersona.EXTERNAL_SYSTEM_PROMPT)
             if (prunedCoreContext.isNotBlank()) appendLine("Context: $prunedCoreContext")
             append(policy.strictMt5SystemPromptAddon())
+            if (policy.isTradingContext && !policy.mt5Mode) {
+                // กัน model ตอบว่า "ไม่มีข้อมูล/ต้องต่อ MT5" ทั้งที่ TV tools ใช้ได้โดยไม่ต้อง MT5
+                // (เคสจริง: qwen/llama บน Groq ปฏิเสธดึงราคาเพราะคิดว่าต้องมี MT5 เท่านั้น)
+                appendLine()
+                appendLine("[TRADING TOOLS พร้อมใช้ — ไม่ต้องมี MT5]")
+                appendLine("- คุณมี tools: trading_price, trading_technical_analysis, trading_indicators, trading_smc_analysis, trading_market_snapshot, trading_news — ดึงข้อมูลสดจาก TradingView ได้ทันที")
+                appendLine("- เมื่อผู้ใช้ถามราคา/กราฟ/วิเคราะห์ ให้เรียก trading_price หรือ trading_technical_analysis ก่อนเสมอ")
+                appendLine("- ห้ามตอบว่า 'ไม่มีข้อมูล' หรือ 'ต้องเชื่อมต่อ MT5' ถ้ายังไม่ได้เรียก tool เด็ดขาด")
+            }
         }
 
-        // 2. Prune history to last 20 turns (approx 10 user/assistant turns)
-        val maxHistoryTurns = 20
+        // 2. Prune history to last 10 turns (เดิม 20 — ลด payload สำหรับ free-tier TPM ต่ำ)
+        val maxHistoryTurns = 10
         val prunedHistory = if (historySnapshot.size > maxHistoryTurns) {
             com.example.personalaibot.logDebug("Orchestrator", "Pruning history from ${historySnapshot.size} to $maxHistoryTurns turns")
             historySnapshot.takeLast(maxHistoryTurns)
@@ -253,19 +390,40 @@ class JarvisOrchestrator(
 
         var round = 1
         val maxRounds = 5
+        // Degraded retry: ถ้ารอบแรกเจอ error (413 payload ใหญ่ / 404 model / timeout)
+        // → ลองใหม่ครั้งเดียวแบบประหยัด token: ไม่ส่ง tools + history เหลือ 3 turns
+        // เคสจริง: Groq free tier TPM 8K ได้ 413 เพราะ tools schema ใหญ่
+        var degraded = false
+        // 429 transient backoff: Groq แจ้ง "Please try again in X s" — ควรรอแล้วลองใหม่ ไม่ใช่ degrade ทิ้ง
+        var rateLimitRetries = 0
+        // กัน model วนเรียก tool เดิมซ้ำ (เคสจริง: gpt-oss เรียก search_web ซ้ำ 5 รอบจนตอบว่าง)
+        var lastToolSignature: String? = null
         while (round <= maxRounds) {
-            val actualModel = modelName.substringAfter("/")
-            com.example.personalaibot.logDebug("Orchestrator", "Round $round starting stream for model: $actualModel")
+            val actualModel = (modelOverride ?: modelName).substringAfter("/")
+            com.example.personalaibot.logDebug("Orchestrator", "Round $round starting stream for model: $actualModel (degraded=$degraded)")
             val options = LlmOptions(
                 model = actualModel,
                 systemPrompt = systemPrompt,
-                tools = if (provider.supportsFunctionCalling) {
-                    ToolRegistry.getGeminiTool().functionDeclarations
+                tools = if (provider.supportsFunctionCalling && !degraded) {
+                    // กัน model หลุดไปเรียก search_web ตอนถามราคา/กราฟ (เคสจริง: llama-3.3-70b/qwen
+                    // บน Groq ถามราคา XAUUSD แล้วเรียก search_web ซ้ำแทน trading tools จนตอบมั่ว)
+                    val decls = ToolRegistry.getGeminiTool().functionDeclarations
                         .filter { policy.isToolAllowed(it.name) }
+                        .filter { decl -> !(policy.isTradingContext && decl.name == "search_web") }
+                        // MT5 tools ส่งเฉพาะตอน strict MT5 mode เท่านั้น — ปกติ MT5 ไม่ได้ pair
+                        // ส่งไปก็เปลือง schema tokens + model อาจหลุดไปเรียก (เคสจริง: trading_mt5_analyze หลุด)
+                        .filter { decl -> policy.mt5Mode || decl.name !in ToolRegistry.mt5OnlyTradingFunctionNames }
+                    // สำคัญ: trading context ต้องให้ trading tools ขึ้นก่อน — registry เรียง builtin
+                    // (calculate/recall_memory/...) มาก่อน take(12) เลยตัด trading tools ทิ้งหมด
+                    // model ไม่เห็น trading_price จนหลุดไปเรียก tool มั่ว (เคสจริง Groq 2026-08-08)
+                    (if (policy.isTradingContext) {
+                        decls.sortedByDescending { if (ToolRegistry.isTradingTool(it.name)) 1 else 0 }
+                    } else decls)
+                        .take(12) // จำกัดจำนวน tools — schema ใหญ่เกินจะชน TPM ของ free tier
                         .map { decl ->
                             LlmToolSpec(
                                 name = decl.name,
-                                description = decl.description,
+                                description = decl.description.take(200), // ตัด description ยาวๆ ประหยัด token
                                 parametersJson = ToolRegistry.toJsonSchema(decl.parameters)
                             )
                         }
@@ -293,14 +451,52 @@ class JarvisOrchestrator(
 
                 // Emit text เฉพาะเมื่อไม่มี tool call (= final answer)
                 if (toolCallsDetected.isNullOrEmpty() && textBuffer.isNotEmpty()) {
+                    // 429 transient: Groq บอก "try again in X s" → รอแล้วลองรอบเดิม (สูงสุด 2 ครั้ง) ก่อนค่อย degrade
+                    val retryMatch = Regex("try again in ([\\d.]+)s", RegexOption.IGNORE_CASE).find(textBuffer.toString())
+                    if (textBuffer.startsWith("⚠️") && retryMatch != null && rateLimitRetries < 2) {
+                        rateLimitRetries++
+                        val waitSec = retryMatch.groupValues[1].toDoubleOrNull() ?: 2.0
+                        com.example.personalaibot.logDebug("Orchestrator", "429 transient — waiting ${waitSec + 1.0}s then retry (attempt $rateLimitRetries)")
+                        emit("\n⏳ ติด rate limit ชั่วคราว — รอ ${(waitSec + 1.0).toInt()} วิ แล้วลองใหม่\n")
+                        kotlinx.coroutines.delay(((waitSec + 1.0) * 1000).toLong())
+                        continue
+                    }
+                    // รอบแรกได้ error กลับมา (413/404/429 ฯลฯ) → degraded retry: ตัด tools + history สั้นลง แล้วลองใหม่
+                    if (!degraded && round == 1 && textBuffer.startsWith("⚠️")) {
+                        degraded = true
+                        while (messages.size > 3) messages.removeAt(0)
+                        com.example.personalaibot.logError("Orchestrator", "Provider error in round 1 — degraded retry (no tools, short history): ${textBuffer.toString().take(200)}")
+                        emit("\n🔄 โมเดลตอบ error — ลองใหม่แบบประหยัดโควต้า (ตัด tools/history)\n")
+                        continue
+                    }
                     emit(textBuffer.toString())
                 } else if (!toolCallsDetected.isNullOrEmpty() && textBuffer.isNotEmpty()) {
                     com.example.personalaibot.logDebug("Orchestrator", "Discarded pre-tool text (${textBuffer.length} chars) to prevent hallucination")
                 }
 
+                // รอบว่างเปล่า (0 ตัวอักษร ไม่มี tool call) → degraded retry ครั้งเดียว กัน Empty response เงียบๆ
+                if (toolCallsDetected.isNullOrEmpty() && textBuffer.isEmpty()) {
+                    if (!degraded) {
+                        degraded = true
+                        while (messages.size > 3) messages.removeAt(0)
+                        com.example.personalaibot.logError("Orchestrator", "Empty round — degraded retry")
+                        emit("\n🔄 โมเดลไม่ตอบ — ลองใหม่แบบประหยัดโควต้า\n")
+                        continue
+                    }
+                    com.example.personalaibot.logError("Orchestrator", "Empty round even after degraded — giving up")
+                    break
+                }
+
                 com.example.personalaibot.logDebug("Orchestrator", "Round $round finished. Total chars: ${fullResponse.length}, Tools: ${toolCallsDetected?.size ?: 0}")
             } catch (e: Exception) {
                 com.example.personalaibot.logError("Orchestrator", "Streaming error in round $round: ${e.message}", e)
+                // timeout/network error รอบแรก → degraded retry ครั้งเดียวก่อนยอมแพ้
+                if (!degraded && round == 1) {
+                    degraded = true
+                    while (messages.size > 3) messages.removeAt(0)
+                    emit("\n🔄 เชื่อมต่อมีปัญหา — ลองใหม่แบบประหยัดโควต้า\n")
+                    continue
+                }
                 emit("⚠️ เกิดข้อผิดพลาดในการรับข้อมูลจาก $providerId: ${e.message}")
                 break
             }
@@ -312,6 +508,20 @@ class JarvisOrchestrator(
             }
 
             // Execute Tools
+            // กัน model วนเรียก tool เดิมซ้ำ (เคสจริง: gpt-oss เรียก search_web ซ้ำทุกรอบจนหมด maxRounds แล้วตอบว่าง)
+            val toolSignature = toolCallsDetected!!.joinToString("|") { "${it.name}:${it.arguments.take(100)}" }
+            if (toolSignature == lastToolSignature) {
+                com.example.personalaibot.logError("Orchestrator", "Tool call loop detected ($toolSignature) — forcing final answer without tools")
+                degraded = true // tools=null ในรอบถัดไป (messages ยังเก็บผล tool ไว้ — ตัด history ไม่ได้ เดี๋ยวผล tool หาย)
+                messages.add(LlmMessage("assistant", fullResponse, toolCalls = toolCallsDetected))
+                toolCallsDetected.forEach { tc ->
+                    messages.add(LlmMessage(role = "tool", content = "Error: เรียก tool นี้ซ้ำหลายครั้งแล้ว — ให้สรุปคำตอบจากข้อมูลที่มีอยู่แล้วทันที ห้ามเรียก tool เพิ่ม", toolCallId = tc.id))
+                }
+                emit("\n🔄 โมเดลเรียก tool ซ้ำ — บังคับสรุปคำตอบจากข้อมูลที่มี\n")
+                round++
+                continue
+            }
+            lastToolSignature = toolSignature
             messages.add(LlmMessage("assistant", fullResponse, toolCalls = toolCallsDetected))
             
             for (toolCall in toolCallsDetected!!) {
@@ -338,6 +548,11 @@ class JarvisOrchestrator(
                 } catch (e: Exception) {
                     com.example.personalaibot.tools.ToolResult(toolCall.name, "Error: ${e.message}", true)
                 }
+
+                // log preview ผล tool — ใช้ตรวจกรณี model ตอบตัวเลขเพี้ยนทั้งที่เรียก tool ถูก
+                // (เคสจริง: llama-3.3-70b ตอบ XAUUSD=1,950 ทั้งที่ tool คืน 4,3xx — ไม่มี log ผล tool เลยหาสาเหตุไม่ได้)
+                com.example.personalaibot.logDebug("Orchestrator",
+                    "Tool result [${toolCall.name}] ${result.result.length} chars: ${result.result.replace("\n", " ").take(300)}")
 
                 if (policy.shouldSuppressToolResult(toolCall.name)) {
                     com.example.personalaibot.logDebug("Orchestrator", "Strict MT5 Mode: Suppressing TV tool result for ${toolCall.name}")
@@ -381,6 +596,30 @@ class JarvisOrchestrator(
 
     suspend fun sendLiveAudioChunk(base64Pcm: String) =
         liveService.sendAudioChunk(base64Pcm)
+
+    /** ส่งข้อความแทรกเข้า Live session (trigger turn ใหม่ เช่นหลังเปลี่ยนเสียง/เปิดกล้อง) */
+    suspend fun sendLiveClientText(text: String) = liveService.sendClientText(text)
+
+    /** ตั้งข้อความให้ AI พูดทักอัตโนมัติทันทีที่ Live session READY ครั้งถัดไป */
+    fun setLiveGreetingOnReady(text: String?) {
+        liveService.pendingGreetingOnReady = text
+    }
+
+    /**
+     * ผูก Voice Profile เข้ากับ Agent Identity — เปลี่ยนเสียงแล้วเพศ/น้ำเสียง/คำลงท้ายเปลี่ยนตาม
+     * persist ลง Core Memory ทันที (จำข้าม session)
+     */
+    suspend fun applyVoiceIdentity(voiceName: String): Boolean {
+        val profile = GeminiVoiceProfiles.findByName(voiceName) ?: return false
+        val genderTh = if (profile.gender == VoiceGender.FEMALE) "หญิง" else "ชาย"
+        JarvisPersona.updateIdentityField("agent", "gender", genderTh)
+        JarvisPersona.updateIdentityField("agent", "vibe", "${profile.tone} (โปรไฟล์เสียง ${profile.name})")
+        // persist เฉพาะ 2 ค่าที่เปลี่ยนจริง — ห้ามเขียน map ทั้งก้อนเพราะจะทับ user identity ที่ตั้งไว้
+        memoryManager.setCoreMemory("agent_gender", genderTh)
+        memoryManager.setCoreMemory("agent_vibe", "${profile.tone} (โปรไฟล์เสียง ${profile.name})")
+        com.example.personalaibot.logDebug("Orchestrator", "Voice identity applied: ${profile.name} → gender=$genderTh, vibe=${profile.tone}")
+        return true
+    }
 
     suspend fun sendLiveCameraFrame(base64Jpeg: String) =
         liveService.sendImageChunk(base64Jpeg)
@@ -514,6 +753,18 @@ class JarvisOrchestrator(
         val path = "custom_agent_tools/$filename"
         fileHandler?.invoke("file_write", mapOf("path" to path, "content" to jsonContent))
         com.example.personalaibot.logDebug("Orchestrator", "New Agent Tool saved: $path")
+    }
+
+    override suspend fun onReadAgentTool(filename: String): String {
+        val handler = fileHandler ?: return "Error: ยังไม่ได้เชื่อมต่อ file system"
+        return handler.invoke("file_read", mapOf("path" to "custom_agent_tools/$filename"))
+    }
+
+    override suspend fun onDeleteAgentTool(filename: String): String {
+        val handler = fileHandler ?: return "Error: ยังไม่ได้เชื่อมต่อ file system"
+        val result = handler.invoke("file_delete", mapOf("path" to "custom_agent_tools/$filename"))
+        com.example.personalaibot.logDebug("Orchestrator", "Agent Tool deleted: custom_agent_tools/$filename → $result")
+        return result
     }
 
     /**

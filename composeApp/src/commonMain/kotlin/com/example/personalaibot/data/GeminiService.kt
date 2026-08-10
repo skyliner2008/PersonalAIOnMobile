@@ -155,6 +155,31 @@ class GeminiService(
     private val showToolResultInChat = false
     // Tool set constants moved to ToolRegistry for cross-provider reuse
 
+    /**
+     * Fallback chain ที่ user ตั้งเองใน Settings (null = ใช้ default ของ ModelConfig)
+     * เรียงลำดับสำคัญ — จะไล่ลองจากตัวแรกที่ยังไม่เคยลองในรอบนั้น
+     */
+    var fallbackModelsOverride: List<String>? = null
+
+    /**
+     * Gemini API keys สำหรับ rotation (multi free-tier accounts)
+     * เมื่อ key ปัจจุบันติดลิมิต → ลอง key ถัดไปใน list ก่อน แล้วค่อยสลับโมเดล
+     */
+    var apiKeysOverride: List<String>? = null
+
+    /**
+     * เซ็ตเมื่อ Gemini ตายทั้ง chain (ทุก key + ทุกโมเดล) ในรอบล่าสุด
+     * Orchestrator ใช้ flag นี้ตัดสินใจสลับไป cross-provider fallback (Groq/NIM/OpenRouter)
+     * null = รอบล่าสุดสำเร็จหรือยังไม่เคยล้ม
+     */
+    var lastFatalError: String? = null
+
+    /** สลับไปใช้ key ใหม่ (ใช้ภายใน fallback rotation เท่านั้น — ไม่ persist) */
+    private fun rotateApiKey(newKey: String) {
+        logDebug("GeminiService", "API key rotation: → ${com.example.personalaibot.maskApiKey(newKey)}")
+        apiKey = newKey
+    }
+
     fun updateConfig(newApiKey: String, newModelName: String) {
         if (newModelName.contains("gemini", ignoreCase = true) || !newModelName.contains("/")) {
             val masked = if (newApiKey.length > 8) {
@@ -206,7 +231,8 @@ class GeminiService(
         fileData: List<InlineData> = emptyList(),
         allowedFunctionNames: Set<String>? = null,
         toolPolicyLabel: String? = null,
-        temperature: Float = 0.7f
+        temperature: Float = 0.7f,
+        excludeCameraTools: Boolean = false
     ): JsonObject {
         // --- Context Pruning (Token Saving) ---
         val maxCoreContextChars = 15000
@@ -267,11 +293,16 @@ class GeminiService(
         val toolsArray: JsonArray? = when {
             includeFunctionTools -> buildJsonArray {
                 val allDecls = ToolRegistry.getGeminiTool().functionDeclarations
-                val decls = if (allowedFunctionNames.isNullOrEmpty()) {
+                var decls = if (allowedFunctionNames.isNullOrEmpty()) {
                     allDecls
                 } else {
                     // Include non-trading tools + allowed trading tools
                     allDecls.filter { !com.example.personalaibot.tools.ToolRegistry.isTradingTool(it.name) || it.name in allowedFunctionNames }
+                }
+                // มีไฟล์แนบจากผู้ใช้ → ซ่อน camera tools (กัน model เผลอเรียก camera_analyze_scene
+                // ทั้งที่รูปอยู่ใน inline_data แล้ว — เคสจริงที่ user เจอ)
+                if (excludeCameraTools) {
+                    decls = decls.filter { !com.example.personalaibot.tools.ToolRegistry.isCameraTool(it.name) }
                 }
                 if (decls.isNotEmpty()) {
                     add(buildJsonObject {
@@ -358,7 +389,8 @@ class GeminiService(
         history: List<ConversationTurn> = emptyList(),
         intentAddon: String = "",
         coreContext: String = "",
-        enableGrounding: Boolean = false
+        enableGrounding: Boolean = false,
+        initialFiles: List<InlineData> = emptyList()
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
             logError("GeminiService", "Chat failed: API Key is blank")
@@ -367,10 +399,49 @@ class GeminiService(
         }
 
         val toolHistory = mutableListOf<JsonObject>()
-        val pendingFiles = mutableListOf<InlineData>()
+        // seed ไฟล์แนบจากผู้ใช้ (รูป/PDF/DOCX) — จะถูกส่งพร้อม request แรกและล้างหลังส่ง
+        val pendingFiles = initialFiles.toMutableList()
+        val hasAttachments = initialFiles.isNotEmpty()
+
+        // มีไฟล์แนบ → บอก model ชัดๆ ว่าให้ดูไฟล์แนบตรงๆ ห้ามเรียก camera tools
+        // + ซ่อน camera tools ออกจาก spec (ผ่าน excludeCameraTools)
+        val effectiveIntentAddon = if (hasAttachments) intentAddon + """
+            |
+            |[USER ATTACHMENTS]: ผู้ใช้แนบไฟล์ ${initialFiles.size} ไฟล์มากับข้อความนี้ (ส่งเป็น inline_data ในข้อความแล้ว)
+            |- ให้วิเคราะห์/อ่าน/สรุปจากไฟล์แนบโดยตรงเท่านั้น — มองเห็นเนื้อหาได้เลยโดยไม่ต้องเรียก tool ใดๆ
+            |- ห้ามเรียก camera tools (ไฟล์แนบไม่เกี่ยวกับกล้อง)
+        """.trimMargin() else intentAddon
         var round = 1
         val maxRounds = 10
         var lastToolCallDetected = false
+        lastFatalError = null // reset fatal flag ทุกรอบใหม่ — Orchestrator อ่านหลัง collect จบ
+
+        // ─── Model fallback chain (free tier) ──────────────────────────────
+        // เมื่อโมเดลหลักติด 429/503/timeout → สลับไปใช้โมเดลสำรองตามลำดับใน ModelConfig
+        val triedModels = mutableSetOf(cleanModelName().removePrefix("models/"))
+
+        // ─── API key rotation (multi free-tier accounts) ───────────────────
+        // ลอง key ถัดไปก่อน (โมเดลเดิม) ก่อนจะสลับโมเดล — key แต่ละอันมีโควต้าแยกกัน
+        val triedKeys = mutableSetOf(apiKey)
+
+        fun trySwitchFallbackKey(): String? {
+            val chain = apiKeysOverride ?: return null
+            val next = chain.firstOrNull { it.isNotBlank() && it !in triedKeys } ?: return null
+            triedKeys.add(next)
+            rotateApiKey(next)
+            return next
+        }
+
+        fun trySwitchFallbackModel(): String? {
+            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.GEMINI_FALLBACK_MODELS
+            val next = chain.firstOrNull { it !in triedModels }
+                ?: return null
+            val old = modelName
+            modelName = next
+            triedModels.add(next)
+            logDebug("GeminiService", "Model fallback: $old → $next")
+            return next
+        }
 
         try {
             // Policy กลางตัวเดียวกับทุก provider path (JarvisOrchestrator / LiveToolBridge)
@@ -394,7 +465,7 @@ class GeminiService(
                 val requestBody = buildRequestJson(
                     userMessage = prompt,
                     history = history,
-                    intentAddon = intentAddon,
+                    intentAddon = effectiveIntentAddon,
                     coreContext = coreContext,
                     enableGrounding = enableGrounding,
                     includeFunctionTools = true,
@@ -403,7 +474,8 @@ class GeminiService(
                     fileData = pendingFiles,
                     allowedFunctionNames = allowedTradingFunctions,
                     toolPolicyLabel = toolPolicyLabel,
-                    temperature = roundTemperature
+                    temperature = roundTemperature,
+                    excludeCameraTools = hasAttachments
                 )
 
                 // Clear pending files after sending them
@@ -415,18 +487,26 @@ class GeminiService(
                 // Buffer text ระหว่าง streaming — ถ้ามี function call ในรอบนี้ ข้อความจะถูกทิ้ง
                 // เพราะเป็น "ความคิด" ของ model ก่อนได้ข้อมูลจริง (อาจ hallucinate ตัวเลข)
                 val textBuffer = StringBuilder()
+                var lastFinishReason: String? = null
+                var modelFailed = false
 
-                client.preparePost(streamGenerateContentUrl()) {
-                    contentType(ContentType.Application.Json)
-                    setBody(requestBody.toString())
-                    timeout { requestTimeoutMillis = 90_000 }
-                }.execute { httpResponse ->
-                    if (!httpResponse.status.isSuccess()) {
-                        val err = httpResponse.bodyAsText()
-                        logError("GeminiService", "API Error ${httpResponse.status.value}: $err")
-                        emit("⚠️ API Error ${httpResponse.status.value}: $err")
-                        return@execute
-                    }
+                try {
+                    client.preparePost(streamGenerateContentUrl()) {
+                        contentType(ContentType.Application.Json)
+                        setBody(requestBody.toString())
+                        timeout { requestTimeoutMillis = 90_000 }
+                    }.execute { httpResponse ->
+                        if (!httpResponse.status.isSuccess()) {
+                            val err = httpResponse.bodyAsText()
+                            logError("GeminiService", "API Error ${httpResponse.status.value} (model=$modelName): ${com.example.personalaibot.sanitizeSensitive(err.take(500))}")
+                            if (httpResponse.status.value in listOf(429, 500, 503)) {
+                                // ลิมิต/เซิร์ฟเวอร์ล้ม — ให้สลับโมเดลสำรองแล้วลองใหม่
+                                modelFailed = true
+                            } else {
+                                emit("⚠️ API Error ${httpResponse.status.value}: ${err.take(300)}")
+                            }
+                            return@execute
+                        }
 
                     val channel = httpResponse.bodyAsChannel()
                     while (!channel.isClosedForRead) {
@@ -439,6 +519,10 @@ class GeminiService(
                             try {
                                 val root = json.parseToJsonElement(jsonStr).jsonObject
                                 val candidates = root["candidates"]?.jsonArray
+                                if (candidates == null) {
+                                    // ไม่มี candidates — เช่น promptFeedback block หรือ response ว่าง (สาเหตุ empty response ที่เคยไม่มี log)
+                                    logDebug("GeminiService", "SSE chunk without candidates (model=$modelName): ${com.example.personalaibot.sanitizeSensitive(jsonStr.take(300))}")
+                                }
                                 val content = candidates?.firstOrNull()?.jsonObject?.get("content")?.jsonObject
                                 val parts = content?.get("parts")?.jsonArray
 
@@ -464,8 +548,11 @@ class GeminiService(
                                 }
 
                                 // Check for safety/finish reasons
+                                candidates?.firstOrNull()?.jsonObject?.get("finishReason")?.jsonPrimitive?.contentOrNull?.let { reason ->
+                                    lastFinishReason = reason
+                                }
                                 if (content == null) {
-                                    candidates?.firstOrNull()?.jsonObject?.get("finishReason")?.jsonPrimitive?.content?.let { reason ->
+                                    lastFinishReason?.let { reason ->
                                         if (reason != "STOP" && reason != "NONE") {
                                             emit("\n⚠️ Response interrupted: $reason")
                                         }
@@ -476,6 +563,39 @@ class GeminiService(
                             }
                         }
                     }
+                }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Timeout / network error — ให้สลับโมเดลสำรองแล้วลองใหม่ (เคสจริง: flash-lite หมดลิมิตแล้วค้าง 90s)
+                    logError("GeminiService", "Stream request failed (model=$modelName, round=$round)", e)
+                    modelFailed = true
+                }
+
+                // ─── Fallback อัตโนมัติ เมื่อหลักติดลิมิต/ล่ม ────────────────
+                if (modelFailed) {
+                    // 1) ลอง API key ถัดไปก่อน (โมเดลเดิม — key ใหม่ = โควต้าใหม่)
+                    val nextKey = trySwitchFallbackKey()
+                    if (nextKey != null) {
+                        emit("\n🔄 key เดิมติดลิมิต — สลับไปใช้ key ถัดไป (${com.example.personalaibot.maskApiKey(nextKey)}) อัตโนมัติ\n")
+                        continue
+                    }
+                    // 2) key หมดแล้ว → สลับโมเดลสำรอง
+                    val next = trySwitchFallbackModel()
+                    if (next != null) {
+                        emit("\n🔄 โมเดลเดิมมีปัญหา (ลิมิต/ไม่ตอบสนอง) — สลับไปใช้ `$next` อัตโนมัติ\n")
+                        continue // retry round เดิมด้วยโมเดลใหม่
+                    } else {
+                        logError("GeminiService", "All fallback models failed: $triedModels")
+                        lastFatalError = "All Gemini keys+models failed: keys=${triedKeys.size} models=$triedModels"
+                        emit("⚠️ โมเดล Gemini ทุกตัวที่ลอง (${triedModels.joinToString(", ")}) ใช้ไม่ได้ชั่วคราว — อาจหมดลิมิต free tier หรือเน็ตมีปัญหา ลองใหม่อีกครั้งภายหลัง")
+                        break
+                    }
+                }
+
+                // Log สาเหตุเมื่อ response ว่างเปล่า (เคสจริง: Empty response โดยไม่รู้สาเหตุ)
+                if (!foundFunctionCall && textBuffer.isEmpty()) {
+                    logDebug("GeminiService", "Empty model response in round $round — model=$modelName finishReason=$lastFinishReason parts=${accumulatedModelParts.size}")
                 }
 
                 // Emit buffered text เฉพาะเมื่อไม่มี function call (= final answer)
@@ -592,7 +712,7 @@ class GeminiService(
                 val finalRequestBody = buildRequestJson(
                     userMessage = prompt,
                     history = history,
-                    intentAddon = intentAddon,
+                    intentAddon = effectiveIntentAddon,
                     coreContext = coreContext,
                     enableGrounding = enableGrounding,
                     includeFunctionTools = false, // Disable tools to force text response
@@ -690,6 +810,8 @@ class GeminiService(
         return try {
             val res = client.post(generateContentUrl()) {
                 contentType(ContentType.Application.Json)
+                // nested AI summaries (news/macro calendar) เคยไม่มี timeout → ค้าง 90s ทำ custom tool ช้า
+                timeout { requestTimeoutMillis = 20_000 }
                 val prunedHistory = if (history.size > 20) history.takeLast(20) else history
                 val contents = prunedHistory.map { turn ->
                     buildJsonObject {
@@ -712,13 +834,13 @@ class GeminiService(
                 val resp: GeminiResponse = res.body()
                 extractAllTextFromResp(resp).ifBlank { "⚠️ No response" }
             } else {
-                val errBody = res.bodyAsText()
-                logError("GeminiService", "API Error ${res.status}: $errBody")
+                val errBody = com.example.personalaibot.sanitizeSensitive(res.bodyAsText())
+                logError("GeminiService", "API Error ${res.status} (model=$modelName): ${errBody.take(300)}")
                 "⚠️ Error ${res.status}"
             }
         } catch (e: Exception) {
             logError("GeminiService", "Generate response failed", e)
-            "⚠️ Error: ${e.message}"
+            "⚠️ Error: ${com.example.personalaibot.sanitizeSensitive(e.message ?: "unknown").take(300)}"
         }
     }
 

@@ -195,6 +195,22 @@ object ToolRegistry {
                 required = listOf("name", "description", "triggerKeywords", "systemPromptAddon")
             )
         ))
+        put("system_list_agent_tools", FunctionDeclaration(
+            name = "system_list_agent_tools",
+            description = "Lists all custom tools/skills the Agent has previously created (name, description, trigger keywords, and internal logic). Use when the user asks what custom tools exist or wants to review/edit one.",
+            parameters = null
+        ))
+        put("system_delete_agent_tool", FunctionDeclaration(
+            name = "system_delete_agent_tool",
+            description = "Permanently deletes a custom tool created by the Agent — removes both the file and its registry entry. Use when the user asks to remove a custom tool. To EDIT a tool, call system_create_agent_tool again with the same name to overwrite it.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "The custom tool name to delete (with or without 'custom_' prefix).")
+                ),
+                required = listOf("name")
+            )
+        ))
         put("system_run_diagnostics", FunctionDeclaration(
             name = "system_run_diagnostics",
             description = "Runs a comprehensive system health check and generates a diagnostic report. Use this to troubleshoot price discrepancies, connection issues, or automation failures.",
@@ -203,6 +219,11 @@ object ToolRegistry {
         put("system_check_connectivity", FunctionDeclaration(
             name = "system_check_connectivity",
             description = "Checks the internet connection and connectivity to key financial APIs (Yahoo, TradingView).",
+            parameters = null
+        ))
+        put("system_self_review", FunctionDeclaration(
+            name = "system_self_review",
+            description = "Returns the bundled self-review document of JARVIS/PersonalAIBot (identity, 8 core capabilities, key numbers, roadmap). Use when the user asks you to review yourself, introduce your capabilities, or read/summarize the project README aloud (e.g. 'รีวิวตัวเองให้ฟังหน่อย', 'แนะนำตัวเอง'). NARRATION MODE: the user wants to HEAR the full review — narrate it aloud in natural spoken Thai, section by section, with NO length limit. Do NOT use analyze_and_display_report for this. Do NOT cut it short.",
             parameters = null
         ))
         put("analyze_and_display_report", FunctionDeclaration(
@@ -253,7 +274,10 @@ object ToolRegistry {
 
     // Copy-on-write immutable maps — mutation เกิดเฉพาะตอน register (เหตุการณ์หายาก)
     // ผู้อ่านจะไม่เห็น map ที่ถูกแก้ครึ่งทาง แม้ถูกเรียกจากหลาย coroutine พร้อมกัน
+    // @Volatile กัน reader thread เห็น reference เก่าค้าง (visibility guarantee)
+    @Volatile
     private var _customTools: Map<String, FunctionDeclaration> = emptyMap()
+    @Volatile
     private var _skills: Map<String, SkillDescriptor> = emptyMap()
 
     // ─── Trading Tools (Real-time, TA, Sentiment, News) ──────────────────────
@@ -356,7 +380,9 @@ object ToolRegistry {
                                _strategyTools.values.toList() +
                                _cameraTools.values.toList() +
                                _customTools.values.toList() +
-                               _skills.values.map { skill ->
+                               // skill ทุกตัวมี custom tool คู่กันอยู่แล้ว (register คู่กัน) —
+                               // ส่งเฉพาะ skill ที่ไม่มี custom tool ชื่อซ้ำ กัน Gemini 400 "Duplicate function declaration"
+                               _skills.values.filter { it.name !in _customTools }.map { skill ->
                                    FunctionDeclaration(
                                        name        = skill.name,
                                        description = skill.description,
@@ -393,6 +419,16 @@ object ToolRegistry {
     fun registerSkill(skill: SkillDescriptor) {
         _skills = _skills + (skill.name to skill)
     }
+
+    /** ลบ custom tool/skill ออกจาก registry (ใช้คู่กับลบไฟล์ใน custom_agent_tools/) */
+    fun unregisterCustomTool(name: String) {
+        _customTools = _customTools - name
+        _skills = _skills - name
+    }
+
+    /** รายการ custom tool ที่ลงทะเบียนอยู่ (name → description) */
+    fun listCustomTools(): Map<String, String> =
+        _customTools.mapValues { it.value.description }
 
     fun getSkill(name: String): SkillDescriptor? = _skills[name]
 
@@ -505,7 +541,7 @@ object ToolRegistry {
         ))
         put("voice_set_profile", FunctionDeclaration(
             name = "voice_set_profile",
-            description = "Changes the current assistant voice profile. Note: This will cause a brief 2-second reconnect to apply the new voice.",
+            description = "Changes the current assistant voice profile. You MUST call this tool whenever the user asks to change/try a voice — NEVER claim the voice has changed without calling this tool. The session reconnects briefly (~2s) and the new voice applies after reconnect.",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(

@@ -271,7 +271,7 @@ fun App(
                         )
                     } else {
                         ChatInputBar(
-                            onSend = { viewModel.sendMessage(it) },
+                            onSend = { msg, atts -> viewModel.sendMessage(msg, attachments = atts) },
                             onStartLive = { viewModel.startVoiceInput() },
                             enabled = !isTyping,
                             voiceAvailable = voiceManager.isAvailable()

@@ -21,11 +21,12 @@ class FileToolExecutor(private val context: Context) {
     companion object {
         private const val TAG = "FileToolExecutor"
 
-        /** นามสกุลที่อนุญาตให้ file_write เขียนได้ (text-based เท่านั้น) */
+        /** นามสกุลที่อนุญาตให้ file_write เขียนได้ (text-based + xlsx ที่สร้างผ่าน XlsxWriter) */
         private val WRITABLE_EXTENSIONS = setOf(
             "txt", "md", "log", "json", "csv", "yaml", "yml", "xml",
             "html", "htm", "css", "ini", "cfg", "conf", "properties", "toml",
-            "kt", "kts", "py", "js", "ts", "java", "sql", "sh", "bat", "pine"
+            "kt", "kts", "py", "js", "ts", "java", "sql", "sh", "bat", "pine",
+            "xlsx"
         )
     }
 
@@ -145,7 +146,14 @@ class FileToolExecutor(private val context: Context) {
         if (!file.exists()) return "ไม่พบไฟล์: $path"
         if (file.isDirectory) return "$path เป็นโฟลเดอร์ ไม่สามารถอ่านเป็น text ได้"
 
-        return file.readText()
+        // กัน context บวม — ไฟล์ใหญ่เกิน 200 KB ให้อ่านเฉพาะส่วนหัว + แจ้งขนาดจริง
+        val MAX_READ_CHARS = 200_000
+        val text = file.readText()
+        return if (text.length > MAX_READ_CHARS) {
+            text.take(MAX_READ_CHARS) +
+                "\n\n...[truncated — ไฟล์มี ${text.length} ตัวอักษร แสดงเฉพาะ ${MAX_READ_CHARS} แรก " +
+                "ใช้ file_analyze ถ้าต้องการให้ AI อ่านทั้งไฟล์]..."
+        } else text
     }
 
     private fun executeWrite(args: Map<String, String>): String {
@@ -167,9 +175,35 @@ class FileToolExecutor(private val context: Context) {
 
         // สร้างโฟลเดอร์ถ้ายังไม่มี
         file.parentFile?.mkdirs()
-        file.writeText(content)
 
-        return "เขียนไฟล์สำเร็จ: $path (${content.length} characters)"
+        // .xlsx: content คือ CSV/TSV (บรรทัดละ row) → แปลงเป็น Excel จริงผ่าน XlsxWriter
+        val isXlsx = ext == "xlsx"
+        var xlsxInfo = ""
+        if (isXlsx) {
+            val rows = XlsxWriter.parseDelimited(content)
+            if (rows.isEmpty()) return "Error: content สำหรับ .xlsx ต้องเป็น CSV/TSV อย่างน้อย 1 แถว"
+            XlsxWriter.write(file, rows, sheetName = file.nameWithoutExtension.take(31).ifBlank { "Sheet1" })
+            xlsxInfo = " (${rows.size} แถว x ${rows.maxOf { it.size }} คอลัมน์ — Excel)"
+        } else {
+            file.writeText(content)
+        }
+
+        // Verify หลังเขียน — scoped storage บางเครื่องเขียนเงียบๆ ไม่ติด ต้องเช็คผลจริง
+        val verified = file.exists() && (content.isEmpty() || file.length() > 0)
+        android.util.Log.d(TAG, "Write verify: path=${file.absolutePath} exists=${file.exists()} size=${file.length()}")
+        if (!verified) {
+            return "Error: เขียนไฟล์ไม่สำเร็จ — หลังเขียนแล้วไฟล์ไม่มีอยู่จริง (path: ${file.absolutePath}) อาจติดสิทธิ์ scoped storage"
+        }
+
+        // Trigger media scan เพื่อให้ file manager / gallery เห็นไฟล์ใหม่ทันที (ไม่ scan = บางเครื่องไม่แสดง)
+        try {
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+            android.util.Log.d(TAG, "Media scan requested: ${file.absolutePath}")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Media scan failed: ${e.message}")
+        }
+
+        return "เขียนไฟล์สำเร็จ: $path (${content.length} characters)$xlsxInfo"
     }
 
     private fun executeDelete(args: Map<String, String>): String {
@@ -178,8 +212,26 @@ class FileToolExecutor(private val context: Context) {
         if (!file.exists()) return "ไม่พบไฟล์ที่ต้องการลบ: $path"
         if (!canMutatePath(file)) return "Error: mutation blocked for unsafe path '$path'"
 
+        // Guard พิเศษ: ห้ามลบโฟลเดอร์สาธารณะมาตรฐานทั้งโฟลเดอร์ (Download/Documents/DCIM/Pictures)
+        // — deleteRecursively บนโฟลเดอร์เหล่านี้ = ลบไฟล์ผู้ใช้หมดเครื่อง
+        if (file.isDirectory && isProtectedPublicDir(file)) {
+            return "Error: delete blocked — ห้ามลบโฟลเดอร์สาธารณะมาตรฐานทั้งโฟลเดอร์ (${file.name}) ลบได้เฉพาะไฟล์/โฟลเดอร์ย่อยข้างใน"
+        }
+
         val success = if (file.isDirectory) file.deleteRecursively() else file.delete()
         return if (success) "ลบสำเร็จ: $path" else "ไม่สามารถลบได้ (อาจติด Permission)"
+    }
+
+    /** โฟลเดอร์สาธารณะมาตรฐานที่ห้ามลบทั้งโฟลเดอร์ */
+    private fun isProtectedPublicDir(file: File): Boolean {
+        val protectedDirs = listOf(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
+        )
+        val normalized = normalizePath(file)
+        return protectedDirs.any { normalizePath(it) == normalized }
     }
 
     private suspend fun executeAnalyze(args: Map<String, String>): String {

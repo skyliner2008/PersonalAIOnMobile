@@ -12,6 +12,8 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import org.jetbrains.compose.resources.ExperimentalResourceApi
+import personalaibot.composeapp.generated.resources.Res
 
 /**
  * SystemToolExecutor — จัดการคำสั่งตรวจสอบสุขภาพและรันการทดสอบระบบอัตโนมัติ
@@ -26,7 +28,20 @@ class SystemToolExecutor(
             "system_run_diagnostics" -> runDiagnostics()
             "system_check_connectivity" -> checkConnectivity()
             "system_create_agent_tool" -> createAgentTool(args)
+            "system_list_agent_tools" -> listAgentTools()
+            "system_delete_agent_tool" -> deleteAgentTool(args)
+            "system_self_review" -> selfReview()
             else -> "⚠️ ไม่พบเครื่องมือระบบ: $toolName"
+        }
+    }
+
+    @OptIn(ExperimentalResourceApi::class)
+    private suspend fun selfReview(): String {
+        return try {
+            val content = Res.readBytes("files/self_review.md").decodeToString()
+            content + "\n\n[NARRATION MODE] ผู้ใช้ต้องการฟังรีวิวนี้ — ให้เล่าออกเสียงเป็นภาษาไทยแบบสนทนา ไล่ทีละหัวข้อจนครบทุกส่วน ไม่จำกัดความยาว ห้ามสรุปสั้น ห้ามใช้ markdown/ตาราง/สัญลักษณ์ ออกเสียง และห้ามหยุดกลางทางจนกว่าจะเล่าครบ"
+        } catch (e: Exception) {
+            "⚠️ อ่านเอกสารรีวิวไม่สำเร็จ: ${e.message}"
         }
     }
 
@@ -76,6 +91,65 @@ class SystemToolExecutor(
         return "✅ สร้างเครื่องมือใหม่ '$finalName' สำเร็จและลงทะเบียนเข้าระบบแล้ว " +
                "— ใช้งานได้ทันทีในแชทนี้ และจะถูกโหลดอัตโนมัติทุกครั้งที่เปิดแอป " +
                "(ไฟล์: custom_agent_tools/$filename)"
+    }
+
+    private fun sanitizeToolName(rawName: String): String {
+        val name = rawName.trim().lowercase()
+            .replace(Regex("[^a-z0-9_]+"), "_")
+            .trim('_')
+        return if (name.startsWith("custom_")) name else "custom_$name"
+    }
+
+    private suspend fun listAgentTools(): String {
+        val tools = ToolRegistry.listCustomTools()
+        if (tools.isEmpty()) {
+            return "ยังไม่มี custom tool ที่สร้างไว้ — สร้างใหม่ได้ด้วย system_create_agent_tool"
+        }
+        val sb = StringBuilder()
+        sb.appendLine("🔧 Custom Tools ที่สร้างไว้ (${tools.size} ตัว):")
+        sb.appendLine()
+        tools.keys.sorted().forEach { name ->
+            val skill = ToolRegistry.getSkill(name)
+            sb.appendLine("• **$name**")
+            sb.appendLine("  - ${skill?.description ?: tools[name]}")
+            if (!skill?.triggerKeywords.isNullOrEmpty()) {
+                sb.appendLine("  - keywords: ${skill!!.triggerKeywords.joinToString(", ")}")
+            }
+            // อ่าน logic ข้างใน (systemPromptAddon) ให้ AI เห็นด้วย — ใช้ตอนอยากแก้ไข
+            val fileContent = delegate?.onReadAgentTool("$name.json") ?: ""
+            val addonMatch = Regex("\"systemPromptAddon\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(fileContent)
+            if (addonMatch != null) {
+                val addon = addonMatch.groupValues[1]
+                    .replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+                val preview = if (addon.length > 500) addon.take(500) + "…" else addon
+                sb.appendLine("  - logic:")
+                preview.lines().forEach { sb.appendLine("    $it") }
+            }
+            sb.appendLine()
+        }
+        sb.append("หมายเหตุ: แก้ไข tool ไหนให้เรียก system_create_agent_tool ด้วยชื่อเดิม (เขียนทับ) ส่วนลบใช้ system_delete_agent_tool")
+        return sb.toString().trim()
+    }
+
+    private suspend fun deleteAgentTool(args: Map<String, String>): String {
+        val rawName = args["name"]?.trim() ?: return "Error: Missing 'name' parameter."
+        val name = sanitizeToolName(rawName)
+        if (name == "custom_") return "Error: ชื่อ tool '$rawName' ใช้ไม่ได้"
+
+        val existed = ToolRegistry.listCustomTools().containsKey(name)
+        if (!existed) {
+            val available = ToolRegistry.listCustomTools().keys.sorted()
+            return "⚠️ ไม่พบ custom tool '$name'" +
+                (if (available.isNotEmpty()) " — ที่มีอยู่: ${available.joinToString(", ")}" else " — ยังไม่มี custom tool เลย")
+        }
+
+        // 1) ลบไฟล์ผ่าน delegate (persist)
+        val fileResult = delegate?.onDeleteAgentTool("$name.json") ?: "(ไม่ได้เชื่อมต่อ file system)"
+
+        // 2) ถอดออกจาก registry ทันที — หายจาก tool list รอบถัดไป
+        ToolRegistry.unregisterCustomTool(name)
+
+        return "🗑️ ลบ custom tool '$name' เรียบร้อย — ถอดออกจากระบบแล้ว (ไฟล์: $fileResult)"
     }
 
     private suspend fun runDiagnostics(): String {

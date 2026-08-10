@@ -37,6 +37,10 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     private val advancedEngine = AdvancedTradingEngine(SmcApiService(client))
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Circuit breaker — bridge ล่มแล้วข้าม HTTP ไป local engine ตรงๆ เป็นเวลา 10 นาที */
+    @Volatile
+    private var deepSuiteBridgeDownUntilMs: Long = 0L
+
     /**
      * Execute tool call และ return ผลลัพธ์เป็น String
      */
@@ -323,7 +327,17 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
 
     private suspend fun executeDeepAnalysisSuite(args: Map<String, String>): String {
         val symbol = args["symbol"] ?: return "Missing symbol"
-        val tf = args["timeframe"] ?: "H1"
+        // รองรับทั้ง "timeframe" และ "interval" (model มักส่ง interval ตาม declaration)
+        val tf = args["timeframe"] ?: args["interval"] ?: "1h"
+
+        // Circuit breaker — bridge เพิ่งล่มภายใน 10 นาที: ข้าม HTTP ไป local engine เลย
+        // (กันเสียเวลา 0.5-2 วิต่อครั้งทุกรอบเรียก เมื่อ ngrok offline ค้าง)
+        val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        if (nowMs < deepSuiteBridgeDownUntilMs) {
+            logDebug("TradingTool", "Deep analysis bridge circuit OPEN — skip HTTP, using local engine directly")
+            return runLocalDeepSuite(symbol, tf, "bridge circuit open")
+        }
+
         val endpoint = args["endpoint"]?.trim()
             ?: "http://127.0.0.1:8090/api/mt5/auto/deep-analysis"
         val finalUrl = if (endpoint.contains("?")) "$endpoint&symbol=$symbol&timeframe=$tf"
@@ -338,32 +352,47 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 }
             }
             val body = response.bodyAsText()
+            // ngrok offline / HTML error page ไม่ throw exception — ต้องตรวจเอง
+            // แล้วตกไป local engine (ข้อมูลจาก TV) แทนการส่งขยะกลับเข้า tool loop
+            val invalid = response.status.value !in 200..299 ||
+                body.contains("ERR_NGROK") || body.contains("ngrok") && body.contains("offline") ||
+                body.trimStart().startsWith("<")
+            if (invalid) {
+                throw Exception("bridge unreachable (HTTP ${response.status.value}, ngrok/html error page)")
+            }
+            deepSuiteBridgeDownUntilMs = 0L // bridge กลับมาแล้ว — ปิด circuit
             "═══ Deep Analysis Suite: $symbol $tf ═══\n$body"
         } catch (e: Exception) {
-            // Local fallback — คำนวณเองบนเครื่องด้วย AdvancedTradingEngine
-            // (แหล่งเดียวกับที่ background automation ใช้ ทำให้พฤติกรรมตรงกัน)
-            logDebug("TradingTool", "Deep analysis bridge failed (${e.message}) — using local engine")
-            val result = try {
-                advancedEngine.analyze(symbol, tf.lowercase())
-            } catch (e2: Exception) {
-                logDebug("TradingTool", "Local deep analysis failed: ${e2.message}")
-                null
+            // เปิด circuit 10 นาที — รอบถัดไปข้าม HTTP ไป local ตรงๆ
+            deepSuiteBridgeDownUntilMs =
+                kotlinx.datetime.Clock.System.now().toEpochMilliseconds() + 10 * 60_000L
+            runLocalDeepSuite(symbol, tf, e.message ?: "bridge failed")
+        }
+    }
+
+    /** Local fallback — คำนวณเองบนเครื่องด้วย AdvancedTradingEngine (ข้อมูลแท่งเทียน TV) */
+    private suspend fun runLocalDeepSuite(symbol: String, tf: String, reason: String): String {
+        logDebug("TradingTool", "Deep analysis using local engine ($reason)")
+        val result = try {
+            advancedEngine.analyze(symbol, tf.lowercase())
+        } catch (e2: Exception) {
+            logDebug("TradingTool", "Local deep analysis failed: ${e2.message}")
+            null
+        }
+        if (result == null) {
+            return "⚠️ Deep analysis ไม่สำเร็จทั้ง bridge และ local engine ($reason)"
+        }
+        return buildString {
+            appendLine("═══ Deep Analysis Suite (Local Engine): ${result.symbol} ${result.interval} ═══")
+            appendLine("💵 ราคาปัจจุบัน: ${result.currentPrice}")
+            appendLine("🏛️ LSD Trend: ${result.lsdTrend.state} (Confluence TF: ${result.lsdTrend.confluenceTF}/4)")
+            appendLine("📦 Orderflow: ${result.orderflow.deltaLabel} (Δ ${"%.2f".format(result.orderflow.lastDelta)})")
+            appendLine("🌀 Momentum: ${result.momentum.signal}${if (result.momentum.isSqueeze) " (SQUEEZE!)" else ""}")
+            val hot = result.fiboStrength.filter { it.isHot }
+            if (hot.isNotEmpty()) {
+                appendLine("🎯 Fibo Hot Zones: " + hot.joinToString { "${it.label} (${it.score}/10)" })
             }
-            if (result == null) {
-                return "⚠️ Deep analysis ไม่สำเร็จทั้ง bridge และ local engine (${e.message})"
-            }
-            buildString {
-                appendLine("═══ Deep Analysis Suite (Local Engine): ${result.symbol} ${result.interval} ═══")
-                appendLine("💵 ราคาปัจจุบัน: ${result.currentPrice}")
-                appendLine("🏛️ LSD Trend: ${result.lsdTrend.state} (Confluence TF: ${result.lsdTrend.confluenceTF}/4)")
-                appendLine("📦 Orderflow: ${result.orderflow.deltaLabel} (Δ ${"%.2f".format(result.orderflow.lastDelta)})")
-                appendLine("🌀 Momentum: ${result.momentum.signal}${if (result.momentum.isSqueeze) " (SQUEEZE!)" else ""}")
-                val hot = result.fiboStrength.filter { it.isHot }
-                if (hot.isNotEmpty()) {
-                    appendLine("🎯 Fibo Hot Zones: " + hot.joinToString { "${it.label} (${it.score}/10)" })
-                }
-                appendLine("⭐ Summary Score: ${result.summaryScore}/100")
-            }
+            appendLine("⭐ Summary Score: ${result.summaryScore}/100")
         }
     }
 

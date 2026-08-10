@@ -287,7 +287,9 @@ class LiveGeminiService(
 
     // คลังความจำระยะสั้น: เก็บประโยคสุดท้ายที่ผู้ใช้พูด เพื่อใช้เตือนสมาธิ AI ตอนเปิดเครื่องมือ
     var lastUserText: String = ""
-        private set
+
+    /** ข้อความที่จะส่งให้ model พูดทันทีหลัง session READY (เช่นทักยืนยันเสียงใหม่หลังเปลี่ยนเสียง) — ใช้ครั้งเดียวแล้วล้าง */
+    var pendingGreetingOnReady: String? = null
 
     // buffer 128 chunks — แยกการอ่าน WebSocket ออกจาก AudioTrack.write() ที่ blocking
     // (เดิมไม่มี buffer → emit suspend รอ playback → เฟรมถัดไปค้างทั้ง turn/transcript/tool)
@@ -463,6 +465,15 @@ class LiveGeminiService(
                 logDebug("LiveGemini", "✅ Live session READY")
                 isSetupComplete = true
                 _connectionState.value = ConnectionState.Connected
+                // ถ้ามี greeting ค้างไว้ (เช่นหลังเปลี่ยนเสียง) ส่งทันทีที่ READY เพื่อให้ model พูดทักก่อน
+                pendingGreetingOnReady?.let { greeting ->
+                    pendingGreetingOnReady = null
+                    logDebug("LiveGemini", "🔔 Sending pending greeting on ready: ${greeting.take(60)}")
+                    scope.launch {
+                        kotlinx.coroutines.delay(800) // รอ audio pipeline นิ่งก่อน
+                        sendRealtimeText(greeting) // realtimeInput — trigger generation ได้แม้ audio streaming อยู่
+                    }
+                }
                 return
             }
 
@@ -551,6 +562,7 @@ class LiveGeminiService(
                 }
 
                 if (content.turnComplete == true) {
+                    turnCompleteFlow.tryEmit(System.currentTimeMillis())
                     val userText = pendingUserTurnText
                     // ใช้ transcription เป็นหลัก ถ้าไม่มี (model ตอบ text ล้วน) ใช้ text parts แทน
                     val modelText = pendingModelTurnText ?: pendingModelTextParts
@@ -628,6 +640,35 @@ class LiveGeminiService(
             )
             json.encodeToString(msg)
         }
+    }
+
+    /** แจ้งทุกครั้งที่ model จบ turn — ใช้โดย LiveToolBridge กระตุ้น vision summary หลัง turn "กำลังเปิดกล้อง" จบ */
+    val turnCompleteFlow = kotlinx.coroutines.flow.MutableSharedFlow<Long>(extraBufferCapacity = 1)
+
+    /** ส่ง text เข้า session แบบ client content (เหมือน user พิมพ์) — ใช้กระตุ้นให้ model เริ่ม turn ใหม่ */
+    suspend fun sendClientText(text: String) {
+        sendIfReady {
+            val msg = LiveClientContentMessage(
+                clientContent = LiveContentWrapper(
+                    turns = listOf(LiveTurn(role = "user", parts = listOf(LivePart(text = text))))
+                )
+            )
+            json.encodeToString(msg)
+        }
+    }
+
+    /**
+     * ส่ง text ผ่าน realtimeInput — ถูกปฏิบัติเหมือน user "พูด" เข้ามาจริง (trigger generation ได้)
+     * ต่างจาก clientContent ที่ขณะ audio streaming ทำหน้าที่เป็นแค่ context (model ไม่ตอบเอง — พิสูจน์แล้วจากเคส voice-change greeting 2026-08-09)
+     */
+    suspend fun sendRealtimeText(text: String) {
+        sendIfReady {
+            val msg = LiveRealtimeInputMessage(
+                realtimeInput = LiveRealtimeInputData(text = text)
+            )
+            json.encodeToString(msg)
+        }
+        logDebug("LiveGemini", "⬆ Sent realtime text: ${text.take(80)}")
     }
 
     suspend fun sendNativeToolResponse(callId: String, toolName: String, result: String) {

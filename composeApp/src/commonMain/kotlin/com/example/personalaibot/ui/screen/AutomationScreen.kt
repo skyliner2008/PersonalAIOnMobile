@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -246,33 +247,47 @@ private fun AlertSettingsCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = JarvisTheme.Card)
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("⚙️ รูปแบบการแจ้งเตือน", color = Color.White, fontWeight = FontWeight.SemiBold)
-            SettingToggleRow(
-                label = "🤖 ให้ AI สรุปก่อนแจ้งเตือน",
+        // แบบกะทัดรัด: แถวเดียว ไอคอน + toggle 2 ตัวข้างกัน
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("⚙️", fontSize = 14.sp)
+            CompactToggle(
+                label = "🤖 AI สรุป",
                 checked = aiSummary,
-                onChange = onAiSummaryChange
+                onChange = onAiSummaryChange,
+                modifier = Modifier.weight(1f)
             )
-            SettingToggleRow(
-                label = "🔊 แจ้งเตือนด้วยเสียงพูด",
+            CompactToggle(
+                label = "🔊 เสียงพูด",
                 checked = voice,
-                onChange = onVoiceChange
+                onChange = onVoiceChange,
+                modifier = Modifier.weight(1f)
             )
         }
     }
 }
 
 @Composable
-private fun SettingToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-        Spacer(modifier = Modifier.weight(1f))
+private fun CompactToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            modifier = Modifier.weight(1f).padding(start = 8.dp)
+        )
         Switch(
             checked = checked,
             onCheckedChange = onChange,
+            modifier = Modifier.scale(0.7f),
             colors = SwitchDefaults.colors(checkedTrackColor = JarvisTheme.Cyan)
         )
     }
@@ -567,7 +582,10 @@ private val ALERT_PRESETS = listOf(
     AlertPreset("💥 Bollinger Squeeze", "trading_indicators", "bb_width", "<=", "3"),
     AlertPreset("🚀 เทรนด์แรง ADX", "trading_technical_analysis", "ADX", ">=", "25"),
     AlertPreset("😱 Extreme Fear", "trading_fear_greed", "value", "<=", "20"),
-    AlertPreset("🌟 High Confluence", "trading_deep_analysis_suite", "summaryScore", ">=", "85")
+    AlertPreset("🌟 High Confluence", "trading_deep_analysis_suite", "summaryScore", ">=", "85"),
+    AlertPreset("🔄 LSD ขาขึ้น", "trading_deep_analysis_suite", "lsdState", "==", "BULLISH"),
+    AlertPreset("⚡ Squeeze Breakout", "trading_deep_analysis_suite", "isSqueeze", "==", "1"),
+    AlertPreset("📦 แรงซื้อนำ (Delta)", "trading_deep_analysis_suite", "deltaLabel", "contains", "BUYING")
 )
 
 /**
@@ -601,10 +619,10 @@ private fun CreateAlertDialog(
             Column(
                 modifier = Modifier
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // ── Preset ลัด (เลื่อนขวา-ซ้ายได้) ──
-                Text("⚡ Preset ลัด:", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+                Text("⚡ Preset ลัด", color = JarvisTheme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -628,21 +646,18 @@ private fun CreateAlertDialog(
                     }
                 }
 
-                // ── Symbol + ชื่อ (แถวเดียวกัน ประหยัดที่) ──
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(modifier = Modifier.weight(1.2f)) {
-                        AlertTextField("Symbol เช่น XAUUSD", symbol) { symbol = it.uppercase() }
-                    }
-                    Box(modifier = Modifier.weight(1f)) {
-                        AlertTextField("ชื่อ (ไม่บังคับ)", name) { name = it }
-                    }
-                }
+                // ── ส่วนที่ 1: สิ่งที่เฝ้าดู ──
+                Text("1️⃣ สิ่งที่เฝ้าดู", color = JarvisTheme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                AlertTextField("Symbol เช่น XAUUSD, BTCUSDT", symbol) { symbol = it.uppercase() }
                 Text(
                     "💡 ต่อท้าย @TF เลือกกรอบเวลาได้ เช่น XAUUSD@15m (default 1h)",
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 4.dp)
                 )
+                AlertTextField("ชื่อ Alert (ไม่บังคับ)", name) { name = it }
 
-                // ── เลือกประเภทข้อมูล (tool) ──
+                // ── ส่วนที่ 2: เงื่อนไข ──
+                Text("2️⃣ เงื่อนไขแจ้งเตือน", color = JarvisTheme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 AlertDropdown(
                     label = "ประเภทข้อมูล",
                     selected = selectedTool.label,
@@ -651,8 +666,6 @@ private fun CreateAlertDialog(
                     selectedTool = catalog.tools[idx]
                     selectedField = selectedTool.fields.first()
                 }
-
-                // ── เลือกฟิลด์ (เฉพาะที่ระบบทำได้จริง) ──
                 AlertDropdown(
                     label = "ฟิลด์ / เงื่อนไข",
                     selected = selectedField.label,
@@ -667,6 +680,8 @@ private fun CreateAlertDialog(
                             "summaryScore" -> { op = ">="; value = "85" }
                             "smc_zone_pct" -> { op = "<="; value = "20" }
                             "ema_cross_state" -> { op = "=="; value = "GOLDEN_CROSS" }
+                            "lsdState" -> { op = "=="; value = "BULLISH" }
+                            "isSqueeze" -> { op = "=="; value = "1" }
                         }
                     }
                 }
@@ -674,12 +689,14 @@ private fun CreateAlertDialog(
                     Text(
                         "💡 ${selectedField.hint}",
                         color = JarvisTheme.Cyan.copy(alpha = 0.8f), fontSize = 10.sp,
-                        maxLines = 2
+                        maxLines = 2,
+                        modifier = Modifier.padding(start = 4.dp)
                     )
                 }
-
-                // ── ตัวดำเนินการ + ค่า (แถวเดียวกัน) ──
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
                     Box(modifier = Modifier.weight(1f)) {
                         AlertDropdown(
                             label = "ตัวดำเนินการ",
@@ -687,11 +704,13 @@ private fun CreateAlertDialog(
                             options = allowedOps
                         ) { idx -> op = allowedOps[idx] }
                     }
-                    Box(modifier = Modifier.weight(1.4f)) {
+                    Box(modifier = Modifier.weight(2f)) {
                         AlertTextField("ค่า เช่น 4100, 70", value) { value = it }
                     }
                 }
 
+                // ── ส่วนที่ 3: ความถี่ ──
+                Text("3️⃣ ความถี่ในการตรวจสอบ", color = JarvisTheme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 AlertTextField("ตรวจสอบทุกกี่นาที (1-1440)", interval) {
                     if (it.all(Char::isDigit)) interval = it
                 }
@@ -734,8 +753,8 @@ private fun AlertDropdown(
             shape = RoundedCornerShape(8.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
-                Text(selected, color = Color.White, fontSize = 13.sp)
+                Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, maxLines = 1)
+                Text(selected, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Text("▼", color = JarvisTheme.Cyan, fontSize = 11.sp)
         }

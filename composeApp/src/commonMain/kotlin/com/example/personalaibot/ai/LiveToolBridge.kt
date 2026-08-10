@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -36,6 +37,7 @@ class LiveToolBridge(
     val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
 
     private var collectionJob: Job? = null
+    private var visionPromptJob: Job? = null
 
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
         logDebug("LiveBridge", "▶ Path A: ${event.name}(${event.args})")
@@ -73,11 +75,24 @@ class LiveToolBridge(
                 scope.launch {
                     memoryManager?.storeMessage("system", "JARVIS activated eyes to observe environment.", metadata = "{\"event\": \"vision_on\"}")
                 }
-                
+
+                // แก้อาการ "เปิดตาแล้วเงียบ": Live API ไม่เริ่ม turn ใหม่จาก video stream เอง —
+                // รอ turn แรก ("กำลังเปิดกล้อง...") จบ แล้วส่ง client text กระตุ้นให้สรุปสิ่งที่เห็นทันที
+                // (เคสจริง 2026-08-08: โมเดลเงียบ 15 วิจน user ต้องถามซ้ำรอบ 2)
+                visionPromptJob?.cancel()
+                visionPromptJob = scope.launch {
+                    kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                        liveService.turnCompleteFlow.first()
+                    }
+                    logDebug("LiveBridge", "👁️ Vision auto-prompt: กระตุ้นให้สรุปภาพหลังเปิดกล้อง")
+                    liveService.sendClientText("[SYSTEM] ตอนนี้ภาพจากกล้องชัดแล้ว โปรดสรุปสิ่งที่เห็นตอบคำถามล่าสุดของผู้ใช้ทันที เป็นภาษาไทยแบบสนทนากระชับ เมื่อพูดจบให้เรียก vision_deactivate ทันที")
+                }
+
                 logDebug("LiveBridge", "👁️ Vision activated (Context: ${liveService.lastUserText})")
                 return
             }
             event.name == "vision_deactivate" -> {
+                visionPromptJob?.cancel()
                 onAiVisionToggle?.invoke(false)
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
@@ -135,10 +150,16 @@ class LiveToolBridge(
         }
 
         // ผลเต็มแสดงในแชทแล้ว (emitTextToChat ด้านบน) — แนบกฎเสียงกำกับไม่ให้ model อ่านตาราง/markdown ออกเสียง
+        // ยกเว้น system_self_review: โหมดเล่ายาว (narration) ผู้ใช้ต้องการฟังรีวิวเต็ม ไม่จำกัดประโยค
+        val voiceRule = if (event.name == "system_self_review") {
+            "\n\n[VOICE RULE - NARRATION] นี่คือโหมดรีวิวตัวเอง ผู้ใช้ต้องการฟังเนื้อหาทั้งหมด — โปรดเล่าออกเสียงเป็นภาษาไทยแบบสนทนา ไล่ทีละหัวข้อตามเอกสารจนครบทุกส่วน ไม่จำกัดความยาว ห้ามสรุปย่อ ห้ามหยุดกลางทางจนกว่าจะเล่าครบ ห้ามใช้ markdown หรืออ่านสัญลักษณ์ออกเสียง"
+        } else {
+            "\n\n[VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 2-4 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 5-8 ประโยค ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown"
+        }
         liveService.sendNativeToolResponse(
             callId   = event.callId,
             toolName = event.name,
-            result   = finalResultText + "\n\n[VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 2-4 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 5-8 ประโยค ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown"
+            result   = finalResultText + voiceRule
         )
         logDebug("LiveBridge", "✅ Path A done: ${event.name} → ${finalResultText.take(80)}")
     }

@@ -212,12 +212,18 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                          else raw.fitToTargetDimension(EMBEDDING_TARGET_DIMS)
             val score = cosineSimilarity(queryVector, vector)
             if (score >= minSimilarity) {
-                row.content to score
+                Triple(row.id, row.content, score)
             } else null
-        }.sortedByDescending { it.second }
+        }.sortedByDescending { it.third }
          .take(limit)
 
-        scoredFacts.map { it.first }
+        // access_count tracking (review หมวด 13 — query updateArchivalAccess เคยเป็น dead code)
+        // facts ที่ถูก recall บ่อยจะถูกนับไว้ ใช้วัดความสำคัญเชิงพฤติกรรมในอนาคต
+        scoredFacts.forEach { (id, _, _) ->
+            runCatching { database.jarvisDatabaseQueries.updateArchivalAccess(id) }
+        }
+
+        scoredFacts.map { it.second }
     }
 
     private fun cosineSimilarity(v1: List<Float>, v2: List<Float>): Float {

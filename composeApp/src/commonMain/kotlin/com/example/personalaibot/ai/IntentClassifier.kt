@@ -53,10 +53,10 @@ object IntentClassifier {
             "analyze", "วิเคราะห์", "compare", "เปรียบเทียบ", "evaluate",
             "review", "calculate", "คำนวณ", "assess", "summarize", "สรุป",
             "pros", "cons", "ข้อดี", "ข้อเสีย", "difference", "ต่างกัน",
-            "performance", "ประสิทธิภาพ", "benchmark", "metric", "statistics",
-            "mt5", "xauusd", "xau", "forex", "gold", "ทอง", "confluence",
-            "regime", "bias", "indicator", "timeframe", "tf", "h1", "h4", "m15",
-            "broker", "โบรก", "เทรด", "trade", "trading", "สถานะตลาด"
+            "performance", "ประสิทธิภาพ", "benchmark", "metric", "statistics"
+            // หมายเหตุ: keyword ฝั่ง trading (mt5/xauusd/ทอง/สถานะตลาด ฯลฯ) ถูกย้ายไป
+            // TradingIntentUtility.isTradingPrompt ตัวเดียว — classify() จะ boost ANALYSIS จากตรงนั้น
+            // (กัน keyword ซ้ำซ้อน 2 ระบบ ตาม review หมวด 6)
         ),
         TaskType.CREATIVE to listOf(
             "write", "เขียน", "create", "สร้าง", "design", "ออกแบบ",
@@ -128,6 +128,12 @@ object IntentClassifier {
             patterns[taskType]
                 ?.filter { matchesKeyword(lowerText, it) }
                 ?.sumOf { keywordWeight(it) } ?: 0
+        }.toMutableMap()
+
+        // Trading keyword ทั้งหมดอยู่ที่ TradingIntentUtility ตัวเดียว (single source)
+        // — ถ้าเป็นบริบท trading ให้ boost ANALYSIS แทนการกระจาย keyword ซ้ำไว้ 2 ที่
+        if (TradingIntentUtility.isTradingPrompt(lowerText)) {
+            scores[TaskType.ANALYSIS] = (scores[TaskType.ANALYSIS] ?: 0) + 3
         }
 
         // เก็บ keywords ที่เจอ
@@ -189,14 +195,15 @@ Task Type: ANALYSIS — วิเคราะห์เชิงลึก
 - แสดงการคิด ไม่ใช่แค่ผลลัพธ์
 - เปรียบเทียบ tradeoffs อย่างสมดุล
 
-[MT5/Trading Analysis Protocol]:
-เมื่อวิเคราะห์ symbol ใดๆ จาก MT5 broker ให้ทำดังนี้:
-1. เรียก trading_mt5_analyze พร้อมกัน 3 TF: H4, H1, M15 ในรอบเดียวกัน (3 function calls)
-2. สรุปผลเป็นตารางเปรียบเทียบ: Regime | Bias | RSI | Confluence | Fitness ของทุก TF
+[Trading Analysis Protocol (TV-first)]:
+เมื่อวิเคราะห์ symbol ใดๆ ให้ใช้ข้อมูล TradingView เป็นหลัก:
+1. เรียก trading_deep_analysis_suite (หรือ trading_technical_analysis / trading_smc_analysis) พร้อมกันหลาย TF: 4h, 1h, 15m ในรอบเดียวกัน
+2. สรุปผลเป็นตารางเปรียบเทียบ: Trend/Bias | Momentum | Score ของทุก TF
 3. หา Confluence ข้าม TF — ถ้า Bias ตรงกันทุก TF = สัญญาณแข็ง
-4. ระบุแนวรับ-แนวต้าน จากข้อมูล 20-bar High/Low ของแต่ละ TF
+4. ระบุแนวรับ-แนวต้าน / zone สำคัญ จากข้อมูลจริงที่ดึงมา
 5. แนะนำ Entry zone, SL, TP ที่ชัดเจน พร้อม Risk:Reward ratio
-6. สรุป Risk Assessment: ปลอดภัย/ระวัง/อันตราย"""
+6. สรุป Risk Assessment: ปลอดภัย/ระวัง/อันตราย
+หมายเหตุ: ใช้ trading_mt5_analyze เฉพาะเมื่อผู้ใช้ระบุชัดว่าต้องการข้อมูลจาก MT5/broker เท่านั้น"""
 
             TaskType.CREATIVE -> """
 

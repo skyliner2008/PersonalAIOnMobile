@@ -94,17 +94,35 @@ class DiagnosticManager(
     }
 
     private fun checkDatabaseIntegrity(): DiagnosticResult {
-        // Simple check if we can access the manager
+        // ตรวจจริง: อ่านจำนวน records จากตารางหลัก (ใช้ getArchivalRecent ซึ่งเคยเป็น dead query)
         return try {
             val jobsSize = automationManager.activeJobs.value.size
-            DiagnosticResult("Database", "PASS", "เข้าถึงฐานข้อมูล SQLDelight ได้ปกติ (พบ $jobsSize รายการ)")
+            val archivalCount = runCatching {
+                com.example.personalaibot.db.JarvisDatabaseHolder.database
+                    ?.jarvisDatabaseQueries?.getArchivalRecent(1000)?.executeAsList()?.size
+            }.getOrNull() ?: -1
+            val details = "automation jobs: $jobsSize\narchival memories: ${if (archivalCount >= 0) archivalCount else "อ่านไม่ได้"}"
+            if (archivalCount >= 0) {
+                DiagnosticResult("Database", "PASS", "เข้าถึงฐานข้อมูล SQLDelight ได้ปกติ", details)
+            } else {
+                DiagnosticResult("Database", "WARNING", "อ่าน automation ได้ แต่อ่าน archival memory ไม่ได้", details)
+            }
         } catch (e: Exception) {
             DiagnosticResult("Database", "FAIL", "ฐานข้อมูลขัดข้อง: ${e.message}")
         }
     }
 
     private fun checkAutomationHealth(): DiagnosticResult {
-        // Placeholder: Checks heartbeat or last run time
-        return DiagnosticResult("Automation", "PASS", "ระบบ Jarvis Automation กำลังทำงานในเบื้องหลัง")
+        // ตรวจจริงจากสถานะ AutomationManager (เดิมเป็น placeholder ที่ PASS เสมอ)
+        return try {
+            val jobs = automationManager.activeJobs.value
+            val enabledJobs = jobs.count { it.is_active != 0L }
+            val tasks = automationManager.scheduledTasks.value
+            val enabledTasks = tasks.count { it.is_active != 0L }
+            val details = "alert jobs: $enabledJobs/${jobs.size} active\nscheduled tasks: $enabledTasks/${tasks.size} active"
+            DiagnosticResult("Automation", "PASS", "ระบบ Automation พร้อมทำงาน", details)
+        } catch (e: Exception) {
+            DiagnosticResult("Automation", "FAIL", "อ่านสถานะ automation ไม่ได้: ${e.message}")
+        }
     }
 }

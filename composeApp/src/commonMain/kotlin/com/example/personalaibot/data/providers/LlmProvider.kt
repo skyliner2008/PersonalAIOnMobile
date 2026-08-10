@@ -84,7 +84,9 @@ data class LlmOptions(
     val systemPrompt: String? = null,
     val tools: List<LlmToolSpec>? = null,
     val responseFormat: String? = null,   // "json" สำหรับ structured output
-    val timeoutMs: Long = 60_000L
+    // เดิม 60s — reasoning models บน OpenRouter (nemotron) คิดนานเกิน 60s ทำ stream ขาดกลางประโยค
+    // (เคสจริง 2026-08-08: nemotron-3-ultra ตอบ "↓ -0.0" แล้วตัด) → ยืดเป็น 120s
+    val timeoutMs: Long = 120_000L
 )
 
 /** Tool specification สำหรับ function calling */

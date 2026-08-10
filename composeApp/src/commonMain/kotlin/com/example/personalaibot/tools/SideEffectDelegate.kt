@@ -29,6 +29,12 @@ interface SideEffectDelegate {
     /** บันทึกเครื่องมือ (Tool/Skill) ที่สร้างโดย Agent */
     suspend fun onSaveAgentTool(filename: String, jsonContent: String)
 
+    /** อ่านเนื้อหาไฟล์ custom tool ที่เคยสร้าง (คืน error string ถ้าอ่านไม่ได้) */
+    suspend fun onReadAgentTool(filename: String): String
+
+    /** ลบไฟล์ custom tool (คืนข้อความผลลัพธ์) */
+    suspend fun onDeleteAgentTool(filename: String): String
+
     /**
      * อัปเดตตัวตนของ AI agent หรือผู้ใช้ (จาก tool `identity_update`)
      * @param target "agent" | "user"

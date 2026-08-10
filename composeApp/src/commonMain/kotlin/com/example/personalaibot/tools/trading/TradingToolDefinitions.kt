@@ -404,7 +404,8 @@ object TradingToolDefinitions {
             name = "trading_deep_analysis_suite",
             description = """วิเคราะห์ตลาดเชิงลึก 5 มิติ (LSD Trend, Orderflow Delta, Fibo Strength, Momentum Squeeze)
                 |เหมาะสำหรับการหาจุดกลับตัวและความต่อเนื่องของแนวโน้มระดับสถาบัน
-                |ใช้เมื่อผู้ใช้ต้องการการวิเคราะห์ที่แม่นยำที่สุด หรือถามหา "Institutional Analysis" """.trimMargin(),
+                |ใช้เมื่อผู้ใช้ต้องการการวิเคราะห์ที่แม่นยำที่สุด หรือถามหา "Institutional Analysis"
+                |หมายเหตุ: ถ้า MT5 bridge ออฟไลน์ tool นี้จะคำนวณบนเครื่องจากข้อมูล TradingView อัตโนมัติ (ไม่ต้องทำอะไรเพิ่ม)""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
@@ -826,7 +827,25 @@ object TradingToolDefinitions {
             )
         ),
 
-        // ── AUTOMATION-1. Manage Alerts ──────────────────────────────────────
+        // ── MT5-ADV-6. Trade Journal (Auto-Trading) ────────────────────────────
+        // หมายเหตุ: registry/executor เปิดใช้ tool นี้อยู่แล้ว แต่เคยไม่มี declaration
+        // ทำให้ Gemini มองไม่เห็น — เพิ่มกลับเข้ามา
+        FunctionDeclaration(
+            name = "trading_mt5_trade_journal",
+            description = """อ่าน Trade Journal ของระบบ Auto-Trading บน MT5 bridge
+                |type=decision → journal การตัดสินใจล่าสุด, type=management → บันทึกการจัดการ positions, type=performance → สถิติผลงาน
+                |ใช้เมื่อถาม: "bot เทรดอะไรไปบ้าง", "ผลงาน auto trading", "ทำไม bot เข้าออเดอร์นี้" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "type" to ParameterProperty("STRING", "ชนิด journal",
+                        enum = listOf("decision", "management", "performance")),
+                    "limit" to ParameterProperty("NUMBER", "จำนวนรายการ (default 50)"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ),
         FunctionDeclaration(
             name = "automation_manage_alerts",
             description = """จัดการการแจ้งเตือนอัตโนมัติ (Price Alerts / Condition Alerts)

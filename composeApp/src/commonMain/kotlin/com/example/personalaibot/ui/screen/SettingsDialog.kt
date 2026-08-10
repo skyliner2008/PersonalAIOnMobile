@@ -22,7 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -94,13 +100,14 @@ private data class ProviderMeta(
 )
 
 private val ProviderMetas = listOf(
-    ProviderMeta("gemini",     "Google Gemini",    "AIza…",   "AIza…"),
-    ProviderMeta("openai",     "OpenAI",           "sk-…",    "sk-…"),
-    ProviderMeta("claude",     "Anthropic Claude", "sk-ant-…", "sk-ant-…"),
-    ProviderMeta("openrouter", "OpenRouter",       "sk-or-…", "sk-or-…"),
+    ProviderMeta("gemini",     "Google Gemini",    "API Key",   "Paste Gemini API key"),
+    ProviderMeta("openrouter", "OpenRouter",       "sk-or-…",  "sk-or-…"),
+    ProviderMeta("groq",       "Groq",             "gsk_…",    "gsk_…"),
     ProviderMeta("minimax",    "MiniMax",          "minimax-…", "minimax-…"),
-    ProviderMeta("adk_vertex", "Vertex AI ADK",    "ADC",       "ADC — ใช้ผ่าน Server (ADK)"),
 )
+
+/** provider ที่ปุ่ม "Show free models only" ใช้ได้ (Groq ทุก model ฟรี ถือว่าผ่าน filter เสมอ) */
+private val freeFilterProviders = setOf("openrouter", "groq")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,20 +123,25 @@ fun SettingsDialog(
     val currentModel by viewModel.selectedModel.collectAsStateWithLifecycle()
     val currentLiveModel by viewModel.liveModelName.collectAsStateWithLifecycle()
     val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
-    val currentOpenaiKey by viewModel.openaiApiKey.collectAsStateWithLifecycle()
-    val currentClaudeKey by viewModel.claudeApiKey.collectAsStateWithLifecycle()
     val currentOpenRouterKey by viewModel.openRouterApiKey.collectAsStateWithLifecycle()
+    val currentGroqKey by viewModel.groqApiKey.collectAsStateWithLifecycle()
+    val currentNvidiaNimKey by viewModel.nvidiaNimApiKey.collectAsStateWithLifecycle()
     val currentMinimaxKey by viewModel.minimaxApiKey.collectAsStateWithLifecycle()
+    val currentFallbackModels by viewModel.geminiFallbackModels.collectAsStateWithLifecycle()
+    val geminiApiKeys by viewModel.geminiApiKeys.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.modelDownloadProgress.collectAsStateWithLifecycle()
     val autoTradingConfig by viewModel.autoTrading.config.collectAsStateWithLifecycle()
     val mt5PairingStatus by viewModel.mt5PairingStatus.collectAsStateWithLifecycle()
     val mt5BridgeBaseUrl by viewModel.mt5BridgeBaseUrl.collectAsStateWithLifecycle()
 
     var geminiKey by remember(currentApiKey) { mutableStateOf(currentApiKey) }
-    var openaiKey by remember(currentOpenaiKey) { mutableStateOf(currentOpenaiKey) }
-    var claudeKey by remember(currentClaudeKey) { mutableStateOf(currentClaudeKey) }
     var openRouterKey by remember(currentOpenRouterKey) { mutableStateOf(currentOpenRouterKey) }
+    var groqKey by remember(currentGroqKey) { mutableStateOf(currentGroqKey) }
+    var nvidiaNimKey by remember(currentNvidiaNimKey) { mutableStateOf(currentNvidiaNimKey) }
     var minimaxKey by remember(currentMinimaxKey) { mutableStateOf(currentMinimaxKey) }
+    var fallbackText by remember(currentFallbackModels) {
+        mutableStateOf(currentFallbackModels.joinToString("\n"))
+    }
     var apiKeyVisible by remember { mutableStateOf(false) }
 
     var mainModel by remember(currentModel) { mutableStateOf(currentModel) }
@@ -140,27 +152,32 @@ fun SettingsDialog(
     var providerExpanded by remember { mutableStateOf(false) }
     var mainExpanded by remember { mutableStateOf(false) }
     var liveExpanded by remember { mutableStateOf(false) }
-    var showFreeOnly by remember { mutableStateOf(false) }
+    var voiceExpanded by remember { mutableStateOf(false) }
+    val currentVoice by viewModel.voiceName.collectAsStateWithLifecycle()
+    val savedShowFreeOnly by viewModel.showFreeModelsOnly.collectAsStateWithLifecycle()
+    var showFreeOnly by remember(savedShowFreeOnly) { mutableStateOf(savedShowFreeOnly) }
     var providerModels by remember { mutableStateOf<List<com.example.personalaibot.data.providers.LlmModelInfo>>(emptyList()) }
     var liveModels by remember { mutableStateOf<List<com.example.personalaibot.data.providers.LlmModelInfo>>(emptyList()) }
     var isLoadingModels by remember { mutableStateOf(false) }
     var refreshTick by remember { mutableStateOf(0) }
     var modelSearch by remember { mutableStateOf("") }
+    var showGeminiKeysDialog by remember { mutableStateOf(false) }
+    var autoTestStatus by remember { mutableStateOf<String?>(null) }
 
     /** key ของ provider ที่เลือก (blank = ยังไม่ได้ตั้งค่า) */
     fun keyFor(providerId: String): String = when (providerId) {
         "gemini" -> geminiKey
-        "openai" -> openaiKey
-        "claude" -> claudeKey
         "openrouter" -> openRouterKey
+        "groq" -> groqKey
+        "nvidia_nim" -> nvidiaNimKey
         "minimax" -> minimaxKey
         else -> ""
     }
 
     // Main models: reload เมื่อ provider / free-filter / refresh เปลี่ยน
     LaunchedEffect(selectedProvider, showFreeOnly, refreshTick) {
-        // free filter มีผลเฉพาะ OpenRouter — reset อัตโนมัติเมื่อสลับ provider
-        if (selectedProvider != "openrouter" && showFreeOnly) {
+        // free filter ใช้ได้กับ provider ที่มี free tier (Groq/NIM ทุก model ฟรีอยู่แล้ว)
+        if (selectedProvider !in freeFilterProviders && showFreeOnly) {
             showFreeOnly = false
             return@LaunchedEffect // รอ trigger รอบใหม่จาก showFreeOnly
         }
@@ -193,6 +210,7 @@ fun SettingsDialog(
 
     var sectApiKeys by remember { mutableStateOf(true) }
     var sectModels by remember { mutableStateOf(true) }
+    var sectFallback by remember { mutableStateOf(false) }
     var sectLive by remember { mutableStateOf(false) }
     var sectIdentity by remember { mutableStateOf(false) }
     var sectLocalAi by remember { mutableStateOf(false) }
@@ -237,20 +255,14 @@ fun SettingsDialog(
             },
         ) {
             ProviderMetas.forEach { meta ->
-                if (meta.id == "adk_vertex") {
-                    ServerProviderStatusCard(
-                        meta = meta,
-                        pairingStatus = mt5PairingStatus,
-                        serverUrl = mt5BridgeBaseUrl
-                    )
-                } else {
+                run {
                     val key: String
                     val setter: (String) -> Unit
                     when (meta.id) {
                         "gemini" -> { key = geminiKey; setter = { geminiKey = it } }
-                        "openai" -> { key = openaiKey; setter = { openaiKey = it } }
-                        "claude" -> { key = claudeKey; setter = { claudeKey = it } }
                         "openrouter" -> { key = openRouterKey; setter = { openRouterKey = it } }
+                        "groq" -> { key = groqKey; setter = { groqKey = it } }
+                        "nvidia_nim" -> { key = nvidiaNimKey; setter = { nvidiaNimKey = it } }
                         "minimax" -> { key = minimaxKey; setter = { minimaxKey = it } }
                         else -> { key = ""; setter = { } }
                     }
@@ -274,6 +286,19 @@ fun SettingsDialog(
                                 testing[meta.id] = false
                             }
                         },
+                        trailingAction = if (meta.id == "gemini") {
+                            {
+                                // ปุ่มจัดการ multi API keys (free tier หลายเมล์)
+                                IconButton(onClick = { showGeminiKeysDialog = true }, modifier = Modifier.size(28.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Key,
+                                        contentDescription = "จัดการ Gemini API Keys (${geminiApiKeys.size})",
+                                        tint = if (geminiApiKeys.size > 1) JarvisTheme.Green else JarvisTheme.Cyan,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        } else null,
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -287,12 +312,38 @@ fun SettingsDialog(
             expanded = sectModels,
             onToggle = { sectModels = !sectModels },
             trailing = {
-                IconButton(onClick = { refreshTick++ }, enabled = !isLoadingModels) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh model list",
-                        tint = if (isLoadingModels) Color.White.copy(alpha = 0.3f) else JarvisTheme.Cyan,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // ปุ่ม Auto Test (Groq / OpenRouter free) — ไล่เทสทุก model ว่า chat/tools ใช้ได้จริง
+                    if (selectedProvider == "groq" || selectedProvider == "openrouter") {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    autoTestStatus = "🧪 เริ่มทดสอบ…"
+                                    val pass = viewModel.autoTestProviderModels(selectedProvider) { c, t, id ->
+                                        autoTestStatus = "🧪 ทดสอบ $c/$t: $id"
+                                    }
+                                    autoTestStatus = "✅ เสร็จ: chat ผ่าน $pass ตัว (ดูรายละเอียดใน logcat tag ModelAutoTest)"
+                                    providerModels = viewModel.getModelsForProvider(
+                                        selectedProvider, showFreeOnly, keyFor(selectedProvider).ifBlank { null }
+                                    )
+                                }
+                            },
+                            enabled = autoTestStatus?.startsWith("🧪") != true,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Auto test models",
+                                tint = if (autoTestStatus?.startsWith("🧪") == true) Color.White.copy(alpha = 0.3f) else JarvisTheme.Green,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { refreshTick++ }, enabled = !isLoadingModels) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh model list",
+                            tint = if (isLoadingModels) Color.White.copy(alpha = 0.3f) else JarvisTheme.Cyan,
+                        )
+                    }
                 }
             },
         ) {
@@ -352,8 +403,6 @@ fun SettingsDialog(
                     ) {
                         if (providerModels.isEmpty() && !isLoadingModels) {
                             val emptyHint = when {
-                                selectedProvider == "adk_vertex" ->
-                                    "Vertex AI ADK ใช้ผ่าน Server — ดูสถานะการเชื่อมต่อในส่วน API Keys ด้านบน"
                                 keyFor(selectedProvider).isBlank() ->
                                     "ยังไม่มี API Key — ใส่ key ด้านบน แล้วกด Test หรือ ↻"
                                 else ->
@@ -407,12 +456,21 @@ fun SettingsDialog(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            // Free-only filter — always visible, enabled only for OpenRouter
+            // สถานะ auto-test (แสดงระหว่างเทส/หลังเทสเสร็จ)
+            autoTestStatus?.let { status ->
+                Text(
+                    status,
+                    color = if (status.startsWith("✅")) JarvisTheme.Green else JarvisTheme.Amber,
+                    fontSize = HelperSize,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            // Free-only filter — ใช้ได้กับ provider ที่มี free tier
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Checkbox(
                     checked = showFreeOnly,
-                    onCheckedChange = { showFreeOnly = it },
-                    enabled = selectedProvider == "openrouter",
+                    onCheckedChange = { showFreeOnly = it; viewModel.setShowFreeModelsOnly(it) },
+                    enabled = selectedProvider in freeFilterProviders,
                     colors = CheckboxDefaults.colors(
                         checkedColor = JarvisTheme.Cyan,
                         uncheckedColor = Color.White.copy(alpha = 0.5f),
@@ -422,8 +480,8 @@ fun SettingsDialog(
                     ),
                 )
                 Text(
-                    "Show free models only (OpenRouter)",
-                    color = if (selectedProvider == "openrouter") Color.White.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.4f),
+                    "Show free models only (OpenRouter / Groq)",
+                    color = if (selectedProvider in freeFilterProviders) Color.White.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.4f),
                     fontSize = BodySize,
                 )
             }
@@ -446,6 +504,52 @@ fun SettingsDialog(
                     )
                 }
             }
+        }
+
+        // ─── Gemini Fallback Chain (จัดลำดับเอง) ───────────────────────────
+        SectionCard(
+            title = "Gemini Fallback Models",
+            icon = Icons.Default.Memory,
+            expanded = sectFallback,
+            onToggle = { sectFallback = !sectFallback },
+        ) {
+            Text(
+                "เมื่อโมเดลหลักติดลิมิต (429) / ล่ม (503) / timeout ระบบจะไล่ลองโมเดลสำรองตามลำดับนี้ — 1 บรรทัด = 1 โมเดล (ลองจากบนลงล่าง)",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = HelperSize,
+            )
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = fallbackText,
+                onValueChange = { fallbackText = it },
+                placeholder = {
+                    Text(
+                        com.example.personalaibot.data.ModelConfig.GEMINI_FALLBACK_MODELS.joinToString("\n"),
+                        color = Color.White.copy(alpha = 0.35f),
+                        fontSize = HelperSize,
+                    )
+                },
+                minLines = 4,
+                maxLines = 8,
+                modifier = Modifier.fillMaxWidth(),
+                colors = fieldColors(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    fallbackText = com.example.personalaibot.data.ModelConfig.GEMINI_FALLBACK_MODELS.joinToString("\n")
+                }) {
+                    Text("Reset เป็นค่า default", color = JarvisTheme.Cyan, fontSize = HelperSize)
+                }
+                TextButton(onClick = { fallbackText = "" }) {
+                    Text("ล้าง (ใช้ default)", color = Color.White.copy(alpha = 0.5f), fontSize = HelperSize)
+                }
+            }
+            Text(
+                "ว่างไว้ = ใช้ลำดับ default ของระบบ (อิงโควต้า free tier: lite RPD 500 ขึ้นก่อน) • กด Save ด้านล่างเพื่อบันทึก",
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = HelperSize,
+            )
         }
 
         // ─── Live / Multi-Modal Model section ──────────────────────────────
@@ -522,6 +626,48 @@ fun SettingsDialog(
             IdentityField("Creature (บทบาท)", agentCreature, { agentCreature = it }, "เช่น ผู้ช่วยส่วนตัว เลขา")
             IdentityField("Vibe (บุคลิก/น้ำเสียง)", agentVibe, { agentVibe = it }, "เช่น พูดสั้น กระชับ สุภาพ ตลก มีอารมณ์ขัน")
             IdentityField("Gender", agentGender, { agentGender = it }, "เช่น Female / Male / ไม่ระบุ")
+            // ── Voice Profile (Live mode) — เลือกเสียงแล้ว sync เพศ/บุคลิกอัตโนมัติ ──
+            ExposedDropdownMenuBox(
+                expanded = voiceExpanded,
+                onExpandedChange = { voiceExpanded = !voiceExpanded },
+            ) {
+                OutlinedTextField(
+                    value = currentVoice,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Voice Profile (เสียง Live)", fontSize = HelperSize) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = voiceExpanded) },
+                    modifier = Modifier
+                        .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true)
+                        .fillMaxWidth()
+                        .heightIn(min = FieldHeight),
+                    colors = fieldColors(),
+                )
+                ExposedDropdownMenu(
+                    expanded = voiceExpanded,
+                    onDismissRequest = { voiceExpanded = false },
+                    containerColor = JarvisTheme.Card,
+                ) {
+                    com.example.personalaibot.data.GeminiVoiceProfiles.all.forEach { p ->
+                        val icon = if (p.gender == com.example.personalaibot.data.VoiceGender.FEMALE) "♀" else "♂"
+                        DropdownMenuItem(
+                            text = { Text("${p.name} ($icon) — ${p.tone}", color = Color.White, fontSize = BodySize) },
+                            onClick = {
+                                voiceExpanded = false
+                                agentGender = if (p.gender == com.example.personalaibot.data.VoiceGender.FEMALE) "หญิง" else "ชาย"
+                                agentVibe = "${p.tone} (โปรไฟล์เสียง ${p.name})"
+                                viewModel.selectVoiceProfile(p.name)
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                "เลือกเสียงแล้วระบบจะปรับ Gender/Vibe และคำลงท้าย (ครับ/ค่ะ) ให้อัตโนมัติ — มีผลทันทีและจำข้ามการเปิดแอป",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = HelperSize,
+                modifier = Modifier.padding(top = 6.dp),
+            )
             Spacer(Modifier.height(4.dp))
             Text("USER IDENTITY", color = JarvisTheme.Cyan, fontSize = HelperSize, fontWeight = FontWeight.Bold)
             IdentityField("Name (ชื่อจริง)", userName, { userName = it }, "เช่น บอส")
@@ -659,7 +805,16 @@ fun SettingsDialog(
                         voice = viewModel.voiceName.value,
                         preferFree = autoTradingConfig.preferFreeOnly,
                     )
-                    viewModel.updateExternalApiKeys(openaiKey, claudeKey, openRouterKey, minimaxKey)
+                    viewModel.updateExternalApiKeys(
+                        openRouter = openRouterKey,
+                        minimax = minimaxKey,
+                        groq = groqKey,
+                        nvidiaNim = nvidiaNimKey,
+                    )
+                    // fallback chain: 1 บรรทัด = 1 โมเดล เรียงจากตัวที่จะลองก่อน
+                    viewModel.updateGeminiFallbackModels(
+                        fallbackText.lines().map { it.trim() }.filter { it.isNotBlank() }
+                    )
                     viewModel.updateIdentity(
                         agentName = agentName,
                         agentCreature = agentCreature,
@@ -676,6 +831,18 @@ fun SettingsDialog(
             ) {
                 Text("Save", color = JarvisTheme.Dark, fontWeight = FontWeight.Bold, fontSize = BodySize)
             }
+        }
+
+        // ─── Gemini Multi-Key Manager dialog ────────────────────────────────
+        if (showGeminiKeysDialog) {
+            GeminiKeysDialog(
+                keys = geminiApiKeys,
+                primaryKey = geminiKey,
+                onAdd = { viewModel.addGeminiApiKey(it) },
+                onEdit = { old, new -> viewModel.editGeminiApiKey(old, new) },
+                onDelete = { viewModel.removeGeminiApiKey(it) },
+                onDismiss = { showGeminiKeysDialog = false },
+            )
         }
     }
 }
@@ -736,8 +903,12 @@ private fun ProviderKeyCard(
     testing: Boolean,
     result: ApiKeyTester.TestResult?,
     onTest: () -> Unit,
+    trailingAction: @Composable (() -> Unit)? = null,
 ) {
     val formatHint = remember(key, meta.id) { ApiKeyTester.validateFormat(meta.id, key) }
+    val geminiSoftHint = remember(key, meta.id) {
+        if (meta.id == "gemini") ApiKeyTester.geminiPrefixHint(key) else null
+    }
     Surface(
         color = JarvisTheme.Surface,
         shape = RoundedCornerShape(10.dp),
@@ -752,6 +923,7 @@ private fun ProviderKeyCard(
                     fontSize = LabelSize,
                     modifier = Modifier.weight(1f),
                 )
+                trailingAction?.invoke()
                 StatusDot(result = result, testing = testing)
             }
             OutlinedTextField(
@@ -768,16 +940,18 @@ private fun ProviderKeyCard(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val hintColor = when {
-                    formatHint != null && key.isNotBlank() -> JarvisTheme.Amber
+                    formatHint != null && key.isNotBlank() -> JarvisTheme.Red
                     result != null && !result.ok -> JarvisTheme.Red
                     result != null && result.ok -> JarvisTheme.Green
+                    geminiSoftHint != null && key.isNotBlank() -> JarvisTheme.Amber
                     else -> Color.White.copy(alpha = 0.5f)
                 }
                 val hintText = when {
                     formatHint != null && key.isNotBlank() -> formatHint
                     result != null -> result.displayMessage
+                    geminiSoftHint != null && key.isNotBlank() -> geminiSoftHint
                     key.isBlank() -> "Prefix: ${meta.keyPrefixHint}"
-                    else -> "Prefix OK — tap Test to verify"
+                    else -> "Format OK — tap Test to verify"
                 }
                 Text(hintText, color = hintColor, fontSize = HelperSize, modifier = Modifier.weight(1f))
                 TextButton(onClick = onTest, enabled = !testing && key.isNotBlank()) {
@@ -901,4 +1075,144 @@ private fun ServerProviderStatusCard(
             )
         }
     }
+}
+
+
+// ─── Gemini Multi-Key Manager ────────────────────────────────────────────────
+/**
+ * Dialog จัดการ Gemini API keys หลายอัน (free tier หลายเมล์)
+ * — add / edit / del เป็นปุ่มไอคอนเล็กต่อแถว
+ * การเปลี่ยนแปลง persist ทันทีผ่าน ViewModel (ไม่ต้องกด Save ของหน้า Settings)
+ * key ที่ใช้งานหลัก (primary จากช่อง Gemini ด้านบน) จะถูก merge เป็นหัว rotation chain อัตโนมัติ
+ */
+@Composable
+private fun GeminiKeysDialog(
+    keys: List<String>,
+    primaryKey: String,
+    onAdd: (String) -> Unit,
+    onEdit: (old: String, new: String) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newKeyText by remember { mutableStateOf("") }
+    var editingKey by remember { mutableStateOf<String?>(null) }
+    var editText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = JarvisTheme.Card,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Key, contentDescription = null, tint = JarvisTheme.Cyan, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Gemini API Keys (${keys.size})", color = Color.White, fontSize = SectionTitleSize, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "เพิ่ม key จากหลายเมล์ free tier — เมื่อ key ที่ใช้อยู่ติดลิมิต ระบบจะหมุนไป key ถัดไปอัตโนมัติ (โมเดลเดิม) ก่อนสลับโมเดล",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = HelperSize,
+                )
+
+                // ── รายการ keys ──
+                if (keys.isEmpty()) {
+                    Text(
+                        "ยังไม่มี key สำรอง — key หลักจากช่อง Gemini ใช้งานอยู่เสมอ",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = HelperSize,
+                    )
+                }
+                keys.forEach { k ->
+                    Surface(color = JarvisTheme.Surface, shape = RoundedCornerShape(8.dp)) {
+                        if (editingKey == k) {
+                            // ── โหมดแก้ไข ──
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = editText,
+                                    onValueChange = { editText = it },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    colors = fieldColors(),
+                                )
+                                IconButton(onClick = {
+                                    onEdit(k, editText)
+                                    editingKey = null
+                                }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Check, contentDescription = "บันทึก", tint = JarvisTheme.Green, modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(onClick = { editingKey = null }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "ยกเลิก", tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        } else {
+                            // ── โหมดแสดง ──
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(vertical = 8.dp)) {
+                                    Text(
+                                        com.example.personalaibot.maskApiKey(k),
+                                        color = Color.White,
+                                        fontSize = BodySize,
+                                    )
+                                    if (k == primaryKey) {
+                                        Text("PRIMARY — ใช้งานอยู่", color = JarvisTheme.Green, fontSize = HelperSize)
+                                    }
+                                }
+                                IconButton(onClick = {
+                                    editingKey = k
+                                    editText = k
+                                }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Edit, contentDescription = "แก้ไข", tint = JarvisTheme.Cyan, modifier = Modifier.size(16.dp))
+                                }
+                                IconButton(onClick = { onDelete(k) }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Delete, contentDescription = "ลบ", tint = JarvisTheme.Red, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── เพิ่ม key ใหม่ ──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newKeyText,
+                        onValueChange = { newKeyText = it },
+                        placeholder = { Text("วาง Gemini API key ใหม่…", color = Color.White.copy(alpha = 0.35f), fontSize = HelperSize) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        colors = fieldColors(),
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    IconButton(
+                        onClick = {
+                            if (newKeyText.isNotBlank()) {
+                                onAdd(newKeyText)
+                                newKeyText = ""
+                            }
+                        },
+                        enabled = newKeyText.isNotBlank(),
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "เพิ่ม key",
+                            tint = if (newKeyText.isNotBlank()) JarvisTheme.Green else Color.White.copy(alpha = 0.3f),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("เสร็จ", color = JarvisTheme.Cyan, fontWeight = FontWeight.Bold)
+            }
+        },
+    )
 }

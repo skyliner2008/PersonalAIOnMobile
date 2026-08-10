@@ -256,6 +256,15 @@ class JarvisViewModel(
                 logError("JarvisVM", "Local model startup check failed", e)
             }
         }
+        // โหลด custom tools ที่ Agent เคยสร้าง (custom_agent_tools/*.json) กลับเข้า ToolRegistry
+        // — เดิม loadCustomTools() ไม่มี caller เลย ทำให้ tool ที่ AI สร้างหายทุกครั้งที่ปิดแอป
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                orchestrator.loadCustomTools()
+            } catch (e: Exception) {
+                logError("JarvisVM", "loadCustomTools startup failed", e)
+            }
+        }
     }
 
     private val maxContextTurns = 10
@@ -411,9 +420,6 @@ class JarvisViewModel(
     private var mt5AutoSyncJob: Job? = null
     private var mt5RealtimeJob: Job? = null
     private var mt5SnapshotRevision: String = ""
-    
-    /** เก็บข้อความสั่งสุดท้ายของผู้ใช้ที่ยังทำไม่เสร็จตอนเปลี่ยนเสียง เพื่อนำไปสั่ง AI ต่อทันทีที่เชื่อมต่อใหม่ */
-    private var pendingCommandAfterVoiceChange: String? = null
 
     private val pcmAudioEngine = PcmAudioEngine()
 
@@ -478,19 +484,19 @@ class JarvisViewModel(
         // --- AI-Controlled Voice Change ---
         orchestrator.setVoiceChangeHandler { newVoice ->
             viewModelScope.launch {
-                // เก็บคำถามล่าสุดของผู้ใช้ไว้ (ถ้ามี) เพื่อนำไปป้อนให้ session ใหม่
-                val lastMsg = _messages.value.lastOrNull { it.role == "user" }?.content
-                pendingCommandAfterVoiceChange = lastMsg
-                
-                logDebug("JarvisVM", "🔔 Voice change requested: $newVoice. Task cached: $lastMsg")
+                logDebug("JarvisVM", "🔔 Voice change requested: $newVoice")
                 
                 _voiceName.value = newVoice
                 updateSettings(_apiKey.value, _selectedModel.value, _liveModelName.value, newVoice)
-                
+                // ผูกเสียงเข้ากับ identity (เพศ/น้ำเสียง/คำลงท้าย) + persist ลง Core Memory
+                orchestrator.applyVoiceIdentity(newVoice)
+
                 // Immediate Apply: Restart session if active
                 if (_isListening.value) {
                     stopVoiceInput()
                     delay(800) // เพิ่ม delay เล็กน้อยเพื่อให้ระบบเคลียร์ resources และบันทึกความจำได้ทัน
+                    // ตั้ง greeting ให้ AI พูดยืนยันเสียงใหม่อัตโนมัติทันทีที่ session READY (ผูกกับ event ไม่ใช่ timer)
+                    orchestrator.setLiveGreetingOnReady("[SYSTEM] คุณเพิ่งเปลี่ยนเสียงเป็น $newVoice เรียบร้อยแล้ว โปรดพูดทักยืนยันเสียงใหม่สั้นๆ 1 ประโยคเท่านั้น (เช่น 'เปลี่ยนเสียงเป็น $newVoice เรียบร้อยแล้วครับ/ค่ะ') ไม่ต้องทำงานอื่นต่อ")
                     startVoiceInput()
                 }
             }
@@ -609,8 +615,46 @@ class JarvisViewModel(
         val savedMinimaxKey = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("minimax_api_key").executeAsOneOrNull() ?: ""
         }
+        val savedGroqKey = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("groq_api_key").executeAsOneOrNull() ?: ""
+        }
+        val savedNvidiaNimKey = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("nvidia_nim_api_key").executeAsOneOrNull() ?: ""
+        }
+        // Fallback chain ที่ user ตั้งเอง (comma-separated) — empty = ใช้ default ModelConfig
+        val savedGeminiFallback = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("gemini_fallback_models").executeAsOneOrNull() ?: ""
+        }
+        _geminiFallbackModels.value = savedGeminiFallback.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        orchestrator.updateGeminiFallbackChain(_geminiFallbackModels.value)
+        // Gemini multi-key: โหลด list + merge primary key ไว้หัว chain เสมอ (rotation จะไล่จาก key ปัจจุบัน)
+        val savedGeminiApiKeys = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("gemini_api_keys").executeAsOneOrNull() ?: ""
+        }
+        _geminiApiKeys.value = savedGeminiApiKeys.lines().map { it.trim() }.filter { it.isNotBlank() }
+        orchestrator.updateGeminiApiKeys(listOf(savedKey) + _geminiApiKeys.value.filter { it != savedKey })
+        // ผล auto-test โมเดล (Groq/NIM) จากรอบก่อน — ใช้ซ่อนโมเดลที่ใช้ไม่ได้จาก list
+        val savedModelCaps = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("model_caps_v1").executeAsOneOrNull() ?: ""
+        }
+        _modelCaps.value = com.example.personalaibot.data.providers.ModelAutoTester.parseCaps(savedModelCaps)
+        // ส่งผลเทสเข้า orchestrator — cross-provider fallback จะเลือกเฉพาะโมเดลที่เทสผ่านจริง
+        orchestrator.updateModelCaps(_modelCaps.value)
+        // โหลดค่าสวิตช์การแจ้งเตือน — เดิมไม่ได้โหลดกลับ ทำให้ toggle แจ้งเตือนด้วยเสียงเด้งเป็น "ปิด" ทุกครั้งที่เปิดแอปใหม่
+        val savedAlertAiSummary = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("alert_ai_summary").executeAsOneOrNull()?.let { it == "true" } ?: true
+        }
+        val savedAlertVoice = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("alert_voice").executeAsOneOrNull()?.let { it == "true" } ?: false
+        }
+        // toggle "Show free models only" — เดิมไม่ได้โหลดกลับ เด้งเป็นไม่ติ๊กทุกครั้ง
+        _showFreeModelsOnly.value = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("show_free_models_only").executeAsOneOrNull()?.let { it == "true" } ?: false
+        }
 
         _apiKey.value = savedKey
+        _alertAiSummaryEnabled.value = savedAlertAiSummary
+        _alertVoiceEnabled.value = savedAlertVoice
         _selectedModel.value = savedModel
         _liveModelName.value = savedLiveModel
         _voiceName.value = savedVoiceName
@@ -629,6 +673,8 @@ class JarvisViewModel(
         _claudeApiKey.value = savedClaudeKey
         _openRouterApiKey.value = savedOpenRouterKey
         _minimaxApiKey.value = savedMinimaxKey
+        _groqApiKey.value = savedGroqKey
+        _nvidiaNimApiKey.value = savedNvidiaNimKey
         orchestrator.updateConfig(savedKey, savedModel, savedLiveModel, savedVoiceName)
 
         // Register external providers on startup
@@ -636,7 +682,9 @@ class JarvisViewModel(
             openaiKey = savedOpenaiKey,
             claudeKey = savedClaudeKey,
             openRouterKey = savedOpenRouterKey,
-            minimaxKey = savedMinimaxKey
+            minimaxKey = savedMinimaxKey,
+            groqKey = savedGroqKey,
+            nvidiaNimKey = savedNvidiaNimKey
         )
 
         // Initialize camera service keys
@@ -667,6 +715,14 @@ class JarvisViewModel(
         }
     }
 
+    /** เลือกโปรไฟล์เสียงจาก Settings — ผูก identity + persist + (ถ้ากำลัง live) restart session พร้อมยืนยันเสียง */
+    fun selectVoiceProfile(voice: String) {
+        viewModelScope.launch {
+            orchestrator.applyVoiceIdentity(voice)
+            updateSettings(_apiKey.value, _selectedModel.value, _liveModelName.value, voice)
+        }
+    }
+
     fun updateSettings(key: String, model: String, liveModel: String = _liveModelName.value, voice: String = _voiceName.value, preferFree: Boolean = false) {
         viewModelScope.launch {
             _apiKey.value = key
@@ -681,7 +737,21 @@ class JarvisViewModel(
                 database.jarvisDatabaseQueries.insertSetting("prefer_free_only", if (preferFree) "true" else "false")
             }
             orchestrator.updateConfig(key, model, liveModel, voice)
+            // primary key เปลี่ยน → อัปเดต rotation chain ให้เริ่มจาก key ใหม่
+            orchestrator.updateGeminiApiKeys(listOf(key) + _geminiApiKeys.value.filter { it != key })
             autoTrading.updatePreferFreeOnly(preferFree)
+
+            // Sync vision provider ตาม provider หลักของแชท (review หมวด 11)
+            // — เปลี่ยนโมเดลหลักแล้วกล้อง/vision ควรตามไปใช้ผู้ให้บริการเดียวกันอัตโนมัติ
+            val providerId = if (model.contains("/")) model.substringBefore("/") else "gemini"
+            val visionType = when (providerId.lowercase()) {
+                "openai" -> CameraProviderType.OPENAI_GPT4O
+                "claude", "anthropic" -> CameraProviderType.CLAUDE_SONNET
+                else -> CameraProviderType.GEMINI_LIVE
+            }
+            runCatching { cameraService.switchProvider(visionType) }
+                .onFailure { logDebug("JarvisVM", "Vision provider sync skipped: ${it.message}") }
+
             fetchModels()
         }
     }
@@ -714,10 +784,20 @@ class JarvisViewModel(
             "claude", "anthropic" -> _claudeApiKey.value
             "openrouter" -> _openRouterApiKey.value
             "minimax" -> _minimaxApiKey.value
+            "groq" -> _groqApiKey.value
+            "nvidia_nim", "nim" -> _nvidiaNimApiKey.value
             else -> ""
         }
         return try {
-            orchestrator.listModelsForProvider(providerId, freeOnly, keyToUse)
+            val models = orchestrator.listModelsForProvider(providerId, freeOnly, keyToUse)
+            // ใช้ผล auto-test (ถ้ามี): ซ่อนโมเดลที่ chat ไม่ผ่าน + แก้ tag 🔧 ตามผลเทสจริง
+            val caps = _modelCaps.value
+            if (caps.isEmpty()) models else models.mapNotNull { m ->
+                when (val cap = caps["$providerId/${m.id}"]) {
+                    null -> m // ยังไม่เคยเทส → แสดงตามเดิม
+                    else -> if (!cap.chatOk) null else m.copy(supportsFunctions = cap.toolsOk)
+                }
+            }
         } catch (e: Exception) {
             logError("JarvisVM", "Failed to fetch models for $providerId", e)
             emptyList()
@@ -757,6 +837,8 @@ class JarvisViewModel(
             "claude", "anthropic" -> _claudeApiKey.value
             "openrouter" -> _openRouterApiKey.value
             "minimax" -> _minimaxApiKey.value
+            "groq" -> _groqApiKey.value
+            "nvidia_nim", "nim" -> _nvidiaNimApiKey.value
             else -> ""
         }
         val result = com.example.personalaibot.data.providers.ApiKeyTester.test(client, providerId, key)
@@ -769,6 +851,8 @@ class JarvisViewModel(
                 "claude", "anthropic" -> orchestrator.updateProviderKeys(claudeKey = key)
                 "openrouter" -> orchestrator.updateProviderKeys(openRouterKey = key)
                 "minimax" -> orchestrator.updateProviderKeys(minimaxKey = key)
+                "groq" -> orchestrator.updateProviderKeys(groqKey = key)
+                "nvidia_nim", "nim" -> orchestrator.updateProviderKeys(nvidiaNimKey = key)
             }
         }
         
@@ -777,24 +861,56 @@ class JarvisViewModel(
 
     private suspend fun loadHistory() {
         val history = memoryManager.getRecentHistory(20).reversed()
-        _messages.value = history.map { Message(it.role, it.content) }
+        // ซ่อนข้อความฝั่ง user ที่มาจาก live voice (transcription) — ตอนคุยสดไม่แสดง เปิดแอปใหม่ก็ไม่ควรโผล่
+        _messages.value = history
+            .filterNot { it.role == "user" && it.metadata?.contains("live_voice") == true }
+            .map { Message(it.role, it.content) }
     }
 
-    fun sendMessage(text: String, speakResponse: Boolean = false) {
-        if (text.isBlank()) return
+    fun sendMessage(
+        text: String,
+        speakResponse: Boolean = false,
+        attachments: List<com.example.personalaibot.ui.ChatAttachment> = emptyList()
+    ) {
+        if (text.isBlank() && attachments.isEmpty()) return
 
         viewModelScope.launch {
             try {
-                _messages.value = _messages.value + Message("user", text)
-                memoryManager.storeMessage("user", text)
+                // แยกไฟล์ text (ฝังเข้า prompt) กับ binary (ส่งเป็น inline_data)
+                val textAtts = attachments.filter { it.isText }
+                val binaryAtts = attachments.filterNot { it.isText }
+
+                val displayText = buildString {
+                    append(text)
+                    if (attachments.isNotEmpty()) {
+                        append("\n📎 แนบ: ")
+                        append(attachments.joinToString(", ") { it.name })
+                    }
+                }
+                _messages.value = _messages.value + Message("user", displayText)
+                memoryManager.storeMessage("user", displayText)
+
+                // prompt จริงที่ส่งให้ AI — ฝังเนื้อหาไฟล์ text ไว้ใน block ชัดเจน
+                val promptForAi = buildString {
+                    append(text)
+                    textAtts.forEach { att ->
+                        append("\n\n[ไฟล์แนบ: ${att.name}]\n```\n")
+                        append(att.textContent ?: "")
+                        append("\n```")
+                    }
+                }
+                val inlineFiles = binaryAtts.mapNotNull { att ->
+                    att.base64?.let { com.example.personalaibot.data.InlineData(att.mimeType, it) }
+                }
+
                 _isTyping.value = true
                 val historySnapshot = buildHistorySnapshot()
                 val coreContext = buildRuntimeCoreContext()
                 _messages.value = _messages.value + Message("model", "")
                 var currentAiMessage = ""
-                
-                logDebug("JarvisVM", "[Chat] Sending: model=${_selectedModel.value}, apiKeySet=${_apiKey.value.isNotBlank()}")
-                val responseFlow = orchestrator.chatWithHistory(text, historySnapshot, coreContext)
+
+                logDebug("JarvisVM", "[Chat] Sending: model=${_selectedModel.value}, apiKey=${maskApiKey(_apiKey.value)}, attachments=${attachments.size} (binary=${inlineFiles.size})")
+                val responseFlow = orchestrator.chatWithHistory(promptForAi, historySnapshot, coreContext, inlineFiles)
 
                 responseFlow.collect { chunk ->
                     // Hide tool-request/progress traces from chat; keep only user-facing content.
@@ -814,7 +930,8 @@ class JarvisViewModel(
                         _messages.value = currentList
                     }
                 }
-                logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)")
+                // log เนื้อคำตอบจริงด้วย (preview 800 ตัวอักษร) — เดิมมีแค่จำนวน chars ตรวจพฤติกรรมโมเดลไม่ได้
+                logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)\n>>> ${currentAiMessage.take(800)}")
 
                 // ถ้า response ว่างเปล่า แสดง fallback message
                 if (currentAiMessage.isBlank()) {
@@ -829,7 +946,7 @@ class JarvisViewModel(
                         currentList[currentList.size - 1] = Message("model", fallbackMsg)
                         _messages.value = currentList
                     }
-                    logError("JarvisVM", "[Chat] Empty response — model=$model, apiKeySet=${_apiKey.value.isNotBlank()}")
+                    logError("JarvisVM", "[Chat] Empty response — model=$model, apiKey=${maskApiKey(_apiKey.value)}")
                 } else {
                     memoryManager.storeMessage("model", currentAiMessage)
                     memoryManager.updateKnowledgeGraph("User: $text\nJARVIS: $currentAiMessage")
@@ -861,17 +978,128 @@ class JarvisViewModel(
     private val _minimaxApiKey = MutableStateFlow("")
     val minimaxApiKey: StateFlow<String> = _minimaxApiKey.asStateFlow()
 
-    fun updateExternalApiKeys(openai: String, claude: String, openRouter: String = _openRouterApiKey.value, minimax: String = _minimaxApiKey.value) {
+    private val _groqApiKey = MutableStateFlow("")
+    val groqApiKey: StateFlow<String> = _groqApiKey.asStateFlow()
+
+    private val _nvidiaNimApiKey = MutableStateFlow("")
+    val nvidiaNimApiKey: StateFlow<String> = _nvidiaNimApiKey.asStateFlow()
+
+    /** Gemini fallback chain ที่ user ตั้งเอง (เรียงลำดับ) — empty = ใช้ default ModelConfig */
+    private val _geminiFallbackModels = MutableStateFlow<List<String>>(emptyList())
+    val geminiFallbackModels: StateFlow<List<String>> = _geminiFallbackModels.asStateFlow()
+
+    /** ค่า toggle "Show free models only" ใน Settings — persist เพราะเดิมเด้งกลับเป็นไม่ติ๊กทุกครั้ง */
+    private val _showFreeModelsOnly = MutableStateFlow(false)
+    val showFreeModelsOnly: StateFlow<Boolean> = _showFreeModelsOnly.asStateFlow()
+
+    fun setShowFreeModelsOnly(v: Boolean) {
+        _showFreeModelsOnly.value = v
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("show_free_models_only", if (v) "true" else "false")
+        }
+    }
+
+    /** ผล auto-test โมเดล ("provider/model" → capability) — persist ใน setting "model_caps_v1" */
+    private val _modelCaps = MutableStateFlow<Map<String, com.example.personalaibot.data.providers.ModelAutoTester.ModelCapability>>(emptyMap())
+    val modelCaps: StateFlow<Map<String, com.example.personalaibot.data.providers.ModelAutoTester.ModelCapability>> = _modelCaps.asStateFlow()
+
+    /**
+     * Auto-test ทุก model ของ provider (Groq/NIM) — ไล่เทส chat + tool calling ทีละตัว
+     * ผล persist ถาวร: model ที่ chat ไม่ผ่านจะถูกซ่อนจาก list, ที่ tools ไม่ผ่านจะไม่มี tag 🔧
+     */
+    suspend fun autoTestProviderModels(
+        providerId: String,
+        onProgress: (current: Int, total: Int, modelId: String) -> Unit = { _, _, _ -> }
+    ): Int {
+        val key = when (providerId) {
+            "groq" -> _groqApiKey.value
+            "openrouter" -> _openRouterApiKey.value
+            else -> return 0
+        }
+        if (key.isBlank()) return 0
+        val provider = when (providerId) {
+            "groq" -> com.example.personalaibot.data.providers.GroqLlmProvider(client, key)
+            else -> com.example.personalaibot.data.providers.OpenRouterLlmProvider(client, key)
+        }
+        val results = com.example.personalaibot.data.providers.ModelAutoTester.testAllModels(
+            client, provider, key, freeOnly = (providerId == "openrouter"), onProgress = onProgress
+        )
+        val merged = _modelCaps.value.toMutableMap()
+        results.forEach { (id, cap) -> merged["$providerId/$id"] = cap }
+        _modelCaps.value = merged
+        orchestrator.updateModelCaps(merged)
+        withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting(
+                "model_caps_v1",
+                com.example.personalaibot.data.providers.ModelAutoTester.serializeCaps(merged)
+            )
+        }
+        return results.count { it.value.chatOk }
+    }
+
+    /** Gemini API keys ทั้งหมด (multi free-tier accounts) — ใช้ rotate เมื่อ key ปัจจุบันติดลิมิต */
+    private val _geminiApiKeys = MutableStateFlow<List<String>>(emptyList())
+    val geminiApiKeys: StateFlow<List<String>> = _geminiApiKeys.asStateFlow()
+
+    private fun persistGeminiApiKeys(keys: List<String>) {
+        viewModelScope.launch {
+            _geminiApiKeys.value = keys
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("gemini_api_keys", keys.joinToString("\n"))
+            }
+            orchestrator.updateGeminiApiKeys(listOf(_apiKey.value) + keys.filter { it != _apiKey.value })
+        }
+    }
+
+    fun addGeminiApiKey(key: String) {
+        val k = key.trim()
+        if (k.isBlank() || k in _geminiApiKeys.value) return
+        persistGeminiApiKeys(_geminiApiKeys.value + k)
+    }
+
+    fun removeGeminiApiKey(key: String) {
+        persistGeminiApiKeys(_geminiApiKeys.value - key)
+    }
+
+    fun editGeminiApiKey(oldKey: String, newKey: String) {
+        val k = newKey.trim()
+        if (k.isBlank()) return
+        persistGeminiApiKeys(_geminiApiKeys.value.map { if (it == oldKey) k else it })
+    }
+
+    /** บันทึก fallback chain (เรียงลำดับสำคัญ) — ส่ง list ว่างเพื่อกลับไปใช้ default */
+    fun updateGeminiFallbackModels(models: List<String>) {
+        viewModelScope.launch {
+            _geminiFallbackModels.value = models
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("gemini_fallback_models", models.joinToString(","))
+            }
+            orchestrator.updateGeminiFallbackChain(models)
+        }
+    }
+
+    fun updateExternalApiKeys(
+        openai: String = _openaiApiKey.value,
+        claude: String = _claudeApiKey.value,
+        openRouter: String = _openRouterApiKey.value,
+        minimax: String = _minimaxApiKey.value,
+        groq: String = _groqApiKey.value,
+        nvidiaNim: String = _nvidiaNimApiKey.value
+    ) {
         viewModelScope.launch {
             _openaiApiKey.value = openai
             _claudeApiKey.value = claude
             _openRouterApiKey.value = openRouter
             _minimaxApiKey.value = minimax
+            _groqApiKey.value = groq
+            _nvidiaNimApiKey.value = nvidiaNim
             withContext(Dispatchers.IO) {
                 database.jarvisDatabaseQueries.insertSetting("openai_api_key", openai)
                 database.jarvisDatabaseQueries.insertSetting("claude_api_key", claude)
                 database.jarvisDatabaseQueries.insertSetting("openrouter_api_key", openRouter)
                 database.jarvisDatabaseQueries.insertSetting("minimax_api_key", minimax)
+                database.jarvisDatabaseQueries.insertSetting("groq_api_key", groq)
+                database.jarvisDatabaseQueries.insertSetting("nvidia_nim_api_key", nvidiaNim)
             }
             // Update camera service with new keys
             cameraService.updateProviderKeys(
@@ -884,7 +1112,9 @@ class JarvisViewModel(
                 openaiKey = openai,
                 claudeKey = claude,
                 openRouterKey = openRouter,
-                minimaxKey = minimax
+                minimaxKey = minimax,
+                groqKey = groq,
+                nvidiaNimKey = nvidiaNim
             )
         }
     }
@@ -1022,17 +1252,7 @@ class JarvisViewModel(
                     // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
                 launch {
                     logDebug("JARVIS_VM", "Connecting Live session (with memory context)...")
-                    
-                    // If we just changed voice, send cached user task as startup context.
-                    val contextToSubmit = if (!pendingCommandAfterVoiceChange.isNullOrBlank()) {
-                        val task = pendingCommandAfterVoiceChange
-                        pendingCommandAfterVoiceChange = null // Clear to avoid loop
-                        "SYSTEM_INFO: คุณแจ้งเปลี่ยนเสียงสำเร็จแล้ว งานต่อไปที่คุณต้องทำทันทีคือ: $task. โปรดดำเนินการต่อและแจ้งผู้ใช้ด้วยเสียงใหม่ของคุณ."
-                    } else {
-                        historySnapshot
-                    }
-                    
-                    orchestrator.startLiveVoiceSessionWithMemory(coreContext, contextToSubmit)
+                    orchestrator.startLiveVoiceSessionWithMemory(coreContext, historySnapshot)
                 }
 
                 // 4. Collect audio output -> speaker

@@ -136,8 +136,8 @@ class OpenRouterLlmProvider(
                 } ?: break
                 if (line.isBlank()) continue
 
-                logDebug("OpenRouter", "Stream line: $line")
-
+                // ไม่ log ทุก SSE chunk — โมเดล reasoning ของ OpenRouter ส่ง chunk ยาวมาก
+                // ทำ logcat พุ่งเป็นร้อย KB ต่อ 1 คำถาม (เคสจริง nemotron 2026-08-08)
                 if (line.startsWith("data: ")) {
                     val dataStr = line.removePrefix("data: ").trim()
                     if (dataStr == "[DONE]") {
@@ -319,7 +319,9 @@ class OpenRouterLlmProvider(
                     // Convert from $/token to $/1M tokens
                     val promptPer1M = promptPrice * 1_000_000
                     val completionPer1M = completionPrice * 1_000_000
-                    val isFree = promptPrice == 0.0 && completionPrice == 0.0
+                    // Free model: ราคา 0 ทั้งสองทาง หรือ id ลงท้าย ":free" (OpenRouter convention)
+                    // — เดิมเช็คเฉพาะ pricing ทำให้ model ฟรีที่ pricing หาย/ parse ไม่ได้ หลุดจาก filter
+                    val isFree = (promptPrice == 0.0 && completionPrice == 0.0) || id.endsWith(":free")
 
                     // อ่าน capability จริงจาก API แทนการเดาจากชื่อ:
                     // - supported_parameters มี "tools" → รองรับ function calling

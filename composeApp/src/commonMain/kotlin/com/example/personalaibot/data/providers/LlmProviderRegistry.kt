@@ -56,6 +56,18 @@ class LlmProviderRegistry(private val client: HttpClient) {
         register(LiteLlmProvider(client, baseUrl))
     }
 
+    /** ลงทะเบียน Groq provider (free tier — OpenAI-compatible) */
+    fun registerGroq(apiKey: String) {
+        if (apiKey.isBlank()) return
+        register(GroqLlmProvider(client, apiKey))
+    }
+
+    /** ลงทะเบียน NVIDIA NIM provider (free dev credits — OpenAI-compatible) */
+    fun registerNvidiaNim(apiKey: String) {
+        if (apiKey.isBlank()) return
+        register(NvidiaNimLlmProvider(client, apiKey))
+    }
+
     /** ลงทะเบียน MiniMax provider */
     fun registerMinimax(apiKey: String) {
         if (apiKey.isBlank()) return
@@ -144,6 +156,8 @@ class LlmProviderRegistry(private val client: HttpClient) {
             "openai" -> OpenAILlmProvider(client, apiKey)
             "claude", "anthropic" -> ClaudeLlmProvider(client, apiKey)
             "openrouter" -> OpenRouterLlmProvider(client, apiKey)
+            "groq" -> GroqLlmProvider(client, apiKey)
+            "nvidia_nim", "nim" -> NvidiaNimLlmProvider(client, apiKey)
             "minimax" -> MinimaxLlmProvider(client, apiKey)
             "litellm" -> LiteLlmProvider(client)
             // Vertex AI ต้อง register ผ่าน registerVertexAI() ก่อน

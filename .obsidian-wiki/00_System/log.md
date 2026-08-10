@@ -471,3 +471,270 @@
 - พบบั๊ก: TradingApiService.getTechnicalAnalysis รับ interval แต่ไม่เคยใช้ → alert TA ติด 1h เสมอ; แก้ด้วย suffix คอลัมน์ TV scanner (RSI|15 ฯลฯ) + fetchTechnicalAnalysisWithFallback parse @TF
 - อัปเดต AlertFieldCatalog + AlertDataTester ให้ตรงกัน
 - Build ผ่าน — ต้องติดตั้ง APK ใหม่
+
+## 2026-08-08 — UI หน้าสร้าง Alert ใหม่ + preset deep suite
+- จัด layout เป็น 3 ส่วนชัดเจน: 1) สิ่งที่เฝ้าดู (Symbol/ชื่อ) 2) เงื่อนไข (tool/field/op/ค่า) 3) ความถี่ — หัวข้อสี cyan, spacing สม่ำเสมอ, dropdown ตัดข้อความยาว ellipsis กันกล่องยืด
+- เพิ่ม preset: LSD ขาขึ้น, Squeeze Breakout, แรงซื้อนำ (Delta) — auto-fill เพิ่ม lsdState/isSqueeze
+- Build ผ่าน — ต้องติดตั้ง APK ใหม่
+
+## 2026-08-08 — แก้ toggle ไม่จำค่า + ย่อการ์ดตั้งค่าแจ้งเตือน
+- บั๊ก: setAlertVoiceEnabled/AI summary เขียนลง AppSetting แต่ loadSettings() ไม่เคยอ่านกลับ → toggle เด้งเป็นค่า default ทุกครั้งที่เปิดแอปใหม่; เพิ่มโหลด alert_ai_summary/alert_voice ใน loadSettings
+- AlertSettingsCard จากการ์ดใหญ่ 2 แถว → แถวเดียวกะทัดรัด (ไอคอน ⚙️ + CompactToggle 2 ตัว, switch scale 0.7)
+- Build ผ่าน — ต้องติดตั้ง APK ใหม่
+
+## 2026-08-08 — หมวด 5 Tool System / การสร้าง Tool ✅
+- **AI สร้าง tool เองไม่ได้ (ข้าม session)** — root cause: `JarvisOrchestrator.loadCustomTools()` ไม่มี caller เลย; tool ที่สร้างผ่าน system_create_agent_tool ถูกบันทึกลง custom_agent_tools/ แต่ไม่เคยโหลดกลับ → เพิ่มเรียกใน JarvisViewModel init (IO dispatcher)
+- Thread safety: เพิ่ม @Volatile ให้ _customTools/_skills ใน ToolRegistry (copy-on-write เดิมกัน corruption แล้ว แต่ขาด visibility guarantee)
+- JSON injection: ToolArgParser ปลอดภัยอยู่แล้ว — parse fail คืน null และ Orchestrator คืน error เข้า tool loop ถูกต้อง
+- Audit การลงทะเบียน: พบ `trading_mt5_trade_journal` เปิดใช้ใน registry + มี executor แต่ **ไม่มี declaration** → Gemini มองไม่เห็น; เพิ่ม declaration แล้ว (type: decision/management/performance)
+- นับ tool: declared 45, registry active 46, executor ครบ (automation_manage_* route ผ่าน delegate โดยตั้งใจ)
+- Build ผ่าน — ต้องติดตั้ง APK ใหม่
+
+## 2026-08-08 — หมวด 5 เทสเครื่องจริงรอบ 1: พบบั๊ก Duplicate declaration
+- เทสจริง: สร้าง custom_gold_check สำเร็จ แต่ API Round 2 ตาย 400 "Duplicate function declaration found: custom_gold_check"
+- root cause: registerCustomTool + registerSkill คู่กัน แล้ว getGeminiTool() ส่งทั้ง _customTools และ _skills ทำชื่อซ้ำ
+- แก้: getGeminiTool ส่งเฉพาะ skill ที่ไม่มีชื่อใน _customTools
+- สร้าง tool สำเร็จและ persist ลง /storage/emulated/0/custom_agent_tools/ ยืนยันแล้ว
+- Build ผ่าน — รอเทสรอบ 2: สร้าง tool ใหม่แล้วคุยต่อต้องไม่ 400 + ปิดเปิดแอปแล้ว tool ยังอยู่
+
+## 2026-08-08 — Custom Tool CRUD ครบวงจรผ่าน AI (หมวด 5 ต่อ)
+- เพิ่ม `system_list_agent_tools` (ดูรายการ+logic ข้างใน) และ `system_delete_agent_tool` (ลบทั้งไฟล์+registry)
+- แก้ไข tool: ใช้ `system_create_agent_tool` ชื่อเดิมเขียนทับ (แนบ hint ใน description แล้ว)
+- SideEffectDelegate + JarvisOrchestrator: `onReadAgentTool`/`onDeleteAgentTool` ผ่าน fileHandler (file_read/file_delete ใน custom_agent_tools/)
+- ToolRegistry: declarations ใหม่ 2 ตัว (routing ผ่าน isSystemTool `startsWith("system_")` อยู่แล้ว)
+- Live mode: ยืนยัน custom tools ถูกส่งเข้า session ตอน connect (startLiveVoiceSessionWithMemory → LiveGeminiService.connectAndListen tools=...) — tool ที่สร้าง/ลบกลาง live session มีผลหลัง reconnect; chat mode เห็นทันทีทุก request
+- Build :composeApp:assembleDebug SUCCESS — รอ user เทสบนเครื่องจริง (หมวด 5 ยัง 🔶)
+
+## 2026-08-08 — แก้ deep suite ngrok + MT5 mode false positive
+- ปัญหา: custom_gold_check เรียก trading_deep_analysis_suite แล้วได้ ngrok offline page (ERR_NGROK_3200) แทน fallback local engine
+- สาเหตุ 1: bridge ngrok ตอบ error page โดยไม่ throw → เพิ่มตรวจ response.status + marker (ERR_NGROK / ngrok offline / HTML) แล้ว throw เพื่อตก fallback คำนวณจาก TV
+- สาเหตุ 2: model ส่ง interval= แต่โค้ดอ่าน timeframe= → รองรับทั้งสอง key (แก้บั๊ก TF ติด H1 เสมอ)
+- สาเหตุ 3: isMt5Prompt keyword กว้างเกิน (order/position/history/balance/snapshot) → โหมด MT5-only ติดเองตอนคุย SMC (order blocks) แล้ว suppress TV tools — ตัดเหลือเฉพาะคำชี้ broker account ชัดๆ
+- เพิ่ม note ใน description ของ deep suite ว่ามี TV local fallback อัตโนมัติ
+- Build SUCCESS — รอ user เทส custom_gold_check อีกรอบ
+
+## 2026-08-08 — Circuit breaker สำหรับ deep suite bridge
+- ปัญหา: bridge (ngrok) offline ค้าง แต่ทุก tool call ยังยิง HTTP ไปโดน 404 ทุกครั้งก่อน fallback (เสีย 0.5-2 วิ/ครั้ง หลาย TF ก็หลายรอบ)
+- แก้: @Volatile deepSuiteBridgeDownUntilMs — bridge ล่มแล้วเปิด circuit 10 นาที รอบถัดไปข้าม HTTP ไป local engine (TV) ตรงๆ; bridge ตอบปกติเมื่อไหร่ reset circuit ทันที
+- Refactor: แยก runLocalDeepSuite(symbol, tf, reason) ใช้ร่วมกันทั้ง circuit-open และ catch path
+- Build SUCCESS — รอ user เทส: รอบแรกจะยังเห็น bridge failed 1 ครั้ง รอบถัดไปควรเห็น "circuit OPEN — skip HTTP"
+
+## 2026-08-08 — หมวด 6: Orchestrator / Intent Routing
+- JarvisPlanner: ไม่พบไฟล์/reference ใน codebase แล้ว (dead code ถูกลบไปก่อนหน้า) — ปิดประเด็น
+- IntentClassifier tie-break: deterministic อยู่แล้ว (maxByOrNull บน LinkedHashMap ตามลำดับ enum — มี comment ยืนยันในโค้ด)
+- รวม keyword ซ้ำซ้อน: ลบ trading keywords (mt5/xauusd/ทอง/สถานะตลาด ฯลฯ) ออกจาก ANALYSIS pattern — classify() boost ANALYSIS +3 ผ่าน TradingIntentUtility.isTradingPrompt ตัวเดียว (single source)
+- อัปเดต ANALYSIS addon ที่เก่า: "[MT5/Trading Analysis Protocol]" บังคับ trading_mt5_analyze → เปลี่ยนเป็น TV-first protocol (deep suite/TA/SMC หลาย TF) ใช้ MT5 เฉพาะเมื่อ user ระบุชัด
+- Tool loop ตรวจแล้ว: maxRounds=10, SSE error recovery, buffer text กัน hallucination, suppression wired ทั้ง GeminiService + Orchestrator external path; LiveToolBridge ไม่มี loop (Live API จัดการ function call เอง)
+- Build SUCCESS — 🔶 รอ user เทสเครื่องจริง (วิเคราะห์ทองในแชท ควรยังได้ prompt ANALYSIS + ไม่เด้งไป MT5)
+
+## 2026-08-08 — หมวด 9: File Tools / Security + ระบบแนบไฟล์ในแชท
+- Review File Tools: path guard ครบทุก mutation (read/write/delete/move/analyze), canonicalize กัน traversal, extension allowlist สำหรับ write, JSON injection แก้ไปแล้ว (buildJsonObject)
+- Hardening เพิ่ม: file_read จำกัด 200K ตัวอักษร (กัน context บวม), ห้าม file_delete โฟลเดอร์สาธารณะมาตรฐานทั้งโฟลเดอร์ (Download/Documents/DCIM/Pictures)
+- ระบบแนบไฟล์ใหม่: ChatAttachment (common) + expect/actual rememberAttachmentPicker (Android: OpenMultipleDocuments + contentResolver + base64; iOS: stub no-op)
+- UI ChatInputBar: ปุ่ม 📎 + chips แสดงไฟล์ที่เลือก (ลบทีละไฟล์ได้, สูงสุด 5 ไฟล์) ส่งได้แม้ไม่พิมพ์ข้อความ
+- Wire ครบ: App.kt → ViewModel.sendMessage(text, attachments) → Orchestrator.chatWithHistory(attachments) → GeminiService.generateResponseWithTools(initialFiles) seed pendingFiles
+- Text files (txt/md/csv/code ฯลฯ) ฝังเข้า prompt ตรงๆ (จำกัด 100K ตัวอักษร/ไฟล์); binary (รูป/PDF/DOCX สูงสุด 15MB) ส่งเป็น inline_data ให้ Gemini วิเคราะห์ native
+- External provider path: attachments ถูกข้ามพร้อม log เตือน (ยังไม่รองรับ inline files)
+- Build SUCCESS — 🔶 รอ user เทส: แนบรูป/PDF/txt แล้วถามสรุป
+
+## 2026-08-08 — Review หมวด 10-15 ครบทุกหมวด
+- หมวด 10 System Tools: ตรวจแล้ว — diagnostics/connectivity/agent-tool CRUD ทำงานถูก; เพิ่มเติม DiagnosticManager ตรวจจริง (เดิม automation check เป็น placeholder PASS เสมอ)
+- หมวด 11 Camera/Vision: เพิ่ม vision provider sync — updateSettings เปลี่ยนโมเดลหลักแล้วกล้องสลับ provider ตามอัตโนมัติ (openai→GPT4O, claude→SONNET, อื่นๆ→GEMINI_LIVE)
+- หมวด 12 UI/UX: ตรวจแล้ว state ผ่าน StateFlow/collectAsStateWithLifecycle ถูกต้อง ไม่พบ leak; ChatInputBar เพิ่งปรับใหม่พร้อม attach files
+- หมวด 13 Database: แก้ dead queries — wire updateArchivalAccess เข้า searchRelevantFacts (นับ facts ที่ถูก recall), ใช้ getArchivalRecent ใน DiagnosticManager.checkDatabaseIntegrity
+- หมวด 14 mt5-core-server: ทดสอบรัน scripts/advanced_analytics.mjs (npm run analyze) ผ่าน — ออกรายงาน gate analysis ครบ (15,796 cycles, top reject reasons); scripts อื่น: analytics:gate, analytics:audit, analyze:logs, analyze:deep พร้อมใช้
+- หมวด 15 Diagnostic/Logging: ตรวจ sensitive data — API key ไม่หลุดเข้า log (log เฉพาะ length/isNotBlank), tool results ผ่าน sanitizeToolResultForLog; diagnostics ตอนนี้รายงานจำนวน jobs/tasks/archival จริง
+- Build SUCCESS — 🔶 รอ user เทสเครื่องจริงรวม
+
+## 2026-08-08 — แก้ AI มองไม่เห็นรูปแนบ (เรียก camera tool ผิดตัว)
+- อาการ: แนบรูป (binary=1 ส่งถูกแล้ว) แต่ model เรียก camera_analyze_scene แทนการดู inline_data → error "camera is not active" แล้วตอบมั่ว
+- แก้ 2 ชั้นใน GeminiService.generateResponseWithTools:
+  1. effectiveIntentAddon — แนบ [USER ATTACHMENTS] note: ไฟล์อยู่ใน inline_data แล้ว วิเคราะห์ตรงๆ ห้ามเรียก camera tools
+  2. excludeCameraTools — ซ่อน camera tools ออกจาก tool spec เมื่อมีไฟล์แนบ (buildRequestJson filter ผ่าน ToolRegistry.isCameraTool)
+- Build SUCCESS — รอ user เทสแนบรูปอีกรอบ
+
+## 2026-08-08 รอบ 2 — Model fallback + sanitize key + diagnostics
+- Logger.kt: เพิ่ม sanitizeSensitive() (ลบ ?key=/Bearer token ออกจากข้อความ) + Logger.android.kt sanitize message/stacktrace
+- ModelConfig: เพิ่ม GEMINI_FALLBACK_MODELS = [gemini-2.5-flash, gemini-2.5-flash-lite, gemini-3.5-flash-lite, gemini-3.1-flash, gemini-3.1-pro]
+- GeminiService.generateResponseWithTools: สลับโมเดลอัตโนมัติเมื่อ 429/500/503/timeout (runtime-only ไม่ persist), emit แจ้งผู้ใช้ทุกครั้งที่สลับ, log SSE chunk ที่ไม่มี candidates + empty response พร้อม model/finishReason
+- GeminiService.generateResponse (nested AI summaries): เพิ่ม timeout 20s (เดิมไม่มี ค้าง 90s ทำ custom tool ช้า) + sanitize error message
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+- หมายเหตุความปลอดภัย: API key เต็มเคยหลุดลง logcat ผ่าน ktor exception — แก้ sanitize แล้ว แต่แนะนำ user rotate key
+
+## 2026-08-08 รอบ 3 — Mask key หัว-ท้าย + fallback chain ตามโควต้าจริง
+- Logger.kt: แยก 2 ระดับ — sanitizeSensitive (ลบทิ้ง สำหรับแชท/tool result/log ใน app) vs maskSensitiveForLogcat (โชว์หัว 8 ท้าย 4 เช่น key=AIzaSyBQ***ElLY) + maskApiKey()
+- Logger.android.kt: logcat ใช้ mask หัว-ท้าย (user จงใจดู key ใน logcat สำหรับ debug)
+- JarvisViewModel: log [Chat] Sending/Empty response แสดง apiKey แบบ mask + model ที่ใช้
+- ModelConfig: fallback chain เรียงตามโควต้า free tier จริง — gemini-2.5-flash(RPD20) → 3.5-flash-lite(RPD500) → 3.1-flash-lite(RPD500) → 3-flash(RPD20) → 2.5-flash-lite(RPD20) → 3.5-flash(RPD20)
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 4 — Rework LLM Providers + Fallback Settings UI
+- สร้าง OpenAiCompatLlmProvider (generic OpenAI-compatible) + GroqLlmProvider (api.groq.com/openai/v1, default llama-3.1-8b-instant RPD 14.4K, ตัด whisper/prompt-guard/tts) + NvidiaNimLlmProvider (integrate.api.nvidia.com/v1, default meta/llama-3.1-8b-instruct, ตัด embed/rerank/audio/image-gen)
+- Settings UI: เอา OpenAI/Claude/Vertex ADK ออกจาก ProviderMetas เหลือ Gemini/OpenRouter/Groq/NVIDIA NIM/MiniMax; key flows ใหม่ groq_api_key, nvidia_nim_api_key (DB + ViewModel + orchestrator wiring ครบ)
+- หน้า Settings เพิ่ม Section "Gemini Fallback Models": แก้ลำดับ chain เอง (1 บรรทัด=1 โมเดล) เก็บ setting gemini_fallback_models, GeminiService.fallbackModelsOverride, empty=default; ปุ่ม Reset default/ล้าง
+- Free filter: ใช้ได้กับ openrouter/groq/nvidia_nim (freeFilterProviders); OpenRouter isFree เพิ่มเช็ค suffix ":free" กัน model ฟรีหลุด filter
+- ApiKeyTester: validate gsk_/nvapi- prefix + test listModels ของ groq/nim
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 5 — Gemini Multi API Key (free tier หลายเมล์)
+- ViewModel: geminiApiKeys StateFlow + CRUD (add/remove/edit) persist setting "gemini_api_keys" (newline-separated); merge primary key เป็นหัว rotation chain เสมอ
+- Orchestrator.updateGeminiApiKeys → GeminiService.apiKeysOverride
+- GeminiService: key rotation ก่อน model fallback — 429/503/timeout → ลอง key ถัดไป (โมเดลเดิม, emit แจ้ง masked key) → key หมดค่อยสลับโมเดล; runtime-only ไม่ persist
+- Settings UI: ไอคอนกุญแจเล็กข้างชื่อ Gemini card (สีเขียวเมื่อมี key สำรอง) เปิด GeminiKeysDialog — list keys แบบ mask หัว-ท้าย, tag PRIMARY, ปุ่ม edit (inline textfield + ✓/✗) / delete / add ต่อแถว; persist ทันทีไม่ต้องกด Save
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 6 — Cross-provider fallback (ชั้นสุดท้าย)
+- ตรวจสอบยืนยัน: LiveToolBridge execute tools เองผ่าน ToolExecutor ตรงๆ ไม่ผ่าน chat model → Live mode (voice) ไม่กระทบเมื่อสลับ chat provider; external provider path (chatWithExternalProvider) ส่ง tools ผ่าน ToolRegistry อยู่แล้ว → Groq/NIM/OpenRouter ใช้ tools ของเราได้
+- GeminiService.lastFatalError: เซ็ตเมื่อ Gemini ตายทั้ง chain (ทุก key + ทุกโมเดล) reset ทุกรอบใหม่
+- Orchestrator.chatWithHistory: gemini branch ห่อ flow — หลัง collect จบถ้า fatal → chatWithCrossProviderFallback ไล่ Groq → NIM → OpenRouter → MiniMax; เลือก model จาก listModels(freeOnly) ที่ supportsFunctions; buffer ก่อน emit (chunk มี ⚠️ = fail ไล่ต่อ); emit แจ้งผู้ใช้ทุกขั้น
+- chatWithExternalProvider เพิ่ม modelOverride; OpenAiCompatLlmProvider.listModels ใช้ key ตัวเองก่อน (กัน registry ส่ง gemini key มาผิด)
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 7 — แก้ Groq/NIM ใช้ไม่ได้ (จาก log จริง 13:04-13:09)
+- ปัญหา: Groq 413 (payload 13K tokens > TPM 8K free tier), NIM 404 (models ที่ list ได้แต่ account ไม่มีสิทธิ์), tools ไม่ยิง
+- chatWithExternalProvider: maxCoreContextChars 15000→6000, history 20→10 turns, tools จำกัด 12 ตัว + description ตัด 200 ตัวอักษร
+- Degraded retry: รอบ 1 เจอ error (ขึ้นต้น ⚠️) หรือ timeout → ลองใหม่ครั้งเดียวแบบไม่ส่ง tools + history เหลือ 3 turns (แจ้งผู้ใช้ "ลองใหม่แบบประหยัดโควต้า")
+- Cross-provider fallback: ไล่สูงสุด 3 candidate models ต่อ provider (จัดลำดับ preferred: llama-3.3-70b/gpt-oss-120b/compound/70b/120b/llama/qwen) กัน NIM 404 ตัวแรกแล้วตายทั้ง provider
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 8 — แก้ Groq tool loop / 429 transient / empty round (จาก log 13:33-13:38)
+- Groq excludeModelPattern เพิ่ม orpheus|canopylabs (TTS ต้อง accept terms) + safeguard (safety classifier วน tool จนตอบว่าง)
+- Tool-call loop detection: signature เดิมซ้ำ 2 รอบติด → บังคับสรุปโดย tools=null รอบถัดไป (เก็บผล tool ใน messages) + ส่ง tool result "ห้ามเรียกซ้ำ" — เคสจริง gpt-oss เรียก search_web 5 รอบจน 0 chars
+- 429 transient backoff: parse "try again in X s" → delay X+1s ลองรอบเดิมสูงสุด 2 ครั้ง ก่อน degrade (Groq TPM reset ทุก 1-5 วิ)
+- Empty round (0 chars ไม่มี tool) → degraded retry ครั้งเดียว กัน Empty response เงียบ (เคส qwen3.6-27b)
+- Build: :composeApp:assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-08 รอบ 9 — Auto-test โมเดล Groq/NIM + log เนื้อคำตอบ AI
+- JarvisVM: log [Chat] Response complete แสดง preview 800 ตัวอักษรจริง + masked key (เดิมโชว์แค่จำนวน chars)
+- OpenAiCompatLlmProvider.generate(): ส่ง tools ด้วย (เดิมส่งเฉพาะ stream)
+- ใหม่ ModelAutoTester: เทส 2 ขั้นต่อโมเดล (chat "Reply with exactly: OK" → tool test get_current_time) persist "model_caps_v1" (format "provider/model|flags|latency")
+- Settings: ปุ่ม ✓ เขียวข้าง Main Model (เฉพาะ groq/nvidia_nim) เรียก autoTestProviderModels; โมเดล chat-fail ถูกซ่อน, tools-fail แก้ tag 🔧 ตามผลจริง
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 10 — Fallback ใช้ผล auto-test จริง
+- JarvisOrchestrator.updateModelCaps(caps): เก็บ providerId → set โมเดล chat-ok / tools-ok
+- chatWithCrossProviderFallback: ถ้า provider เคย auto-test → ใช้เฉพาะโมเดลที่เทสผ่าน (tools-ok ก่อน) แทน heuristic เดิมที่ชอบ gpt-oss-120b/compound (เทสจริง chat ไม่ผ่านทั้งคู่)
+- heuristic สำรอง (ยังไม่เคยเทส) อัปเดตตามผลเทส: llama-3.3-70b-versatile, qwen3.6, nemotron-3-ultra/super-120b/nano-30b, llama-3.3-nemotron-super-49b, deepseek-v4-flash, llama-3.2-11b-vision, nemotron-nano-12b-v2, llama-3.1-8b
+- JarvisViewModel ส่ง caps เข้า orchestrator ทั้งตอน startup และหลัง auto-test จบ
+- ผลเทสของ user: Groq tools ผ่าน 3/8 (llama-3.1-8b-instant, llama-3.3-70b-versatile, qwen3.6-27b) / NIM tools ผ่าน 11/87 (nemotron-3-ultra-550b, super-120b, nano-30b, llama-3.3-nemotron-super-49b, deepseek-v4-flash ฯลฯ)
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 11 — ตัด NIM + auto-test OpenRouter free + กัน search_web หลุด
+- ตัด NVIDIA NIM ออกจาก UI (ProviderMetas/freeFilterProviders) และ cross-provider fallback order เหลือ groq → openrouter → minimax (user: โมเดล NIM ช้า/404 เยอะ)
+- ModelAutoTester.testAllModels เพิ่ม freeOnly param; JarvisViewModel.autoTestProviderModels เปลี่ยนจาก nvidia_nim → openrouter (freeOnly=true) — ปุ่ม ✓ ใน Settings ใช้กับ groq/openrouter
+- heuristic fallback อัปเดต: llama-3.3-70b-versatile, qwen3.6, llama-3.3-70b, qwen3, deepseek, gemini, llama, qwen, mistral
+- แก้ bug สำคัญจาก log: llama-3.3-70b/qwen บน Groq ถามราคา XAUUSD แล้วหลุดเรียก search_web ซ้ำแทน trading tools → ตอนนี้ซ่อน search_web ออกจาก tool spec เมื่อ prompt เป็น trading context (TradingToolPolicy.isTradingContext)
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 11b — ผล auto-test OpenRouter free จาก user
+- เทส 17 โมเดลฟรี: ผ่าน 6/17 (chat+tools ครบ)
+  ✅ inclusionai/ling-3.0-tiny (2.1s), poolside/laguna-s-2.1 (3.4s), nvidia/nemotron-3-ultra-550b (3.7s), nvidia/nemotron-3-nano-omni-30b-reasoning (2.2s), google/gemma-4-26b-a4b-it (3.1s), nvidia/nemotron-3-super-120b (2.7s)
+- caps โหลดเข้า orchestrator ถูกต้อง: {groq=3, nvidia_nim=11, openrouter=6} — fallback จะเลือกเฉพาะตัวเทสผ่าน
+- สังเกต: โมเดลที่ fail เร็วผิดปกติ (~140-150ms) หลายตัวน่าจะ 429 burst ตอนเทสถี่ ไม่ใช่โมเดลเสียถาวร
+
+## 2026-08-08 รอบ 12 — แก้ Groq ใช้ trading tools ไม่ได้ (root cause)
+- ROOT CAUSE: chatWithExternalProvider ส่ง tools แค่ take(12) ตามลำดับ registry — builtin tools (calculate/recall_memory/...) มาก่อน trading tools ถูกตัดทิ้งทั้งหมด → model ไม่เห็น trading_price จนหลุดเรียก recall_memory/calculate หรือตอบ "ไม่มีข้อมูล"
+- Fix 1: trading context → sort trading tools ขึ้นก่อน take(12)
+- Fix 2: system prompt addon เมื่อ trading context — แจ้งชัดว่ามี trading_price/trading_technical_analysis/trading_indicators/trading_smc_analysis ฯลฯ ใช้ได้โดยไม่ต้อง MT5 ห้ามตอบ "ไม่มีข้อมูล" ถ้ายังไม่เรียก tool
+- Fix 3: ตัด MT5 tools (21 ตัว) ออกจาก spec เมื่อไม่ใช่ strict MT5 mode — ลด schema bloat + กัน model หลุดเรียก trading_mt5_analyze ตอนไม่ได้ pair
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 13 — ตามผลเทส Groq/OpenRouter ของ user
+- ยืนยัน fix รอบ 12 สำเร็จ: ทั้ง 3 โมเดล Groq เรียก trading_price ได้แล้ว (🔔 [TOOL]: trading_price)
+- llama-3.3-70b ตอบราคาผิด (1,950 vs 4,341 จริง) — เพิ่ม log "Tool result [name] ... 300 chars preview" เพื่อดีบักรอบหน้าว่า tool คืนอะไร
+- llama-3.1-8b-instant ติด TPM 429 ของ Groq (limit 6000/min) ไม่ใช่ bug app
+- ling-3.0-tiny:free ติด 429 upstream Novita ของ OpenRouter ไม่ใช่ bug app
+- แก้ "log ยาวมาก": ตัด logDebug("Stream line: ...") ทุก SSE chunk ใน OpenRouterLlmProvider (reasoning models ทำ logcat พุ่ง 462KB/คำถาม)
+- แก้ "Show free models only ไม่จำค่า": persist setting show_free_models_only + โหลดกลับตอน startup
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 14 — ยืนยัน OpenRouter 6/6 ใช้ได้ + แก้ timeout
+- ยืนยัน: tool result preview ทำงาน — trading_price คืน 4341.9350 ถูกทุกตัว → เคส llama-3.3-70b ตอบ 1,950 คือโมเดลหลอน (tool ให้ค่าถูก)
+- อธิบาย user: Round 1 = โมเดลขอ tool, Round 2 = โมเดลสรุปจากผล tool — เป็นปกติของ tool calling ไม่ใช่ทำงานซ้ำ
+- nemotron-3-super-120b Round 2 เรียก trading_price ซ้ำ args เดิม → loop guard บังคับสรุป (ทำงานถูก)
+- nemotron-3-ultra-550b Round 2 ชน request timeout 60s (reasoning คิดนาน) ตอบขาดกลางประโยค → เพิ่ม LlmOptions.timeoutMs default 60s → 120s
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 รอบ 15 — อัปเดต App_Review_Checklist.md
+- หมวด 1 Provider: ✅ revamp 2026-08-08 (เหลือ Gemini/OpenRouter/Groq/MiniMax, ตัด NIM, multi-key, cross-provider fallback + auto-test, ผลเทสจริง)
+- หมวด 6 Orchestrator: ✅ เทสเครื่องจริงผ่าน (root cause take(12) + 3 fixes) — เหลือประเด็นเดิม JarvisPlanner dead code/IntentClassifier เปิดไว้
+- หมวด 15 Diagnostic/Logging: ✅ (preview คำตอบ/tool result, ตัด SSE log, mask key)
+- ตารางสรุปอัปเดตตาม — เหลือ 🔶 5 หมวด: 9, 10, 11, 12, 13
+
+## 2026-08-08 รอบ 16 — checklist: หมวด 13 Database ✅ (user เทสผ่าน)
+- เหลือ 🔶 4 หมวด: 9 File Tools, 10 System Tools, 11 Camera/Vision, 12 UI/UX
+
+## 2026-08-08 รอบ 17 — หมวด 11 Camera/Vision ✅ + fix เปิดตาแล้วเงียบ
+- user เทส: vision ตอบถูกต้อง แต่เงียบหลังเปิดกล้อง ต้องถามรอบ 2 → root cause: Live API ไม่เริ่ม turn จาก video stream เอง
+- Fix: LiveGeminiService.turnCompleteFlow + sendClientText; LiveToolBridge รอ turn แรกจบ (timeout 15s) แล้วส่ง auto-prompt ให้สรุปภาพ + เรียก vision_deactivate — รอ user ยืนยันรอบหน้า
+- Build: BUILD SUCCESSFUL — user ติดตั้ง APK เอง
+
+## 2026-08-08 — Voice Profile ↔ Identity (หมวด 7 เสริม)
+- แก้ AI เงียบหลังเปลี่ยนเสียง: หลัง reconnect ส่ง sendLiveClientText trigger ให้พูดยืนยันเสียงใหม่ + ทำงานค้างต่อ
+- ผูกเสียงเข้า identity: applyVoiceIdentity() ตั้ง gender(หญิง/ชาย) + vibe ตาม tone ของเสียง persist ลง Core Memory (จำข้าม session)
+- CORE_IDENTITY เพิ่มกฎคำลงท้าย: เสียงหญิง=ค่ะ / ชาย=ครับ (speechParticle)
+- Settings > Identity เพิ่ม dropdown Voice Profile 30 เสียง (♀/♂ + tone) เลือกแล้ว sync gender/vibe อัตโนมัติ
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## 2026-08-09 — แก้บัค Live Voice 2 จุด (ตามรายงาน user)
+- ลบระบบ resume-task หลังเปลี่ยนเสียงทั้งหมด (pendingCommandAfterVoiceChange) — เดิม AI วิ่งไปทำงานเก่าซ้ำ เช่น SMC ทองคำ ตอนนี้เปลี่ยนเสียงแล้วพูดยืนยันเสียงใหม่ 1 ประโยคอย่างเดียว
+- ซ่อน transcription ฝั่ง user ของ live voice ตอนโหลดประวัติแชท (filter metadata live_voice ใน loadHistory) — เดิมเปิดแอปใหม่แล้วคำพูดตัวเองโผล่เป็นตัวหนังสือทั้งหมด
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## 2026-08-09 — แก้ AI อ้างเปลี่ยนเสียงโดยไม่เรียก tool
+- อาการ: AI พูดว่า "เปลี่ยนเป็น Leda แล้ว" แต่ log ไม่มี voice_set_profile — model bluff (hallucinate success)
+- เพิ่ม LIVE_RULES ข้อ 7: ห้ามอ้างเปลี่ยนเสียงสำเร็จหากยังไม่ได้เรียก voice_set_profile เด็ดขาด ต้องเรียก tool ใน turn เดียวกัน
+- เสริม description ของ voice_set_profile ใน ToolRegistry บังคับเรียก tool เมื่อ user ขอเปลี่ยนเสียง
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## 2026-08-09 — Voice change round 3: greeting-on-ready + identity clobber fix
+- แก้ user identity ถูกรีเซ็ตเป็น "ผู้ใช้": applyVoiceIdentity persist เฉพาะ agent_gender/agent_vibe ไม่เขียน map ทั้งก้อนทับ user fields
+- Greeting หลังเปลี่ยนเสียงผูกกับ event setupComplete (pendingGreetingOnReady ใน LiveGeminiService) แทน timer 3.5s ที่ไม่ทำงาน — AI พูดยืนยันเสียงใหม่ทันทีที่ READY ไม่ต้องรอ user พูดก่อน
+- LIVE_RULES ข้อ 7 เพิ่ม: โจทย์กว้างต้องเสนอเสียง+รอยืนยันก่อนเรียก tool / ระบุชื่อชัด=เปลี่ยนทันที / ห้ามเปลี่ยนกลางบทสนทนาที่ยังไม่จบ
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ (user ต้องตั้ง user identity ใหม่ใน Settings 1 ครั้งเพราะถูกทับไปแล้วรอบก่อน)
+
+## 2026-08-09 — Voice greeting round 4: realtimeInput text
+- พิสูจน์แล้ว: clientContent text ถูกส่งถึง model แต่ไม่ trigger generation ขณะ audio streaming (model เก็บเป็น context เฉยๆ ตอบรวมกับ user turn ถัดไป)
+- เพิ่ม sendRealtimeText() ใช้ realtimeInput.text — ถูกปฏิบัติเหมือน user พูดเข้ามาจริง trigger turn ได้
+- pendingGreetingOnReady เปลี่ยนมาใช้ sendRealtimeText แทน sendClientText
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## 2026-08-09 — ✅ หมวด 7 Live/Voice เสร็จสมบูรณ์ (user ยืนยัน "ทำงานได้อย่างลงตัว")
+- Voice change flow ครบวงจร: tool call → reconnect → greeting ด้วยเสียงใหม่อัตโนมัติ (realtimeInput.text)
+- อัปเดต App_Review_Checklist.md หมวด 7 เรียบร้อย — ความรู้สำคัญ: clientContent ไม่ trigger generation ขณะ audio streaming ต้องใช้ realtimeInput.text
+
+## 2026-08-09 — หมวด 9 File Tools: file_write เสริม verify + media scan
+- เคส: AI อ่านสลิปแล้วเขียน bill.txt ลง Download — log ขึ้นสำเร็จแต่ user ไม่เห็นไฟล์
+- file_write เพิ่ม verify หลังเขียน (exists+size) ถ้าเขียนไม่ติดจริงจะคืน error แทนหลอกว่าสำเร็จ
+- เพิ่ม MediaScannerConnection.scanFile หลังเขียนไฟล์ เพื่อให้ file manager เห็นไฟล์ใหม่ทันที
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## 2026-08-09 — หมวด 9: file_write รองรับ .xlsx (Excel จริง)
+- user ยืนยัน media scan fix ใช้ได้: เห็นไฟล์ bill1.txt ใน Download แล้ว
+- สร้าง XlsxWriter.kt (androidMain): เขียน xlsx จริงด้วย zip+XML ไม่พึ่ง POI (เบา ~0 dep) — inline strings, numeric cell อัตโนมัติ, รองรับ quoted CSV
+- file_write: path ลงท้าย .xlsx → content เป็น CSV (บรรทัดละ row) แปลงเป็น Excel; description อัปเดตให้ AI รู้วิธีใช้
+- Use case: อ่านบิล/สลิปหลายใบ → สร้างตารางรายรับ-รายจ่าย .xlsx ลง Download
+- Build assembleDebug ผ่าน — รอ user ติดตั้ง APK ทดสอบ
+
+## แผนอนาคต (บันทึกจาก user 2026-08-09): Rich Chat Rendering
+- แสดงตาราง / รูป / กราฟ / infographic ในแชทได้ — ยกระดับ UX/UI
+- แนวทาง: markdown table renderer ใน chat bubble, image thumbnail จาก file path, chart จาก chart library (เช่น Vico/MPAndroidChart), report card ที่มีอยู่ต่อยอด
+- จัดอยู่ใน roadmap หมวด 12 (UI/UX)
+
+## 2026-08-10 — README.md อัปเดตให้เป็นปัจจุบันทั้งฉบับ
+- เขียนใหม่จากเดิมที่ค้างข้อมูลเก่า (Multi-Provider ยังเขียน GPT-4o/Claude, tool นับ 84/87, ไม่มี Alert V2/Voice profiles/fallback systems)
+- แก้: Providers ปัจจุบัน = Gemini/OpenRouter/Groq/MiniMax, tool catalogue นับใหม่จาก declarations จริง = 88 ตัว (+ system_list/delete_agent_tools, voice_summary)
+- เพิ่ม: Alert System V2, Provider fallback/multi-key/auto-test, Custom tool CRUD, File attachments+xlsx, Voice Profile↔Identity, ผล auto-test Groq 3/8 OpenRouter 6/17
+- ย่อประวัติ mt5-core-server V17-V24 ชี้ไป wiki แทน เก็บ V25/V26/M15 Wall Scalping ไว้ครบ + เพิ่ม Rich Chat Rendering ใน Roadmap + หน้าเอกสารอ้างอิง wiki
+
+## 2026-08-10 — สร้าง project_progress_summary.md
+- สรุปภาพรวมการพัฒนาโปรเจคทั้งหมด (เม.ย.-ส.ค. 2026) จัดกลุ่มตามระบบ: รากฐาน/Live Voice/Alert V2/Providers/Custom Tools/File Tools/ระบบที่ผ่านเทส/สถานะ checklist/Roadmap
+- ที่อยู่: .obsidian-wiki/00_System/project_progress_summary.md — ใช้คู่กับ README.md (GitHub) และ log.md (รายวัน)
+
+## 2026-08-10 — ฟีเจอร์ "รีวิวตัวเอง" + Narration Mode (พูดยาวไม่จำกัด)
+- user ขอ: สั่ง "รีวิวตัวเองให้ฟังหน่อย" แล้ว AI อ่านสรุป README ให้ฟังทั้งหมด + อยากให้พูดยาวขึ้นรองรับเนื้อหายาวอนาคต
+- README อยู่บน PC ไม่ใช่มือถือ → bundle `composeResources/files/self_review.md` (เขียนแบบเล่าเรื่อง: ฉันคือใคร + ความสามารถ 8 ด้าน + ตัวเลข + roadmap)
+- tool ใหม่ `system_self_review`: declaration (ToolRegistry) + executor อ่าน Res.readBytes + แนบคำสั่ง [NARRATION MODE]
+- LiveToolBridge: ยกเว้น [VOICE RULE] 5-8 ประโยคสำหรับ tool นี้ → ใช้ [VOICE RULE - NARRATION] เล่าครบทุกหัวข้อ ไม่จำกัดความยาว ห้ามหยุดกลางทาง
+- JarvisPersona LIVE_RULES ข้อ 8 (โหมดเล่ายาว): เรียก tool ทันทีเมื่อขอรีวิว/แนะนำตัว / เล่ายาวได้เต็มที่ / ห้ามใช้ analyze_and_display_report (user ต้องการฟัง ไม่ใช่อ่าน) / ห้าม markdown ออกเสียง
+- Build assembleDebug SUCCESS — ต้องติดตั้ง APK ใหม่แล้วลองสั่ง "รีวิวตัวเองให้ฟังหน่อย" ทั้งโหมดแชทและ live

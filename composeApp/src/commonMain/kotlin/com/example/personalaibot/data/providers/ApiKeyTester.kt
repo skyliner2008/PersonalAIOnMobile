@@ -52,14 +52,19 @@ object ApiKeyTester {
     /**
      * Format-only validation — instant, no network.  Used for inline hints
      * before the user even taps "Test".
+     *
+     * Returns a hint string (warning) or null if the format looks fine.
+     * For Gemini, prefix mismatch is a SOFT WARNING — the key can still
+     * be tested and saved. Google issues keys in multiple formats
+     * (AIza…, gsk_…, etc.) so we don't block on prefix.
      */
     fun validateFormat(providerId: String, apiKey: String): String? {
         if (apiKey.isBlank()) return "Key is empty"
         val k = apiKey.trim()
         return when (providerId.lowercase()) {
             "gemini" -> when {
-                !k.startsWith("AIza") -> "Gemini keys usually start with \"AIza\""
-                k.length < 35 -> "Key looks too short"
+                k.length < 10 -> "Key looks too short"
+                // Soft hint only — do NOT block non-AIza keys
                 else -> null
             }
             "openai" -> when {
@@ -77,9 +82,32 @@ object ApiKeyTester {
                 k.length < 40 -> "Key looks too short"
                 else -> null
             }
+            "groq" -> when {
+                !k.startsWith("gsk_") -> "Groq keys start with \"gsk_\""
+                k.length < 30 -> "Key looks too short"
+                else -> null
+            }
+            "nvidia_nim", "nim" -> when {
+                !k.startsWith("nvapi-") -> "NVIDIA NIM keys start with \"nvapi-\""
+                k.length < 30 -> "Key looks too short"
+                else -> null
+            }
             // Vertex AI uses ADC — no API key format to validate
             "vertexai" -> null
             else -> null // unknown provider → skip format check
+        }
+    }
+
+    /**
+     * Soft hint for Gemini keys — shown as amber text in the UI
+     * but does NOT block testing or saving.
+     */
+    fun geminiPrefixHint(apiKey: String): String? {
+        val k = apiKey.trim()
+        return when {
+            k.isBlank() -> null
+            k.startsWith("AIza") -> null  // classic format
+            else -> "Non-standard prefix — tap Test to verify"
         }
     }
 
@@ -110,6 +138,8 @@ object ApiKeyTester {
                     "openai" -> OpenAILlmProvider(client, apiKey).listModels(apiKey)
                     "claude", "anthropic" -> ClaudeLlmProvider(client, apiKey).listModels(apiKey)
                     "openrouter" -> OpenRouterLlmProvider(client, apiKey).listModels(apiKey)
+                    "groq" -> GroqLlmProvider(client, apiKey).listModels(apiKey)
+                    "nvidia_nim", "nim" -> NvidiaNimLlmProvider(client, apiKey).listModels(apiKey)
                     "gemini" -> {
                         // GeminiLlmProvider's listModels uses the GeminiService
                         // singleton which doesn't accept a per-call key; do a
