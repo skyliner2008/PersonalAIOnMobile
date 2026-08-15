@@ -9,9 +9,9 @@
 **JARVIS** (PersonalAIBot) คือระบบผู้ช่วย AI ส่วนบุคคลระดับสูง (Personal AI Assistant) ที่ออกแบบมาเพื่อเป็นทั้งเพื่อนคู่คิดและนักวิเคราะห์การเงินอัจฉริยะ ขับเคลื่อนด้วย **Google Gemini 3 Series (Free-Tier Optimized)** + ระบบ **Multi-Provider Fallback**, ความจำ 6 ชั้น (GraphRAG & Obsidian Wiki), ระบบเฝ้าติดตามตลาดอัตโนมัติ (Alert System V2) และระบบ **MT5 Full Agent Control** สำหรับเทรดแบบครบวงจร
 
 - **🔌 Multi-Provider + Fallback หลายชั้น** — Gemini (Multi API Key + Model Fallback Chain) → Groq → OpenRouter → MiniMax สลับอัตโนมัติเมื่อติด limit พร้อม Auto-Test คัดเฉพาะโมเดลที่ใช้ tool ได้จริง
-- **🔔 Alert System V2** — ตั้งเงื่อนไขเฝ้าราคา/อินดิเคเตอร์/SMC ได้จริง แจ้งเตือนพร้อมปุ่ม "หยุด / แจ้งซ้ำ" และ Adaptive Interval เร่งเช็คเมื่อราคาใกล้เป้า
+- **🔔 Alert System V2** — ตั้งเงื่อนไขเฝ้าราคา/อินดิเคเตอร์/SMC/**สัญญาณกลยุทธ์ (Signal Alert)** ได้จริง แจ้งเตือนพร้อมปุ่ม "🗑 ลบ / 🔁 ซ้ำ" + การ์ด 3D ในแชท + เสียงพูดแจ้งเตือนเลือก engine ได้ (AI Live / เครื่อง) และ Adaptive Interval เร่งเช็คเมื่อราคาใกล้เป้า
 - **🎙️ Live Voice + Vision** — คุยสดกับ Gemini Live, เลือกเสียงได้ 30 โปรไฟล์ (ผูกตัวตน/คำลงท้ายอัตโนมัติ), เปิด "ตา" ให้ AI มองผ่านกล้องพร้อม AR Overlay
-- **📲 Mobile Android App (Compose Multiplatform)** — ดีไซน์พรีเมียม, แนบไฟล์/รูป/PDF ในแชทให้ AI วิเคราะห์, สร้างไฟล์ Excel จริง, Symbol Catalogue, Decision Feed และ Auto Trading Controls
+- **📲 Mobile Android App (Compose Multiplatform)** — ดีไซน์พรีเมียม, แนบไฟล์/รูป/PDF ในแชทให้ AI วิเคราะห์, สร้างไฟล์ Excel จริง, Symbol Catalogue, Decision Feed, Auto Trading Controls และ **Setup Checklist** 6 ข้อใน Settings (แจ้งเตือน/ไมค์/กล้อง/Overlay/All-files/Battery — ปุ่มพาไปหน้าตั้งค่าระบบตรงจุด)
 
 ---
 
@@ -37,21 +37,29 @@
 ### 📊 3. Trading Intelligence บนมือถือ (TV-Powered)
 
 - **Indicator Alert Provider** — คำนวณ EMA20/50/200, EMA Cross (Golden/Death), RSI14, MACD, Stoch, CCI, Bollinger Bands, ATR เองจากแท่งเทียน cache (incremental fetch ไม่ดึงใหม่ทั้งชุด) แม่นกว่า TradingView scanner
+- **Strategy Signal Provider** — 5 กลยุทธ์จากคลัง Quantpedia คำนวณในเครื่องจาก OHLCV ล้วน (TSMOM, Trend EMA50/200, Reversal RSI+BB, Donchian Breakout, 52-Week High) + consensus score
+- **🎯 Signal Alert Provider** — ตรวจ edge สัญญาณซื้อ/ขายใหม่เฉพาะแท่งปิดล่าสุดจาก **8 กลยุทธ์** (5 ข้างต้น + EMA Cross, UT Bot, 3-Bar Reversal) พร้อม payload ครบ: Entry/SL/TP/RR เฉพาะกลยุทธ์ (คำนวณจาก ATR) + เหตุผลภาษาไทย + context snapshot — baseline กันสัญญาณเก่าเด้งตอนสร้าง alert อัตโนมัติ และบันทึกทุกสัญญาณลง DB เพื่อติดตามผล TP/SL จริง (win-rate/avgR)
 - **SMC Alert Provider** — แปลง SMC analysis เป็น field เฝ้าติดตามได้ 18 ตัว: zone (Premium/Discount), BOS/CHoCH, Order Blocks, FVG, Liquidity zones + ดาว
 - **Deep Analysis Suite ครบ 5 มิติ** — LSD state + confluence, Orderflow Delta, Fibo Score, Momentum, Squeeze (9 fields) พร้อม TV local fallback + circuit breaker เมื่อ bridge ล่ม
 - **Multi-Timeframe ทุก tool** — ระบุ TF ได้ด้วย suffix `symbol@TF` เช่น `XAUUSD@15m` (1m/5m/15m/30m/1h/4h/1D)
-- **Chart Dashboard (Lightweight Charts v5.1, offline)** — กราฟ multi-pane ในตัวแอป: layouts (single / RSI / MACD / RSI+MACD / Volume / Full), overlays EMA20/50/200 + Bollinger Bands, วาด SMC zones (OB/FVG), ข้อมูลแท่งเทียนจาก TV incremental cache, สลับไป TradingView widget ได้ทุกเมื่อ — **AI ปรับ layout/indicator เองผ่าน tool `chart_dashboard_control`** ทั้งแชทและ Live ("เปิดกราฟทองคำ 1 ชั่วโมง เพิ่ม RSI กับ MACD")
+- **Chart Dashboard (Lightweight Charts v5.1, offline)** — กราฟ multi-pane ในตัวแอป: layouts (single / RSI / MACD / RSI+MACD / Volume / Full), overlays EMA20/50/200 + Bollinger Bands + Donchian (DC20) + **Signal Markers (SIG)** จุดสัญญาณย้อนหลัง 8 ชนิดบนกราฟ, วาด SMC zones (OB/FVG), ข้อมูลแท่งเทียนจาก TV incremental cache (market-closed backoff กันดึงซ้ำตอนตลาดปิด), สลับไป TradingView widget ได้ทุกเมื่อ — **AI ปรับ layout/indicator เองผ่าน tool `chart_dashboard_control`** ทั้งแชทและ Live ("เปิดกราฟทองคำ 1 ชั่วโมง เพิ่ม RSI กับ MACD")
 - **Rich Chat Rendering** — ตาราง markdown แสดงเป็นตารางจริง (header สี + scroll แนวนอน) และ AI แนบ **chart card** ในแชทได้ (```chart fence) แตะการ์ดเพื่อเปิดกราฟเต็มจอด้วย config นั้นทันที
 
 ### 🔔 4. Alert System V2 (ระบบเฝ้าติดตามตลาด)
 
-- **Actionable Notifications** — แจ้งเตือนพร้อมปุ่ม **"🛑 หยุดแจ้งเตือน" / "🔁 แจ้งเตือนซ้ำ"** (manifest receiver ทำงานได้แม้แอปถูกฆ่า) + สถานะชัดเจน "ACTIVE · เฝ้าดูอยู่" / "TRIGGERED · แจ้งแล้ว"
+- **🎯 Signal Alert (ใหม่)** — job type `trading_signal_alert` เฝ้าสัญญาณซื้อ/ขายจาก 8 กลยุทธ์ edge-triggered; payload ครบ Entry/SL/TP/RR/ATR + เหตุผลไทย; **re-arm อัตโนมัติ**ทุกแท่งใหม่ (ไม่ต้องกดซ้ำ) และสร้างผ่านเสียง/แชท/UI ได้ (AI แปลง `signal contains BUY` ให้เป็น signal alert อัตโนมัติ ทำงานตรงกันทุกเครื่อง)
+- **Alert Lifecycle ชัดเจน** — alert ทั่วไป (ราคา/indicator) ที่ TRIGGERED แล้ว **ออกจาก job loop ทันที** ไม่วนเช็กเปลืองทรัพยากร; re-arm ทางเดียวคือปุ่ม **🔁 แจ้งเตือนซ้ำ** (บน notification และในหน้า Cron Jobs) หรือ **🗑 ลบแจ้งเตือน** (ลบออกจาก list จริง ประวัติยังเก็บ)
+- **2 โหมดส่ง (delivery)** — `ai`: AI quick-check ก่อนแจ้ง (fallback chain หลายโมเดล) | `direct`: แจ้งตรงทันทีไม่เรียก AI — ทั้งสองโหมดส่งเข้าแชทพร้อม notification
+- **การ์ด 3D ในแชท** — ทุก alert แสดงเป็นการ์ดจัดระเบียบ (ป้าย 🟢BUY/🔴SELL + gradient/shadow + ตาราง Entry/TP/SL/RR/ATR เฉพาะ field ที่จำเป็น) พร้อม footer บอก engine เสียงที่ใช้จริง; เก่าเป็น markdown table ยังเปิดดูได้ (backward compatible)
+- **🔊 เสียงแจ้งเตือนเลือก engine ได้** — `⚡ เครื่อง` (Android TTS ทันที/ไม่จำกัด — default) | `✨ AI Live` (streaming ผ่าน Live API ได้ยินตั้งแต่ chunk แรก) — chain เริ่มจาก **โมเดล Live ที่เลือกใน Settings** เสมอ → fallback โมเดล Live อีกตัว → Android TTS; ใช้ voice profile + identity เดียวกับ Live mode
+- **Actionable Notifications** — ปุ่ม "🗑 ลบแจ้งเตือน" / "🔁 แจ้งเตือนซ้ำ" (manifest receiver ทำงานได้แม้แอปถูกฆ่า) + สถานะชัดเจน "ACTIVE · เฝ้าดูอยู่" / "TRIGGERED · รอเลือก ลบ/ซ้ำ"
 - **Adaptive Interval** — tick หลัก 30 วินาที + เร่งเช็คอัตโนมัติเมื่อราคาใกล้เป้า (<0.1% → 30 วิ, <0.5% → 1 นาที, ไกล → ตามที่ตั้ง) รองรับทองคำที่วิ่งแรง
 - **AlertFieldCatalog** — dropdown ตอนสร้าง alert เลือกได้เฉพาะ tool/field ที่ดึงค่าได้จริง + validate operator (field ข้อความบังคับ `==`/`contains`) กันตั้งเงื่อนไขมั่ว ทั้งฝั่ง UI และฝั่ง AI
-- **14 Preset ลัด** — ราคาถึงเป้า, RSI Overbought/Oversold, Golden/Death Cross, Discount/Premium Zone, Bollinger Squeeze, ADX แรง, Extreme Fear, High Confluence, LSD ขาขึ้น, Squeeze Breakout ฯลฯ
-- **🧪 Auto-Test** — ปุ่มเดียวไล่ทดสอบดึงข้อมูลทุก tool ที่ alert ใช้ (8/8 ผ่านล่าสุด) แสดงสถานะสดในแอป
-- **แก้ไขครบทุกช่อง** — ชื่อ, ค่าเป้าหมาย, ความถี่ ผ่าน UI หรือสั่ง AI (`automation_manage_alerts`: create/update/rename/delete/list)
-- **Scheduled Tasks** — `automation_manage_schedule` งานตามเวลา (one-time/daily) ถึงเวลาปลุก AI มาทำตาม prompt
+- **14+ Preset ลัด** — ราคาถึงเป้า, RSI Overbought/Oversold, Golden/Death Cross, Discount/Premium Zone, Bollinger Squeeze, ADX แรง, Extreme Fear, High Confluence, LSD ขาขึ้น, Squeeze Breakout, 📡 Signal BUY/SELL, Consensus STRONG_BUY/SELL, Donchian Breakout ฯลฯ
+- **🧪 Auto-Test** — ปุ่มเดียวไล่ทดสอบดึงข้อมูลทุก tool ที่ alert ใช้ แสดงสถานะสดในแอป
+- **แก้ไขครบทุกช่อง** — ชื่อ, ค่าเป้าหมาย, ความถี่, โหมดส่ง ผ่าน UI หรือสั่ง AI (`automation_manage_alerts`: create/update/rename/delete/list)
+- **Scheduled Tasks** — `automation_manage_schedule` งานตามเวลา (one-time/daily) ถึงเวลาปลุก AI มาทำตาม prompt แล้วส่งผลเข้าแชทด้วย
+- **🔍 Pipeline Trace Log** — log ละเอียดทุกขั้นตอนแจ้งเตือน (🔔 FIRE config → 🧠 AI summary ต่อโมเดล → 🔊 voice engine/fallback → 💬 push แชท) debug จาก logcat ได้จบในที่เดียว
 
 ### 🔌 5. Provider System — Multi-Key, Fallback & Auto-Test
 
@@ -137,7 +145,7 @@
 
 ---
 
-## 📦 Tool Catalogue (Total: 89 Tools)
+## 📦 Tool Catalogue (Total: 91 Tools)
 
 ### 🧠 BUILT-IN & SYSTEM TOOLS (21 tools)
 - `calculate`: คำนวณนิพจน์คณิตศาสตร์
@@ -161,7 +169,7 @@
 - `voice_summary`: สรุปเฉพาะส่วนที่พูดในโหมดเสียง
 - `mt5_place_order` / `mt5_close_position`: alias ส่ง/ปิดออเดอร์ MT5
 
-### 📊 TRADING TOOLS (26 tools)
+### 📊 TRADING TOOLS (28 tools)
 - `trading_price`: ราคา Real-time (Stocks/Crypto/Forex/Gold — TV primary + fallback)
 - `trading_market_snapshot`: ภาพรวมตลาดตามกลุ่มอุตสาหกรรม
 - `trading_top_gainers` / `trading_top_losers`: ตัวพุ่ง/ดิ่งแรงสุด
@@ -181,6 +189,8 @@
 - `trading_deep_analysis_suite`: วิเคราะห์ 5 มิติ (LSD, Orderflow, Fibo, Momentum, Squeeze) + TV local fallback
 - `trading_harmonic_scan`: Harmonic Patterns (Gartley, Bat, Butterfly)
 - `trading_elliot_modern_analysis`: Elliott Wave แบบ Modern
+- `trading_strategy_signal`: สัญญาณจาก 5 กลยุทธ์ Quantpedia คำนวณในเครื่อง (TSMOM/Trend/Reversal/Donchian/52W-High) + consensus
+- `trading_signal_stats`: สถิติสัญญาณ — backtest ย้อนหลัง (win-rate/avgR) หรือผล TP/SL จริงจาก signal ที่ยิงไปแล้ว (source=live)
 - `automation_manage_alerts`: สร้าง/แก้/ rename /ลบ/list alerts (validate ด้วย AlertFieldCatalog)
 - `automation_manage_schedule`: ⏰ งานตามเวลา (one-time/daily)
 

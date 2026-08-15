@@ -1134,3 +1134,10 @@
 **แก้ไข:** `SmcApiService.kt` branch `missingBars <= 0` เพิ่ม logDebug "TV cache fresh $sym/$interval: DB N แท่งทันปัจจุบัน (missing=0) — ไม่ต้องดึง รอ bucket ใหม่" ให้เห็นเส้นทาง cache สดชัดเจนเท่า path skip/backoff
 **ไฟล์:** `composeApp/src/commonMain/kotlin/com/example/personalaibot/tools/trading/SmcApiService.kt`
 **Build:** assembleDebug ผ่าน
+
+## 2026-08-15 — อัปเดต README.md ให้ทันงาน 12–15 ส.ค.
+
+- หัวข้อ bullet หลัก: Alert System V2 เพิ่ม Signal Alert + ปุ่ม ลบ/ซ้ำ + การ์ด 3D + เสียงเลือก engine; Mobile App เพิ่ม Setup Checklist 6 ข้อ
+- Trading Intelligence: เพิ่ม Strategy Signal Provider (5 กลยุทธ์ Quantpedia) + Signal Alert Provider (8 กลยุทธ์ edge-triggered, Entry/SL/TP/RR, baseline กันเด้ง, บันทึกผล TP/SL จริง); Chart Dashboard เพิ่ม overlay Donchian + Signal Markers (SIG) + หมายเหตุ market-closed backoff
+- Alert System V2 (section 4) เขียนใหม่ทั้งชุด: Signal Alert re-arm อัตโนมัติ, lifecycle TRIGGERED ออกจาก loop + ปุ่ม 🗑/🔁, โหมดส่ง ai/direct, การ์ด 3D + footer engine, เสียง 2 engine (เครื่อง default / AI Live chain ตาม Settings), presets 14+, pipeline trace log
+- Tool Catalogue: 89 → 91 (เพิ่ม trading_strategy_signal, trading_signal_stats ใน TRADING TOOLS 26 → 28)
