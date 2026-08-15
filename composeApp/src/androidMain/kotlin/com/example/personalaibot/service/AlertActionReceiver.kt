@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
 import kotlin.concurrent.thread
 
 /**
- * Receiver สำหรับปุ่มบน notification ของ alert ("🛑 หยุดแจ้งเตือน" / "🔁 แจ้งเตือนซ้ำ")
+ * Receiver สำหรับปุ่มบน notification ของ alert ("🗑 ลบแจ้งเตือน" / "🔁 แจ้งเตือนซ้ำ")
  *
  * ประกาศใน AndroidManifest (ไม่ใช่ dynamic receiver) เพื่อให้ทำงานได้แม้
  * JarvisAutomationService หรือตัวแอปถูกฆ่าไปแล้ว — ระบบจะปลุก receiver นี้ขึ้นมาเอง
@@ -42,14 +42,16 @@ class AlertActionReceiver : BroadcastReceiver() {
                     val db = JarvisDatabase(driver)
                     when (action) {
                         JarvisAutomationService.ACTION_ALERT_STOP -> {
-                            // 🛑 หยุดแจ้งเตือน — ปิด job ถาวร (เปิดใหม่ได้ในหน้า Automation)
-                            db.jarvisDatabaseQueries.updateAlertJobStatus(0L, jobId)
+                            // 🗑 ลบแจ้งเตือน — ลบ job ออกจากรายการถาวร (ประวัติ SignalAlertRecord ยังเก็บไว้)
+                            db.jarvisDatabaseQueries.deleteAlertJob(jobId)
                         }
                         JarvisAutomationService.ACTION_ALERT_REPEAT -> {
                             // 🔁 แจ้งเตือนซ้ำ — รีเซ็ต trigger ให้เฝ้าดูและแจ้งใหม่เมื่อเข้าเงื่อนไข
                             db.jarvisDatabaseQueries.updateAlertJobTriggerState(
                                 0L, null, Clock.System.now().toEpochMilliseconds(), jobId
                             )
+                            // ปลุก service กลับมาด้วย — ถ้าเหลือแต่ job TRIGGERED ค้าง service จะ stopSelf ไปแล้ว
+                            com.example.personalaibot.automation.wakeupAutomationService()
                         }
                     }
                 } finally {
@@ -66,7 +68,7 @@ class AlertActionReceiver : BroadcastReceiver() {
                 nm.cancel(notifId)
                 val (title, body) = when (action) {
                     JarvisAutomationService.ACTION_ALERT_STOP ->
-                        "🛑 หยุดแจ้งเตือนแล้ว" to "งานเฝ้าดูถูกปิดการใช้งาน — เปิดใหม่ได้ในหน้า Automation"
+                        "🗑 ลบแจ้งเตือนแล้ว" to "งานเฝ้าดูถูกลบออกจากรายการแล้ว — สร้างใหม่ได้ในหน้า Automation"
                     else ->
                         "🔁 เฝ้าดูต่อแล้ว" to "จะแจ้งเตือนอีกครั้งเมื่อราคาเข้าเงื่อนไข"
                 }

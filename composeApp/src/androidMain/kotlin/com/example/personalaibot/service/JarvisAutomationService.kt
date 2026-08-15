@@ -190,7 +190,9 @@ class JarvisAutomationService : Service() {
 
     /** Runs one polling cycle and returns the suggested delay until the next. */
     private suspend fun runOneCycle(): Long {
-        val jobs = database.jarvisDatabaseQueries.getAllActiveJobs().executeAsList()
+        // getRunnableJobs = active ที่ยังไม่ TRIGGERED ค้าง (หรือเป็น signal alert ที่ re-arm เอง)
+        // — job ทั่วไปที่แจ้งไปแล้วจะไม่เข้า loop อีก จนกว่าผู้ใช้จะกด 🔁 ซ้ำ/🗑 ลบ จาก notification หรือหน้า list
+        val jobs = database.jarvisDatabaseQueries.getRunnableJobs().executeAsList()
         val tasks = database.jarvisDatabaseQueries.getAllActiveScheduledTasks().executeAsList()
 
         // No active jobs/tasks → don't keep a foreground notification alive forever.
@@ -381,6 +383,13 @@ class JarvisAutomationService : Service() {
     }
 
     private suspend fun checkJob(job: AlertJob) {
+        // Alert ทั่วไปที่ยิงไปแล้ว (is_triggered=1) → พักการเฝ้าดู รอผู้ใช้ตัดสินใจจากปุ่มบน notification
+        // (🛑 หยุดแจ้งเตือน = ปิด job / 🔁 แจ้งเตือนซ้ำ = รีเซ็ตให้เฝ้าดูใหม่ ผ่าน AlertActionReceiver)
+        // ยกเว้น trading_signal_alert — re-arm อัตโนมัติเมื่อแท่งสัญญาณผ่านไป (provider คืน id=0 → resetTrigger)
+        if (job.is_triggered == 1L && job.tool_name != "trading_signal_alert") {
+            logDebug("AutomationService", "⏸ พัก '${job.name}' — TRIGGERED แล้ว รอผู้ใช้เลือก หยุด/ซ้ำ จาก notification")
+            return
+        }
         logDebug("AutomationService", "Checking job: ${job.name} for ${job.symbol}")
 
         // Decode condition first (need field name for logging regardless of fetch result)
@@ -444,8 +453,11 @@ class JarvisAutomationService : Service() {
         if (job.tool_name == "trading_deep_analysis_suite") {
              val score = data["summaryScore"]?.toDoubleOrNull() ?: 0.0
              if (score >= 85.0 && job.is_triggered == 0L) {
+                 // mark ก่อนยิง (กันยิงซ้ำทุก cycle ขณะ score ค้าง ≥85) แล้วพักรอผู้ใช้เลือกเหมือน alert ทั่วไป
+                 automationManager.markTriggered(job.id, "🌟 $score")
                  // แยกไปทำขนาน — ไม่บล็อก loop (AI call ใช้เวลา ~10 วิ)
                  scope.launch { fireJobAlert(job, "🌟 High Confluence ($score)", data) }
+                 return // ยิง confluence แล้ว ไม่ประเมินเงื่อนไขหลักซ้ำในรอบนี้ (กัน notification เบิ้ล)
              }
         }
 
@@ -635,7 +647,7 @@ class JarvisAutomationService : Service() {
 
     /**
      * Notification ของ alert แบบมีปุ่มกดได้ 2 ปุ่ม (ทำหน้าที่เหมือน msg box):
-     *   🛑 หยุดแจ้งเตือน  — ปิด job นี้ (is_active = 0)
+     *   🗑 ลบแจ้งเตือน   — ลบ job นี้ออกจากรายการถาวร
      *   🔁 แจ้งเตือนซ้ำ   — รีเซ็ตสถานะ ให้ระบบเฝ้าดูและแจ้งใหม่เมื่อเข้าเงื่อนไขอีกครั้ง
      * (Android ไม่อนุญาตให้ background service เปิด dialog ลอยได้จริง
      *  ปุ่มบน notification คือทางที่ถูกต้องตาม platform)
@@ -665,7 +677,7 @@ class JarvisAutomationService : Service() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(createPendingIntent())
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "🛑 หยุดแจ้งเตือน", actionIntent(ACTION_ALERT_STOP))
+            .addAction(android.R.drawable.ic_menu_delete, "🗑 ลบแจ้งเตือน", actionIntent(ACTION_ALERT_STOP))
             .addAction(android.R.drawable.ic_menu_rotate, "🔁 แจ้งเตือนซ้ำ", actionIntent(ACTION_ALERT_REPEAT))
             .build()
 

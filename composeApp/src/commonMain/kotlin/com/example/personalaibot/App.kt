@@ -325,6 +325,7 @@ fun App(
                             onAlertVoiceEngineChange = { viewModel.setAlertVoiceEngine(it) },
                             onDelete = { viewModel.automationManager.deleteJob(it) },
                             onDeleteTask = { viewModel.automationManager.deleteScheduledTask(it) },
+                            onRepeatAlert = { viewModel.automationManager.resetTrigger(it) },
                             onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) },
                             onUpdateCondition = { id, cond -> viewModel.automationManager.updateCondition(id, cond) },
                             onRename = { id, name -> viewModel.automationManager.renameJob(id, name) },

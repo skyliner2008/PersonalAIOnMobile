@@ -71,6 +71,7 @@ fun AutomationScreen(
     onAlertVoiceEngineChange: (String) -> Unit = {},
     onDelete: (Long) -> Unit,
     onDeleteTask: (Long) -> Unit,
+    onRepeatAlert: (Long) -> Unit = {},
     onUpdateInterval: (Long, Long) -> Unit,
     onUpdateCondition: (Long, com.example.personalaibot.automation.AutomationCondition) -> Unit = { _, _ -> },
     onRename: (Long, String) -> Unit = { _, _ -> },
@@ -139,6 +140,7 @@ fun AutomationScreen(
                 CronJobCard(
                     job = job,
                     onDelete = { onDelete(job.id) },
+                    onRepeat = { onRepeatAlert(job.id) },
                     onUpdateInterval = { interval -> onUpdateInterval(job.id, interval) },
                     onUpdateCondition = { cond -> onUpdateCondition(job.id, cond) },
                     onRename = { name -> onRename(job.id, name) }
@@ -400,6 +402,7 @@ private fun ScheduledTaskCard(
 private fun CronJobCard(
     job: AlertJob,
     onDelete: () -> Unit,
+    onRepeat: () -> Unit = {},
     onUpdateInterval: (Long) -> Unit,
     onUpdateCondition: (com.example.personalaibot.automation.AutomationCondition) -> Unit,
     onRename: (String) -> Unit = {}
@@ -457,9 +460,14 @@ private fun CronJobCard(
                     Text(job.symbol.take(8), color = JarvisTheme.Cyan, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                // สถานะ: TRIGGERED = แจ้งไปแล้ว ระบบยัง ACTIVE อยู่และจะรีเซ็ตอัตโนมัติเมื่อราคาหลุดเงื่อนไข (Repeat mode)
+                // สถานะ: TRIGGERED = แจ้งไปแล้ว
+                //  - signal alert: ระบบ re-arm อัตโนมัติ รอสัญญาณใหม่
+                //  - alert ทั่วไป: พักเฝ้าดู รอผู้ใช้เลือก "🛑 หยุด" / "🔁 ซ้ำ" จาก notification (หรือสลับ ปิด/เปิด job ในนี้เพื่อเริ่มเฝ้าดูใหม่)
                 Text(
-                    if (job.is_triggered == 1L) "TRIGGERED · แจ้งแล้ว" else "ACTIVE · เฝ้าดูอยู่",
+                    if (job.is_triggered == 1L) {
+                        if (job.tool_name == "trading_signal_alert") "TRIGGERED · รอสัญญาณใหม่"
+                        else "TRIGGERED · รอเลือก ลบ/ซ้ำ"
+                    } else "ACTIVE · เฝ้าดูอยู่",
                     color = if (job.is_triggered == 1L) Color(0xFFFF5252) else Color(0xFF00C853),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
@@ -483,6 +491,13 @@ private fun CronJobCard(
                     color = Color.White.copy(alpha = 0.75f)
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                // ปุ่ม 🔁 แจ้งเตือนซ้ำ — โชว์เฉพาะ alert ทั่วไปที่ TRIGGERED ค้าง (เผื่อผู้ใช้ปัด notification ทิ้ง)
+                // signal alert ไม่ต้องมี เพราะ re-arm อัตโนมัติเมื่อแท่งสัญญาณผ่านไป
+                if (job.is_triggered == 1L && job.tool_name != "trading_signal_alert") {
+                    IconButton(onClick = onRepeat) {
+                        Icon(Icons.Default.Refresh, contentDescription = "แจ้งเตือนซ้ำ", tint = Color(0xFF00C853))
+                    }
+                }
                 IconButton(onClick = { showEditDialog = true }) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit Alert", tint = Color.White.copy(alpha = 0.8f))
                 }

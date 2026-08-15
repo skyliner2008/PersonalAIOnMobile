@@ -137,6 +137,12 @@ class SmcApiService(private val client: HttpClient) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     private val priceApi by lazy { TradingApiService(client) }
 
+    // กันดึงซ้ำตอนตลาดปิด (เสาร์-อาทิตย์/วันหยุด): estimateMissingBars เทียบกับ "เวลาปัจจุบัน" เสมอ
+    // ทำให้ช่วงตลาดปิดดูเหมือน "ขาดแท่ง" ตลอด — ถ้ารีเฟรชแล้วไม่ได้แท่งใหม่กว่า DB เลย
+    // จำไว้แล้วข้ามการดึงตาม streak (1→4 buckets) จนกว่าจะมีแท่งใหม่จริง
+    private val tvNoNewDataStreak = mutableMapOf<String, Int>()
+    private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
+
     // Interval maps
     private val binanceIntervalMap = mapOf(
         "1m" to "1m", "3m" to "3m", "5m" to "5m", "15m" to "15m",
@@ -193,6 +199,18 @@ class SmcApiService(private val client: HttpClient) {
                 return result
             }
 
+            // ถ้ารีเฟรชรอบก่อนไม่ได้แท่งใหม่เลย (ตลาดปิด) → ข้ามการดึงตาม backoff ที่ตั้งไว้
+            val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
+            val bucketStart = (Clock.System.now().toEpochMilliseconds() / tfMs) * tfMs
+            val noNewKey = "$sym|$interval"
+            val skipUntilBucket = tvNoNewDataSkipUntil[noNewKey]
+            if (skipUntilBucket != null && bucketStart < skipUntilBucket) {
+                logDebug("SmcApiService", "TV incremental skip $sym/$interval: ไม่มีแท่งใหม่ (ตลาดปิด?) — ใช้ DB ${dbCandles.size} แท่งต่อ")
+                val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
+                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
+                return result
+            }
+
             // Incremental refresh: fetch only missing buckets with TF-specific baseline.
             val deltaBars = computeDeltaFetchBars(interval, missingBars, targetBars)
             logDebug(
@@ -201,9 +219,21 @@ class SmcApiService(private val client: HttpClient) {
             )
             val tvDelta = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = deltaBars)
             if (tvDelta.candles.isNotEmpty()) {
+                val latestBefore = dbCandles.maxOf { it.timestamp }
                 val merged = mergeCandlesByTimestamp(dbCandles, tvDelta.candles).takeLast(targetBars)
-                saveTvCandlesToDb(sym, interval, tvDelta.source, merged)
-                trimTvCandlesByWindow(sym, interval, merged)
+                if (merged.maxOf { it.timestamp } <= latestBefore) {
+                    // TV ตอบกลับแต่ไม่มีแท่งใหม่กว่าที่มีใน DB — ตลาดน่าจะปิด: backoff ตาม streak (เพดาน 4 buckets) และไม่เขียน DB ซ้ำ
+                    val streak = (tvNoNewDataStreak[noNewKey] ?: 0) + 1
+                    tvNoNewDataStreak[noNewKey] = streak
+                    val waitBuckets = streak.coerceAtMost(4)
+                    tvNoNewDataSkipUntil[noNewKey] = bucketStart + tfMs * waitBuckets
+                    logDebug("SmcApiService", "TV no-new-bars $sym/$interval: streak=$streak → ข้าม $waitBuckets bucket(s) ถัดไป")
+                } else {
+                    tvNoNewDataStreak.remove(noNewKey)
+                    tvNoNewDataSkipUntil.remove(noNewKey)
+                    saveTvCandlesToDb(sym, interval, tvDelta.source, merged)
+                    trimTvCandlesByWindow(sym, interval, merged)
+                }
                 val result = CandleFetchResult(merged, "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
                 return result

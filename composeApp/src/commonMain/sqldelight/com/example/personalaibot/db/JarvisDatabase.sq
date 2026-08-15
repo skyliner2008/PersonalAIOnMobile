@@ -258,8 +258,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 getAllActiveJobs:
 SELECT * FROM AlertJob WHERE is_active = 1;
 
+-- สำหรับ loop เช็กเงื่อนไขของ AutomationService เท่านั้น — ตัด job ที่ TRIGGERED ค้างออก
+-- (รอผู้ใช้เลือก ลบ/ซ้ำ จาก notification หรือปุ่ม 🔁 ในหน้า list) ยกเว้น signal alert
+-- ที่ re-arm อัตโนมัติเมื่อแท่งสัญญาณผ่านไป — UI list ยังใช้ getAllActiveJobs เห็นครบทุก job
+getRunnableJobs:
+SELECT * FROM AlertJob WHERE is_active = 1 AND (is_triggered = 0 OR tool_name = 'trading_signal_alert');
+
 updateAlertJobStatus:
-UPDATE AlertJob SET is_active = ? WHERE id = ?;
+UPDATE AlertJob SET is_active = ?, is_triggered = 0, last_value = NULL WHERE id = ?;
 
 updateAlertJobTriggerState:
 UPDATE AlertJob SET is_triggered = ?, last_value = ?, last_run_at = ? WHERE id = ?;

@@ -1080,3 +1080,34 @@
 - แก้ JarvisAutomationService: LIVE_VOICE_CHAIN คงที่ → liveVoiceChain() อ่าน setting live_model_name (default ModelConfig.DEFAULT_LIVE_MODEL) ดันขึ้นต้น chain + ตัวที่เหลือตามหลัง (dedup); โมเดลนอกลิสต์รองรับด้วย (label = ชื่อดิบ)
 - log เพิ่ม "🔊 Live chain: X → Y (ตามโมเดล Live ที่เลือกใน Settings)" ทุกครั้งก่อนพูด — เช็กลำดับ chain จาก logcat ได้
 - BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — Alert ทั่วไปหยุดวน loop หลัง TRIGGERED จนกว่าผู้ใช้จะเลือก หยุด/ซ้ำ
+- ปัญหา: alert ที่ไม่ใช่ signal (เช่น price alert "Alert XAUUSD" GTE 4370) หลังยิงแจ้งเตือนแล้ว ระบบยังวนเช็กเงื่อนไขทุก cycle (log "met=true" ซ้ำทุก ~1-2 นาที) ถึงไม่ยิง notification ซ้ำ แต่เปลืองทรัพยากรและสถานะค้าง — ผู้ใช้ต้องการให้ "พัก" จนกว่าจะกด 🛑 หยุดแจ้งเตือน / 🔁 แจ้งเตือนซ้ำ จาก notification
+- กลไกเดิมที่ค้นพบ: signal alert (trading_signal_alert) re-arm อัตโนมัติเพราะ SignalAlertProvider คืน signal_buy_id/signal_sell_id เฉพาะเมื่อมี edge ที่ "แท่งปิดล่าสุด" พอแท่งผ่านไปคืน 0 → met=false → resetTrigger (ห้ามแตะพฤติกรรมนี้); ส่วน alert ทั่วไป reset เมื่อเงื่อนไขกลับเป็น false (ราคาหลุด) เท่านั้น
+- แก้ JarvisAutomationService.checkJob: ถ้า is_triggered=1 และ tool_name != trading_signal_alert → ข้ามการ evaluate ทันที (log "⏸ พัก '<ชื่อ>' — TRIGGERED แล้ว รอผู้ใช้เลือก หยุด/ซ้ำ") — re-arm ทางเดียวคือปุ่ม 🔁 (AlertActionReceiver reset trigger เดิม) หรือ toggle ปิด/เปิด job
+- แก้บั๊กแถม: Auto High Confluence (deep_analysis_suite score≥85) เดิมยิง fireJobAlert โดยไม่ markTriggered → ยิงซ้ำทุก cycle ตราบ score ค้าง — เพิ่ม markTriggered ก่อนยิง + return (กัน notification เบิ้ลกับเงื่อนไขหลักในรอบเดียวกัน)
+- แก้ updateAlertJobStatus (.sq): เปลี่ยน is_active จะ reset is_triggered=0, last_value=NULL ด้วยเสมอ — กันเคสผู้ใช้ปิด/เปิด job ที่ TRIGGERED ค้างแล้วถูกพักถาวร (notification เดิมอาจถูกปัดทิ้งไปแล้ว); updateAlertJobCondition reset trigger อยู่แล้ว
+- AutomationScreen: label สถานะแยกตามชนิด — signal alert: "TRIGGERED · รอสัญญาณใหม่" | alert ทั่วไป: "TRIGGERED · รอเลือก หยุด/ซ้ำ"
+- ไฟล์: JarvisAutomationService.kt, JarvisDatabase.sq, AutomationScreen.kt
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — แก้ TV ดึงแท่งเทียนซ้ำทุก cycle ตอนตลาดปิด (เสาร์-อาทิตย์)
+- อาการ: log "TV incremental refresh XAUUSD/15m: missingBars=46-47 fetchDelta=52-53" + "TV bars loaded: 52" ซ้ำตัวเลขเดิมทุก cycle ทั้งที่ตลาดทองปิด ไม่มีแท่งใหม่
+- Root cause: estimateMissingBars() ใน SmcApiService คำนวณ (currentBucketStart - latestBarTs) / tfMs โดยสมมติตลาดเปิดตลอด — ช่วง weekend แท่งสุดท้ายค้างจากศุกร์ค่ำ ทำให้ "ขาด" หลอก ~46 แท่ง (15m) ตลอด → ดึง delta ทุก cycle, TV ส่งแท่งชุดเดิมกลับมา, merge แล้ว latestTs ไม่ขยับ → วนซ้ำไม่จบ + เขียน DB ซ้ำทุกรอบ
+- Fix (SmcApiService.fetchCandlesWithSource): ถ้า incremental refresh ตอบกลับแต่ไม่มีแท่งใหม่กว่า latestTs ใน DB เลย → ถือว่าตลาดปิด เก็บ streak ต่อ sym|interval แล้วข้ามการดึง 1→2→3→4 buckets (เพดาน 4) — เคลียร์ streak ทันทีเมื่อมีแท่งใหม่จริง (ตลาดเปิด); ข้าม saveTvCandlesToDb/trim ด้วยเมื่อไม่มีแท่งใหม่ (ลด DB write เปล่าๆ); network fail (candles ว่าง) ไม่นับ streak
+- ผล: ช่วงตลาดปิดเหลือดึงทดสอบ ~1 ครั้ง/ชั่วโมง (จากเดิมทุก cycle ~1-2 นาที × จำนวน job); ตลาดเปิดพฤติกรรมเหมือนเดิมเพราะแท่งใหม่มาเกือบทุก bucket
+- log ใหม่: "TV incremental skip sym/tf: ไม่มีแท่งใหม่ (ตลาดปิด?) — ใช้ DB N แท่งต่อ" และ "TV no-new-bars sym/tf: streak=K → ข้าม K bucket(s) ถัดไป"
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — TRIGGERED job ออกจาก loop ทันที + ปุ่ม notification เป็น "ลบ" + ปุ่ม 🔁 ในหน้า list
+- ปรับตามดีไซน์ผู้ใช้: alert ทั่วไปที่ TRIGGERED แล้วไม่ควรถูกรันใน job loop เลย (ถ้ามี 10 job ค้าง log จะเต็มไปด้วย ⏸ ทุก cycle) — notification มีทางเลือกอยู่แล้ว
+- เพิ่ม query `getRunnableJobs` (JarvisDatabase.sq): `is_active = 1 AND (is_triggered = 0 OR tool_name = 'trading_signal_alert')` — AutomationService.runOneCycle เปลี่ยนมาใช้ตัวนี้ → job TRIGGERED ไม่เข้า loop ไม่มี log ซ้ำ; signal alert ยังอยู่เพราะ re-arm เอง; UI list ยังใช้ getAllActiveJobs เห็นครบ
+- ปุ่ม notification "🛑 หยุดแจ้งเตือน" → "🗑 ลบแจ้งเตือน": AlertActionReceiver เปลี่ยนจาก updateAlertJobStatus(0) เป็น deleteAlertJob (ลบออกจาก list จริง — SignalAlertRecord ประวัติยังเก็บ) + ข้อความยืนยัน "ลบแจ้งเตือนแล้ว — สร้างใหม่ได้ในหน้า Automation"
+- AlertActionReceiver ACTION_ALERT_REPEAT เพิ่ม wakeupAutomationService() — จำเป็นเพราะถ้าเหลือแต่ job TRIGGERED ค้าง service จะ stopSelf ไปแล้ว กดซ้ำต้องปลุกกลับมา
+- หน้า Cron Jobs (AutomationScreen): เพิ่มปุ่ม 🔁 (Refresh icon สีเขียว) ในการ์ด job ที่ TRIGGERED ค้างและไม่ใช่ signal alert — กรณีผู้ใช้ปัด notification ทิ้งก็ยัง re-arm ได้จาก list (wire onRepeatAlert → automationManager.resetTrigger ผ่าน App.kt)
+- label สถานะปรับเป็น "TRIGGERED · รอเลือก ลบ/ซ้ำ"
+- ไฟล์: JarvisDatabase.sq, JarvisAutomationService.kt, AlertActionReceiver.kt, AutomationScreen.kt, App.kt
+- BUILD SUCCESSFUL (debug APK)
