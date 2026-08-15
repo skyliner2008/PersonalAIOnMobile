@@ -1,5 +1,6 @@
 package com.example.personalaibot.tools
 
+import com.example.personalaibot.logDebug
 import com.example.personalaibot.tools.trading.TradingToolExecutor
 import com.example.personalaibot.tools.camera.CameraToolExecutor
 import com.example.personalaibot.tools.system.SystemToolExecutor
@@ -72,13 +73,19 @@ object ToolExecutor {
      */
     suspend fun execute(call: ToolCall, memoryContext: String = ""): ToolResult {
         return try {
-            val routedToolName = when (call.name) {
+            // โมเดลบางตัว/บางรอบส่ง arg key พิมพ์ใหญ่ปน (เช่น condition_VALUE จาก Live API)
+            // — normalize key เป็นตัวเล็กทั้งหมด (tool definitions ใช้ snake_case ตัวเล็กอยู่แล้ว ปลอดภัยกับทุก tool)
+            val safeCall = if (call.args.keys.any { key -> key.any { it.isUpperCase() } }) {
+                logDebug("ToolExecutor", "Normalize arg keys เป็นตัวเล็ก: ${call.name} ${call.args.keys}")
+                call.copy(args = call.args.mapKeys { it.key.lowercase() })
+            } else call
+            val routedToolName = when (safeCall.name) {
                 "mt5_place_order" -> "trading_mt5_order"
                 "mt5_close_position" -> "trading_mt5_close_position"
                 "mt5_modify_position" -> "trading_mt5_modify_position"
-                else -> call.name
+                else -> safeCall.name
             }
-            val routedArgs = enrichMt5Args(routedToolName, call.args)
+            val routedArgs = enrichMt5Args(routedToolName, safeCall.args)
             val result = when {
                 // ─── Automation Alerts (intercept ก่อน trading — ใช้ AutomationManager ผ่าน delegate) ──
                 routedToolName == "automation_manage_alerts" -> executeManageAlerts(routedArgs)

@@ -1111,3 +1111,26 @@
 - label สถานะปรับเป็น "TRIGGERED · รอเลือก ลบ/ซ้ำ"
 - ไฟล์: JarvisDatabase.sq, JarvisAutomationService.kt, AlertActionReceiver.kt, AutomationScreen.kt, App.kt
 - BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — แก้ Live API ส่ง tool arg key พิมพ์ใหญ่ (condition_VALUE) ทำสร้าง alert ไม่สำเร็จ
+- อาการ (log 18:22): สั่งด้วยเสียงผ่าน Live "ตั้งแจ้งเตือนสัญญาณทอง M15" → โมเดลส่ง `condition_VALUE=1` (พิมพ์ใหญ่) → handler หา `condition_value` ไม่เจอ → ❌ ทั้ง 2 job, JARVIS ต้องถามกลับ
+- Root cause: parser อ่าน key ตรงตัว (case-sensitive) แต่โมเดล Live บางรอบส่ง key พิมพ์ใหญ่ปน
+- Fix ที่จุดเดียวครอบคลุมทุก tool ทุกช่องทาง: ToolExecutor.execute() (funnel กลางที่ทั้งแชทและ Live [ผ่าน LiveToolBridge] วิ่งผ่าน) — ถ้า arg key มีตัวพิมพ์ใหญ่ ให้ normalize เป็นตัวเล็กทั้งหมดก่อน dispatch (tool definitions ทั้งระบบใช้ snake_case ตัวเล็กอยู่แล้ว จึงปลอดภัย) + log "Normalize arg keys เป็นตัวเล็ก: <tool> <keys>" ไว้ตรวจย้อนหลัง
+- ไฟล์: tools/ToolExecutor.kt
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — ทดสอบจริงผ่านทั้งหมด + ย้าย TV backoff เป็นระดับ process
+- ผู้ใช้ทดสอบจริง: ปุ่ม 🗑 ลบ / 🔁 ซ้ำ (notification + หน้า Cron Jobs) ถูกต้อง, ไม่มี job วนซ้ำ, สั่งเสียงผ่าน Live สร้าง signal alert สำเร็จแล้ว (fix normalize key)
+- ตรวจ log backoff ตลาดปิด: ทำงานถูก — fetch 17:15 (streak=2) → รอ 30 นาที → fetch 17:45 (streak=3) → รอ 45 นาที; แต่พบช่องโหว่: SmcApiService มีถึง 9 instances (AutomationService, ViewModel, TradingToolExecutor×5, TradingApiService, SmcToolExecutor, AlertDataTester) state backoff เป็น per-instance → แต่ละ instance ต้อง fetch อย่างน้อย 1 ครั้งก่อนเรียนรู้ (เห็นใน log: fetch 18:46:54 จาก tester แล้ว service ยัง fetch ซ้ำ 18:48:06 / 18:22:16 มี 2 instance ดึง 15m พร้อมกัน)
+- Fix: ย้าย tvNoNewDataStreak/tvNoNewDataSkipUntil จาก instance field → companion object (แชร์ทั้ง process) — instance ไหนเจอ "ไม่มีแท่งใหม่" ก่อน ทุก instance ข้ามตาม
+- ไฟล์: SmcApiService.kt
+- BUILD SUCCESSFUL (debug APK)
+
+## 2026-08-15 — เพิ่ม log path 'TV cache fresh' (BTC M15 ไม่ดึงแท่งเทียน = ไม่ใช่บั๊ก)
+**อาการ:** ผู้ใช้สร้าง alert signal BTCUSDT@15m ผ่านเสียง (ตลาด crypto ไม่ปิด) แต่ไม่เห็น log ดึงแท่งเทียนหลัง full load ครั้งแรก
+**สาเหตุ (ไม่ใช่บั๊ก):** รอบแรก full fetch 300 แท่งสำเร็จ (19:00:32) รอบถัดไป `estimateMissingBars`=0 เพราะแท่ง bucket 19:00 มีใน DB แล้ว → เข้า branch `missingBars <= 0` ซึ่ง return DB เงียบๆ ไม่มี log เลยดูเหมือนไม่ทำงาน fetch ครั้งถัดไปจะเกิดตอน bucket ขยับ (19:15) นอกช่วง log ที่ส่งมา — พร้อมกันนั้น baseline กัน signal เก่าทำงานถูกต้อง (sell id แท่ง 18:45 ถูก GT baseline กัน met=false)
+**แก้ไข:** `SmcApiService.kt` branch `missingBars <= 0` เพิ่ม logDebug "TV cache fresh $sym/$interval: DB N แท่งทันปัจจุบัน (missing=0) — ไม่ต้องดึง รอ bucket ใหม่" ให้เห็นเส้นทาง cache สดชัดเจนเท่า path skip/backoff
+**ไฟล์:** `composeApp/src/commonMain/kotlin/com/example/personalaibot/tools/trading/SmcApiService.kt`
+**Build:** assembleDebug ผ่าน

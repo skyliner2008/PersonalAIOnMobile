@@ -134,14 +134,17 @@ class StrictSourceMismatchException(message: String) : IllegalStateException(mes
  */
 class SmcApiService(private val client: HttpClient) {
 
+    companion object {
+        // กันดึงซ้ำตอนตลาดปิด (เสาร์-อาทิตย์/วันหยุด): estimateMissingBars เทียบกับ "เวลาปัจจุบัน" เสมอ
+        // ทำให้ช่วงตลาดปิดดูเหมือน "ขาดแท่ง" ตลอด — ถ้ารีเฟรชแล้วไม่ได้แท่งใหม่กว่า DB เลย
+        // จำไว้แล้วข้ามการดึงตาม streak (1→4 buckets) จนกว่าจะมีแท่งใหม่จริง
+        // อยู่ระดับ process (companion) เพราะ SmcApiService มีหลาย instance (service/UI/tester/trading tools)
+        private val tvNoNewDataStreak = mutableMapOf<String, Int>()
+        private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
+    }
+
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
     private val priceApi by lazy { TradingApiService(client) }
-
-    // กันดึงซ้ำตอนตลาดปิด (เสาร์-อาทิตย์/วันหยุด): estimateMissingBars เทียบกับ "เวลาปัจจุบัน" เสมอ
-    // ทำให้ช่วงตลาดปิดดูเหมือน "ขาดแท่ง" ตลอด — ถ้ารีเฟรชแล้วไม่ได้แท่งใหม่กว่า DB เลย
-    // จำไว้แล้วข้ามการดึงตาม streak (1→4 buckets) จนกว่าจะมีแท่งใหม่จริง
-    private val tvNoNewDataStreak = mutableMapOf<String, Int>()
-    private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
 
     // Interval maps
     private val binanceIntervalMap = mapOf(
@@ -194,6 +197,7 @@ class SmcApiService(private val client: HttpClient) {
         if (dbCandles.size >= minBars) {
             val missingBars = estimateMissingBars(dbCandles, interval)
             if (missingBars <= 0) {
+                logDebug("SmcApiService", "TV cache fresh $sym/$interval: DB ${dbCandles.size} แท่งทันปัจจุบัน (missing=0) — ไม่ต้องดึง รอ bucket ใหม่")
                 val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
                 return result
