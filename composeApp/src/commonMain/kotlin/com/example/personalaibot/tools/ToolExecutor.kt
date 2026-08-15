@@ -125,6 +125,8 @@ object ToolExecutor {
                 "search_web"           -> executeSearchWeb(routedArgs["query"] ?: "")
                 "identity_update"      -> executeIdentityUpdate(routedArgs)
                 "analyze_and_display_report" -> executeDisplayReport(routedArgs)
+                "chart_dashboard_control" -> _sideEffectDelegate?.onChartControl(routedArgs)
+                    ?: "⚠️ ระบบกราฟยังไม่พร้อมใช้งาน"
                 else                   -> executeCustomSkill(ToolCall(routedToolName, routedArgs))
                 } // end inner when
             } // end outer when
@@ -360,6 +362,10 @@ object ToolExecutor {
             append("ให้ทำตามคำสั่งของเครื่องมือนี้เพื่อประมวลผลคำขอของผู้ใช้ต่อทันที ")
             append("(เรียกใช้ tool อื่นประกอบได้ตามความเหมาะสม แล้วสรุปผลให้ผู้ใช้):\n\n")
             append(skill.systemPromptAddon)
+            append("\n\n[STRICT - สำคัญที่สุด]: ห้ามพูดตอบผู้ใช้ ห้ามบอกว่า \"รอสักครู่/กำลังประมวลผล\" ")
+            append("และห้ามจบ turn ก่อนที่จะเรียก tool ตามขั้นตอนข้างต้นครบแล้วเด็ดขาด — ")
+            append("ให้เรียก tool ทันทีใน turn นี้ (เรียกหลาย tool พร้อมกันได้) ")
+            append("เมื่อได้ข้อมูลครบแล้วเท่านั้นจึงค่อยพูดสรุปให้ผู้ใช้ฟัง")
         }
     }
 
@@ -406,8 +412,9 @@ object ToolExecutor {
         val markdown = args["detailed_markdown"] ?: return "❌ ต้องระบุ detailed_markdown"
         val voiceSummary = args["voice_summary"] ?: ""
         _sideEffectDelegate?.onDisplayReport(markdown, voiceSummary)
-        return "✅ รายงานฉบับเต็มถูกส่งแสดงในแชทแล้ว — ให้ตอบผู้ใช้ด้วยสรุปสั้นๆ เป็นประโยคสนทนาเท่านั้น " +
-               "(อ้างอิง: $voiceSummary) ห้ามอ่านรายงานหรือตารางซ้ำออกเสียงเด็ดขาด"
+        return "✅ รายงานฉบับเต็มถูกส่งแสดงในแชทแล้ว — ให้ตอบผู้ใช้เป็นภาษาสนทนา สรุปประเด็นสำคัญของรายงานให้ครบถ้วน: " +
+               "ผลสรุป/ทิศทางหลัก + ตัวเลขและระดับราคาสำคัญ 3-5 จุด (แนวรับ-แนวต้าน จุดเข้า-ออก ตัวชี้วัดสำคัญ) + จุดที่ต้องระวัง รวมประมาณ 6-10 ประโยค " +
+               "(อ้างอิง: $voiceSummary) — ไม่ต้องอ่านตารางหรือลิสต์ยาวๆ ซ้ำทุกบรรทัด เพราะผู้ใช้เห็นรายงานเต็มในแชทแล้ว"
     }
 
     // ─── Automation Alerts ───────────────────────────────────────────────────

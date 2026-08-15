@@ -4,7 +4,21 @@ import android.util.Log
 
 actual fun logDebug(tag: String, message: String) {
     // logcat: mask key แบบโชว์หัว-ท้าย เพื่อ debug ได้ว่าใช้ key ไหน (ตามที่ user ต้องการ)
-    Log.d(tag, maskSensitiveForLogcat(message))
+    val masked = maskSensitiveForLogcat(message)
+    // Log.d จำกัด ~4000 bytes/บรรทัด — แบ่ง chunk ให้ log ยาวแสดงครบ ไม่ถูกตัดกลางข้อความ
+    if (masked.length <= 3500) {
+        Log.d(tag, masked)
+    } else {
+        var i = 0
+        var part = 1
+        val total = (masked.length + 3499) / 3500
+        while (i < masked.length) {
+            val end = minOf(i + 3500, masked.length)
+            Log.d(tag, "[part $part/$total] ${masked.substring(i, end)}")
+            i = end
+            part++
+        }
+    }
 }
 
 actual fun logError(tag: String, message: String, throwable: Throwable?) {

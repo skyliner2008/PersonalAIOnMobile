@@ -195,4 +195,51 @@ class AutomationManager(private val database: JarvisDatabase) {
             }
         }
     }
+
+    // ─── Signal Alert Records (เก็บสถิติ signal ที่ยิงจริง + ผล TP/SL) ────────
+
+    /** บันทึก signal ที่ alert ยิงออกไป — ข้ามถ้า job เดียวกันเคยบันทึกแท่งนี้แล้ว (กันซ้ำ) */
+    fun recordSignalAlert(
+        jobId: Long, symbol: String, side: String, strategy: String, reason: String?,
+        entry: Double, sl: Double, tp: Double, rr: Double?, barTime: Long, delivery: String
+    ) {
+        scope.launch {
+            try {
+                val dup = database.jarvisDatabaseQueries
+                    .getSignalAlertByJobBar(jobId = jobId, barTime = barTime)
+                    .executeAsOneOrNull()
+                if (dup != null) return@launch
+                database.jarvisDatabaseQueries.insertSignalAlert(
+                    job_id = jobId, symbol = symbol, side = side, strategy = strategy,
+                    reason = reason, entry = entry, sl = sl, tp = tp, rr = rr,
+                    bar_time = barTime, delivery = delivery,
+                    created_at = Clock.System.now().toEpochMilliseconds()
+                )
+                logDebug("AutomationManager", "Signal recorded: $side $symbol @ $entry ($strategy)")
+            } catch (e: Exception) {
+                logError("AutomationManager", "recordSignalAlert failed: ${e.message}", e)
+            }
+        }
+    }
+
+    fun getOpenSignalAlerts(): List<com.example.personalaibot.db.SignalAlertRecord> =
+        try { database.jarvisDatabaseQueries.getOpenSignalAlerts().executeAsList() }
+        catch (_: Exception) { emptyList() }
+
+    fun closeSignalAlert(id: Long, outcome: String, hitAt: Long, hitPrice: Double, resultR: Double) {
+        scope.launch {
+            try {
+                database.jarvisDatabaseQueries.closeSignalAlert(
+                    outcome = outcome, hitAt = hitAt, hitPrice = hitPrice, resultR = resultR, id = id
+                )
+                logDebug("AutomationManager", "Signal #$id closed: $outcome (${resultR}R)")
+            } catch (e: Exception) {
+                logError("AutomationManager", "closeSignalAlert failed: ${e.message}", e)
+            }
+        }
+    }
+
+    fun getSignalAlertsSince(sinceMs: Long): List<com.example.personalaibot.db.SignalAlertRecord> =
+        try { database.jarvisDatabaseQueries.getSignalAlertsSince(sinceMs).executeAsList() }
+        catch (_: Exception) { emptyList() }
 }

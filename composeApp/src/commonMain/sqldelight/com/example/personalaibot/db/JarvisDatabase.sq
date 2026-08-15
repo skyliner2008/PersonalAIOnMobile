@@ -534,3 +534,50 @@ UPDATE ScheduledTask SET last_fired_date = ? WHERE id = ?;
 -- ═══════════════════════════════════════════════════════════════
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledgeedge_unique
 ON KnowledgeEdge(source_id, target_id, relation);
+
+-- ═══════════════════════════════════════════════════════════════
+-- SignalAlertRecord — บันทึกทุก signal ที่ alert ยิงออกไป (trading_signal_alert)
+--   ใช้เก็บสถิติจริง: tracker ใน AutomationService เช็กทุก cycle ว่าโดน TP/SL หรือยัง
+--   outcome: OPEN (กำลังวิ่ง) | TP (ชนะ) | SL (แพ้)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS SignalAlertRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,          -- เช่น "XAUUSD@15M"
+    side TEXT NOT NULL,            -- BUY | SELL
+    strategy TEXT NOT NULL,        -- เช่น "UT Bot + Donchian Breakout"
+    reason TEXT,
+    entry REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    rr REAL,
+    bar_time INTEGER NOT NULL,     -- timestamp(ms) ของแท่งที่เกิดสัญญาณ
+    delivery TEXT NOT NULL DEFAULT 'ai',
+    outcome TEXT NOT NULL DEFAULT 'OPEN',  -- OPEN | TP | SL
+    hit_at INTEGER,
+    hit_price REAL,
+    result_r REAL,                 -- +RR ถ้าชน TP, -1 ถ้าชน SL
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: SignalAlertRecord
+-- ═══════════════════════════════════════════════════════════════
+insertSignalAlert:
+INSERT INTO SignalAlertRecord(job_id, symbol, side, strategy, reason, entry, sl, tp, rr, bar_time, delivery, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getSignalAlertByJobBar:
+SELECT * FROM SignalAlertRecord WHERE job_id = :jobId AND bar_time = :barTime;
+
+getOpenSignalAlerts:
+SELECT * FROM SignalAlertRecord WHERE outcome = 'OPEN';
+
+closeSignalAlert:
+UPDATE SignalAlertRecord SET outcome = :outcome, hit_at = :hitAt, hit_price = :hitPrice, result_r = :resultR WHERE id = :id;
+
+getSignalAlertsSince:
+SELECT * FROM SignalAlertRecord WHERE created_at >= :since ORDER BY created_at DESC;
+
+getRecentSignalAlerts:
+SELECT * FROM SignalAlertRecord ORDER BY created_at DESC LIMIT :limit;

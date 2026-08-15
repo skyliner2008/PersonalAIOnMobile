@@ -1,0 +1,175 @@
+2026-08-14 10:33:35.883 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:33:35.912 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:33:35.919 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:33:35.947 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:34:35.965 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:34:35.993 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:34:35.994 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:34:36.022 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:35:36.041 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:35:36.070 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:35:36.072 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:35:36.107 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:36:36.126 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:36:36.154 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:36:36.156 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:36:36.185 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:37:36.203 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:37:36.236 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:37:36.238 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:37:36.279 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:38:36.300 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:38:36.337 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:38:36.339 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:38:36.378 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:39:36.391 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:39:36.428 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:39:36.430 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:39:36.471 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:40:36.485 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:40:36.520 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:40:36.522 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:40:36.570 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:41:36.586 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:41:36.623 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:41:36.624 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:41:36.663 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:42:36.678 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:42:36.713 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:42:36.715 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:42:36.756 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:43:36.772 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:43:36.808 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:43:36.810 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:43:36.851 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:48:49.288 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:48:49.298 29034-27628 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=1 fetchDelta=10 dbBars=300
+2026-08-14 10:49:02.288 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-14 10:49:02.290 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-14 10:49:02.291 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-14 10:49:02.296 29034-29133 SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-14 10:49:02.381 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:49:02.382 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:49:02.419 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:50:02.435 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:50:02.471 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:50:02.473 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:50:02.511 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:51:02.527 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:51:02.567 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:51:02.570 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:51:02.623 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:52:02.640 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:52:02.682 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:52:02.684 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:52:02.748 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:53:02.772 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:53:02.787 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:53:02.788 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:53:02.795 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:54:02.808 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:54:02.847 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:54:02.848 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:54:02.886 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:55:02.904 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:55:02.942 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:55:02.945 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:55:02.987 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:56:03.013 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:56:03.054 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:56:03.057 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:56:03.097 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:57:03.119 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:57:03.157 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:57:03.159 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:57:03.200 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:58:03.219 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:58:03.263 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:58:03.265 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:58:03.302 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 10:59:12.006 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 10:59:12.048 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 10:59:12.050 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 10:59:12.087 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:00:12.114 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:00:12.136 29034-28016 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=1 fetchDelta=10 dbBars=300
+2026-08-14 11:00:25.206 29034-27628 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-14 11:00:25.210 29034-27628 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-14 11:00:25.215 29034-27628 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-14 11:00:25.221 29034-27628 SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-14 11:00:25.341 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:00:25.343 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:00:25.380 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:01:25.405 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:01:25.454 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:01:25.455 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:01:25.493 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:02:25.511 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:02:25.547 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:02:25.549 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:02:25.588 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:03:25.614 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:03:25.662 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:03:25.664 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:03:25.702 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:04:25.727 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:04:25.775 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:04:25.777 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:04:25.815 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:05:25.837 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:05:25.886 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:05:25.887 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:05:25.925 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:06:25.951 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:06:25.999 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:06:26.000 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:06:26.029 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:07:26.052 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:07:26.096 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:07:26.098 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:07:26.128 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:08:26.147 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:08:26.197 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:08:26.199 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:08:26.228 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:09:26.249 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:09:26.295 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:09:26.297 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:09:26.327 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:10:26.351 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:10:26.379 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:10:26.382 29034-29095 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:10:26.410 29034-29095 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:11:26.428 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:11:26.473 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:11:26.474 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:11:26.505 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:12:26.517 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:12:26.546 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:12:26.547 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:12:26.578 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:13:26.589 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:13:26.622 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:13:26.627 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:13:26.660 29034-27628 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:14:26.675 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:14:26.709 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:14:26.711 29034-28016 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:14:26.745 29034-28016 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:15:26.758 29034-27628 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:15:26.772 29034-27628 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=1 fetchDelta=10 dbBars=300
+2026-08-14 11:15:39.832 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-14 11:15:39.834 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-14 11:15:39.836 29034-29133 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-14 11:15:39.840 29034-29133 SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-14 11:15:39.960 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:15:39.963 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:15:40.005 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:16:40.027 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:16:40.066 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:16:40.068 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:16:40.106 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false
+2026-08-14 11:17:40.122 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Buy Gold 15m for XAUUSD@15M
+2026-08-14 11:17:40.158 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Buy Gold 15m → signal_buy_id=0 | condition=GT 1786657433800 | met=false
+2026-08-14 11:17:40.159 29034-29133 AutomationService       com.example.personalaibot            D  Checking job: Signal Sell Gold 15m for XAUUSD@15M
+2026-08-14 11:17:40.200 29034-29133 AutomationService       com.example.personalaibot            D  Job Signal Sell Gold 15m → signal_sell_id=0 | condition=GT 1786657433809 | met=false

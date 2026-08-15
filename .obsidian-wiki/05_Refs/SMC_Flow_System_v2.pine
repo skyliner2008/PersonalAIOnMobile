@@ -1,0 +1,2059 @@
+//@version=6
+//==============================================================================
+// 🔱 AETHER FLOW SYSTEM – (Skyliner.jojo OB Edition)
+//==============================================================================
+//
+// 🔰 DESCRIPTION:
+// AETHER FLOW SYSTEM is a fully integrated Smart Money Concept and Hybrid 
+// Market Structure Engine that merges institutional order flow analytics with 
+// dynamic liquidity mapping. Designed for professional traders seeking 
+// structure clarity and precision reversal timing.
+//
+// 💡 Core Frameworks:
+//   • Mxwll Suite (Market Structure + Auto Fibs + CHoCH/BOS Detection)
+//   • UT Bot System (Adaptive ATR-based Trend Shifts) + Label Management ⭐
+//   • Hull Suite Engine (Trend Velocity & Momentum Filtering)
+//   • LuxAlgo-Inspired FVG Engine (Mitigation and Unmitigated Zones)
+//   • LuxAlgo Order Blocks (Volume Pivot Detection) ⭐ NEW
+//   • Three-Bar Reversal Pattern Recognition (Trend-Filtered Confirmations)
+//   • Real-Time Session Heatmap & Volume Activity Dashboard
+//   • SMC Confluence Signal Engine -- fuses Structure Bias, Hull Trend,
+//     Order Block zones and FVG/liquidity zones around a single reversal
+//     trigger into one scored Buy/Sell signal ⭐ NEW
+//
+// 🧭 System Philosophy:
+//   "See the unseen liquidity. Trade the rhythm of price flow."
+//
+// 🔗 HOW THE FRAMEWORKS ARE FUSED:
+//   Each framework above still runs and displays independently (structure
+//   labels, Hull trend line, FVG/OB zones, 3-Bar patterns, momentum phases)
+//   so nothing that worked before is removed. On top of that, the
+//   Confluence Signal Engine (bottom of the script) reads the live state of
+//   all of them -- external BOS/CHoCH bias, Hull trend direction, whether
+//   price sits inside the most recent Order Block, whether price sits
+//   inside the most recent unmitigated FVG -- and scores how many agree
+//   with a chosen reversal trigger (UT Bot / 3-Bar Reversal / Momentum
+//   Phase / Any). Only when the trigger fires AND enough of those factors
+//   line up does it print a single BUY/SELL confluence label + alert(),
+//   with a small dashboard showing exactly which factors agreed.
+//
+//------------------------------------------------------------------------------
+// 📁 CATEGORY:
+//   - Smart Money Concepts
+//   - Market Structure & Volume
+//   - Liquidity Mapping / Order Flow
+//   - Multi-Framework Hybrid Systems
+//
+//------------------------------------------------------------------------------
+// ⚠️ DISCLAIMER:
+// This indicator is for educational and analytical purposes only. 
+// It is not intended as financial advice. Trading carries risk.
+//------------------------------------------------------------------------------
+// Developed with ❤️ by Skyliner.jojo
+//==============================================================================
+
+indicator("🔱 SMC Flow System – v2",overlay=true,
+     max_labels_count=500, max_lines_count=500, max_boxes_count=500, max_bars_back=500)
+
+// ============================================
+// MXWLL SUITE INPUTS
+// ============================================
+bullC       = input.color(defval = #14D990, title = "Bull Color", group = "Smart Money Concepts", inline = "7")
+bearC       = input.color(defval = #F24968, title = "Bear Color", group = "Smart Money Concepts", inline = "7")
+showInt     = input.bool(defval = true, title = "Show Internals", group = "Smart Money Concepts")
+intSens     = input.int(5, "Internals Sensitivity", options =  [3 , 5 , 8 ], group = "Smart Money Concepts", inline = "20")
+intStru     = input.string(defval = "All", title = "Internal Structure", options = ["All", "BoS", "CHoCH"], inline = "30", group = "Smart Money Concepts")
+showExt     = input.bool(defval = true, title = "Show Externals" ,group = "Smart Money Concepts")
+extSens     = input.int(25, "Externals Sensitivity", options = [10, 25, 50],group = "Smart Money Concepts", inline = "21")
+extStru     = input.string(defval = "All", title = "External Structure", options = ["All", "BoS", "CHoCH"], inline = "31", group = "Smart Money Concepts")
+
+showHHLH    = input.bool(defval = true, title = "Show HH/LH", group = "Swing Labels")
+showHLLL    = input.bool(defval = true, title = "Show LH/LL", group = "Swing Labels")
+
+show1D      = input.bool(defval = true, title = "Show Previous Day High", group = "High/Low")
+show1DLab   = input.bool(defval = true, title = "Show 1 Day Labels", group = "High/Low")
+show4H      = input.bool(defval = true, title = "Show 4 Hour High", group = "High/Low")
+show4hLab   = input.bool(defval = true, title = "Show 4 Hour Labels", group = "High/Low")
+
+showFibs     = input.bool(defval = true, title = "Show Auto Fibs", group = "Auto Fibs")
+show0        = input.bool(defval = true,  title = "0",     inline = "0",  group = "Auto Fibs")
+show236      = input.bool(defval = true,  title = "0.236", inline = "1",  group = "Auto Fibs")
+show382      = input.bool(defval = true,  title = "0.382", inline = "2",  group = "Auto Fibs")
+show5        = input.bool(defval = true,  title = "0.5",   inline = "3",  group = "Auto Fibs")
+show618      = input.bool(defval = true,  title = "0.618", inline = "4",  group = "Auto Fibs")
+show786      = input.bool(defval = true,  title = "0.786", inline = "5",  group = "Auto Fibs")
+show886      = input.bool(defval = true,  title = "0.886", inline = "6",  group = "Auto Fibs")
+show100      = input.bool(defval = true,  title = "1",     inline = "7",  group = "Auto Fibs")
+show113      = input.bool(defval = true,  title = "1.13",  inline = "8",  group = "Auto Fibs")
+show127      = input.bool(defval = true,  title = "1.27",  inline = "9",  group = "Auto Fibs")
+show141      = input.bool(defval = true,  title = "1.41",  inline = "10", group = "Auto Fibs")
+show161      = input.bool(defval = true,  title = "1.618", inline = "11", group = "Auto Fibs")
+
+// Standard Fibonacci ratio set + level colors fixed as constants -- the
+// show/hide toggles and pivot length above are the settings actually worth
+// touching day-to-day.
+fib0 = 0.0
+fib1 = 0.236
+fib2 = 0.382
+fib3 = 0.5
+fib4 = 0.618
+fib5 = 0.786
+fib6 = 0.886
+fib100 = 1.0
+fib7 = 1.13
+fib8 = 1.27
+fib9 = 1.41
+fib10 = 1.618
+fib0col = color.white
+fib1col = color.rgb(160, 165, 185)
+fib2col = color.lime
+fib3col = color.yellow
+fib4col = color.orange
+fib5col = color.red
+fib6col = color.purple
+fib100col = color.white
+fib7col = color.blue
+fib8col = color.teal
+fib9col = color.maroon
+fib10col = color.navy
+
+// Auto Trend-Based Fib Extension: a live 3-point projection (P1 -> P2 ->
+// current retracement P3) built on top of the same swing the retracement
+// above already tracks. Useful for projecting TP targets beyond the
+// current swing. Ratio values + colors fixed as constants, same pattern
+// as the retracement levels above -- only the show/hide toggles are
+// exposed.
+showFibExt   = input.bool(true, "Show Trend-Based Extension", tooltip = "Auto 3-point Fib Extension (P1 -> P2 -> live retracement P3). Projects target levels beyond the current swing for TP/SL planning.", group = "Auto Fibs")
+showExt0     = input.bool(true, "0",     inline = "e0", group = "Auto Fibs")
+showExt236   = input.bool(true, "0.236", inline = "e1", group = "Auto Fibs")
+showExt382   = input.bool(true, "0.382", inline = "e2", group = "Auto Fibs")
+showExt500   = input.bool(true, "0.5",   inline = "e3", group = "Auto Fibs")
+showExt618   = input.bool(true, "0.618", inline = "e4", group = "Auto Fibs")
+showExt786   = input.bool(true, "0.786", inline = "e5", group = "Auto Fibs")
+showExt886   = input.bool(true, "0.886", inline = "e6", group = "Auto Fibs")
+showExt100   = input.bool(true, "1.0",   inline = "e7", group = "Auto Fibs")
+showExt1272  = input.bool(true, "1.272", inline = "e8", group = "Auto Fibs")
+showExt1618  = input.bool(true, "1.618", inline = "e9", group = "Auto Fibs")
+showExt2000  = input.bool(true, "2.0",   inline = "e10", group = "Auto Fibs")
+showExt2618  = input.bool(true, "2.618", inline = "e11", group = "Auto Fibs")
+
+fibExtA = 0.0
+fibExtB = 0.236
+fibExtC = 0.382
+fibExtD = 0.5
+fibExt1 = 0.618
+fibExtE = 0.786
+fibExtF = 0.886
+fibExt2 = 1.0
+fibExt3 = 1.272
+fibExt4 = 1.618
+fibExt5 = 2.0
+fibExt6 = 2.618
+fibExtAcol = color.white
+fibExtBcol = color.rgb(0, 188, 212)
+fibExtCcol = color.rgb(139, 195, 74)
+fibExtDcol = color.rgb(255, 235, 59)
+fibExt1col = color.rgb(41, 98, 255)
+fibExtEcol = color.rgb(255, 152, 0)
+fibExtFcol = color.rgb(156, 39, 176)
+fibExt2col = color.rgb(255, 109, 0)
+fibExt3col = color.rgb(0, 230, 118)
+fibExt4col = color.rgb(255, 23, 68)
+fibExt5col = color.rgb(255, 214, 0)
+fibExt6col = color.rgb(213, 0, 249)
+
+showSessionBG   = input.bool(true, "Show Session Highlight", group = "Sessions")
+showSessionDash = input.bool(false, "Show Session Dashboard", group = "Sessions")
+// Session colors + background transparency fixed -- only whether they're
+// shown is exposed above.
+nyCol = #f24968
+asCol = #14D990
+loCol = #F2B807
+tra   = 98
+
+// ============================================
+// UT BOT INPUTS (WITH LABEL MANAGEMENT)
+// ============================================
+a = input.float(2.0,   title = "UT Key Value", minval = 0.01, group = "UT Bot Settings")
+c = input.int(6,       title = "UT ATR Period", minval = 1, group = "UT Bot Settings")
+h = input(false, title = "UT Signals from Heikin Ashi", group = "UT Bot Settings")
+
+// Label Management
+showUTLabels = input.bool(true, "Show UT Labels", group = "UT Bot Settings")
+keepRecentOnly = input.bool(true, "Keep Recent Signals Only", group = "UT Bot Settings", tooltip = "Jika ON, hanya menampilkan beberapa sinyal terakhir")
+maxUTLabels = input.int(3, "Max Recent Signals", minval = 1, maxval = 10, group = "UT Bot Settings", tooltip = "Jumlah sinyal terakhir yang ditampilkan (1-10)")
+showUTBarColor = input.bool(true, "Color Candles by UT Bot Trend", group = "UT Bot Settings")
+
+// ============================================
+// HULL SUITE INPUTS
+// ============================================
+showHull = input.bool(false, title = "Show Hull Suite", group = "Hull Suite Settings")
+modeSwitch = input.string("Hma", title="Hull Variation", options=["Hma", "Thma", "Ehma"], group = "Hull Suite Settings")
+length = input.int(55, title="Hull Length", minval = 1, group = "Hull Suite Settings")
+useHtf = input(false, title="Show Hull MA from higher timeframe?", group = "Hull Suite Settings")
+htf = input.timeframe("240", title="Hull Higher timeframe", group = "Hull Suite Settings")
+switchColor = input(true, "Hull Color according to trend?", group = "Hull Suite Settings")
+candleCol = input(false,title="Hull Color candles?", group = "Hull Suite Settings")
+visualSwitch  = input(true, title="Hull Show as Band?", group = "Hull Suite Settings")
+
+// Source, length multiplier, line thickness and band transparency fixed --
+// rarely touched relative to Length/Variation/HTF above.
+srcHull = close
+lengthMult = 1.0
+thicknesSwitch = 1
+transpSwitch = 40
+
+// ============================================
+// EMA INPUTS
+// ============================================
+showEMA = input.bool(true, "Show EMA 14/60", group = "EMA")
+emaFastLen = input.int(14, "Fast EMA Length", minval = 1, group = "EMA")
+emaSlowLen = input.int(60, "Slow EMA Length", minval = 1, group = "EMA")
+
+// ============================================
+// LUXALGO FVG INPUTS
+// ============================================
+showLuxFVG = input.bool(defval = true, title = "Show FVG", group = "FVG")
+fvgATRMulti = input.float(0.25, "ATR Multiplier", minval = 0, step = 0.05, tooltip = "LuxAlgo-style gap filter: only a gap larger than ATR(200) * this multiplier counts as a valid FVG. Higher = fewer, larger gaps.", group = "FVG")
+showFVGAvg = input.bool(true, "Show Positioning Average", tooltip = "LuxAlgo FVG Positioning Average: a smoothed support/resistance-style line built from the average edge of recent bull/bear FVGs.", group = "FVG")
+showLastFVG = input.int(0, 'Unmitigated Levels', minval = 0, group = "FVG")
+mitigationLevels = input.bool(false, 'Mitigation Levels', group = "FVG")
+tfFVG = input.timeframe('', "Timeframe", group = "FVG")
+dynamicFVG = input(false, 'Dynamic Display', group = "FVG")
+showDash = input(false, 'Show Dashboard', group = "FVG")
+
+// ATR length for the gap filter, box extension length, zone colors,
+// dashboard position/text size, and the Positioning Average lookback are
+// fixed -- ATR Multiplier above is the one knob that actually changes
+// which gaps qualify as an FVG.
+fvgATRLen = 200
+fvgAvgLookback = 30
+bullCss = color.new(#089981, 70)
+bearCss = color.new(#f23645, 70)
+dashLoc = 'Bottom Left'
+textSize = 'Small'
+
+// ============================================
+// LUXALGO ORDER BLOCKS INPUTS
+// ============================================
+showLuxOB = input.bool(defval = true, title = "Show Order Blocks", group = "LuxAlgo Order Blocks")
+lengthOB = input.int(5, 'Volume Pivot Length', minval = 1, group = "LuxAlgo Order Blocks")
+bull_ext_last = input.int(3, 'Bullish OB Count', minval = 1, group = "LuxAlgo Order Blocks")
+bear_ext_last = input.int(3, 'Bearish OB Count', minval = 1, group = "LuxAlgo Order Blocks")
+mitigationOB = input.string('Wick', 'Mitigation Method', options = ['Wick', 'Close'], group = "LuxAlgo Order Blocks")
+
+// Zone colors and average-line style fixed -- Count/Length/Mitigation Method
+// above are what actually changes detection + how many zones show.
+bg_bull_css = color.new(#089981, 80)
+bull_css = #089981
+bull_avg_css = color.new(#9598a1, 37)
+bg_bear_css = color.new(#f23645, 80)
+bear_css = #f23645
+bear_avg_css = color.new(#9598a1, 37)
+line_style = '⎯⎯⎯'
+line_width = 1
+
+// ============================================
+// DEMAND & SUPPLY INPUTS
+// ============================================
+showDemandSupply = input.bool(true, "Show Demand & Supply Zones", group = "Demand & Supply")
+dsBaseLen        = input.int(3, "Base Length (bars)", minval = 1, group = "Demand & Supply")
+dsImpulseMult    = input.float(1.5, "Impulse Strength (x ATR)", minval = 0.1, step = 0.1, group = "Demand & Supply")
+dsZoneCount      = input.int(3, "Zone Count (each side)", minval = 1, group = "Demand & Supply")
+
+// Zone colors and the "how tight must the base be" factor fixed as
+// constants -- Base Length / Impulse Strength / Zone Count above are the
+// knobs that actually change what gets detected and how much shows.
+demandCss     = color.new(#2157f3, 80)
+demandBorder  = #2157f3
+supplyCss     = color.new(#ff5d00, 80)
+supplyBorder  = #ff5d00
+dsTightFactor = 0.8
+
+// ============================================
+// THREE BAR REVERSAL INPUTS
+// ============================================
+show3BR = input.bool(defval = false, title = "Show Three Bar Reversal", group = "Three Bar Reversal")
+brpType = input.string("All", "Pattern Type", options = ["Normal", "Enhanced", "All"], group = "Three Bar Reversal")
+brpSR = input.string("Level", "Support/Resistance", options = ["Level", "Zone", "None"], group = "Three Bar Reversal")
+trendType3BR = input.string("None", "Trend Filtering", options = ["Moving Average Cloud", "Supertrend", "Donchian Channels", "None"], group = "Three Bar Reversal")
+trendFilt3BR = input.string("Aligned", "", options = ["Aligned", "Opposite"], group = "Three Bar Reversal")
+
+// Pattern/trend colors and the trend filter's internal MA/ATR/Donchian
+// lengths fixed -- Trend Filtering + Aligned/Opposite above are the two
+// choices that actually matter day-to-day.
+brpAC = #2962ff
+brpSC = #ff9800
+maType3BR = "HMA"
+maFLength3BR = 50
+maSLength3BR = 200
+atrPeriod3BR = 10
+factor3BR = 3.0
+length3BR = 13
+
+// ============================================
+// REVERSAL SIGNALS INPUTS
+// ============================================
+showRS = input.bool(defval = false, title = "Show Reversal Signals", group = "Reversal Signals")
+srLRS = input.bool(true, 'Support & Resistance Levels', group = "Reversal Signals")
+
+// ============================================
+// SMC CONFLUENCE SIGNAL ENGINE INPUTS
+// ============================================
+// Three independently-labeled signal sources share this group: UT Bot (its
+// own native Buy/Sell labels, unchanged), an EMA 14/60 cross signal, and the
+// SMC confluence signal. The SMC signal always requires Structure (BOS/CHoCH)
+// bias to agree, plus at least ONE of three alternative recipes:
+//   Recipe A: Liquidity zone   -- Order Block OR Demand/Supply zone
+//   Recipe B: FVG + Demand/Supply zone together
+//   Recipe C: Fibonacci golden zone (0.618-0.786 retracement)
+confirmTF             = input.timeframe("5", "LTF Confirmation Timeframe (EMA + SMC signals)", group = "Confluence Signal Engine")
+requireLTFConfirm     = input.bool(true, "Require LTF Confirmation Candle", group = "Confluence Signal Engine", tooltip = "If the confirmation timeframe has no data yet at a given bar (common far back in history on higher-timeframe charts), the signal is treated as confirmed rather than silently blocked.")
+
+enableEMASignal       = input.bool(true, "Enable EMA Cross Signal", group = "Confluence Signal Engine")
+
+enableConfluence      = input.bool(true, "Enable SMC Confluence Signal", group = "Confluence Signal Engine")
+triggerSource         = input.string("Any", "SMC Reversal Trigger Source", options = ["UT Bot", "3-Bar Reversal", "Momentum Phase", "Any"], group = "Confluence Signal Engine")
+triggerLookbackBars   = input.int(3, "Trigger Valid Window (bars)", minval = 0, maxval = 20, group = "Confluence Signal Engine", tooltip = "A reversal trigger stays 'active' for this many bars while waiting for a recipe + LTF confirmation to line up, instead of requiring everything on the exact same bar.")
+useRecipeLiquidity    = input.bool(true, "Recipe A: Structure + Liquidity (OB or Demand/Supply)", group = "Confluence Signal Engine")
+useRecipeFVGZone      = input.bool(true, "Recipe B: Structure + FVG + Demand/Supply", group = "Confluence Signal Engine")
+useRecipeFibo         = input.bool(true, "Recipe C: Structure + Fibonacci Golden Zone", group = "Confluence Signal Engine")
+maxConfluenceLabels   = input.int(5, "Max Recent Signals (each source)", minval = 1, maxval = 20, group = "Confluence Signal Engine")
+showEMALabels         = input.bool(true, "Show EMA Signal Labels", group = "Confluence Signal Engine")
+showSMCLabels          = input.bool(true, "Show SMC Signal Labels", group = "Confluence Signal Engine")
+showConfluenceDash    = input.bool(true, "Show Confluence Dashboard", group = "Confluence Signal Engine")
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+type fvg
+    float max
+    float min
+    bool  isbull
+    int   t = time
+
+type barRS
+    float o = open
+    float h = high
+    float l = low
+    float c = close
+    int i = bar_index
+
+type trbRS
+    int bSC
+    float bSH
+    float bSL
+    int sSC
+    float sSH
+    float sSL
+
+type treRS
+    int bCC
+    float bC8
+    float bCHt
+    float bCH
+    float bCL
+    float bCLt
+    float bCD
+    int sCC
+    float sC8
+    float sCHt
+    float sCH
+    float sCL
+    float sCLt
+    float sCT
+
+// ============================================
+// METHODS
+// ============================================
+method tosolid(color id) => color.rgb(color.r(id), color.g(id), color.b(id))
+
+// ============================================
+// FUNCTIONS
+// ============================================
+movingAverage3BR(source, lengthMA, maType) => 
+    switch maType
+        "SMA" => ta.sma(source, lengthMA)
+        "EMA" => ta.ema(source, lengthMA)
+        "HMA" => ta.hma(source, lengthMA)
+        "RMA" => ta.rma(source, lengthMA)
+        "WMA" => ta.wma(source, lengthMA)
+        "VWMA" => ta.vwma(source, lengthMA)
+
+isBullishReversal3BR() =>
+    (close[2] < open[2]) and
+     (low[1] < low[2]) and (high[1] < high[2]) and (close[1] < open[1]) and
+     (close > open) and (high > high[2])
+
+isBearishReversal3BR() =>
+    (close[2] > open[2]) and
+     (high[1] > high[2]) and (low[1] > low[2]) and (close[1] > open[1]) and
+     (close < open) and (low < low[2])
+
+f_xLXRS(_p, _l) =>
+    (_l > _p and _l < _p[1]) or (_l < _p and _l > _p[1])
+
+f_lnSRS(_s) =>
+    switch _s
+        'Circles' => plot.style_circles
+        'Step Line' => plot.style_steplinebr
+        'Step Line w/ Diamonds' => plot.style_steplinebr
+        => plot.style_circles
+
+detectFVG() =>
+    var new_fvg = fvg.new(na, na, false, na)
+    // LuxAlgo "FVG Positioning Average" style filter: gap size must exceed
+    // ATR(200) * multiplier, instead of a fixed percentage of price. This
+    // scales the filter with current volatility automatically.
+    atrFVG = nz(ta.atr(fvgATRLen) * fvgATRMulti, ta.cum(high - low) / (bar_index + 1))
+
+    bull_fvg = low > high[2] and close[1] > high[2] and (low - high[2]) > atrFVG
+    bear_fvg = high < low[2] and close[1] < low[2] and (low[2] - high) > atrFVG
+    
+    if bull_fvg
+        new_fvg := fvg.new(low, high[2], true, time)
+    else if bear_fvg
+        new_fvg := fvg.new(low[2], high, false, time)
+
+    [bull_fvg, bear_fvg, new_fvg]
+
+// Scans every tracked zone (not just the most-recently-formed one) for one
+// that contains `px`. Used by the Confluence Signal Engine so a price
+// sitting inside an older-but-still-unmitigated Order Block / Demand /
+// Supply zone is recognised, not just the single newest zone.
+zoneContains(top_arr, btm_arr, px) =>
+    found = false
+    if array.size(top_arr) > 0
+        for i = 0 to array.size(top_arr) - 1
+            if px <= array.get(top_arr, i) and px >= array.get(btm_arr, i)
+                found := true
+    found
+
+// LuxAlgo OB Functions
+get_line_style(style) =>
+    out = switch style
+        '⎯⎯⎯'  => line.style_solid
+        '----' => line.style_dashed
+        '····' => line.style_dotted
+
+get_coordinates(condition, top, btm, ob_val, max_tracked)=>
+    var ob_top  = array.new_float(0)
+    var ob_btm  = array.new_float(0)
+    var ob_avg  = array.new_float(0)
+    var ob_left = array.new_int(0)
+
+    float ob = na
+
+    if condition
+        avg = math.avg(top, btm)
+        
+        array.unshift(ob_top, top)
+        array.unshift(ob_btm, btm)
+        array.unshift(ob_avg, avg)
+        array.unshift(ob_left, time[lengthOB])
+
+        // Safety cap: un-mitigated OBs would otherwise accumulate forever
+        // (mitigation only removes by price, never by age/count), slowly
+        // growing memory/CPU cost on long histories or low timeframes.
+        if array.size(ob_top) > max_tracked
+            array.pop(ob_top)
+            array.pop(ob_btm)
+            array.pop(ob_avg)
+            array.pop(ob_left)
+
+        ob := ob_val
+    
+    [ob_top, ob_btm, ob_avg, ob_left, ob]
+
+remove_mitigated(ob_top, ob_btm, ob_left, ob_avg, target, bull)=>
+    mitigated = false
+    target_array = bull ? ob_btm : ob_top
+
+    // Iterate by index, back-to-front, so removing the current element never
+    // shifts not-yet-visited indices (the previous for..in + indexof(value)
+    // version could skip elements or delete the wrong one when two OBs shared
+    // the same price).
+    if array.size(target_array) > 0
+        for idx = array.size(target_array) - 1 to 0
+            element = array.get(target_array, idx)
+
+            if (bull ? target < element : target > element)
+                mitigated := true
+
+                array.remove(ob_top, idx)
+                array.remove(ob_btm, idx)
+                array.remove(ob_avg, idx)
+                array.remove(ob_left, idx)
+
+    mitigated
+
+set_order_blocks(ob_top, ob_btm, ob_left, ob_avg, ext_last, bg_css, border_css, lvl_css)=>
+    var ob_box = array.new_box(0)
+    var ob_lvl = array.new_line(0)
+
+    if barstate.isfirst
+        for i = 0 to ext_last-1
+            array.unshift(ob_box, box.new(na,na,na,na
+              , xloc = xloc.bar_time
+              , extend= extend.right
+              , bgcolor = bg_css
+              , border_color = color.new(border_css, 70)))
+
+            array.unshift(ob_lvl, line.new(na,na,na,na
+              , xloc = xloc.bar_time
+              , extend = extend.right
+              , color = lvl_css
+              , style = get_line_style(line_style)
+              , width = line_width))
+
+    if barstate.islast
+        if array.size(ob_top) > 0
+            for i = 0 to math.min(ext_last-1, array.size(ob_top)-1)
+                get_box = array.get(ob_box, i)
+                get_lvl = array.get(ob_lvl, i)
+
+                box.set_lefttop(get_box, array.get(ob_left, i), array.get(ob_top, i))
+                box.set_rightbottom(get_box, array.get(ob_left, i), array.get(ob_btm, i))
+
+                line.set_xy1(get_lvl, array.get(ob_left, i), array.get(ob_avg, i))
+                line.set_xy2(get_lvl, array.get(ob_left, i)+1, array.get(ob_avg, i))
+
+// ============================================
+// MXWLL SUITE CODE  
+// ============================================
+var bigData = map.new<string, float>()
+
+if bigData.size() == 0
+    bigData.put("moving", 0)
+    bigData.put("upaxis", 0.0) 
+    bigData.put("upaxis2", 0)
+    bigData.put("dnaxis", 0.0) 
+    bigData.put("dnaxis2", 0)
+    bigData.put("upside", 1)
+    bigData.put("downside", 1)
+
+[pdHigh, pdLow, dayHigh, dayLow, pdBar, dayBar] = request.security(syminfo.tickerid, "1D", [high[1], low[1], high, low, time[1], time])
+
+var highArr = array.new_float(), var lowArr  = array.new_float()
+var timeArr = array.new_int  (), var volArr  = array.new_float()
+var closeArr = array.new_float(), var openArr = array.new_float()
+
+highArr.unshift(high), lowArr.unshift(low)
+timeArr.unshift(time), volArr.unshift(volume)
+closeArr.unshift(close), openArr.unshift(open)
+
+type rollingTF 
+    float highTF                  = 0
+    float lowTF                   = 1e8
+    int   highTFt                 = 0
+    int   lowTFt                  = 0
+    float volTF                   = 0
+    map   <string, line >         rTFdraw
+    map   <string, label>         rTFlabel
+
+method tfDraw(int tfDiff, bool showRollingLab, string tf, bool showLevels) => 
+    TFhrdata = rollingTF.new(), var volRolling = array.new<float>()
+
+    if highArr.size() > tfDiff
+        for i = 0 to tfDiff
+            if showLevels and barstate.islast
+                getHigh = highArr.get(i), getLow = lowArr.get(i), 
+                             getTime = timeArr.get(i)
+
+                TFhrdata.highTF := math.max(TFhrdata.highTF, getHigh)
+                TFhrdata.lowTF  := math.min(TFhrdata.lowTF , getLow )
+
+                if TFhrdata.highTF == getHigh 
+                    TFhrdata.highTFt := timeArr.get(i)
+
+                if TFhrdata.lowTF == getLow
+                    TFhrdata.lowTFt  := timeArr.get(i)
+
+            TFhrdata.volTF += volArr.get(i)
+
+        volRolling.push(TFhrdata.volTF)
+
+        var lineDraw = rollingTF.new(rTFdraw = map.new<string, line>(), rTFlabel = map.new<string, label>())
+
+        if showLevels
+            switch lineDraw.rTFdraw.size() == 0
+                true =>  lineDraw.rTFdraw.put("High", line.new(TFhrdata.highTFt, TFhrdata.highTF, time, TFhrdata.highTF, 
+                                                 xloc = xloc.bar_time, color = color.aqua)),
+                         lineDraw.rTFdraw.put("Low" , line.new(TFhrdata.lowTFt , TFhrdata.lowTF , time, TFhrdata.lowTF , 
+                                                 xloc = xloc.bar_time, color = color.aqua))  
+
+                =>       lineDraw.rTFdraw.get("High").set_xy1(TFhrdata.highTFt, TFhrdata.highTF),
+                         lineDraw.rTFdraw.get("High").set_xy2(time, TFhrdata.highTF),
+
+                         lineDraw.rTFdraw.get("Low").set_xy1(TFhrdata.lowTFt, TFhrdata.lowTF),
+                         lineDraw.rTFdraw.get("Low").set_xy2(time, TFhrdata.lowTF)
+
+            if showRollingLab 
+                switch lineDraw.rTFlabel.size() == 0
+                    true =>  lineDraw.rTFlabel.put("High", label.new(time, TFhrdata.highTF, xloc = xloc.bar_time, 
+                                                         textcolor = color.aqua, 
+                                                         text      = tf + "H", 
+                                                         size      = size.tiny, 
+                                                         style     = label.style_label_left, 
+                                                         color     = #00000000
+                                                         )),
+                             lineDraw.rTFlabel.put("Low" , label.new(time, TFhrdata.lowTF , xloc = xloc.bar_time, 
+                                                         textcolor = color.aqua, 
+                                                         text      = tf + "L", 
+                                                         size      = size.tiny, 
+                                                         style     = label.style_label_left, 
+                                                         color     = #00000000
+                                                         ))  
+
+                    =>       lineDraw.rTFlabel.get("High") .set_xy(time, TFhrdata.highTF),
+                             lineDraw.rTFlabel.get("Low")  .set_xy(time, TFhrdata.lowTF)
+
+    [TFhrdata.volTF, volRolling]
+
+tfDrawLower(bool showRollingLab, simple string tf, bool showLevels) => 
+    simple int end = switch tf 
+        "240" => 240
+        "1D"  => 1440
+
+    [oLTF, hLTF, lLTF, cLTF, vLTF, tLTF] = request.security_lower_tf(syminfo.tickerid, "1", [open, high, low, close, volume, time])
+
+    var oArr = array.new_float()
+    var hArr = array.new_float()
+    var lArr = array.new_float()
+    var cArr = array.new_float()
+    var vArr = array.new_float()
+    var tArr = array.new_int()
+
+    TFhrdata = rollingTF.new(), var volRolling = array.new<float>()
+
+    if hLTF.size() > 0
+        for i = 0 to hLTF.size() - 1
+            oArr.push(oLTF.get(i))
+            hArr.push(hLTF.get(i))
+            lArr.push(lLTF.get(i))
+            cArr.push(cLTF.get(i))
+            vArr.push(vLTF.get(i))
+            tArr.push(tLTF.get(i))
+
+            if hArr.size() > end 
+                oArr.shift()
+                hArr.shift()
+                lArr.shift()
+                cArr.shift()
+                vArr.shift()
+                tArr.shift()
+
+        for i = 0 to hArr.size() - 1
+            if showLevels
+                getHigh = hArr.get(i), getLow = lArr.get(i), 
+                             getTime = tArr.get(i)
+
+                TFhrdata.highTF := math.max(TFhrdata.highTF, getHigh)
+                TFhrdata.lowTF  := math.min(TFhrdata.lowTF , getLow)
+
+                if TFhrdata.highTF == getHigh 
+                    TFhrdata.highTFt := tArr.get(i)
+
+                if TFhrdata.lowTF == getLow
+                    TFhrdata.lowTFt  := tArr.get(i)
+
+            TFhrdata.volTF  += vArr.get(i)
+
+        volRolling.push(TFhrdata.volTF)
+
+        var lineDraw = rollingTF.new(rTFdraw = map.new<string, line>(), rTFlabel = map.new<string, label>())
+
+        if showLevels
+            switch lineDraw.rTFdraw.size() == 0
+                true =>  lineDraw.rTFdraw.put("High", line.new(TFhrdata.highTFt, TFhrdata.highTF, time, TFhrdata.highTF, 
+                                                 xloc = xloc.bar_time, color = color.aqua)),
+                         lineDraw.rTFdraw.put("Low" , line.new(TFhrdata.lowTFt , TFhrdata.lowTF , time, TFhrdata.lowTF , 
+                                                 xloc = xloc.bar_time, color = color.aqua))  
+
+                =>       lineDraw.rTFdraw.get("High").set_xy1(TFhrdata.highTFt, TFhrdata.highTF),
+                         lineDraw.rTFdraw.get("High").set_xy2(time, TFhrdata.highTF),
+
+                         lineDraw.rTFdraw.get("Low").set_xy1(TFhrdata.lowTFt, TFhrdata.lowTF),
+                         lineDraw.rTFdraw.get("Low").set_xy2(time, TFhrdata.lowTF)
+
+            if showRollingLab 
+                switch lineDraw.rTFlabel.size() == 0
+                    true =>  lineDraw.rTFlabel.put("High", label.new(time, TFhrdata.highTF, xloc = xloc.bar_time, 
+                                                         textcolor = color.aqua, 
+                                                         text      = tf + "H", 
+                                                         size      = size.tiny, 
+                                                         style     = label.style_label_left, 
+                                                         color     = #00000000
+                                                         )),
+                             lineDraw.rTFlabel.put("Low" , label.new(time, TFhrdata.lowTF , xloc = xloc.bar_time, 
+                                                         textcolor = color.aqua, 
+                                                         text      = tf + "L", 
+                                                         size      = size.tiny, 
+                                                         style     = label.style_label_left, 
+                                                         color     = #00000000
+                                                         ))  
+
+                    =>       lineDraw.rTFlabel.get("High") .set_xy(time, TFhrdata.highTF),
+                             lineDraw.rTFlabel.get("Low")  .set_xy(time, TFhrdata.lowTF)
+
+    [TFhrdata.volTF, volRolling]
+
+var r4hrbars = math.floor(timeframe.in_seconds("240") / timeframe.in_seconds(timeframe.period))
+var rDbars   = math.floor(timeframe.in_seconds("1D") / timeframe.in_seconds(timeframe.period))
+
+[vol4hr, vol4hrArr] = switch 
+    timeframe.in_seconds() <= 60 => r4hrbars.tfDraw(show4hLab, "240", show4H)
+    =>                              tfDrawLower(show4hLab, "240", show4H)
+    
+[vol1D, vol1DArr] = switch
+    timeframe.in_seconds() <= 60 => rDbars.tfDraw(show1DLab, "1D", show1D) 
+    =>                              tfDrawLower(show1DLab, "1D", show1D)
+
+calculatePivots(lengthCalc)=>
+    var int intraCalc = 0
+
+    if bar_index > lengthCalc + 1
+        up  = highArr.slice(0, lengthCalc).max()
+        dn  = lowArr .slice(0, lengthCalc).min() 
+        
+        cHi = highArr.get(lengthCalc)
+        cLo = lowArr .get(lengthCalc)
+
+        intraCalc := switch 
+            cHi > up => 0 
+            cLo < dn => 1 
+            =>          intraCalc[1]
+
+        topSwing = switch 
+            intraCalc == 0 and intraCalc[1] != 0 => cHi 
+            =>                                      0 
+
+        botSwing = switch 
+            intraCalc == 1 and intraCalc[1] != 1 => cLo
+            =>                                      0 
+
+        [topSwing, botSwing]
+
+[bigUpper    , bigLower   ]     = calculatePivots(extSens)
+[smallUpper  , smallLower ]     = calculatePivots(intSens)
+
+// Seed with a real (non-na) placeholder label instead of the array's default
+// na entry -- `main` below reads .get_x()/.get_y() off these on bar 0, and
+// calling those getters on a na label throws a runtime error.
+var label [] upLabel = array.new_label(1, label.new(bar_index, close, "", color = color.new(color.white, 100), textcolor = color.new(color.white, 100)))
+var label [] dnLabel = array.new_label(1, label.new(bar_index, close, "", color = color.new(color.white, 100), textcolor = color.new(color.white, 100)))
+
+drawChar(x, y, str, col, down) =>
+    style = switch down 
+        true => label.style_label_down
+        =>      label.style_label_up
+
+    line.new (int(x), y, bar_index, y, color = col, style = line.style_dashed)
+    label.new(math.round(math.avg(x, bar_index)), y, str, color = #00000000, textcolor = col, style = style, size = size.small)
+
+drawStructureExt() => 
+    var int counter = 0
+
+    if bigUpper != 0
+        bigData.put("upside", 1)
+        x1 = bar_index - extSens
+
+        txt = switch bigUpper > bigData.get("upaxis")
+            true => 'HH'
+            =>      'LH'
+
+        if showHHLH
+            upLabel.set(0, label.new(x1, bigUpper, txt,
+                          color     = color.new(color.white, 100), 
+                          textcolor = bearC, 
+                          style     = label.style_label_down, 
+                          size      = size.small
+                          ))
+
+        bigData.put("upaxis" , bigUpper)
+        bigData.put("upaxis2", x1)
+
+        counter := 1
+
+    if bigLower != 0
+        bigData.put("downside", 1)
+
+        x1 = bar_index - extSens
+
+        txt = switch bigLower < bigData.get("dnaxis") 
+            true => "LL" 
+            =>      "HL"
+
+        if showHLLL == true 
+            dnLabel.set(0, label.new(x1, bigLower, txt, color = #ffffff00, 
+                         textcolor = bullC, 
+                         style     = label.style_label_up, 
+                         size      = size.small
+                         ))
+        
+        bigData.put("dnaxis" , bigLower)
+        bigData.put("dnaxis2", x1)
+
+        counter := -1
+
+    // Structure bias (bigData "moving") must always update here -- the
+    // Confluence Signal Engine reads it regardless of whether the BOS/CHoCH
+    // labels themselves are switched on. Only the drawChar() visual label
+    // below is gated by showExt.
+    if ta.crossover(close, bigData.get("upaxis"))
+        if bigData.get("upside") != 0
+            str = switch bigData.get("moving") < 0
+                true => extStru != "BoS"   ? 'CHoCH' : "" 
+                =>      extStru != 'CHoCH' ? 'BoS'   : ""
+
+            if showExt and (extStru == "All" or str.contains(extStru, str))
+                drawChar(bigData.get("upaxis2"), bigData.get("upaxis"), str, bullC, true)
+
+            bigData.put("upside", 0)
+            bigData.put("moving", 1)
+
+    if ta.crossunder(close, bigData.get("dnaxis"))
+        if bigData.get("downside") != 0
+            str = switch bigData.get("moving") > 0
+                true => extStru != "BoS"   ? 'CHoCH' : "" 
+                =>      extStru != 'CHoCH' ? 'BoS'   : ""
+
+            if showExt and (extStru == "All" or str.contains(extStru, str))
+                drawChar(bigData.get("dnaxis2"), bigData.get("dnaxis"), str, bearC, false)
+
+            bigData.put("downside", 0)
+            bigData.put("moving", -1)
+
+    counter 
+
+counter = drawStructureExt()
+
+method updateMain(line id) => 
+    hi = 0.0 
+    lo = 1e8
+
+    // Always recompute the swing endpoints -- this used to be gated by
+    // `showFibs`, so turning off the Fib *display* silently froze the swing
+    // line (and anything derived from it, like the Fibo confluence zone)
+    // at whatever position it last had. showFibs now only controls whether
+    // drawFibs() below actually draws the ratio lines/labels.
+    //
+    // This also used to run its OWN separate calculatePivots(fibsPivotLen)
+    // call, independent from the extSens-based bigUpper/bigLower that
+    // bigData's "upaxis"/"upaxis2"/"dnaxis"/"dnaxis2" anchors actually come
+    // from. Whenever the Fib pivot length differed from the Structure
+    // sensitivity, `counterFibs` could flip on a completely different bar
+    // than when those anchors last updated, silently attaching the Fib
+    // measurement to a stale/mismatched swing point. Reusing bigUpper/
+    // bigLower directly keeps the Fib swing permanently in sync with the
+    // exact same swing structure the BOS/CHoCH labels are drawn from.
+    var int counterFibs = 0
+
+    if bigUpper != 0 
+        counterFibs := 1
+
+    if bigLower != 0 
+        counterFibs := -1
+
+    if counterFibs == 1 
+        hi := 0.0
+        
+        id.set_xy1(int(bigData.get("upaxis2")), bigData.get("upaxis"))
+
+        for i = 0 to bar_index - int(bigData.get("dnaxis2"))
+            getLow = lowArr.get(i)
+
+            lo := math.min(getLow, lo)
+
+            if lo == getLow
+                id.set_xy2(bar_index - i, lo)
+
+    else if counterFibs == -1
+        lo := 1e8
+        id.set_xy1(int(bigData.get("dnaxis2")), bigData.get("dnaxis"))
+
+        for i = 0 to bar_index - bigData.get("upaxis2")
+            getHigh = highArr.get(i)
+            hi     := math.max(highArr.get(i), hi)
+
+            if hi == getHigh 
+                id.set_xy2(bar_index - i, hi)
+
+    if id.get_x2() < id.get_x1()
+        x2 = id.get_x2(), x1 = id.get_x1()
+        y2 = id.get_y2(), y1 = id.get_y1(),
+
+                 id.set_xy2(x1, y1),
+                 id.set_xy1(x2, y2)
+
+    switch id.get_y2() < id.get_y1()
+        true => id.set_color(#F24968)
+        =>      id.set_color(#14D990)
+
+    0
+
+var main = line.new(dnLabel.first().get_x(), dnLabel.first().get_y(), upLabel.first().get_x(), upLabel.first().get_y(),
+                                                 style = line.style_dashed, 
+                                                 width = 2
+                                                 )
+
+main.updateMain()
+
+quickLine(y, colorLine) => 
+    line.new(bar_index + 1, y, bar_index + 5, y, color = color.new(colorLine, 75))
+
+quickLabel(y, txt, colorLabel) => 
+    label.new(bar_index + 5, y, text = str.tostring(txt), color = #00000000, style = label.style_label_left, textcolor = colorLabel)
+
+// Extension gets its own bolder-but-shorter line (3 bars instead of 5, and
+// far less transparent than the plain retracement lines) plus a label
+// pushed further right so it sits in its own column, not overlapping the
+// retracement labels -- matching the look of TradingView's own Trend-Based
+// Fib Extension drawing tool.
+quickLineExt(y, colorLine) =>
+    line.new(bar_index + 4, y, bar_index + 9, y, color = color.new(colorLine, 15), width = 2)
+
+quickLabelExt(y, txt, colorLabel) =>
+    label.new(bar_index + 9, y, text = str.tostring(txt), color = #00000000, style = label.style_label_left, textcolor = colorLabel)
+
+// Auto Trend-Based Fib Extension -- live 3-point projection built on the
+// same swing the retracement above uses: P1 = main.get_y1() (older/100%
+// point), P2 = main.get_y2() (newer/0% point), P3 = the live extreme of
+// the retracement in progress since P2 (updates every bar, same way the
+// swing endpoints above do). Extension level = P3 + (P2 - P1) * ratio.
+// Always calculated, independent of showFibExt -- that toggle only gates
+// drawFibExt()'s drawing below.
+fibExtP1    = main.get_y1()
+fibExtP2    = main.get_y2()
+fibExtDirUp = fibExtP2 > fibExtP1
+fibExtX2    = main.get_x2()
+fibExtN     = math.max(bar_index - fibExtX2, 0)
+fibExtP3    = fibExtDirUp ? lowArr.slice(0, fibExtN + 1).min() : highArr.slice(0, fibExtN + 1).max()
+fibExtDiff  = fibExtP2 - fibExtP1
+
+drawFibs() => 
+    if barstate.islast
+        var fibLine = array.new<line>(12)
+        var fibLab = array.new<label>(12) 
+        
+        if fibLine.size() > 0 
+            for i = 0 to fibLine.size() - 1
+                fibLine .get(i).delete()
+                fibLab  .get(i).delete()
+
+        if showFibs
+            getY2 = main.get_y2(), sub   = main.get_y1() - getY2, 
+            getX1 = main.get_x1(), getX2 = main.get_x2()
+
+            for i = 0 to fibLine.size() - 1
+                [y, col, txt] = switch i
+                    0  => [sub * fib0  + getY2, show0   ? fib0col   : color.new(chart.bg_color, 100), fib0]
+                    1  => [sub * fib1  + getY2, show236 ? fib1col   : color.new(chart.bg_color, 100), fib1]
+                    2  => [sub * fib2  + getY2, show382 ? fib2col   : color.new(chart.bg_color, 100), fib2]
+                    3  => [sub * fib3  + getY2, show5   ? fib3col   : color.new(chart.bg_color, 100), fib3]
+                    4  => [sub * fib4  + getY2, show618 ? fib4col   : color.new(chart.bg_color, 100), fib4]
+                    5  => [sub * fib5  + getY2, show786 ? fib5col   : color.new(chart.bg_color, 100), fib5]
+                    6  => [sub * fib6  + getY2, show886 ? fib6col   : color.new(chart.bg_color, 100), fib6]
+                    7  => [sub * fib100 + getY2, show100 ? fib100col : color.new(chart.bg_color, 100), fib100]
+                    8  => [sub * fib7  + getY2, show113 ? fib7col   : color.new(chart.bg_color, 100), fib7]
+                    9  => [sub * fib8  + getY2, show127 ? fib8col   : color.new(chart.bg_color, 100), fib8]
+                    10 => [sub * fib9  + getY2, show141 ? fib9col   : color.new(chart.bg_color, 100), fib9]
+                    => [sub * fib10 + getY2, show161 ? fib10col : color.new(chart.bg_color, 100), fib10]
+
+                fibLine.set(i, quickLine  (y, col))
+                fibLab .set(i, quickLabel (y, txt, col))
+
+drawFibs()
+
+drawFibExt() =>
+    if barstate.islast
+        var fibExtLine = array.new<line>(12)
+        var fibExtLab = array.new<label>(12)
+
+        if fibExtLine.size() > 0
+            for i = 0 to fibExtLine.size() - 1
+                fibExtLine.get(i).delete()
+                fibExtLab .get(i).delete()
+
+        if showFibExt
+            for i = 0 to fibExtLine.size() - 1
+                [y, col, txt] = switch i
+                    0  => [fibExtP3 + fibExtDiff * fibExtA, showExt0    ? fibExtAcol : color.new(chart.bg_color, 100), fibExtA]
+                    1  => [fibExtP3 + fibExtDiff * fibExtB, showExt236  ? fibExtBcol : color.new(chart.bg_color, 100), fibExtB]
+                    2  => [fibExtP3 + fibExtDiff * fibExtC, showExt382  ? fibExtCcol : color.new(chart.bg_color, 100), fibExtC]
+                    3  => [fibExtP3 + fibExtDiff * fibExtD, showExt500  ? fibExtDcol : color.new(chart.bg_color, 100), fibExtD]
+                    4  => [fibExtP3 + fibExtDiff * fibExt1, showExt618  ? fibExt1col : color.new(chart.bg_color, 100), fibExt1]
+                    5  => [fibExtP3 + fibExtDiff * fibExtE, showExt786  ? fibExtEcol : color.new(chart.bg_color, 100), fibExtE]
+                    6  => [fibExtP3 + fibExtDiff * fibExtF, showExt886  ? fibExtFcol : color.new(chart.bg_color, 100), fibExtF]
+                    7  => [fibExtP3 + fibExtDiff * fibExt2, showExt100  ? fibExt2col : color.new(chart.bg_color, 100), fibExt2]
+                    8  => [fibExtP3 + fibExtDiff * fibExt3, showExt1272 ? fibExt3col : color.new(chart.bg_color, 100), fibExt3]
+                    9  => [fibExtP3 + fibExtDiff * fibExt4, showExt1618 ? fibExt4col : color.new(chart.bg_color, 100), fibExt4]
+                    10 => [fibExtP3 + fibExtDiff * fibExt5, showExt2000 ? fibExt5col : color.new(chart.bg_color, 100), fibExt5]
+                    => [fibExtP3 + fibExtDiff * fibExt6, showExt2618 ? fibExt6col : color.new(chart.bg_color, 100), fibExt6]
+
+                fibExtLine.set(i, quickLineExt  (y, col))
+                fibExtLab .set(i, quickLabelExt (y, txt, col))
+
+drawFibExt()
+
+drawStructureInternals() => 
+    if showInt
+        var keyValues = map.new<string, float>()
+
+        if keyValues.size() == 0 
+            keyValues.put("movingSmall", 0)
+
+        if smallUpper != 0 
+            keyValues.put("upsideSmall", 1)          
+            keyValues.put("upaxisSmall", smallUpper) 
+            keyValues.put("upaxis2Small", bar_index - intSens)
+
+        if smallLower != 0 
+            keyValues.put("downsideSmall", 1)       
+            keyValues.put("dnaxisSmall", smallLower)
+            keyValues.put("dnaxis2Small", bar_index - intSens)
+
+        if ta.crossover(close, keyValues.get("upaxisSmall")) 
+            if keyValues.get("upsideSmall") != 0
+                str = switch 
+                    keyValues.get("movingSmall") < 0 =>     intStru != "BoS"   ? 'I-CHoCH' : "" 
+                    =>                                      intStru != "CHoCH" ? 'I-BoS'   : ""
+
+                if intStru == "All" or str.contains(str, intStru)
+                    drawChar(keyValues.get("upaxis2Small"), keyValues.get("upaxisSmall"), str, bullC, true)
+
+                keyValues.put("upsideSmall", 0)
+                keyValues.put("movingSmall", 1)
+
+        if ta.crossunder(close, keyValues.get("dnaxisSmall"))
+            if keyValues.get("downsideSmall") != 0
+                str = switch 
+                    keyValues.get("movingSmall") > 0 => intStru != "BoS"   ? 'I-CHoCH' : ""
+                    =>                                  intStru != "CHoCH" ? 'I-BoS'   : ""
+
+                if intStru == "All" or str.contains(str, intStru)
+                    drawChar(keyValues.get("dnaxis2Small"), keyValues.get("dnaxisSmall"), str, bearC, false)
+
+                keyValues.put("downsideSmall", 0)
+                keyValues.put("movingSmall", -1)
+
+drawStructureInternals()
+
+var table tab2 = table.new(position.top_right, 2, 8,  bgcolor = #20222C, border_color = #363843, frame_color = #363843, border_width = 1, frame_width = 1)
+
+nyHour   = hour  (timenow, "America/New_York")
+nyMinute = minute(timenow, "America/New_York")
+
+calculateTimeDifference(timestamp1, timestamp2) =>
+    timeDifference = timestamp2 - timestamp1
+    hours = math.floor(timeDifference / 3600000)
+    minutes = math.floor((timeDifference % 3600000) / 60000)
+    [hours, minutes]
+
+dayAdjustment = (hour(timenow, "America/New_York") < 2) ? dayofmonth(timenow) + 1 : dayofmonth(timenow)
+dayAdjustment2 = nyHour >= 20 or nyHour < 2 ? dayofmonth(timenow) + 1 : dayofmonth(timenow)
+
+timeIsInRange(startHour, startMinute, endHour, endMinute) =>
+    (nyHour > startHour or (nyHour == startHour and nyMinute >= startMinute)) and (nyHour < endHour or (nyHour == endHour and nyMinute <= endMinute))
+
+[chartcol, timetilchange, stringCol, stringCol2] = switch 
+    timeIsInRange(9, 30, 16, 0) => [#f24968  , timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 16, 0, 0), "New York", "Asia"]
+    timeIsInRange(20, 0, 2 , 0) => [#14D990  , timestamp("America/New_York", year(timenow), month(timenow), dayAdjustment, 2, 0, 0), "Asia", "London"]
+    timeIsInRange(3, 0, 11, 30) => [#F2B807  , timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 11, 30, 0), "London", "New York"]
+    => [color.gray, int(na), "Dead Zone", (nyHour > 16 or nyHour < 3) ? "London" : (nyHour >= 11 and nyHour < 20) ? "Asia" : "New York"]                        
+
+[hours, minutes] = calculateTimeDifference(timenow, timetilchange)
+
+timetilchange2 = switch
+    timeIsInRange(9, 30, 16, 0)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 20, 0, 0) 
+    timeIsInRange(20, 0, 2 , 0)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 3, 0, 0)  
+    timeIsInRange(3, 0, 11, 30)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 9, 30, 0) 
+    => na 
+
+if na(timetilchange2)
+    timetilchange2 := switch
+        nyHour < 9 or (nyHour == 9 and nyMinute < 30) => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 9, 30, 0) 
+        nyHour < 20 or (nyHour >= 16 and nyHour < 20) => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 20, 0, 0) 
+        nyHour < 3 or (nyHour >= 2 and nyHour < 3)    => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 3, 0, 0)     
+        => na  
+
+[hours2, minutes2] = calculateTimeDifference(timenow, timetilchange2)
+
+method getActivity(array<float> id, float id2) => 
+    if id.size() > 0
+        volPerc1 = id.percentile_nearest_rank(10)
+        volPerc2 = id.percentile_nearest_rank(33)
+        volPerc3 = id.percentile_nearest_rank(50)
+        volPerc4 = id.percentile_nearest_rank(66)
+        volPerc5 = id.percentile_nearest_rank(90)
+
+        log.warning(str.tostring(volPerc1) + "\n" + str.tostring(volPerc2) + "\n" + str.tostring(volPerc3) + "\n" + str.tostring(volPerc4) + "\n" + str.tostring(volPerc5))
+
+        activity = switch 
+            id2 <=  volPerc1 => "Very Low"   
+            id2 <=  volPerc2 => "Low"   
+            id2 <=  volPerc3 => "Average"   
+            id2 <=  volPerc4 => "High"   
+            =>                  "Very High"
+
+        activity
+    
+if showSessionDash and barstate.islast 
+    hr4Act = vol4hrArr.getActivity(vol4hr)
+    D1Act  = vol1DArr .getActivity(vol1D)
+
+    table.cell(tab2, 0, 2, text = "Session:"  ,       text_color = color.white, text_halign = text.align_left)
+    table.cell(tab2, 0, 3, text = "Session Close:"  , text_color = color.white, text_halign = text.align_left)
+    table.cell(tab2, 0, 4, text = "Next Session:"  , text_color = color.white, text_halign = text.align_left)
+    table.cell(tab2, 0, 5, text = "Next Session Open:"  , text_color = color.white, text_halign = text.align_left)
+
+    table.cell(tab2, 0, 6, text = "4-Hr Volume:"  ,   text_color = color.white, text_halign = text.align_left)
+    table.cell(tab2, 0, 7, text = "24-Hr Volume:"  ,  text_color = color.white, text_halign = text.align_left)
+
+    table.cell(tab2, 1, 2, text =  stringCol , text_color = color.white)
+    table.cell(tab2, 1, 3, text = stringCol != "Dead Zone" ? str.tostring(hours)+ "h" + str.tostring(minutes) + "m": "Dead Zone", text_color = color.white)
+    table.cell(tab2, 1, 4, text =stringCol2, text_color = color.white)
+    table.cell(tab2, 1, 5, text = str.tostring(hours2) + "h:" + str.tostring(minutes2) + "m", text_color = color.white)
+    table.cell(tab2, 1, 6, text = hr4Act, text_color = color.white)
+    table.cell(tab2, 1, 7, text = D1Act, text_color = color.white)
+
+nyHour2   = hour  (time, "America/New_York")
+nyMinute2 = minute(time, "America/New_York")
+
+timeIsInRange2(startHour, startMinute, endHour, endMinute) =>
+    if endHour >= startHour
+        (nyHour2 > startHour or (nyHour2 == startHour and nyMinute2 >= startMinute)) and 
+         (nyHour2 < endHour or (nyHour2 == endHour and nyMinute2 <= endMinute))
+    else
+        (nyHour2 > startHour or (nyHour2 == startHour and nyMinute2 >= startMinute)) or
+         (nyHour2 < endHour or (nyHour2 == endHour and nyMinute2 <= endMinute))
+
+bgcolor(showSessionBG and timeIsInRange2(9, 30, 16, 0) ? color.new(nyCol, tra) : na)
+bgcolor(showSessionBG and timeIsInRange2(20, 0, 2 , 0) ? color.new(asCol, tra) : na)
+bgcolor(showSessionBG and timeIsInRange2(3, 0, 11, 30) ? color.new(loCol, tra) : na)
+
+// ════════════════════════════════════════════════════════════════
+// UT BOT CODE (WITH LABEL MANAGEMENT)
+// ════════════════════════════════════════════════════════════════
+var utBuyLabels = array.new<label>()
+var utSellLabels = array.new<label>()
+
+xATR  = ta.atr(c)
+nLoss = a * xATR
+
+srcUT = h ? request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close, lookahead = barmerge.lookahead_off) : close
+
+var float xATRTrailingStop = 0.0
+xATRTrailingStop := if srcUT > nz(xATRTrailingStop[1], 0) and srcUT[1] > nz(xATRTrailingStop[1], 0)
+    math.max(nz(xATRTrailingStop[1]), srcUT - nLoss)
+else if srcUT < nz(xATRTrailingStop[1], 0) and srcUT[1] < nz(xATRTrailingStop[1], 0)
+    math.min(nz(xATRTrailingStop[1]), srcUT + nLoss)
+else if srcUT > nz(xATRTrailingStop[1], 0)
+    srcUT - nLoss
+else
+    srcUT + nLoss
+ 
+var int pos = 0   
+pos := if srcUT[1] < nz(xATRTrailingStop[1], 0) and srcUT > nz(xATRTrailingStop[1], 0)
+    1
+else if srcUT[1] > nz(xATRTrailingStop[1], 0) and srcUT < nz(xATRTrailingStop[1], 0)
+    -1
+else
+    nz(pos[1], 0)
+   
+xcolor = pos == -1 ? color.red: pos == 1 ? color.green : color.blue 
+
+emaUT   = ta.ema(srcUT,1)
+above = ta.crossover(emaUT, xATRTrailingStop)
+below = ta.crossover(xATRTrailingStop, emaUT)
+
+buy  = srcUT > xATRTrailingStop and above 
+sell = srcUT < xATRTrailingStop and below
+
+barbuy  = srcUT > xATRTrailingStop 
+barsell = srcUT < xATRTrailingStop 
+
+if showUTLabels
+    if buy
+        newLabel = label.new(bar_index, low, 'Buy', 
+                     yloc = yloc.belowbar, 
+                     color = color.green, 
+                     textcolor = color.white, 
+                     style = label.style_label_up,
+                     size = size.tiny)
+        utBuyLabels.push(newLabel)
+        
+    if sell
+        newLabel = label.new(bar_index, high, 'Sell', 
+                     yloc = yloc.abovebar, 
+                     color = color.red, 
+                     textcolor = color.white, 
+                     style = label.style_label_down,
+                     size = size.tiny)
+        utSellLabels.push(newLabel)
+    
+    if keepRecentOnly
+        while utBuyLabels.size() > maxUTLabels
+            oldLabel = utBuyLabels.shift()
+            label.delete(oldLabel)
+        
+        while utSellLabels.size() > maxUTLabels
+            oldLabel = utSellLabels.shift()
+            label.delete(oldLabel)
+
+// Plotshape for when label management is OFF
+plotshape(not showUTLabels and buy,  title = "UT Buy",  text = 'Buy',  style = shape.labelup,   location = location.belowbar, color= color.green, textcolor = color.white, size = size.tiny)
+plotshape(not showUTLabels and sell, title = "UT Sell", text = 'Sell', style = shape.labeldown, location = location.abovebar, color= color.red,   textcolor = color.white, size = size.tiny)
+
+barcolor(showUTBarColor and barbuy  ? color.green : na)
+barcolor(showUTBarColor and barsell ? color.red   : na)
+
+if buy
+    alert("UT Long", alert.freq_once_per_bar)
+if sell
+    alert("UT Short", alert.freq_once_per_bar)
+
+// ============================================
+// HULL SUITE CODE
+// ============================================
+HMA(_src, _length) =>  ta.wma(2 * ta.wma(_src, _length / 2) - ta.wma(_src, _length), math.round(math.sqrt(_length)))
+EHMA(_src, _length) =>  ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+THMA(_src, _length) =>  ta.wma(ta.wma(_src,_length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+    
+Mode(modeSwitch, src, len) =>
+    result = if modeSwitch == "Hma"
+        HMA(src, len)
+    else if modeSwitch == "Ehma"
+        EHMA(src, len)
+    else if modeSwitch == "Thma"
+        THMA(src, len/2)
+    else
+        na
+    result
+
+_hull = Mode(modeSwitch, srcHull, int(length * lengthMult))
+HULL = useHtf ? request.security(syminfo.tickerid, htf, _hull) : _hull
+MHULL = HULL[0]
+SHULL = HULL[2]
+
+hullColor = switchColor ? (HULL > HULL[2] ? #00ff00 : #ff0000) : #ff9800
+
+Fi1 = plot(showHull ? MHULL : na, title="MHULL", color=hullColor, linewidth=thicknesSwitch)
+Fi2 = plot(showHull and visualSwitch ? SHULL : na, title="SHULL", color=hullColor, linewidth=thicknesSwitch)
+
+// ta.crossover()/ta.crossunder() must be called unconditionally every bar
+// (their internal history buffers depend on it) -- assign to a variable
+// first, then gate the alert with showHull, rather than short-circuiting
+// the ta.* call itself inside the if-condition.
+hullCrossUp   = ta.crossover(MHULL, SHULL)
+hullCrossDown = ta.crossover(SHULL, MHULL)
+
+if showHull and hullCrossUp
+    alert("Hull trending up.", alert.freq_once_per_bar)
+if showHull and hullCrossDown
+    alert("Hull trending down.", alert.freq_once_per_bar)
+
+fill(Fi1, Fi2, title="Band Filler", color=color.new(hullColor, transpSwitch))
+
+barcolor(color = showHull and candleCol ? (switchColor ? hullColor : na) : na)
+
+// ============================================
+// EMA CODE
+// ============================================
+// Simple EMA 14/60 trend + cross reference, used both as its own optional
+// display and as one of the three independently-labeled signal sources in
+// the Confluence Signal Engine further down (alongside UT Bot and SMC).
+ema14 = ta.ema(close, emaFastLen)
+ema60 = ta.ema(close, emaSlowLen)
+
+emaCrossBull = ta.crossover(ema14, ema60)
+emaCrossBear = ta.crossunder(ema14, ema60)
+
+plot(showEMA ? ema14 : na, "EMA Fast", color = #f6c343, linewidth = 1)
+plot(showEMA ? ema60 : na, "EMA Slow", color = #d946ef, linewidth = 2)
+
+// ============================================
+// LUXALGO FVG CODE
+// ============================================
+var float max_bull_fvg = na
+var float min_bull_fvg = na
+var float max_bear_fvg = na
+var float min_bear_fvg = na
+
+// Global mirrors of the nearest unmitigated bull/bear FVG zone, for the
+// Confluence Signal Engine further down the script (fvg_records itself is
+// local to this section and used only for calculation here).
+var bool  bull_fvg_g     = false
+var bool  bear_fvg_g     = false
+var float lastBullFVGmax = na
+var float lastBullFVGmin = na
+var float lastBearFVGmax = na
+var float lastBearFVGmin = na
+
+// Detection, mitigation tracking and alerts always run, independent of
+// whether the FVG boxes/dashboard are actually drawn on the chart -- so the
+// Confluence Signal Engine keeps seeing accurate FVG state either way.
+// `showLuxFVG` below only ever gates the box/line *drawing* calls.
+var int bull_count = 0, var int bull_mitigated = 0
+var int bear_count = 0, var int bear_mitigated = 0
+var int t_fvg = 0
+
+var fvg_records = array.new<fvg>(0)
+var fvg_areas = array.new<box>(0)
+
+// LuxAlgo "FVG Positioning Average" tracking -- bar index + edge value of
+// each detected FVG within a rolling bar-count lookback, regardless of
+// mitigation status (this is a separate, purely additive display layer;
+// it does not feed the Confluence Signal Engine).
+var fvgAvgUpBar = array.new<int>(0)
+var fvgAvgUpVal = array.new<float>(0)
+var fvgAvgDnBar = array.new<int>(0)
+var fvgAvgDnVal = array.new<float>(0)
+
+n_fvg = bar_index
+
+[bull_fvg, bear_fvg, new_fvg] = request.security(syminfo.tickerid, tfFVG, detectFVG())
+
+if bull_fvg and new_fvg.t != t_fvg
+    if dynamicFVG
+        max_bull_fvg := new_fvg.max
+        min_bull_fvg := new_fvg.min
+
+    if showLuxFVG and not dynamicFVG
+        fvg_areas.unshift(box.new(n_fvg - 2, new_fvg.max, n_fvg, new_fvg.min, na, bgcolor = bullCss))
+    fvg_records.unshift(new_fvg)
+
+    fvgAvgUpBar.unshift(n_fvg)
+    fvgAvgUpVal.unshift(new_fvg.min)
+
+    bull_count += 1
+    t_fvg := new_fvg.t
+else if dynamicFVG
+    max_bull_fvg := math.max(math.min(close, max_bull_fvg), min_bull_fvg)
+
+if bear_fvg and new_fvg.t != t_fvg
+    if dynamicFVG
+        max_bear_fvg := new_fvg.max
+        min_bear_fvg := new_fvg.min
+
+    if showLuxFVG and not dynamicFVG
+        fvg_areas.unshift(box.new(n_fvg - 2, new_fvg.max, n_fvg, new_fvg.min, na, bgcolor = bearCss))
+    fvg_records.unshift(new_fvg)
+
+    fvgAvgDnBar.unshift(n_fvg)
+    fvgAvgDnVal.unshift(new_fvg.max)
+
+    bear_count += 1
+    t_fvg := new_fvg.t
+else if dynamicFVG
+    min_bear_fvg := math.min(math.max(close, min_bear_fvg), max_bear_fvg) 
+
+if fvgAvgUpBar.size() > 0
+    for i = fvgAvgUpBar.size() - 1 to 0
+        if fvgAvgUpBar.get(i) < bar_index - fvgAvgLookback
+            fvgAvgUpBar.remove(i)
+            fvgAvgUpVal.remove(i)
+if fvgAvgDnBar.size() > 0
+    for i = fvgAvgDnBar.size() - 1 to 0
+        if fvgAvgDnBar.get(i) < bar_index - fvgAvgLookback
+            fvgAvgDnBar.remove(i)
+            fvgAvgDnVal.remove(i)
+
+if fvg_records.size() > 0
+    for i = fvg_records.size() - 1 to 0
+        get = fvg_records.get(i)
+
+        if get.isbull
+            if close < get.min
+                if showLuxFVG and mitigationLevels
+                    line.new(get.t, get.min, time, get.min, xloc.bar_time, color = bullCss, style = line.style_dashed)
+
+                if showLuxFVG and not dynamicFVG
+                    area = fvg_areas.remove(i)
+                    area.delete()
+
+                fvg_records.remove(i)
+                bull_mitigated += 1
+        else if close > get.max
+            if showLuxFVG and mitigationLevels
+                line.new(get.t, get.max, time, get.max, xloc.bar_time, color = bearCss, style = line.style_dashed)
+
+            if showLuxFVG and not dynamicFVG
+                area = fvg_areas.remove(i)
+                area.delete()
+
+            fvg_records.remove(i)
+            bear_mitigated += 1
+
+// Mirror this bar's trigger flags and scan for the most recent unmitigated
+// zone in each direction (fvg_records is newest-first).
+bull_fvg_g := bull_fvg
+bear_fvg_g := bear_fvg
+
+float _nextBullMax = na
+float _nextBullMin = na
+float _nextBearMax = na
+float _nextBearMin = na
+
+if fvg_records.size() > 0
+    for i = 0 to fvg_records.size() - 1
+        rec = fvg_records.get(i)
+        if rec.isbull and na(_nextBullMax)
+            _nextBullMax := rec.max
+            _nextBullMin := rec.min
+        if not rec.isbull and na(_nextBearMax)
+            _nextBearMax := rec.max
+            _nextBearMin := rec.min
+
+lastBullFVGmax := _nextBullMax
+lastBullFVGmin := _nextBullMin
+lastBearFVGmax := _nextBearMax
+lastBearFVGmin := _nextBearMin
+
+if bull_count > bull_count[1]
+    alert('Bullish FVG detected', alert.freq_once_per_bar)
+if bear_count > bear_count[1]
+    alert('Bearish FVG detected', alert.freq_once_per_bar)
+
+if bull_mitigated > bull_mitigated[1]
+    alert('Bullish FVG mitigated', alert.freq_once_per_bar)
+if bear_mitigated > bear_mitigated[1]
+    alert('Bearish FVG mitigated', alert.freq_once_per_bar)
+
+// -- Pure display below: unmitigated-level lines + dashboard table --------
+if showLuxFVG
+    var unmitigated = array.new<line>(0)
+
+    if barstate.islast and showLastFVG > 0 and fvg_records.size() > 0
+        if unmitigated.size() > 0 
+            for element in unmitigated
+                element.delete()
+            unmitigated.clear()
+
+        for i = 0 to math.min(showLastFVG - 1, fvg_records.size() - 1)
+            get = fvg_records.get(i)
+            unmitigated.push(line.new(get.t, get.isbull ? get.min : get.max, time, get.isbull ? get.min : get.max, xloc.bar_time, color = get.isbull ? bullCss : bearCss))
+
+if showDash
+    var table_position = dashLoc == 'Bottom Left' ? position.bottom_left : dashLoc == 'Top Right' ? position.top_right : position.bottom_right
+    var table_size = textSize == 'Tiny' ? size.tiny : textSize == 'Small' ? size.small : size.normal
+
+    var tb = table.new(table_position, 3, 3, bgcolor = #1e222d, border_color = #373a46, border_width = 1, frame_color = #373a46, frame_width = 1)
+
+    if barstate.isfirst
+        tb.cell(1, 0, 'Bullish', text_color = bullCss.tosolid(), text_size = table_size)
+        tb.cell(2, 0, 'Bearish', text_color = bearCss.tosolid(), text_size = table_size)
+
+        tb.cell(0, 1, 'Count', text_size = table_size, text_color = color.white)
+        tb.cell(0, 2, 'Mitigated', text_size = table_size, text_color = color.white)
+
+    if barstate.islast
+        tb.cell(1, 1, str.tostring(bull_count), text_color = bullCss.tosolid(), text_size = table_size)
+        tb.cell(2, 1, str.tostring(bear_count), text_color = bearCss.tosolid(), text_size = table_size)
+
+        tb.cell(1, 2, str.tostring(bull_count > 0 ? bull_mitigated / bull_count * 100 : 0, format.percent), text_color = bullCss.tosolid(), text_size = table_size)
+        tb.cell(2, 2, str.tostring(bear_count > 0 ? bear_mitigated / bear_count * 100 : 0, format.percent), text_color = bearCss.tosolid(), text_size = table_size)
+
+max_bull_plot = plot(showLuxFVG ? max_bull_fvg : na, color = na, display = display.none)
+min_bull_plot = plot(showLuxFVG ? min_bull_fvg : na, color = na, display = display.none)
+fill(max_bull_plot, min_bull_plot, color = showLuxFVG ? bullCss : na)
+
+max_bear_plot = plot(showLuxFVG ? max_bear_fvg : na, color = na, display = display.none)
+min_bear_plot = plot(showLuxFVG ? min_bear_fvg : na, color = na, display = display.none)
+fill(max_bear_plot, min_bear_plot, color = showLuxFVG ? bearCss : na)
+
+// -- LuxAlgo FVG Positioning Average: smoothed support/resistance line
+// built from the average edge of recent bull/bear FVGs (ported from the
+// "FVG Positioning Average [LuxAlgo]" script). Line only, no gradient
+// fill -- purely additive display layer, does not feed the Confluence
+// Signal Engine.
+fvgUpAvg = array.avg(fvgAvgUpVal)
+fvgDnAvg = array.avg(fvgAvgDnVal)
+
+fvgAvgHst   = ta.highest(high, 5)
+fvgAvgLst   = ta.lowest(low, 5)
+fvgAvgInvis = color.new(chart.bg_color, 100)
+fvgAvgBullCss = color.new(#089981, 0)
+fvgAvgBearCss = color.new(#f23645, 0)
+
+plot(showFVGAvg ? fvgUpAvg : na
+  , style = plot.style_linebr
+  , color = (fvgAvgHst < fvgUpAvg ? fvgAvgInvis : fvgAvgBullCss)
+  , title = "FVG Bull Positioning Average")
+
+plot(showFVGAvg ? fvgDnAvg : na
+  , style = plot.style_linebr
+  , color = (fvgAvgLst > fvgDnAvg ? fvgAvgInvis : fvgAvgBearCss)
+  , title = "FVG Bear Positioning Average")
+
+// ════════════════════════════════════════════════════════════════
+// LUXALGO ORDER BLOCKS CODE
+// ════════════════════════════════════════════════════════════════
+var os = 0
+var target_bull = 0.
+var target_bear = 0.
+var bull_ob_plot = 0.0
+var bear_ob_plot = 0.0
+
+// Global mirrors of OB state, for the Confluence Signal Engine further down
+// the script.
+var bool  bull_ob_detected_g = false
+var bool  bear_ob_detected_g = false
+var bool  mitigated_bull_g   = false
+var bool  mitigated_bear_g   = false
+var float lastBullOBTop      = na
+var float lastBullOBBtm      = na
+var float lastBearOBTop      = na
+var float lastBearOBBtm      = na
+
+// Pivot detection, mitigation tracking and alerts always run, independent of
+// whether the OB boxes are actually drawn on the chart -- so the Confluence
+// Signal Engine keeps seeing accurate OB state either way. `showLuxOB` below
+// only ever gates the box/line *drawing* call (set_order_blocks()).
+n = bar_index
+upper = ta.highest(lengthOB)
+lower = ta.lowest(lengthOB)
+
+if mitigationOB == 'Close'
+    target_bull := ta.lowest(close, lengthOB)
+    target_bear := ta.highest(close, lengthOB)
+else
+    target_bull := lower
+    target_bear := upper
+
+os := high[lengthOB] > upper ? 0 : low[lengthOB] < lower ? 1 : os[1]
+
+phv = ta.pivothigh(volume, lengthOB, lengthOB)
+phv_detected = not na(phv)
+
+[bull_top, bull_btm, bull_avg, bull_left, bull_ob] = get_coordinates(phv_detected and os == 1, hl2[lengthOB], low[lengthOB], low[lengthOB], math.max(bull_ext_last * 10, 50))
+
+[bear_top, bear_btm, bear_avg, bear_left, bear_ob] = get_coordinates(phv_detected and os == 0, high[lengthOB], hl2[lengthOB], high[lengthOB], math.max(bear_ext_last * 10, 50))
+
+mitigated_bull = remove_mitigated(bull_top, bull_btm, bull_left, bull_avg, target_bull, true)
+
+mitigated_bear = remove_mitigated(bear_top, bear_btm, bear_left, bear_avg, target_bear, false)
+
+bull_ob_plot := bull_ob
+bear_ob_plot := bear_ob
+
+bull_ob_detected = not na(bull_ob)
+bear_ob_detected = not na(bear_ob)
+
+// Mirror state out to the global vars declared above the block
+bull_ob_detected_g := bull_ob_detected
+bear_ob_detected_g := bear_ob_detected
+mitigated_bull_g    := mitigated_bull
+mitigated_bear_g    := mitigated_bear
+if array.size(bull_top) > 0
+    lastBullOBTop := array.get(bull_top, 0)
+    lastBullOBBtm := array.get(bull_btm, 0)
+if array.size(bear_top) > 0
+    lastBearOBTop := array.get(bear_top, 0)
+    lastBearOBBtm := array.get(bear_btm, 0)
+
+if bull_ob_detected
+    alert('Bullish OB Formed', alert.freq_once_per_bar)
+if bear_ob_detected
+    alert('Bearish OB Formed', alert.freq_once_per_bar)
+if mitigated_bull
+    alert('Bullish OB Mitigated', alert.freq_once_per_bar)
+if mitigated_bear
+    alert('Bearish OB Mitigated', alert.freq_once_per_bar)
+
+// -- Pure display below: draw the OB boxes + average lines ----------------
+if showLuxOB
+    set_order_blocks(bull_top, bull_btm, bull_left, bull_avg, bull_ext_last, bg_bull_css, bull_css, bull_avg_css)
+    set_order_blocks(bear_top, bear_btm, bear_left, bear_avg, bear_ext_last, bg_bear_css, bear_css, bear_avg_css)
+
+// (Removed: hidden display.none plots for Bull/Bear OB. They carried no
+// visual purpose and the alert() calls above already handle notifications.)
+
+// ════════════════════════════════════════════════════════════════
+// DEMAND & SUPPLY ZONES (auto: tight base + impulsive breakout)
+// ════════════════════════════════════════════════════════════════
+// A "base" is a short run of small-range (low volatility) bars. When price
+// then breaks out of that base with a strong impulsive candle, the base
+// range itself is marked as a Demand zone (bullish breakout) or Supply zone
+// (bearish breakout) -- the classic "rally/drop-base-rally/drop" zone
+// definition, distinct from the volume-pivot-based Order Blocks above.
+// Detection + mitigation always run; `showDemandSupply` only gates drawing,
+// same pattern as FVG/OB above, so the Confluence Signal Engine always sees
+// accurate zone state.
+var bool  demand_detected_g = false
+var bool  supply_detected_g = false
+var float lastDemandTop     = na
+var float lastDemandBtm     = na
+var float lastSupplyTop     = na
+var float lastSupplyBtm     = na
+
+atrDS       = ta.atr(14)
+baseHighDS  = ta.highest(high[1], dsBaseLen)
+baseLowDS   = ta.lowest(low[1], dsBaseLen)
+tightBaseDS = (baseHighDS - baseLowDS) < atrDS * dsTightFactor
+
+impulseUpDS   = (close - open) > atrDS * dsImpulseMult and close > baseHighDS
+impulseDownDS = (open - close) > atrDS * dsImpulseMult and close < baseLowDS
+
+demandDetectedRaw = tightBaseDS and impulseUpDS
+supplyDetectedRaw = tightBaseDS and impulseDownDS
+
+[demand_top, demand_btm, demand_avg, demand_left, demand_val] = get_coordinates(demandDetectedRaw, baseHighDS, baseLowDS, low, math.max(dsZoneCount * 10, 50))
+[supply_top, supply_btm, supply_avg, supply_left, supply_val] = get_coordinates(supplyDetectedRaw, baseHighDS, baseLowDS, high, math.max(dsZoneCount * 10, 50))
+
+mitigated_demand = remove_mitigated(demand_top, demand_btm, demand_left, demand_avg, close, true)
+mitigated_supply = remove_mitigated(supply_top, supply_btm, supply_left, supply_avg, close, false)
+
+demand_detected_g := not na(demand_val)
+supply_detected_g := not na(supply_val)
+if array.size(demand_top) > 0
+    lastDemandTop := array.get(demand_top, 0)
+    lastDemandBtm := array.get(demand_btm, 0)
+if array.size(supply_top) > 0
+    lastSupplyTop := array.get(supply_top, 0)
+    lastSupplyBtm := array.get(supply_btm, 0)
+
+if demand_detected_g
+    alert('Demand Zone Formed', alert.freq_once_per_bar)
+if supply_detected_g
+    alert('Supply Zone Formed', alert.freq_once_per_bar)
+if mitigated_demand
+    alert('Demand Zone Mitigated', alert.freq_once_per_bar)
+if mitigated_supply
+    alert('Supply Zone Mitigated', alert.freq_once_per_bar)
+
+// -- Pure display below: draw the zone boxes + average lines --------------
+if showDemandSupply
+    set_order_blocks(demand_top, demand_btm, demand_left, demand_avg, dsZoneCount, demandCss, demandBorder, demandBorder)
+    set_order_blocks(supply_top, supply_btm, supply_left, supply_avg, dsZoneCount, supplyCss, supplyBorder, supplyBorder)
+
+// ============================================
+// THREE BAR REVERSAL CODE
+// ============================================
+// Trend filter + raw reversal-pattern detection always run, independent of
+// whether the 3-Bar Reversal visuals are drawn -- so the Confluence Signal
+// Engine's "3-Bar Reversal" trigger option keeps respecting the chosen trend
+// filter even when `show3BR` is off.
+var int os3BR = 0
+C_DownTrend3BR = true
+C_UpTrend3BR = true
+
+if trendType3BR == 'Moving Average Cloud'
+    maFast3BR = movingAverage3BR(close, maFLength3BR, maType3BR)
+    maSlow3BR = movingAverage3BR(close, maSLength3BR, maType3BR)
+    
+    if trendFilt3BR == 'Aligned'
+        C_DownTrend3BR := close < maFast3BR and maFast3BR < maSlow3BR
+        C_UpTrend3BR := close > maFast3BR and maFast3BR > maSlow3BR
+    else if trendFilt3BR == 'Opposite'
+        C_DownTrend3BR := close > maFast3BR and maFast3BR > maSlow3BR
+        C_UpTrend3BR := close < maFast3BR and maFast3BR < maSlow3BR
+
+if trendType3BR == 'Supertrend'
+    [supertrend3BR, direction3BR] = ta.supertrend(factor3BR, atrPeriod3BR)
+    
+    if trendFilt3BR == 'Aligned'
+        C_DownTrend3BR := direction3BR > 0
+        C_UpTrend3BR := direction3BR < 0
+    else if trendFilt3BR == 'Opposite'
+        C_DownTrend3BR := direction3BR < 0
+        C_UpTrend3BR := direction3BR > 0
+
+if trendType3BR == 'Donchian Channels'
+    upper3BR = ta.highest(close, length3BR)
+    lower3BR = ta.lowest(close, length3BR)
+    os3BR := upper3BR > upper3BR[1] ? 1 : lower3BR < lower3BR[1] ? 0 : os3BR
+    
+    if trendFilt3BR == 'Aligned'
+        C_DownTrend3BR := os3BR == 0
+        C_UpTrend3BR := os3BR == 1
+    else if trendFilt3BR == 'Opposite'
+        C_DownTrend3BR := os3BR == 1
+        C_UpTrend3BR := os3BR == 0
+
+bullishReversal3BR = isBullishReversal3BR() and C_UpTrend3BR
+bearishReversal3BR = isBearishReversal3BR() and C_DownTrend3BR
+
+// -- Pure display below: multi-bar pattern confirmation animation ---------
+if show3BR
+
+    var line lnAT = na
+    var line lnAB = na
+    var line lnAT2 = na
+    var line lnAB2 = na
+    var label lbAT = na
+    var box bxA = na
+    var bool bullProcess = false
+    var bool bullProcess2 = false
+    var float bullHigh = na
+
+    if bullishReversal3BR and (brpType == 'All' ? true : brpType == 'Enhanced' ? close > high[2] : brpType == 'Normal' ? close < high[2] : false)
+        bullProcess := true
+
+        lbAT := label.new(bar_index, low, '▲', color = color(na), textcolor = color.new(brpAC, 7), style = label.style_label_up, size = size.small, tooltip = 'Bullish pattern' + (close > high[2] ? ' (enhanced)' : ' (normal)'))
+
+        lnAT := line.new(bar_index[2], high[2], bar_index, high[2], color = color.new(brpAC, 53))
+        lnAB := line.new(bar_index[1], math.min(low[1], low), bar_index[0], math.min(low[1], low), color = color.new(brpAC, 53))
+        linefill.new(lnAT, lnAB, color.new(brpAC, 73))
+
+        lnAT2 := line.new(bar_index[2], high[2], bar_index, high[2], color = color.new(brpAC, 53))
+        lnAB2 := line.new(bar_index[1], math.min(low[1], low), bar_index[0], math.min(low[1], low), color = color.new(brpAC, 53))
+
+        bullHigh := brpSR == 'Zone' ? math.max(low[1], low) : math.min(low[1], low)
+
+    if bullProcess
+        if close[1] > lnAT.get_price(bar_index)
+            if bullProcess[1] and bullProcess[1] != bullProcess[2]
+                lbAT.set_tooltip('Enhanced (confirmed at detection)')
+            else
+                lbAT.set_tooltip('Confirmed ' + str.tostring(bar_index[1] - lbAT.get_x()) + ' bars later')
+                label.new(bar_index[1], low[1], '⦁', color = color(na), textcolor = color.new(brpAC, 7), style = label.style_label_up, size = size.small, tooltip = 'Confirmation bar')
+            
+            bullProcess := false
+
+            bxA := box.new(bar_index, bullHigh, bar_index, lnAB.get_price(bar_index), color.new(brpAC, brpSR == 'Zone' ? 73 : 53), bgcolor = color.new(brpAC, 73))
+            bullProcess2 := true
+
+        if close[1] < lnAB.get_price(bar_index) or bearishReversal3BR
+            lbAT.set_tooltip('Pattern failed')
+            bullProcess := false
+
+        if not bullProcess
+            lnAT2.set_x2(bar_index[1])
+            lnAB2.set_x2(bar_index[1])
+        else
+            lnAT2.set_x2(bar_index)
+            lnAB2.set_x2(bar_index)
+
+    if bullProcess2 and brpSR != 'None'
+        if close > bxA.get_bottom()
+            bxA.set_right(bar_index)
+        else
+            bxA.set_right(bar_index)
+            bullProcess2 := false
+
+    var line lnST = na
+    var line lnSB = na
+    var line lnST2 = na
+    var line lnSB2 = na
+    var label lbST = na
+    var box bxS = na
+    var bool bearProcess = false
+    var bool bearProcess2 = false
+    var float bearLow = na
+
+    if bearishReversal3BR and (brpType == 'All' ? true : brpType == 'Enhanced' ? close < low[2] : brpType == 'Normal' ? close > low[2] : false)
+        bearProcess := true
+
+        lbST := label.new(bar_index, high, '▼', color = color(na), textcolor = color.new(brpSC, 7), style = label.style_label_down, size = size.small, tooltip = 'Bearish pattern' + (close < low[2] ? ' (enhanced)' : ' (normal)'))
+
+        lnSB := line.new(bar_index[2], low[2], bar_index, low[2], color = color.new(brpSC, 53))
+        lnST := line.new(bar_index[1], math.max(high[1], high), bar_index[0], math.max(high[1], high), color = color.new(brpSC, 53))
+        linefill.new(lnST, lnSB, color.new(brpSC, 73))
+
+        lnSB2 := line.new(bar_index[2], low[2], bar_index, low[2], color = color.new(brpSC, 53))
+        lnST2 := line.new(bar_index[1], math.max(high[1], high), bar_index[0], math.max(high[1], high), color = color.new(brpSC, 53))
+
+        bearLow := brpSR == 'Zone' ? math.min(high[1], high) : math.max(high[1], high)
+
+    if bearProcess
+        if close[1] > lnST.get_price(bar_index) or bullishReversal3BR
+            lbST.set_tooltip('Pattern failed')
+            bearProcess := false
+
+        if close[1] < lnSB.get_price(bar_index)
+            if bearProcess[1] and bearProcess[1] != bearProcess[2]
+                lbST.set_tooltip('Enhanced (confirmed at detection)')
+            else
+                lbST.set_tooltip('Confirmed ' + str.tostring(bar_index[1] - lbST.get_x()) + ' bars later')
+                label.new(bar_index[1], high[1], '⦁', color = color(na), textcolor = color.new(brpSC, 7), style = label.style_label_down, size = size.small, tooltip = 'Confirmation bar')
+
+            bearProcess := false
+
+            bxS := box.new(bar_index, lnST.get_price(bar_index), bar_index, bearLow, color.new(brpSC, brpSR == 'Zone' ? 73 : 53), bgcolor = color.new(brpSC, 73))
+            bearProcess2 := true
+
+        if not bearProcess
+            lnST2.set_x2(bar_index[1])
+            lnSB2.set_x2(bar_index[1])
+        else
+            lnST2.set_x2(bar_index)
+            lnSB2.set_x2(bar_index)
+
+    if bearProcess2 and brpSR != 'None'
+        if close < bxS.get_top()
+            bxS.set_right(bar_index)
+        else
+            bxS.set_right(bar_index)
+            bearProcess2 := false
+
+// ============================================
+// REVERSAL SIGNALS CODE (SIMPLIFIED)
+// ============================================
+var int bSCRS = 0
+var int sSCRS = 0
+var float bSRRS = na
+var float sSSRS = na
+var bool showBullMomentum = false
+var bool showBearMomentum = false
+
+// Momentum-phase counting always runs, independent of whether the
+// Bullish/Bearish Momentum shapes are drawn -- so the Confluence Signal
+// Engine's "Momentum Phase" trigger option keeps working even when
+// `showRS` is off. `showRS`/`srLRS` below only ever gate the plot calls.
+conRS = close < close[4]
+
+if conRS
+    bSCRS := bSCRS == 9 ? 1 : bSCRS + 1
+    sSCRS := 0
+else
+    sSCRS := sSCRS == 9 ? 1 : sSCRS + 1
+    bSCRS := 0
+
+showBullMomentum := bSCRS == 9
+showBearMomentum := sSCRS == 9
+
+sRRS = ta.highest(9)
+bSRRS := bSCRS == 9 ? sRRS : close > bSRRS ? na : bSRRS
+
+sSRS = ta.lowest(9)
+sSSRS := sSCRS == 9 ? sSRS : close < sSSRS ? na : sSSRS
+
+plotshape(showRS and showBullMomentum, 'Bullish Momentum', shape.labelup, location.belowbar, color.new(#089981, 25), text = '', textcolor = color.white, size = size.tiny)
+plotshape(showRS and showBearMomentum, 'Bearish Momentum', shape.labeldown, location.abovebar, color.new(#f23645, 25), text = '', textcolor = color.white, size = size.tiny)
+plot(showRS and srLRS and not na(bSRRS) ? bSRRS : na, "RS Resistance", color.new(#f23645, 50), 2)
+plot(showRS and srLRS and not na(sSSRS) ? sSSRS : na, "RS Support", color.new(#089981, 50), 2)
+
+// ============================================
+// SMC CONFLUENCE SIGNAL ENGINE
+// ============================================
+// This is the fusion layer: it doesn't replace any of the frameworks above,
+// it reads their *already-computed* live state and produces THREE
+// independently-labeled signals: UT Bot's own native Buy/Sell (unchanged),
+// an EMA 14/60 cross signal, and an SMC confluence signal that scores
+// Structure Bias, Order Blocks, FVG and Demand/Supply zones around a chosen
+// reversal trigger. The EMA and SMC signals additionally require a
+// lower-timeframe confirmation candle (confirmTF) to close in the trigger's
+// direction before firing.
+
+// -- Lower-timeframe confirmation candle (EMA + SMC signals only) ---------
+// request.security() can legitimately return na far back in history on a
+// higher-timeframe chart if intraday data for `confirmTF` doesn't reach
+// that far back -- without a guard, that na comparison is always false and
+// silently blocks every signal forever. Treat "no data" the same as
+// "requirement turned off": don't let missing LTF data hard-block a signal.
+[ltfClose, ltfOpen] = request.security(syminfo.tickerid, confirmTF, [close, open], lookahead = barmerge.lookahead_off)
+ltfDataOK      = not na(ltfClose) and not na(ltfOpen)
+ltfBullConfirm = not requireLTFConfirm or not ltfDataOK or ltfClose > ltfOpen
+ltfBearConfirm = not requireLTFConfirm or not ltfDataOK or ltfClose < ltfOpen
+
+// ============================================
+// EMA 14/60 CROSS SIGNAL
+// ============================================
+emaBuySignal  = enableEMASignal and emaCrossBull and ltfBullConfirm
+emaSellSignal = enableEMASignal and emaCrossBear and ltfBearConfirm
+
+var emaBuyLabels  = array.new<label>()
+var emaSellLabels = array.new<label>()
+
+if showEMALabels
+    if emaBuySignal
+        emaBuyLbl = label.new(bar_index, low, "🟡 BUY (EMA)", yloc = yloc.belowbar, color = color.new(#f6c343, 15),
+                      textcolor = color.black, style = label.style_label_up, size = size.normal,
+                      tooltip = "EMA " + str.tostring(emaFastLen) + "/" + str.tostring(emaSlowLen) + " bullish cross, confirmed on " + confirmTF + " timeframe")
+        emaBuyLabels.push(emaBuyLbl)
+
+    if emaSellSignal
+        emaSellLbl = label.new(bar_index, high, "🟡 SELL (EMA)", yloc = yloc.abovebar, color = color.new(#f6c343, 15),
+                       textcolor = color.black, style = label.style_label_down, size = size.normal,
+                       tooltip = "EMA " + str.tostring(emaFastLen) + "/" + str.tostring(emaSlowLen) + " bearish cross, confirmed on " + confirmTF + " timeframe")
+        emaSellLabels.push(emaSellLbl)
+
+    while emaBuyLabels.size() > maxConfluenceLabels
+        emaBuyLabels.shift().delete()
+    while emaSellLabels.size() > maxConfluenceLabels
+        emaSellLabels.shift().delete()
+
+if emaBuySignal
+    alert("EMA Cross BUY (confirmed " + confirmTF + ")", alert.freq_once_per_bar)
+if emaSellSignal
+    alert("EMA Cross SELL (confirmed " + confirmTF + ")", alert.freq_once_per_bar)
+
+// ============================================
+// SMC CONFLUENCE SIGNAL (Structure + Order Block + FVG + Demand/Supply)
+// ============================================
+// -- Reversal trigger candidates -----------------------------------------
+utTriggerBull  = buy
+utTriggerBear  = sell
+tbrTriggerBull = bullishReversal3BR  // trend-filtered per Trend Filtering/Aligned-Opposite inputs, always computed regardless of show3BR
+tbrTriggerBear = bearishReversal3BR
+momTriggerBull = showBullMomentum
+momTriggerBear = showBearMomentum
+
+triggerBull = switch triggerSource
+    "UT Bot"         => utTriggerBull
+    "3-Bar Reversal" => tbrTriggerBull
+    "Momentum Phase" => momTriggerBull
+    => utTriggerBull or tbrTriggerBull or momTriggerBull
+
+triggerBear = switch triggerSource
+    "UT Bot"         => utTriggerBear
+    "3-Bar Reversal" => tbrTriggerBear
+    "Momentum Phase" => momTriggerBear
+    => utTriggerBear or tbrTriggerBear or momTriggerBear
+
+// -- Confirmation factors ---------------------------------------------------
+structureBias     = bigData.get("moving")               // Mxwll external BOS/CHoCH bias: 1 bull, -1 bear
+// Scan every still-tracked (unmitigated) zone, not just the newest one --
+// price can be sitting inside an older zone while a newer zone formed
+// somewhere else entirely; checking only the latest one missed those cases.
+closeInDemandZone = zoneContains(demand_top, demand_btm, close)
+closeInSupplyZone = zoneContains(supply_top, supply_btm, close)
+closeInBullOB     = zoneContains(bull_top, bull_btm, close)
+closeInBearOB     = zoneContains(bear_top, bear_btm, close)
+
+closeInBullFVG = false
+closeInBearFVG = false
+if fvg_records.size() > 0
+    for i = 0 to fvg_records.size() - 1
+        rec = fvg_records.get(i)
+        if close <= rec.max and close >= rec.min
+            if rec.isbull
+                closeInBullFVG := true
+            else
+                closeInBearFVG := true
+
+// Fibonacci golden zone (0.618-0.786 retracement of the current swing).
+// `main`'s coordinates are now always kept up to date (see updateMain()
+// above), independent of whether the Fib ratio lines are actually drawn.
+fibSwingSub  = main.get_y1() - main.get_y2()
+fibSwingY2   = main.get_y2()
+fibLevelLow  = fibSwingSub * fib4 + fibSwingY2   // 0.618
+fibLevelHigh = fibSwingSub * fib5 + fibSwingY2   // 0.786
+fibZoneTop   = math.max(fibLevelLow, fibLevelHigh)
+fibZoneBtm   = math.min(fibLevelLow, fibLevelHigh)
+closeInFibZone = close <= fibZoneTop and close >= fibZoneBtm
+
+// -- Recipes: Structure is mandatory in all three; any ONE recipe passing
+// is enough (this replaces the old "score >= N out of 4" system, matching
+// how these confluences are actually used in practice) ---------------------
+//   Recipe A: Structure + Liquidity (an Order Block OR a Demand/Supply zone)
+//   Recipe B: Structure + FVG AND Demand/Supply zone together
+//   Recipe C: Structure + Fibonacci golden zone
+recipeA_bull = useRecipeLiquidity and (closeInBullOB or closeInDemandZone)
+recipeA_bear = useRecipeLiquidity and (closeInBearOB or closeInSupplyZone)
+
+recipeB_bull = useRecipeFVGZone and closeInBullFVG and closeInDemandZone
+recipeB_bear = useRecipeFVGZone and closeInBearFVG and closeInSupplyZone
+
+recipeC_bull = useRecipeFibo and closeInFibZone
+recipeC_bear = useRecipeFibo and closeInFibZone
+
+anyRecipeBull = recipeA_bull or recipeB_bull or recipeC_bull
+anyRecipeBear = recipeA_bear or recipeB_bear or recipeC_bear
+
+// -- Trigger validity window ------------------------------------------------
+// Requiring the trigger, a recipe AND the LTF candle to all land on the
+// exact same bar is rare almost by construction: breakout-style triggers
+// (e.g. UT Bot's crossover) tend to fire once price has already moved away
+// from a zone, not while sitting inside it. Instead, once a trigger fires it
+// stays "active" for `triggerLookbackBars` bars, giving a recipe + LTF
+// confirmation a realistic window to catch up. Each trigger event can still
+// only produce one signal (no repeat spam every bar the window stays open).
+var int lastTriggerBullBar = -1
+var int lastTriggerBearBar = -1
+var int lastSignalBullBar  = -1
+var int lastSignalBearBar  = -1
+
+if triggerBull
+    lastTriggerBullBar := bar_index
+if triggerBear
+    lastTriggerBearBar := bar_index
+
+bullTriggerActive = lastTriggerBullBar >= 0 and (bar_index - lastTriggerBullBar) <= triggerLookbackBars
+bearTriggerActive = lastTriggerBearBar >= 0 and (bar_index - lastTriggerBearBar) <= triggerLookbackBars
+
+confluenceBuyRaw  = enableConfluence and bullTriggerActive and structureBias == 1  and anyRecipeBull and ltfBullConfirm
+confluenceSellRaw = enableConfluence and bearTriggerActive and structureBias == -1 and anyRecipeBear and ltfBearConfirm
+
+confluenceBuy  = confluenceBuyRaw  and lastSignalBullBar != lastTriggerBullBar
+confluenceSell = confluenceSellRaw and lastSignalBearBar != lastTriggerBearBar
+
+if confluenceBuy
+    lastSignalBullBar := lastTriggerBullBar
+if confluenceSell
+    lastSignalBearBar := lastTriggerBearBar
+
+// -- Signal labels (recent-only, same pattern as the UT Bot label manager) --
+var confluenceBuyLabels  = array.new<label>()
+var confluenceSellLabels = array.new<label>()
+
+if showSMCLabels
+    if confluenceBuy
+        buyRecipeTxt = (recipeA_bull ? "A(Liquidity) " : "") + (recipeB_bull ? "B(FVG+D/S) " : "") + (recipeC_bull ? "C(Fibo)" : "")
+        buyTip = "SMC Confluence BUY, confirmed on " + confirmTF + " timeframe" +
+                 "\nRecipe(s) satisfied: " + buyRecipeTxt +
+                 "\nStructure: aligned" +
+                 "\nDemand Zone: " + (closeInDemandZone ? "in zone" : "no zone") +
+                 "\nOrder Block: " + (closeInBullOB ? "in zone" : "no zone") +
+                 "\nFVG: " + (closeInBullFVG ? "in zone" : "no zone") +
+                 "\nFibo Golden Zone: " + (closeInFibZone ? "in zone" : "no zone")
+        confBuyLbl = label.new(bar_index, low, "🔵 BUY (SMC)", yloc = yloc.belowbar, color = color.new(color.green, 15),
+                       textcolor = color.white, style = label.style_label_up, size = size.normal, tooltip = buyTip)
+        confluenceBuyLabels.push(confBuyLbl)
+
+    if confluenceSell
+        sellRecipeTxt = (recipeA_bear ? "A(Liquidity) " : "") + (recipeB_bear ? "B(FVG+D/S) " : "") + (recipeC_bear ? "C(Fibo)" : "")
+        sellTip = "SMC Confluence SELL, confirmed on " + confirmTF + " timeframe" +
+                  "\nRecipe(s) satisfied: " + sellRecipeTxt +
+                  "\nStructure: aligned" +
+                  "\nSupply Zone: " + (closeInSupplyZone ? "in zone" : "no zone") +
+                  "\nOrder Block: " + (closeInBearOB ? "in zone" : "no zone") +
+                  "\nFVG: " + (closeInBearFVG ? "in zone" : "no zone") +
+                  "\nFibo Golden Zone: " + (closeInFibZone ? "in zone" : "no zone")
+        confSellLbl = label.new(bar_index, high, "🔵 SELL (SMC)", yloc = yloc.abovebar, color = color.new(color.red, 15),
+                        textcolor = color.white, style = label.style_label_down, size = size.normal, tooltip = sellTip)
+        confluenceSellLabels.push(confSellLbl)
+
+    while confluenceBuyLabels.size() > maxConfluenceLabels
+        confluenceBuyLabels.shift().delete()
+    while confluenceSellLabels.size() > maxConfluenceLabels
+        confluenceSellLabels.shift().delete()
+
+if confluenceBuy
+    alert("SMC Confluence BUY", alert.freq_once_per_bar)
+if confluenceSell
+    alert("SMC Confluence SELL", alert.freq_once_per_bar)
+
+// -- Live confluence dashboard: exactly which recipe(s) agree, right now ---
+var table confTable = table.new(position.bottom_right, 3, 7, bgcolor = #131722, border_color = #363843,
+                        frame_color = #363843, border_width = 1, frame_width = 1)
+
+if showConfluenceDash and barstate.islast
+    table.cell(confTable, 0, 0, "Confluence", text_color = color.white, text_size = size.small, bgcolor = #1e222d)
+    table.cell(confTable, 1, 0, "Bull", text_color = color.lime, text_size = size.small, bgcolor = #1e222d)
+    table.cell(confTable, 2, 0, "Bear", text_color = #f23645, text_size = size.small, bgcolor = #1e222d)
+
+    table.cell(confTable, 0, 1, "Structure", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 1, structureBias == 1  ? "✔" : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 1, structureBias == -1 ? "✔" : "—", text_color = #f23645, text_size = size.small)
+
+    table.cell(confTable, 0, 2, "Recipe A: Liquidity", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 2, recipeA_bull ? "✔" : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 2, recipeA_bear ? "✔" : "—", text_color = #f23645, text_size = size.small)
+
+    table.cell(confTable, 0, 3, "Recipe B: FVG+D/S", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 3, recipeB_bull ? "✔" : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 3, recipeB_bear ? "✔" : "—", text_color = #f23645, text_size = size.small)
+
+    table.cell(confTable, 0, 4, "Recipe C: Fibo", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 4, recipeC_bull ? "✔" : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 4, recipeC_bear ? "✔" : "—", text_color = #f23645, text_size = size.small)
+
+    table.cell(confTable, 0, 5, "SMC Signal", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 5, anyRecipeBull ? (confluenceBuy  ? "⚡" : "ready") : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 5, anyRecipeBear ? (confluenceSell ? "⚡" : "ready") : "—", text_color = #f23645, text_size = size.small)
+
+    table.cell(confTable, 0, 6, "EMA Cross", text_color = color.white, text_size = size.small)
+    table.cell(confTable, 1, 6, emaBuySignal  ? "⚡" : "—", text_color = color.lime, text_size = size.small)
+    table.cell(confTable, 2, 6, emaSellSignal ? "⚡" : "—", text_color = #f23645, text_size = size.small)

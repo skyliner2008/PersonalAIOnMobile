@@ -349,6 +349,9 @@ object TradingToolDefinitions {
                 |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction (ใช้กับ ==)
                 |- trading_indicators ⭐ แนะนำ (คำนวณจากแท่งเทียนเอง แม่นกว่า scanner — เลือก TF ได้ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH ใช้กับ ==), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
                 |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM ใช้กับ ==), smc_zone_pct (>=80 พรีเมียม, <=20 ดิสเคาน์), smc_trend, smc_last_event (BOS_UP/BOS_DOWN/CHOCH_UP/CHOCH_DOWN), smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
+                |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal (BUY/SELL/NONE ใช้กับ == — confluence ครบ: trigger+structure+zone), smc_recipes (A=OB, B=FVG+OB, C=Fib golden ใช้กับ contains), ema14_60_signal (BUY/SELL/NONE ใช้กับ ==), ema14_60_cross (GOLDEN_CROSS/DEATH_CROSS/NONE ใช้กับ ==), ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal (BUY/SELL/NONE), utbot_trend (BULL/BEAR), utbot_stop, structure_bias, in_fib_golden (0/1), fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
+                |- trading_strategy_signal ⭐ (กลยุทธ์เชิงวิชาการจาก Strategy Library — เลือก TF ด้วย symbol@TF): consensus_signal (STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL ใช้กับ ==), consensus_score (ตัวเลข -5 ถึง 5), tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal (BUY/SELL/NONE ใช้กับ ==), trend_state (UPTREND/DOWNTREND/RANGE), tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
+                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก 8 กลยุทธ์: Momentum / Trend EMA50-200 / Reversal / Donchian / 52W High / EMA14-60 / UT Bot / 3-Bar Reversal — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 หรือ signal_sell >= 1 (สร้าง 2 job ถ้าต้องการทั้งสองฝั่ง) — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผลเงื่อนไข, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
                 |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal (STRONG BUY/SELL ใช้กับ ==), volume
                 |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore (0-100), lsdState (BULLISH/BEARISH/NEUTRAL ใช้กับ ==/contains), lsdConfluenceTF (1-4), deltaLabel (ใช้กับ ==/contains), deltaValue, fiboScore (0-10), momentum (EXPANSION/SQUEEZE/REVERSAL ใช้กับ ==/contains), isSqueeze (0/1), close
                 |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label (ใช้กับ ==) ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
@@ -356,6 +359,7 @@ object TradingToolDefinitions {
                 |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
                 |
                 |Operator: >=, <=, ==, >, <, contains
+                |[โหมดส่งแจ้งเตือน — delivery] "ai" (default) = alert → AI วิเคราะห์/quick-check → แจ้งผู้ใช้ | "direct" = alert → notification + ส่งข้อความเข้าแชทโดยตรง (ไม่เรียก AI ประหยัดโทเคน — เหมาะตอนผู้ใช้อยากเฝ้าดูความถี่ของสัญญาณก่อน)
                 |ตัวอย่าง: RSI Overbought → tool=trading_technical_analysis, field=RSI, >= 70 | RSI Oversold → RSI <= 30 | ราคาทองถึงเป้า → tool=trading_price, field=price, >= 4100
                 |ใช้เมื่อผู้ใช้สั่ง: "ช่วยเฝ้าดูทองให้หน่อย ถ้าถึง 4800 บอกฉันด้วย", "แก้ alert ID 5 เป็น 4200", "ลบการแจ้งเตือน ID 5", "มี alert อะไรอยู่บ้าง" """.trimMargin(),
             parameters = FunctionParameters(
@@ -369,6 +373,7 @@ object TradingToolDefinitions {
                     "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่จะตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้นเท่านั้น"),
                     "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <, contains)"),
                     "condition_value"    to ParameterProperty("STRING", "ค่าเปรียบเทียบ (เช่น 4800, 30, bullish)"),
+                    "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
                     "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการดึงข้อมูล (1-1440 นาที, default 15)")
                 ),
                 required = listOf("action")
@@ -414,6 +419,93 @@ object TradingToolDefinitions {
                         type = "STRING",
                         description = "Timeframe: 15m, 1h, 4h, 1D",
                         enum = listOf("15m", "1h", "4h", "1D")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14b. SMC Flow System (port จาก TV "SMC Flow System v2") ─────────
+        FunctionDeclaration(
+            name = "trading_smc_flow",
+            description = """สัญญาณ BUY/SELL จาก SMC Flow System (port จาก TradingView "SMC Flow System v2")
+                |ให้ 3 สัญญาณแยกกัน: (1) EMA 14/60 cross signal, (2) UT Bot signal (ATR trailing stop),
+                |(3) SMC Confluence signal = trigger (UT Bot/3-Bar Reversal ภายใน 3 แท่ง) + structure bias
+                |+ ราคาอยู่ใน OB/FVG/Fib Golden Zone + แท่งยืนยัน — พร้อม Auto Fib levels จาก swing ปัจจุบัน
+                |ใช้เมื่อผู้ใช้ถามหา "สัญญาณซื้อขาย", "SMC Flow", "confluence signal", "EMA cross 14/60"
+                |คำนวณจากแท่งเทียน TradingView ในเครื่อง (รองรับ TF 1m/5m/15m/30m/1h/4h/1D)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14c. Strategy Signals (แปลงจาก Strategy Library / Quantpedia) ────
+        FunctionDeclaration(
+            name = "trading_strategy_signal",
+            description = """สัญญาณ BUY/SELL จากกลยุทธ์เชิงวิชาการ (แปลงจาก Strategy Library — Quantpedia/QuantConnect มาคำนวณในเครื่องจากแท่งเทียน TV ไม่พึ่ง QuantConnect)
+                |5 กลยุทธ์: tsmom (Time-Series Momentum ROC 20 แท่ง), trend (Trend Following EMA50/200),
+                |reversal (Short-Term Reversal RSI+BB), donchian (Donchian Breakout 20 แท่ง), w52high (52-Weeks High proximity)
+                |— พร้อม consensus_signal (STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL) จากคะแนนรวมทั้ง 5 กลยุทธ์
+                |ใช้เมื่อผู้ใช้ถามหา "สัญญาณกลยุทธ์", "strategy signal", "consensus กลยุทธ์", "กลยุทธ์ไหนให้สัญญาณอะไร"
+                |รองรับ TF 1m/5m/15m/30m/1h/4h/1D""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    ),
+                    "strategy" to ParameterProperty(
+                        type = "STRING",
+                        description = "กลยุทธ์เฉพาะตัว (default all = ทั้ง 5 + consensus)",
+                        enum = listOf("all", "tsmom", "trend", "reversal", "donchian", "w52high")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14d. Signal Stats (backtest win-rate ของสัญญาณย้อนหลัง) ─────────
+        FunctionDeclaration(
+            name = "trading_signal_stats",
+            description = """สถิติสัญญาณเทรด 8 กลยุทธ์ (Momentum/Trend/Reversal/Donchian/52W High/EMA14-60/UT Bot/3-Bar Reversal) 2 แหล่ง:
+                |source=backtest (default): จำลอง win-rate/avg R ย้อนหลังจากชุดแท่งเทียน — ใช้เมื่อถาม "กลยุทธ์ไหนแม่นสุด", "backtest สัญญาณ"
+                |source=live: สถิติจาก Signal Alert ที่ยิงจริง (ระบบบันทึกทุก signal + ติดตามผล TP/SL อัตโนมัติ) — ใช้เมื่อถาม "วันนี้มี signal อะไรบ้าง", "signal ที่แจ้งไปโดน TP หรือ SL", "สถิติ signal จริง"
+                |รองรับ TF 1m/5m/15m/30m/1h/4h/1D (เฉพาะ backtest)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h, ใช้เฉพาะ source=backtest)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    ),
+                    "strategy" to ParameterProperty(
+                        type = "STRING",
+                        description = "กลยุทธ์เฉพาะตัว (default all = ทั้ง 8, ใช้เฉพาะ source=backtest)",
+                        enum = listOf("all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "utbot", "threebar")
+                    ),
+                    "source" to ParameterProperty(
+                        type = "STRING",
+                        description = "backtest = จำลองย้อนหลัง (default) | live = สถิติ signal ที่ alert ยิงจริงพร้อมผล TP/SL",
+                        enum = listOf("backtest", "live")
+                    ),
+                    "range" to ParameterProperty(
+                        type = "STRING",
+                        description = "ช่วงเวลาของ source=live (default today)",
+                        enum = listOf("today", "7d", "all")
                     )
                 ),
                 required = listOf("symbol")
@@ -855,22 +947,27 @@ object TradingToolDefinitions {
                 |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction
                 |- trading_indicators ⭐ (คำนวณจากแท่งเทียนเอง — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
                 |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM), smc_zone_pct, smc_trend, smc_last_event, smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
+                |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal, smc_recipes, ema14_60_signal, ema14_60_cross, ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal, utbot_trend, utbot_stop, structure_bias, in_fib_golden, fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
+                |- trading_strategy_signal ⭐ (กลยุทธ์จาก Strategy Library — เลือก TF ด้วย symbol@TF): consensus_signal, consensus_score, tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal, trend_state, tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
+                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" จาก 8 กลยุทธ์: Momentum/Trend/Reversal/Donchian/52W High/EMA14-60/UT Bot/3-Bar Reversal — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 (แจ้งเมื่อมีสัญญาณ BUY ใหม่) หรือ signal_sell >= 1 — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผล, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
                 |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal, volume
                 |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore, lsdState, lsdConfluenceTF, deltaLabel, deltaValue, fiboScore, momentum, isSqueeze, close
                 |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
                 |- trading_fear_greed: value, classification
                 |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
-                |เมื่อเข้าเงื่อนไข ระบบจะปลุก AI มาสรุปบริบทก่อนแจ้งเตือนผู้ใช้ (notification มีปุ่ม หยุดแจ้งเตือน/แจ้งเตือนซ้ำ)""".trimMargin(),
+                |เมื่อเข้าเงื่อนไข ระบบจะปลุก AI มาสรุปบริบทก่อนแจ้งเตือนผู้ใช้ (notification มีปุ่ม หยุดแจ้งเตือน/แจ้งเตือนซ้ำ)
+                |[โหมดส่งแจ้งเตือน — delivery] "ai" (default) = alert → AI วิเคราะห์/quick-check → ผู้ใช้ | "direct" = alert → notification + ส่งเข้าแชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "action" to ParameterProperty("STRING", "create | update | rename | delete | list", enum = listOf("create", "update", "rename", "delete", "list")),
                     "name" to ParameterProperty("STRING", "ชื่อ alert (สำหรับ create) — rename ใช้เป็นชื่อใหม่"),
                     "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTC-USD (สำหรับ create)"),
-                    "tool_name" to ParameterProperty("STRING", "trading_price | trading_technical_analysis | trading_sentiment | trading_fear_greed | trading_crypto_overview | trading_deep_analysis_suite (default: trading_price)"),
+                    "tool_name" to ParameterProperty("STRING", "trading_price | trading_indicators | trading_smc | trading_smc_flow | trading_strategy_signal | trading_signal_alert | trading_technical_analysis | trading_sentiment | trading_fear_greed | trading_crypto_overview | trading_deep_analysis_suite (default: trading_price)"),
                     "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่ตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้น (default: price)"),
                     "condition_operator" to ParameterProperty("STRING", "> | < | >= | <= | == | contains (default: >=)"),
                     "condition_value" to ParameterProperty("STRING", "ค่าเปรียบเทียบ เช่น 4100, 30, 85 (สำหรับ update ใช้เป็นค่าใหม่)"),
+                    "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
                     "interval_minutes" to ParameterProperty("NUMBER", "ความถี่ตรวจสอบเป็นนาที (default: 15, min: 1, max: 1440)"),
                     "alert_id" to ParameterProperty("NUMBER", "ID ของ alert ที่ต้องการลบ/แก้ไข (สำหรับ delete/update)")
                 ),

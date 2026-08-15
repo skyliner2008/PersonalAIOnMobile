@@ -75,6 +75,7 @@ fun App(
     registerWidgetClosed: (() -> Unit) -> Unit = {},
     requestAllFilesPermission: () -> Unit = {},
     allFilesAccessGranted: Boolean = false,
+    setupChecks: List<com.example.personalaibot.ui.screen.SetupCheckItem> = emptyList(),
     fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null,
     onDownloadLocalModel: (suspend (com.example.personalaibot.data.embedding.LocalOnnxEmbeddingProvider, (Float) -> Unit, Boolean) -> Unit)? = null
 ) {
@@ -106,6 +107,14 @@ fun App(
     val chartLocale by viewModel.chartLocale.collectAsStateWithLifecycle()
     val chartHideSideToolbar by viewModel.chartHideSideToolbar.collectAsStateWithLifecycle()
     val chartRefreshToken by viewModel.chartRefreshToken.collectAsStateWithLifecycle()
+    val chartViewMode by viewModel.chartViewMode.collectAsStateWithLifecycle()
+    val chartLayout by viewModel.chartLayout.collectAsStateWithLifecycle()
+    val chartOverlays by viewModel.chartOverlays.collectAsStateWithLifecycle()
+    val chartCandles by viewModel.chartCandles.collectAsStateWithLifecycle()
+    val chartSmcResult by viewModel.chartSmcResult.collectAsStateWithLifecycle()
+    val chartSignalMarkers by viewModel.chartSignalMarkers.collectAsStateWithLifecycle()
+    val chartCardCache by viewModel.chartCardCache.collectAsStateWithLifecycle()
+    val chartDataLoading by viewModel.chartDataLoading.collectAsStateWithLifecycle()
     val jobs by viewModel.activeJobs.collectAsStateWithLifecycle()
     val scheduledTasks by viewModel.scheduledTasks.collectAsStateWithLifecycle()
     val alertTestRunning by viewModel.alertTestRunning.collectAsStateWithLifecycle()
@@ -113,6 +122,7 @@ fun App(
     val alertTestResults by viewModel.alertTestResults.collectAsStateWithLifecycle()
     val alertAiSummary by viewModel.alertAiSummaryEnabled.collectAsStateWithLifecycle()
     val alertVoice by viewModel.alertVoiceEnabled.collectAsStateWithLifecycle()
+    val alertVoiceEngine by viewModel.alertVoiceEngine.collectAsStateWithLifecycle()
     val mt5BridgeBaseUrl by viewModel.mt5BridgeBaseUrl.collectAsStateWithLifecycle()
     val mt5AuthToken by viewModel.mt5AuthToken.collectAsStateWithLifecycle()
     val mt5PairingStatus by viewModel.mt5PairingStatus.collectAsStateWithLifecycle()
@@ -294,7 +304,8 @@ fun App(
                             onStartWidget = onStartWidget,
                             onStopWidget = onStopWidget,
                             requestAllFilesPermission = requestAllFilesPermission,
-                            allFilesAccessGranted = allFilesAccessGranted
+                            allFilesAccessGranted = allFilesAccessGranted,
+                            setupChecks = setupChecks
                         )
                     }
 
@@ -310,6 +321,8 @@ fun App(
                             alertVoice = alertVoice,
                             onAlertAiSummaryChange = { viewModel.setAlertAiSummaryEnabled(it) },
                             onAlertVoiceChange = { viewModel.setAlertVoiceEnabled(it) },
+                            alertVoiceEngine = alertVoiceEngine,
+                            onAlertVoiceEngineChange = { viewModel.setAlertVoiceEngine(it) },
                             onDelete = { viewModel.automationManager.deleteJob(it) },
                             onDeleteTask = { viewModel.automationManager.deleteScheduledTask(it) },
                             onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) },
@@ -319,8 +332,8 @@ fun App(
                             alertTestStatus = alertTestStatus,
                             alertTestResults = alertTestResults,
                             onRunTest = { viewModel.runAlertDataTest() },
-                            onCreateAlert = { name, symbol, toolName, field, op, value, interval ->
-                                viewModel.createAlert(name, symbol, toolName, field, op, value, interval)
+                            onCreateAlert = { name, symbol, toolName, field, op, value, interval, delivery ->
+                                viewModel.createAlert(name, symbol, toolName, field, op, value, interval, delivery)
                             },
                             onCreateScheduledTask = { name, prompt, type, runAt, hhmm ->
                                 viewModel.createScheduledTask(name, prompt, type, runAt, hhmm)
@@ -386,6 +399,16 @@ fun App(
                             hideSideToolbar = chartHideSideToolbar,
                             refreshToken = chartRefreshToken,
                             openSettingsSignal = chartSettingsSignal,
+                            viewMode = chartViewMode,
+                            layout = chartLayout,
+                            overlays = chartOverlays,
+                            candles = chartCandles,
+                            smcResult = chartSmcResult,
+                            signalMarkers = chartSignalMarkers,
+                            dataLoading = chartDataLoading,
+                            onSetViewMode = { viewModel.setChartViewMode(it) },
+                            onSetLayout = { viewModel.setChartLayout(it) },
+                            onToggleOverlay = { viewModel.toggleChartOverlay(it) },
                             onSetLocale = { viewModel.updateChartLocale(it) },
                             onSetHideSideToolbar = { viewModel.setChartHideSideToolbar(it) },
                             onClose = { viewModel.closeChart() }
@@ -408,7 +431,12 @@ fun App(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(messages.asReversed()) { message ->
-                                    MessageBubble(message)
+                                    MessageBubble(
+                                        message = message,
+                                        onOpenChart = { cfg -> viewModel.openChartWithConfig(cfg.symbol, cfg.interval, cfg.layout, cfg.overlays) },
+                                        chartCardCache = chartCardCache,
+                                        onChartCardShown = { cfg -> viewModel.ensureChartCardData(cfg.symbol, cfg.interval, needsSmc = "smc" in cfg.overlays, needsMarkers = "signals" in cfg.overlays) }
+                                    )
                                 }
 
                                 if (messages.isEmpty()) {

@@ -1,0 +1,224 @@
+2026-08-12 08:59:15.873 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Sending: model=gemini-2.5-flash, apiKey=AIzaSyBo***VEj8, attachments=0 (binary=0)
+2026-08-12 08:59:15.873 21392-21392 Orchestrator            com.example.personalaibot            D  Chat Request: modelName='gemini-2.5-flash', resolvedProviderId='gemini', internalApiKeyLength=39, attachments=0
+2026-08-12 08:59:15.873 21392-21392 Orchestrator            com.example.personalaibot            D  Routing to GeminiService
+2026-08-12 08:59:15.875 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 1
+2026-08-12 08:59:18.262 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 1: [custom_gold_check]
+2026-08-12 08:59:18.263 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: custom_gold_check({})
+2026-08-12 08:59:18.264 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: 🛠️ เปิดใช้งานเครื่องมือ 'custom_gold_check' แล้ว\nให้ทำตามคำสั่งของเครื่องมือนี้เพื่อประมวลผลคำขอของผู้ใช้ต่อทันที (เรียกใช้ tool อื่นประกอบได้ตามความเหมาะสม แล้วสรุปผลให้ผู้ใช้):\n\n1.  ดึงข้อมูล Deep Analysis Suite (15m, 1h, 4h, 1D) เพื่อดู LSD Trend, Flow Sentiment และ Confluence\n2.  ดึงข้อมูล SMC Analysis (15m, 1h, 4h, 1D) เพื่อดูโครงสร้างตลาด (BOS/CHoCH), Order Blocks, FVG และ Liquidity Zones\n3.  ดึงข้อมูล Technical Analysis (15m, 1h, 4h, 1D) เพื่อดูค่า RSI, MACD และ Bollinger Bands\n4.  สรุปข้อมูลทั้งหมด วิเคราะห์ความสอดคล้อง (Confluence) ของสัญญาณในแต่ละมิติและ Timeframe\n5.  ระบุระดับราคาสำคัญ (Key Levels) จาก OB/FVG/Liquidity ที่มีนัยสำคัญ\n6.  ให้คำแนะนำการเทรด (BUY/SELL/HOLD) พร้อมเหตุผลประกอบ และจุดเข้า/ออก (Entry/SL/TP) ที่เป็นไปได้
+2026-08-12 08:59:18.264 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 2
+2026-08-12 08:59:23.222 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 2: [trading_deep_analysis_suite, trading_deep_analysis_suite, trading_deep_analysis_suite, trading_deep_analysis_suite]
+2026-08-12 08:59:23.222 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_deep_analysis_suite({symbol=XAUUSD, interval=15m})
+2026-08-12 08:59:23.855 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis using local engine (bridge unreachable (HTTP 404, ngrok/html error page))
+2026-08-12 08:59:23.865 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=1 fetchDelta=10 dbBars=300
+2026-08-12 08:59:37.380 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-12 08:59:37.384 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-12 08:59:37.388 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-12 08:59:37.393 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-12 08:59:37.484 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ═══ Deep Analysis Suite (Local Engine): XAUUSD 15m ═══\n💵 ราคาปัจจุบัน: 4396.92\n🏛️ LSD Trend: BULLISH (Confluence TF: 1/4)\n📦 Orderflow: STRONG BUYING PRESSURE (Δ 3148.24)\n🌀 Momentum: EXPANSION\n🎯 Fibo Hot Zones: 0.0 (8/10), 0.382 (10/10), 0.5 (10/10), 0.618 (6/10)\n⭐ Summary Score: 100/100\n
+2026-08-12 08:59:37.484 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_deep_analysis_suite({symbol=XAUUSD, interval=1h})
+2026-08-12 08:59:37.485 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis bridge circuit OPEN — skip HTTP, using local engine directly
+2026-08-12 08:59:37.485 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis using local engine (bridge circuit open)
+2026-08-12 08:59:37.494 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/1h: missingBars=5 fetchDelta=8 dbBars=300
+2026-08-12 08:59:50.904 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=series_loading
+2026-08-12 08:59:50.908 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=symbol_resolved
+2026-08-12 08:59:50.912 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=timescale_update
+2026-08-12 08:59:50.919 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 8 for OANDA:XAUUSD/60
+2026-08-12 08:59:51.023 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ═══ Deep Analysis Suite (Local Engine): XAUUSD 1h ═══\n💵 ราคาปัจจุบัน: 4396.825\n🏛️ LSD Trend: NEUTRAL (Confluence TF: 1/4)\n📦 Orderflow: BUYING EFFORT (Δ 27879.74)\n🌀 Momentum: REVERSAL\n🎯 Fibo Hot Zones: 0.382 (10/10), 0.5 (6/10)\n⭐ Summary Score: 0/100\n
+2026-08-12 08:59:51.024 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_deep_analysis_suite({interval=4h, symbol=XAUUSD})
+2026-08-12 08:59:51.024 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis bridge circuit OPEN — skip HTTP, using local engine directly
+2026-08-12 08:59:51.024 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis using local engine (bridge circuit open)
+2026-08-12 08:59:51.034 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/4h: missingBars=1 fetchDelta=3 dbBars=300
+2026-08-12 09:00:04.209 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/240]: m=series_loading
+2026-08-12 09:00:04.211 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/240]: m=symbol_resolved
+2026-08-12 09:00:04.212 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/240]: m=timescale_update
+2026-08-12 09:00:04.213 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 3 for OANDA:XAUUSD/240
+2026-08-12 09:00:04.280 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ═══ Deep Analysis Suite (Local Engine): XAUUSD 4h ═══\n💵 ราคาปัจจุบัน: 4396.505\n🏛️ LSD Trend: NEUTRAL (Confluence TF: 1/4)\n📦 Orderflow: STRONG BUYING PRESSURE (Δ 27378.21)\n🌀 Momentum: REVERSAL\n🎯 Fibo Hot Zones: 0.0 (10/10)\n⭐ Summary Score: 0/100\n
+2026-08-12 09:00:04.280 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_deep_analysis_suite({symbol=XAUUSD, interval=1D})
+2026-08-12 09:00:04.280 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis bridge circuit OPEN — skip HTTP, using local engine directly
+2026-08-12 09:00:04.280 21392-21392 TradingTool             com.example.personalaibot            D  Deep analysis using local engine (bridge circuit open)
+2026-08-12 09:00:04.289 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/1d: missingBars=1 fetchDelta=3 dbBars=300
+2026-08-12 09:00:17.246 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/D]: m=series_loading
+2026-08-12 09:00:17.249 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/D]: m=symbol_resolved
+2026-08-12 09:00:17.251 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/D]: m=timescale_update
+2026-08-12 09:00:17.252 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 3 for OANDA:XAUUSD/D
+2026-08-12 09:00:17.305 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ═══ Deep Analysis Suite (Local Engine): XAUUSD 1d ═══\n💵 ราคาปัจจุบัน: 4395.76\n🏛️ LSD Trend: BULLISH (Confluence TF: 1/4)\n📦 Orderflow: STRONG BUYING PRESSURE (Δ 52176.35)\n🌀 Momentum: EXPANSION\n🎯 Fibo Hot Zones: 0.5 (10/10), 1.0 (10/10)\n⭐ Summary Score: 70/100\n
+2026-08-12 09:00:17.305 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 3
+2026-08-12 09:00:20.739 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 3: [trading_smc_analysis, trading_smc_analysis, trading_smc_analysis, trading_smc_analysis]
+2026-08-12 09:00:20.739 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_smc_analysis({symbol=XAUUSD, interval=15m})
+2026-08-12 09:00:20.750 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=1 fetchDelta=10 dbBars=300
+2026-08-12 09:00:33.809 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-12 09:00:33.811 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-12 09:00:33.811 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-12 09:00:33.812 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-12 09:00:34.888 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: =============================\n🧠 **SMC Analysis — XAUUSD (15m)**\n💰 ราคาปัจจุบัน: **4396.51**|ATR: 7.4636\n\n**📐 Market Structure**\n  ⚪ Trend: **NEUTRAL**\n  Structure High: 4404.29\n  Structure Low:  4362.66\n  Last Event: — ไม่มี event ล่าสุด\n\n**📊 Premium / Discount Zones**\n  Zone ปัจจุบัน: 🔴 PREMIUM (แพง — บริเวณ Short)\n  Premium  ≥ 4393.88\n  Equilibrium: 4383.47\n  Discount ≤ 4373.06\n\n**🟢 Bullish OB (Demand Zones)**\n  — ไม่พบ Active Bullish OB\n**🔴 Bearish OB (Supply Zones)**\n  — ไม่พบ Active Bearish OB\n\n**⬛ Fair Value Gaps (FVG)**\n  🟢 Bull FVG: 4383.28 — 4386.73  (size: 3.4500)\n  🟢 Bull FVG: 4372.08 — 4374.25  (size: 2.1750)\n  🔴 Bear FVG: 4369.90 — 4374.88  (size: 4.9850)\n  🟢 Bull FVG: 4368.93 — 4373.46  (size: 4.5350)\n  🟢 Bull FVG: 4367.39 — 4370.12  (size: 2.7250)\n\n**💧 Liquidity Zones (Pending Sweeps)**\n  🔺 EQH 4404.29  ★★★ (touches: 2)\n  🔻 EQL 4362.66  ★★★ (touches: 2)\n  🔻 EQL 4368.00  ★★ (touches: 1)\n  🔺 EQH 4397.42  ★★ (touches: 1)\n  🔻 EQL 4374.25  ★ (touches: 2)\n  🔻 EQL 4379.32  ★ (touches: 2)\n=============================\n\n**🎯 SMC Bias: 🟡 **CAUTION** — ราคาอยู่ใน Premium zone — ระวัง Short opportunity**\n[Data] candle_sou...[truncated]
+2026-08-12 09:00:34.889 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_smc_analysis({symbol=XAUUSD, interval=1h})
+2026-08-12 09:00:34.896 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/1h: missingBars=1 fetchDelta=5 dbBars=300
+2026-08-12 09:00:47.926 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=series_loading
+2026-08-12 09:00:47.927 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=symbol_resolved
+2026-08-12 09:00:47.928 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/60]: m=timescale_update
+2026-08-12 09:00:47.930 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 5 for OANDA:XAUUSD/60
+2026-08-12 09:00:48.452 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: =============================\n🧠 **SMC Analysis — XAUUSD (1h)**\n💰 ราคาปัจจุบัน: **4395.09**|ATR: 14.1629\n\n**📐 Market Structure**\n  🟢 Trend: **BULLISH**\n  Structure High: 4435.25\n  Structure Low:  4356.70\n  Last Event: 📈 BOS ขึ้น (ฺBoS Bullish)\n\n**📊 Premium / Discount Zones**\n  Zone ปัจจุบัน: 🟡 EQUILIBRIUM (กลาง)\n  Premium  ≥ 4415.61\n  Equilibrium: 4395.97\n  Discount ≤ 4376.34\n\n**🟢 Bullish OB (Demand Zones)**\n  — ไม่พบ Active Bullish OB\n**🔴 Bearish OB (Supply Zones)**\n  — ไม่พบ Active Bearish OB\n\n**⬛ Fair Value Gaps (FVG)**\n  🟢 Bull FVG: 4383.80 — 4394.31  (size: 10.5100)\n  🟢 Bull FVG: 4374.77 — 4378.45  (size: 3.6750)\n  🔴 Bear FVG: 4372.69 — 4378.52  (size: 5.8300)\n  🟢 Bull FVG: 4375.66 — 4380.57  (size: 4.9100)\n  🔴 Bear FVG: 4382.70 — 4403.49  (size: 20.7900)\n\n**💧 Liquidity Zones (Pending Sweeps)**\n  🔻 EQL 4360.30  ★★★★ (touches: 2)\n  🔻 EQL 4368.94  ★★★ (touches: 3)\n  🔺 EQH 4435.25  ★★★ (touches: 2)\n  🔻 EQL 4378.52  ★★ (touches: 1)\n  🔺 EQH 4397.42  ★ (touches: 1)\n=============================\n\n**🎯 SMC Bias: ⚪ **NEUTRAL** — รอ structure break หรือ OB retest ที่ชัดเจนกว่านี้**\n[Data] candle_source=TV:DB | price_source=UNIFIED_...[truncated]
+2026-08-12 09:00:48.453 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_smc_analysis({symbol=XAUUSD, interval=4h})
+2026-08-12 09:00:48.566 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: =============================\n🧠 **SMC Analysis — XAUUSD (4h)**\n💰 ราคาปัจจุบัน: **4395.09**|ATR: 32.1907\n\n**📐 Market Structure**\n  ⚪ Trend: **NEUTRAL**\n  Structure High: 4120.50\n  Structure Low:  4019.24\n  Last Event: — ไม่มี event ล่าสุด\n\n**📊 Premium / Discount Zones**\n  Zone ปัจจุบัน: 🔴 PREMIUM (แพง — บริเวณ Short)\n  Premium  ≥ 4095.18\n  Equilibrium: 4069.87\n  Discount ≤ 4044.55\n\n**🟢 Bullish OB (Demand Zones)**\n  — ไม่พบ Active Bullish OB\n**🔴 Bearish OB (Supply Zones)**\n  — ไม่พบ Active Bearish OB\n\n**⬛ Fair Value Gaps (FVG)**\n  🟢 Bull FVG: 4364.80 — 4389.34  (size: 24.5400)\n  🟢 Bull FVG: 4316.74 — 4327.46  (size: 10.7200)\n  🟢 Bull FVG: 4269.22 — 4301.02  (size: 31.8000)\n  🟢 Bull FVG: 4253.25 — 4262.10  (size: 8.8550)\n  🟢 Bull FVG: 4213.54 — 4237.00  (size: 23.4600)\n\n**💧 Liquidity Zones (Pending Sweeps)**\n  🔻 EQL 4019.24  ★★★ (touches: 2)\n  🔺 EQH 4400.19  ★★ (touches: 2)\n  🔻 EQL 4356.70  ★ (touches: 1)\n  🔻 EQL 4367.68  ★ (touches: 1)\n=============================\n\n**🎯 SMC Bias: 🟡 **CAUTION** — ราคาอยู่ใน Premium zone — ระวัง Short opportunity**\n[Data] candle_source=TV:DB | price_source=UNIFIED_PRICE:TV:OANDA | bars=300 | strict...[truncated]
+2026-08-12 09:00:48.566 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_smc_analysis({interval=1d, symbol=XAUUSD})
+2026-08-12 09:00:48.674 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: =============================\n🧠 **SMC Analysis — XAUUSD (1d)**\n💰 ราคาปัจจุบัน: **4395.09**|ATR: 88.6275\n\n**📐 Market Structure**\n  ⚪ Trend: **NEUTRAL**\n  Structure High: 4773.58\n  Structure Low:  3959.80\n  Last Event: — ไม่มี event ล่าสุด\n\n**📊 Premium / Discount Zones**\n  Zone ปัจจุบัน: 🟡 EQUILIBRIUM (กลาง)\n  Premium  ≥ 4570.13\n  Equilibrium: 4366.69\n  Discount ≤ 4163.24\n\n**🟢 Bullish OB (Demand Zones)**\n  — ไม่พบ Active Bullish OB\n**🔴 Bearish OB (Supply Zones)**\n  — ไม่พบ Active Bearish OB\n\n**⬛ Fair Value Gaps (FVG)**\n  🟢 Bull FVG: 4106.48 — 4223.51  (size: 117.0300)\n  🟢 Bull FVG: 4040.82 — 4076.76  (size: 35.9400)\n  🔴 Bear FVG: 4044.14 — 4091.03  (size: 46.8900)\n  🟢 Bull FVG: 4246.72 — 4306.11  (size: 59.3950)\n  🔴 Bear FVG: 4353.45 — 4423.97  (size: 70.5150)\n\n**💧 Liquidity Zones (Pending Sweeps)**\n  🔺 EQH 4773.58  ★★★ (touches: 2)\n  🔻 EQL 3959.80  ★★★ (touches: 2)\n  🔻 EQL 4020.98  ★★ (touches: 1)\n=============================\n\n**🎯 SMC Bias: ⚪ **NEUTRAL** — รอ structure break หรือ OB retest ที่ชัดเจนกว่านี้**\n[Data] candle_source=TV:DB | price_source=UNIFIED_PRICE:TV:OANDA | bars=300 | strict_tv=true\n
+2026-08-12 09:00:48.675 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 4
+2026-08-12 09:00:52.743 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 4: [trading_technical_analysis, trading_technical_analysis, trading_technical_analysis, trading_technical_analysis]
+2026-08-12 09:00:52.744 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_technical_analysis({interval=15m, exchange=OANDA, symbol=XAUUSD})
+2026-08-12 09:00:53.231 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: Technical Analysis - XAUUSD (15m)\nSignal: + BUY (score: 0.445)\n-----------------------------------\nPrice: 4395.085 | Change: -0.0322%\n\nMomentum\n  RSI: 65.2389 (prev: null)\n  MACD: 4.9382 | Signal: 2.1757 | Hist: null\n  Stoch K/D: null / null\n  CCI: null | AO: null\n\nTrend\n  EMA20: null | EMA50: null | EMA200: null\n  ADX: 23.7109 (+DI: null / -DI: null)\n\nVolatility\n  BB Upper: null\n  BB Basis: 4378.4793\n  BB Lower: null\n  BB Width: N/A | ATR: 6.829\n\nSummary - Buy: N/A | Sell: N/A | Neutral: N/A\n
+2026-08-12 09:00:53.232 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_technical_analysis({exchange=OANDA, interval=1h, symbol=XAUUSD})
+2026-08-12 09:00:53.542 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: Technical Analysis - XAUUSD (1h)\nSignal: + BUY (score: 0.288)\n-----------------------------------\nPrice: 4394.36 | Change: 0.5978%\n\nMomentum\n  RSI: 66.9468 (prev: null)\n  MACD: 60.0528 | Signal: 16.2394 | Hist: null\n  Stoch K/D: null / null\n  CCI: null | AO: null\n\nTrend\n  EMA20: null | EMA50: null | EMA200: null\n  ADX: 29.4904 (+DI: null / -DI: null)\n\nVolatility\n  BB Upper: null\n  BB Basis: 4137.3122\n  BB Lower: null\n  BB Width: N/A | ATR: 91.5298\n\nSummary - Buy: N/A | Sell: N/A | Neutral: N/A\n
+2026-08-12 09:00:53.543 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_technical_analysis({interval=4h, exchange=OANDA, symbol=XAUUSD})
+2026-08-12 09:00:53.867 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: Technical Analysis - XAUUSD (4h)\nSignal: + BUY (score: 0.467)\n-----------------------------------\nPrice: 4395.085 | Change: 0.333%\n\nMomentum\n  RSI: 65.4046 (prev: null)\n  MACD: 48.2466 | Signal: 54.254 | Hist: null\n  Stoch K/D: null / null\n  CCI: null | AO: null\n\nTrend\n  EMA20: null | EMA50: null | EMA200: null\n  ADX: 47.2131 (+DI: null / -DI: null)\n\nVolatility\n  BB Upper: null\n  BB Basis: 4352.1282\n  BB Lower: null\n  BB Width: N/A | ATR: 34.3701\n\nSummary - Buy: N/A | Sell: N/A | Neutral: N/A\n
+2026-08-12 09:00:53.867 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_technical_analysis({interval=1D, exchange=OANDA, symbol=XAUUSD})
+2026-08-12 09:00:54.191 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: Technical Analysis - XAUUSD (1D)\nSignal: = HOLD (score: 0.000)\n-----------------------------------\nPrice: N/A | Change: N/A%\n\nMomentum\n  RSI: N/A (prev: null)\n  MACD: N/A | Signal: N/A | Hist: null\n  Stoch K/D: null / null\n  CCI: null | AO: null\n\nTrend\n  EMA20: null | EMA50: null | EMA200: null\n  ADX: N/A (+DI: null / -DI: null)\n\nVolatility\n  BB Upper: null\n  BB Basis: N/A\n  BB Lower: null\n  BB Width: N/A | ATR: N/A\n\nSummary - Buy: N/A | Sell: N/A | Neutral: N/A\n
+2026-08-12 09:00:54.191 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 5
+2026-08-12 09:01:22.347 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 5: [analyze_and_display_report]
+2026-08-12 09:01:22.348 21392-21392 GeminiService           com.example.personalaibot            D  [part 1/2] Tool Request: analyze_and_display_report({voice_summary=ผมได้ทำการวิเคราะห์ทองคำ (XAUUSD) เชิงลึกให้ผู้ใช้แล้วครับ ภาพรวมตลาดแสดงสัญญาณที่ผสมผสานกัน โดยมีแรงซื้อใน Timeframe สั้นและยาวบางส่วน แต่ก็มีสัญญาณเตือนจาก SMC ใน Timeframe ที่เล็กลงว่าราคาอยู่ในโซน Premium ซึ่งอาจเป็นจุดที่ต้องระวังการกลับตัวหรือการพักฐานครับ ผมได้ให้คำแนะนำการเทรดสำหรับทั้งสองสถานการณ์พร้อมจุดเข้าออกและระดับความเสี่ยงแล้วครับ, detailed_markdown=# 📊 การวิเคราะห์ทองคำ (XAUUSD) เชิงลึก: Confluence Trading Report
+                                                                                                    
+                                                                                                    **ภาพรวม:** ตลาด XAUUSD กำลังแสดงสัญญาณที่ผสมผสานกันอย่างมีนัยสำคัญ โดยมีแรงซื้อใน Timeframe สั้นและยาวบางส่วน แต่ก็มีสัญญาณเตือนจาก Smart Money Concepts (SMC) ใน Timeframe ที่เล็กลง
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ## 📈 Deep Analysis Suite (LSD Trend, Orderflow, Momentum)
+                                                                                                    
+                                                                                                    | Timeframe | LSD Trend | Orderflow Delta | Momentum | Summary Score |
+                                                                                                    | :-------- | :-------- | :-------------- | :------- | :------------ |
+                                                                                                    | **15m**   | BULLISH   | STRONG BUYING   | EXPANSION | 100/100       |
+                                                                                                    | **1h**    | NEUTRAL   | BUYING EFFORT   | REVERSAL | 0/100         |
+                                                                                                    | **4h**    | NEUTRAL   | STRONG BUYING   | REVERSAL | 0/100         |
+                                                                                                    | **1D**    | BULLISH   | STRONG BUYING   | EXPANSION | 70/100        |
+                                                                                                    
+                                                                                                    **ข้อสังเกต:**
+                                                                                                    *   **15m และ 1D:** แสดงแนวโน้ม Bullish และแรงซื้อที่แข็งแกร่ง (Strong Buying Pressure) พร้อม Momentum แบบ Expansion
+                                                                                                    *   **1h และ 4h:** แสดงแนวโน้ม Neutral และ Momentum แบบ Reversal ซึ่งอาจบ่งชี้ถึงการชะลอตัวหรือการพักฐาน
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ## 🧠 SMC Analysis (Market Structure, OB, FVG, Liquidity)
+                                                                                                    
+                                                                                                    | Timeframe | Trend / Bias | Premium/Discount | Key FVG (Bull/Bear) | Key Liquidity (EQH/EQL) |
+                                                                                                    | :-------- | :----------- | :--------------- | :------------------ | :---------------------- |
+                                                                                                    | **15m**   | NEUTRAL / CAUTION (Premium) | 🔴 PREMIUM | Bull FVG: 4383-4386<br>Bear FVG: 4369-4374 | EQH 4404 (★★★)<br>EQL 4362 (★★★) |
+                                                                                                    | **1h**    | BULLISH / NEUTRAL | 🟡 EQUILIBRIUM | Bull FVG: 4383-4394<br>Bear FVG: 4382-4403 | EQL 4360 (★★★★)<br>EQH 4435 (★★★) |
+                                                                                                    | **4h**    | NEUTRAL / CAUTION (Premium) | 🔴 PREMIUM | Bull FVG: 4364-4389 | EQH 4400 (★★)<br>EQL 4019 (★★★) |
+                                                                                                    | **1D**    | NEUTRAL / NEUTRAL | 🟡 EQUILIBRIUM | Bear FVG: 4353-4423 | EQH 4773 (★★★)<br>EQL 3959 (★★★) |
+                                                                                                    
+                                                                                                    **ข้อสังเกต:**
+                                                                                                    *   **Premium/Discount:** Timeframe 15m และ 4h อยู่ในโซน Premium ซึ่งเป็นบริเวณที่ราคามักจะกลับตัวลง (Short Opportunity)
+                                                                                                    *   **Market Structure:** 1h แสดง BOS Bullish แต่ Timeframe อื่นๆ เป็น Neutral
+                                                                                                    *   **FVG:** มีทั้ง Bullish และ Bearish FVG กระจายอยู่ ซึ่งเป็นโซนที่ราคาอาจกลับไปเติมเต็ม
+2026-08-12 09:01:22.348 21392-21392 GeminiService           com.example.personalaibot            D  *   **Liquidity:** มี Equal Highs (EQH) และ Equal Lows (EQL) ที่มี Confluence Stars สูง ซึ่งเป็นเป้าหมายของ Smart Money Sweeps
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ## 📊 Technical Analysis (RSI, MACD, Bollinger Bands)
+                                                                                                    
+                                                                                                    | Timeframe | Signal | RSI      | MACD (MACD/Signal) | BB Basis | ATR     |
+                                                                                                    | :-------- | :----- | :------- | :----------------- | :------- | :------ |
+                                                                                                    | **15m**   | BUY    | 65.23    | 4.93 / 2.17        | 4378.47  | 6.82    |
+                                                                                                    | **1h**    | BUY    | 66.94    | 60.05 / 16.23      | 4137.31  | 91.52   |
+                                                                                                    | **4h**    | BUY    | 65.40    | 48.24 / 54.25      | 4352.12  | 34.37   |
+                                                                                                    | **1D**    | HOLD   | N/A      | N/A                | N/A      | N/A     |
+                                                                                                    
+                                                                                                    **ข้อสังเกต:**
+                                                                                                    *   **RSI:** อยู่ในระดับสูง (65-66) ในทุก Timeframe (15m, 1h, 4h) ซึ่งบ่งชี้ถึงโมเมนตัมขาขึ้นที่แข็งแกร่ง แต่ก็เข้าใกล้โซน Overbought
+                                                                                                    *   **MACD:** เป็นบวกใน 15m และ 1h แต่ใน 4h MACD อยู่ต่ำกว่า Signal Line ซึ่งอาจเป็นสัญญาณของการชะลอตัว
+                                                                                                    *   **Daily TA:** ข้อมูลไม่สมบูรณ์สำหรับบาง Indicator
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ## 🎯 Confluence & Key Levels
+                                                                                                    
+                                                                                                    *   **Confluence Score:** สัญญาณมีความขัดแย้งกันใน
+2026-08-12 09:01:22.348 21392-21392 GeminiService           com.example.personalaibot            D  [part 2/2] บาง Timeframe โดยเฉพาะระหว่าง Technical Indicators ที่เป็นบวก กับ SMC ที่เตือนเรื่อง Premium Zone และ Momentum Reversal
+                                                                                                    *   **แนวรับสำคัญ (Demand Zones):**
+                                                                                                        *   **Bull FVG 4383.28 – 4386.73 (15m):** โซนนี้อาจเป็นจุดที่ราคาเด้งกลับขึ้นไปได้
+                                                                                                        *   **EQL 4362.66 (15m) / 4360.30 (1h):** แหล่ง Liquidity ที่แข็งแกร่ง อาจเป็นจุดที่ Smart Money เข้าซื้อ
+                                                                                                    *   **แนวต้านสำคัญ (Supply Zones):**
+                                                                                                        *   **EQH 4404.29 (15m):** แหล่ง Liquidity ที่ราคาอาจไป Sweep ก่อนลง
+                                                                                                        *   **Bear FVG 4382.70 – 4403.49 (1h):** โซน Supply ที่อาจทำให้ราคาถูกกดดัน
+                                                                                                    
+                                                                                                    ---
+                                                                                                    
+                                                                                                    ## 📝 คำแนะนำการเทรด & Risk Assessment
+                                                                                                    
+                                                                                                    **ภาพรวม Bias:** **MIXED / CAUTION** (ผสมผสาน/ระมัดระวัง)
+                                                                                                    
+                                                                                                    **สถานการณ์ที่เป็นไปได้:**
+                                                                                                    
+                                                                                                    1.  **Short-term Pullback (สอดคล้องกับ SMC Premium):**
+                                                                                                        *   **Entry Zone (Short):** บริเวณราคาปัจจุบัน หรือรอการยืนยันการกลับตัวที่ **EQH 4404.29 (15m)** หรือ **Bear FVG 4382.70 – 4403.49 (1h)**
+                                                                                                        *   **Stop Loss (SL):** เหนือ **4410.00**
+                                                                                                        *   **Take Profit (TP):**
+                                                                                                            *   TP1: **4386.00** (บริเวณ Bull FVG 15m)
+                                                                                                            *   TP2: **4375.00** (ใกล้ EQL 1h)
+                                                                                                        *   **Risk:Reward:** ควรตั้งเป้าหมาย Risk:Reward อย่างน้อย 1:1 หรือดีกว่า
+                                                                                                    
+                                                                                                    2.  **Long from Demand Zone (สอดคล้องกับภาพรวม Bullish ใน TF สูง):**
+                                                                                                        *   **Entry Zone (Long):** รอย่อตัวลงมาที่ **Bull FVG 4383.28 – 4386.73 (15m)** หรือ **EQL 4360.30 – 4362.66** แล้วรอสัญญาณยืนยัน
+                                                                                                        *   **Stop Loss (SL):** ใต้ **4355.00**
+                                                                                                        *   **Take Profit (TP):**
+                                                                                                            *   TP1: **4400.00** (ทดสอบแนวต้านปัจจุบัน/EQH)
+                                                                                                            *   TP2: **4430.00** (ใกล้ EQH 1h)
+                                                                                                        *   **Risk:Reward:** ควรตั้งเป้าหมาย Risk:Reward อย่างน้อย 1:2 หรือดีกว่า
+                                                                                                    
+                                                                                                    **Risk Assessment:**
+                                                                                                    *   **ระดับความเสี่ยง:** **สูง** เนื่องจากสัญญาณที่ขัดแย้งกัน
+                                                                                                    *   **คำแนะนำ:** ควรใช้ Position Sizing ที่อนุรักษ์นิยม (Conservative) และรอการยืนยันจาก Price Action ที่ชัดเจนใน Timeframe ที่ต้องการเทรด หากยังไม่มีความชัดเจน ควรหลีกเลี่ยงการเข้าเทรด หรือพิจารณาตั้ง Alert เพื่อเฝ้าราคาในโซนสำคัญครับ
+                                                                                                    
+                                                                                                    ---
+                                                                                                    })
+2026-08-12 09:01:22.350 21392-21392 Orchestrator            com.example.personalaibot            D  SideEffect: Display report (4978 chars)
+2026-08-12 09:01:22.350 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ✅ รายงานฉบับเต็มถูกส่งแสดงในแชทแล้ว — ให้ตอบผู้ใช้เป็นภาษาสนทนา สรุปประเด็นสำคัญของรายงานให้ครบถ้วน: ผลสรุป/ทิศทางหลัก + ตัวเลขและระดับราคาสำคัญ 3-5 จุด (แนวรับ-แนวต้าน จุดเข้า-ออก ตัวชี้วัดสำคัญ) + จุดที่ต้องระวัง รวมประมาณ 6-10 ประโยค (อ้างอิง: ผมได้ทำการวิเคราะห์ทองคำ (XAUUSD) เชิงลึกให้ผู้ใช้แล้วครับ ภาพรวมตลาดแสดงสัญญาณที่ผสมผสานกัน โดยมีแรงซื้อใน Timeframe สั้นและยาวบางส่วน แต่ก็มีสัญญาณเตือนจาก SMC ใน Timeframe ที่เล็กลงว่าราคาอยู่ในโซน Premium ซึ่งอาจเป็นจุดที่ต้องระวังการกลับตัวหรือการพักฐานครับ ผมได้ให้คำแนะนำการเทรดสำหรับทั้งสองสถานการณ์พร้อมจุดเข้าออกและระดับความเสี่ยงแล้วครับ) — ไม่ต้องอ่านตารางหรือลิสต์ยาวๆ ซ้ำทุกบรรทัด เพราะผู้ใช้เห็นรายงานเต็มในแชทแล้ว
+2026-08-12 09:01:22.351 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 6
+2026-08-12 09:01:26.101 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Response complete (3407 chars)
+                                                                                                    >>> รับทราบครับ ผู้ใช้ ผมได้เปิดใช้งานเครื่องมือ `custom_gold_check` แล้วครับ
+                                                                                                    
+                                                                                                    ผมจะดำเนินการวิเคราะห์ทองคำ (XAUUSD) เชิงลึกตามขั้นตอนที่กำหนดไว้ดังนี้ครับ:
+                                                                                                    
+                                                                                                    1.  **Deep Analysis Suite:** ดึงข้อมูล LSD Trend, Flow Sentiment และ Confluence ใน Timeframe 15m, 1h, 4h, 1D
+                                                                                                    2.  **SMC Analysis:** ดึงข้อมูล Market Structure (BOS/CHoCH), Order Blocks, FVG และ Liquidity Zones ใน Timeframe 15m, 1h, 4h, 1D
+                                                                                                    3.  **Technical Analysis:** ดึงข้อมูล RSI, MACD และ Bollinger Bands ใน Timeframe 15m, 1h, 4h, 1D
+                                                                                                    
+                                                                                                    จากนั้นผมจะสรุปผลทั้งหมด วิเคราะห์ความสอดคล้องของสัญญาณ ระบุระดับราคาสำคัญ และให้คำแนะนำการเทรดพร้อมจุดเข้า/ออกที่เหมาะสมครับ
+                                                                                                    
+                                                                                                    โปรดรอสักครู่นะครับ ผมกำลังประมวลผลข้อมูลอยู่ครับ
+                                                                                                    
+                                                                                                    ผมได้รับข้อมูล Deep Analysis Suite สำหรับ XAUUSD ในทุก Timeframe แล้วครับ
+                                                                                                    
+                                                                                                    ต่อไป ผมจะดำเนินการดึงข้อมูล SMC Analysis ใน Timeframe 15m, 1h, 4h, และ 1D ครับ
+                                                                                                    
+                                                                                                    โปรดรอสักครู่นะครับ
+                                                                                                    
+                                                                                                    ผมได้รับข้อมูล SMC Analysis สำหรับ XAUUSD ในทุก Timeframe แล้วครับ
+                                                                                                    
+                                                                                                    ต่อไป ผมจะดำเนินการดึงข้อมูล Technical Analysis ใน Timeframe 15m, 1h, 4h, และ 1D โดยใช้ OANDA เป็น Exchange ครับ
+                                                                                                    
+                                                                                                    โปรดรอสักครู่นะครับ
+                                                                                                    
+                                                                                                    ผมได้ทำการวิเคราะห์ทองคำ (XAUUSD) เชิงลึกตามที่ผู้ใช้ร้องขอแล้วครับ โดยรวบรวมข้อมูลจาก Deep Analysis Suite, SMC Analysis และ Technical Analysis ใน Timeframe 15m, 1h, 4h และ 1D ครับ
+                                                                                                    
+                                                                                                    **สรุปภาพรวมการวิเคราะห์:**
+                                                                                                    
+                                                                                                    ตลาด XAUUSD กำลังแสดงสัญญาณที่ผสมผสานกันครับ ในขณะที่ Deep Analysis และ Technical Analysis ใน Timeframe สั้นและยาวบางส่วนยังคงบ่งชี้ถึงแรงซื้อ แต่ SMC Analysis ใน Timeframe 15m และ 4h ชี้ให้เห็นว่าราคาอยู่ในโซน Premium ซึ่งอาจเป็นจุดที่ต้องระวังการกลับตัวหรือการพักฐานครับ นอกจากนี้ Momentum ใน 1h และ 4h จาก Deep Analysis ก็แสดงสัญญาณการกลับตัวเช่นกันครับ
+                                                                                                    
+                                                                                                    **คำแนะนำการเทรด:**
+                                                                                                    
+                                                                                                    เนื่องจากสัญญาณยังคงผสมผสานกัน ผมแนะนำให้ผู้ใช้ใช้ความระมัดระวังและรอการยืนยันที่ชัดเจนขึ้นครับ
+2026-08-12 09:01:26.102 21392-21392 JarvisVM                com.example.personalaibot            D  *   **สำหรับผู้ที่มองหาโอกาส Short (ในระยะสั้น):** อาจพิจารณาเข้า Short บริเวณแนวต้านสำคัญ เช่น EQH ที่ 4404.29 (15m) หรือ Bear FVG 4382.70 – 4403.49 (1h) โดยมี Stop Loss เหนือ 4410 และ Take Profit บริเวณ Bull FVG 4383.28 – 4386.73 (15m) หรือ EQL 4360.30 – 4362.66 ครับ
+                                                                                                    *   **สำหรับผู้ที่มองหาโอกาส Long (เมื่อมีการพักฐาน):** ควรรอให้ราคาย่อตัวลงมาในโซน Demand ที่แข็งแกร่ง เช่น Bull FVG 4383.28 – 4386.73 (15m) หรือ EQL 4360.30 – 4362.66 แล้วรอสัญญาณยืนยันการกลับตัวขึ้นก่อนเข้า Long โดยมี Stop Loss ใต้ 4355.00 และ Take Profit บริเวณ EQH 4404.29 หรือ 4435.25 ครับ
+                                                                                                    
+                                                                                                    **การประเมินความเสี่ยง:**
+                                                                                                    
+                                                                                                    สถานะตลาดในตอนนี้อยู่ในระดับ **"ระมัดระวัง" (CAUTION)** ครับ การเข้าเทรดควรใช้ Position Sizing ที่เหมาะสมและรอสัญญาณยืนยันที่ชัดเจนเพื่อลดความเสี่ยงครับ
+                                                                                                    
+                                                                                                    ผมได้จัดทำรายงานฉบับเต็มในรูปแบบ Markdown เพื่อให้ผู้ใช้ได้ตรวจสอบรายละเอียดทั้งหมดแล้วครับ
+                                                                                                    
+                                                                                                    ผมได้ทำการวิเคราะห์ทองคำ (XAUUSD) เชิงลึกให้ผู้ใช้แล้วครับ ภาพรวมตลาดแสดงสัญญาณที่ผสมผสานกัน โดยมีแรงซื้อใน Timeframe สั้นและยาวบางส่วน แต่ก็มีสัญญาณเตือนจาก SMC ใน Timeframe ที่เล็กลงว่าราคาอยู่ในโซน Premium ซึ่งอาจเป็นจุดที่ต้องระวังการกลับตัวหรือการพักฐานครับ ผมได้ให้คำแนะนำการเทรดสำหรับทั้งสองสถานการณ์พร้อมจุดเข้าออกและระดับความเสี่ยงแล้วครับ
+                                                                                                    
+                                                                                                    โดยสรุปคือ ใน Timeframe 15m และ 1D มีแรงซื้อที่แข็งแกร่ง แต่ใน 1h และ 4h มีสัญญาณ Momentum Reversal ครับ SMC Analysis ชี้ว่าราคาอยู่ในโซน Premium ใน 15m และ 4h ซึ่งอาจเป็นจุดกลับตัวลงได้ครับ
+                                                                                                    
+                                                                                                    สำหรับแนวรับสำคัญที่น่าสนใจคือ Bull FVG ที่ 4383.28 – 4386.73 และ EQL ที่ 4360.30 – 4362.66 ครับ ส่วนแนวต้านสำคัญคือ EQH ที่ 4404.29 และ Bear FVG ที่ 4382.70 – 4403.49 ครับ
+                                                                                                    
+                                                                                                    การเทรดในช่วงนี้ควรใช้ความระมัดระวังเป็นพิเศษครับ และควรพิจารณาตั้ง Alert เพื่อเฝ้าราคาในโซนสำคัญที่ผมได้ระบุไว้ครับ

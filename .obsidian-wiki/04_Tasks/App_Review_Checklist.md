@@ -158,7 +158,9 @@
 
 * **ที่มา**: user request 2026-07-30 ตอน 03:06
 
-### 9. File Tools / Security 🔶 แก้ไขแล้ว รอทดสอบเครื่องจริง (2026-08-08)
+### 9. File Tools / Security ✅ (2026-08-11 — เทสเครื่องจริงผ่านแล้ว)
+
+* **เทสผ่านโดย user**: แนบรูป/ไฟล์ในแชทวิเคราะห์ได้, file_write เขียนไฟล์ลง Download เห็นทันที (verify+media scan), สร้าง .xlsx จริงได้, system_self_review ทำงานถูกต้อง
 
 * **ขอบเขต**: `tools/file/FileToolDefinitions.kt`, FileToolExecutor (androidMain)
 
@@ -172,7 +174,9 @@
 
 * **ที่มา**: \[\[ai\_subsystem\_review\_2026-07-29]]
 
-### 10. System Tools 🔶 แก้ไข/ตรวจแล้ว รอทดสอบเครื่องจริง (2026-08-08)
+### 10. System Tools ✅ (2026-08-11 — เทสเครื่องจริงผ่าน 10/10)
+
+* **เทสผ่านโดย user** (ตาม Test_Plan_Section10_SystemTools): diagnostics แชท+live, connectivity, custom tool CRUD ครบใน live, persistence ข้าม session, edge case หลัง fix LIVE_RULES ข้อ 9 (NO EMPTY PROMISES)
 
 * **ขอบเขต**: `tools/system/SystemToolExecutor.kt`
 
@@ -195,7 +199,7 @@
 
   * [ ] อ้างอิงเอกสาร \[\[vision\_system]]
 
-### 12. UI / UX ทั่วไป 🔶 แก้ไข/ตรวจแล้ว รอทดสอบเครื่องจริง (2026-08-08)
+### 12. UI / UX ทั่วไป ✅ (2026-08-11 — เทสเครื่องจริงผ่าน A–H ครบ 41 ข้อ)
 
 * **ขอบเขต**: `ui/screen/*` (ChatInputBar, JarvisTopBar, SettingsDialog, ToolListScreen, TradingChartScreen, TradingTerminalScreen, AutoTradingScreen, SymbolPickerDialog)
 
@@ -259,10 +263,10 @@
 | 6. Orchestrator / Intent    | ✅ เทสเครื่องจริงผ่านแล้ว           | 2026-08-08 |
 | 7. Live Mode / Voice        | ✅ เสร็จ (เทสเครื่องจริงผ่านแล้ว) | 2026-08-03 |
 | 8. Scheduled Tasks          | ✅ เสร็จ (เทสเครื่องจริงผ่านแล้ว) | 2026-08-08 |
-| 9. File Tools / Security    | 🔶 รอเทสเครื่องจริง                | 2026-08-08 |
-| 10. System Tools            | 🔶 รอเทสเครื่องจริง                | 2026-08-08 |
+| 9. File Tools / Security    | ✅ เทสเครื่องจริงผ่านแล้ว (+xlsx)   | 2026-08-11 |
+| 10. System Tools            | ✅ เทสเครื่องจริงผ่าน 10/10        | 2026-08-11 |
 | 11. Camera / Vision         | ✅ เทสเครื่องจริงผ่านแล้ว           | 2026-08-08 |
-| 12. UI/UX                   | 🔶 รอเทสเครื่องจริง                | 2026-08-08 |
+| 12. UI/UX                   | ✅ เทสเครื่องจริงผ่าน A–H ครบ 41 ข้อ | 2026-08-11 |
 | 13. Database / Storage      | ✅ เทสเครื่องจริงผ่านแล้ว           | 2026-08-08 |
 | 14. mt5-core-server         | ✅ เทสสคริปต์ผ่าน (analyze)      | 2026-08-08 |
 | 15. Diagnostic / Logging    | ✅ เสร็จ (ยืนยันจาก logcat จริง)    | 2026-08-08 |

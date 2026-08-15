@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
+import kotlinx.datetime.*
 
 import com.example.personalaibot.data.GeminiService
 import com.example.personalaibot.logDebug
@@ -35,6 +36,9 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     private val api = TradingApiService(client)
     private val smcExecutor = SmcToolExecutor(client)
     private val advancedEngine = AdvancedTradingEngine(SmcApiService(client))
+    private val smcFlowProvider = com.example.personalaibot.automation.SmcFlowAlertProvider(SmcApiService(client))
+    private val strategySignalProvider = com.example.personalaibot.automation.StrategySignalProvider(SmcApiService(client))
+    private val signalAlertProvider = com.example.personalaibot.automation.SignalAlertProvider(SmcApiService(client))
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Circuit breaker — bridge ล่มแล้วข้าม HTTP ไป local engine ตรงๆ เป็นเวลา 10 นาที */
@@ -86,6 +90,9 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "trading_mt5_economic_radar"     -> executeMt5EconomicRadar(args)
             "trading_mt5_trade_journal"      -> executeMt5TradeJournal(args)
             "trading_deep_analysis_suite"    -> executeDeepAnalysisSuite(args)
+            "trading_smc_flow"               -> executeSmcFlow(args)
+            "trading_strategy_signal"        -> executeStrategySignal(args)
+            "trading_signal_stats"           -> executeSignalStats(args)
             "trading_fundamental_analysis"   -> executeFundamentalAnalysis(args)
             "trading_fear_greed"             -> executeFearGreed(args)
             "trading_crypto_overview"        -> executeCryptoOverview(args)
@@ -103,6 +110,108 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
     }
 
     // ─── Implementations ──────────────────────────────────────────────────────
+
+    /** trading_smc_flow — สัญญาณจาก SMC Flow System (คำนวณในเครื่องจากแท่งเทียน TV) */
+    private suspend fun executeSmcFlow(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        return runCatching { smcFlowProvider.fetchFormatted("$symbol@$interval") }
+            .getOrElse { "❌ SMC Flow error: ${it.message}" }
+    }
+
+    /** trading_strategy_signal — สัญญาณกลยุทธ์จาก Strategy Library (คำนวณในเครื่องจากแท่งเทียน TV) */
+    private suspend fun executeStrategySignal(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val strategy = (args["strategy"] ?: "all").trim().lowercase()
+        return runCatching { strategySignalProvider.fetchFormatted("$symbol@$interval", strategy) }
+            .getOrElse { "❌ Strategy Signal error: ${it.message}" }
+    }
+
+    /** trading_signal_stats — backtest win-rate/avgR (จำลองย้อนหลัง) หรือ live (สถิติ signal ที่ alert ยิงจริง) */
+    private suspend fun executeSignalStats(args: Map<String, String>): String {
+        val source = (args["source"] ?: "backtest").trim().lowercase()
+        if (source == "live") return executeSignalStatsLive(args)
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val strategy = (args["strategy"] ?: "all").trim().lowercase()
+        return runCatching { signalAlertProvider.fetchStats("$symbol@$interval", strategy) }
+            .getOrElse { "❌ Signal Stats error: ${it.message}" }
+    }
+
+    /**
+     * trading_signal_stats (source=live) — สถิติจาก Signal Alert ที่ยิงจริง
+     * (JarvisAutomationService บันทึกทุก signal + tracker ตามเช็ก TP/SL ทุก cycle)
+     * range: today (default, เวลาท้องถิ่น) | 7d | all
+     */
+    private fun executeSignalStatsLive(args: Map<String, String>): String {
+        val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }
+            .getOrElse { return "❌ ยังเข้าถึงฐานข้อมูลไม่ได้: ${it.message}" }
+        val range = (args["range"] ?: "today").trim().lowercase()
+        val tz = kotlinx.datetime.TimeZone.currentSystemDefault()
+        val now = kotlinx.datetime.Clock.System.now()
+        val sinceMs = when (range) {
+            "all" -> 0L
+            "7d" -> now.minus(7, kotlinx.datetime.DateTimeUnit.DAY, tz).toEpochMilliseconds()
+            else -> { // today (local midnight)
+                val local = now.toLocalDateTime(tz)
+                kotlinx.datetime.LocalDateTime(local.year, local.monthNumber, local.dayOfMonth, 0, 0)
+                    .toInstant(tz).toEpochMilliseconds()
+            }
+        }
+        val recs = mgr.getSignalAlertsSince(sinceMs)
+        val rangeLabel = when (range) { "all" -> "ทั้งหมด"; "7d" -> "7 วันล่าสุด"; else -> "วันนี้" }
+        if (recs.isEmpty()) {
+            return "📭 ยังไม่มี signal ที่บันทึกไว้ ($rangeLabel)\n" +
+                "ระบบจะบันทึกอัตโนมัติเมื่อ Signal Alert (trading_signal_alert) ยิงแจ้งเตือน — ลองตั้ง alert แล้วรอ signal เกิด"
+        }
+
+        fun fmtTime(ms: Long): String {
+            val l = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz)
+            return "%02d:%02d".format(l.hour, l.minute)
+        }
+        fun fmtDate(ms: Long): String {
+            val l = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(tz)
+            return "%02d/%02d %02d:%02d".format(l.dayOfMonth, l.monthNumber, l.hour, l.minute)
+        }
+        val showDate = range != "today"
+
+        return buildString {
+            appendLine("📊 **Signal Stats จาก Alert จริง — $rangeLabel** (${recs.size} สัญญาณ)")
+            appendLine()
+            // รายการสัญญาณ (ล่าสุดก่อน — จำกัด 20 รายการ)
+            recs.take(20).forEach { r ->
+                val icon = if (r.side == "BUY") "🟢" else "🔴"
+                val outcome = when (r.outcome) {
+                    "TP" -> "✅ TP ${"%+.2f".format(r.result_r ?: 0.0)}R @ ${r.hit_price}"
+                    "SL" -> "❌ SL −1R @ ${r.hit_price}"
+                    else -> "⏳ กำลังวิ่ง"
+                }
+                val whenStr = if (showDate) fmtDate(r.created_at) else fmtTime(r.created_at)
+                appendLine("$icon **${r.side}** ${r.symbol} @ ${r.entry} (${r.strategy}) — $outcome ・ $whenStr")
+                appendLine("   SL ${r.sl} / TP ${r.tp} (RR 1:${r.rr?.let { "%.2f".format(it) } ?: "-"})")
+            }
+            if (recs.size > 20) appendLine("… และอีก ${recs.size - 20} รายการ")
+            appendLine()
+            // สรุปรวม + รายกลยุทธ์
+            fun summarize(list: List<com.example.personalaibot.db.SignalAlertRecord>): String {
+                val tp = list.count { it.outcome == "TP" }
+                val sl = list.count { it.outcome == "SL" }
+                val openN = list.count { it.outcome == "OPEN" }
+                val decided = tp + sl
+                val wr = if (decided > 0) "%.0f%%".format(tp * 100.0 / decided) else "-"
+                val avgR = if (decided > 0) list.filter { it.outcome != "OPEN" }
+                    .sumOf { it.result_r ?: 0.0 } / decided else 0.0
+                return "${list.size} สัญญาณ | TP $tp SL $sl วิ่งอยู่ $openN | win-rate $wr | avg ${"%+.2f".format(avgR)}R"
+            }
+            appendLine("**รวม: **${summarize(recs)}")
+            appendLine()
+            appendLine("**แยกตามกลยุทธ์:**")
+            recs.groupBy { it.strategy }.toList()
+                .sortedByDescending { (_, l) -> l.filter { it.outcome != "OPEN" }.sumOf { it.result_r ?: 0.0 } }
+                .forEach { (name, list) -> appendLine("• **$name**: ${summarize(list)}") }
+        }.trim()
+    }
 
     /**
      * trading_position_sizing — คำนวณขนาดไม้จากความเสี่ยง (pure math, ไม่ต้องเรียก API)
@@ -612,11 +721,40 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         return formatScanResults("📉 Top Losers — $exchange", results)
     }
 
+    private val indicatorProvider = com.example.personalaibot.automation.IndicatorAlertProvider(SmcApiService(client))
+
+    /** เติมค่าที่ scanner คืน null/N/A ด้วยค่าที่คำนวณเองจากแท่งเทียน (300 แท่ง) */
+    private suspend fun fillTaFromLocal(symbol: String, interval: String, data: Map<String, String>): Map<String, String> {
+        fun bad(v: String?) = v == null || v == "N/A" || v == "null"
+        val needsLocal = listOf("close", "RSI", "RSI[1]", "MACD.macd", "MACD.signal", "MACD.hist",
+            "Stoch.K", "Stoch.D", "CCI20", "AO", "EMA20", "EMA50", "EMA200",
+            "BB.upper", "BB.basis", "BB.lower", "BB.width", "ATR", "ADX", "ADX+DI", "ADX-DI"
+        ).any { bad(data[it]) }
+        if (!needsLocal) return data
+
+        val tf = interval.lowercase().let { if (it == "1d") "1D" else it }
+        val local = runCatching { indicatorProvider.fetch("$symbol@$tf") }.getOrNull() ?: return data
+        if (local.containsKey("error")) return data
+
+        val out = data.toMutableMap()
+        fun fill(key: String, localKey: String) {
+            if (bad(out[key])) local[localKey]?.let { out[key] = it }
+        }
+        fill("close", "close"); fill("RSI", "rsi14"); fill("RSI[1]", "rsi14_prev")
+        fill("MACD.macd", "macd"); fill("MACD.signal", "macd_signal"); fill("MACD.hist", "macd_hist")
+        fill("Stoch.K", "stoch_k"); fill("Stoch.D", "stoch_d"); fill("CCI20", "cci20"); fill("AO", "ao")
+        fill("EMA20", "ema20"); fill("EMA50", "ema50"); fill("EMA200", "ema200")
+        fill("BB.upper", "bb_upper"); fill("BB.basis", "bb_basis"); fill("BB.lower", "bb_lower")
+        fill("BB.width", "bb_width"); fill("ATR", "atr14")
+        fill("ADX", "adx"); fill("ADX+DI", "di_plus"); fill("ADX-DI", "di_minus")
+        return out
+    }
+
     private suspend fun executeTechnicalAnalysis(args: Map<String, String>): String {
         val symbol   = args["symbol"]   ?: return "Missing required argument: symbol"
         val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
         val interval = args["interval"] ?: "1h"
-        val data = api.getTechnicalAnalysis(symbol, resolvedExchange, interval)
+        val data = fillTaFromLocal(symbol, interval, api.getTechnicalAnalysis(symbol, resolvedExchange, interval))
 
         if (data.containsKey("error")) return "TA error: ${data["error"]}"
 

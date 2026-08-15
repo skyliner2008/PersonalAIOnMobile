@@ -56,4 +56,11 @@ interface SideEffectDelegate {
      * @return ข้อความยืนยันผลลัพธ์ (จะถูกส่งกลับเข้า tool loop)
      */
     suspend fun onManageSchedule(args: Map<String, String>): String
+
+    /**
+     * ควบคุมหน้ากราฟ/dashboard (จาก tool `chart_dashboard_control`)
+     * @param args action, symbol, interval, layout, view, overlay, visible
+     * @return ข้อความยืนยันผลลัพธ์ (จะถูกส่งกลับเข้า tool loop)
+     */
+    suspend fun onChartControl(args: Map<String, String>): String
 }

@@ -1,0 +1,82 @@
+---------------------------- PROCESS STARTED (21392) for package com.example.personalaibot ----------------------------
+2026-08-12 08:36:26.002 21392-21580 AndroidONNX             com.example.personalaibot            D  Loading Multilingual tokenizer...
+2026-08-12 08:36:26.004 21392-21578 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools'
+2026-08-12 08:36:26.004 21392-21578 FileToolExecutor        com.example.personalaibot            D  Storage Root: /storage/emulated/0 | isManager: true
+2026-08-12 08:36:26.005 21392-21392 PcmAudio                com.example.personalaibot            D  Initializing AudioTrack (Speaker)
+2026-08-12 08:36:26.006 21392-21578 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools'
+2026-08-12 08:36:26.006 21392-21578 FileToolExecutor        com.example.personalaibot            D  executeList on: /storage/emulated/0/custom_agent_tools
+2026-08-12 08:36:26.047 21392-21578 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools/custom_gold_check.json'
+2026-08-12 08:36:26.047 21392-21578 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools/custom_gold_check.json'
+2026-08-12 08:36:26.072 21392-21578 Orchestrator            com.example.personalaibot            D  Loaded 1 custom tool(s) from custom_agent_tools/
+2026-08-12 08:36:26.096 21392-21392 PcmAudio                com.example.personalaibot            D  AudioTrack Ready
+2026-08-12 08:36:27.379 21392-21392 Orchestrator            com.example.personalaibot            D  Gemini fallback chain = [gemini-2.5-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-3-flash, gemini-2.5-flash-lite, gemini-3.5-flash]
+2026-08-12 08:36:27.384 21392-21392 Orchestrator            com.example.personalaibot            D  Gemini API keys for rotation: 7 key(s)
+2026-08-12 08:36:27.418 21392-21392 Orchestrator            com.example.personalaibot            D  Model caps loaded: tools-ok = {groq=3, nvidia_nim=11, openrouter=6}
+2026-08-12 08:36:27.422 21392-21392 GeminiService           com.example.personalaibot            D  Updating Gemini config: model=gemini-2.5-flash, key=AIza...VEj8
+2026-08-12 08:36:29.045 21392-21580 AndroidONNX             com.example.personalaibot            D  Loading ONNX model...
+2026-08-12 08:36:30.492 21392-21580 AndroidONNX             com.example.personalaibot            D  Multilingual model loaded successfully.
+2026-08-12 08:36:30.493 21392-21392 JarvisVM                com.example.personalaibot            D  Local ONNX model already on device — marked Ready
+2026-08-12 08:36:31.280 21392-21753 ProfileInstaller        com.example.personalaibot            D  Installing profile for com.example.personalaibot
+2026-08-12 08:37:41.842 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Sending: model=gemini-2.5-flash, apiKey=AIzaSyBo***VEj8, attachments=0 (binary=0)
+2026-08-12 08:37:41.843 21392-21392 Orchestrator            com.example.personalaibot            D  Chat Request: modelName='gemini-2.5-flash', resolvedProviderId='gemini', internalApiKeyLength=39, attachments=0
+2026-08-12 08:37:41.843 21392-21392 Orchestrator            com.example.personalaibot            D  Routing to GeminiService
+2026-08-12 08:37:41.849 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 1
+2026-08-12 08:37:44.308 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 1: [trading_smc_flow]
+2026-08-12 08:37:44.309 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: trading_smc_flow({symbol=XAUUSD, interval=15m})
+2026-08-12 08:37:44.322 21392-21392 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=34 fetchDelta=40 dbBars=300
+2026-08-12 08:37:59.173 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-12 08:37:59.174 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-12 08:37:59.177 21392-21392 SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-12 08:37:59.188 21392-21392 SmcApiService           com.example.personalaibot            D  TV bars loaded: 40 for OANDA:XAUUSD/15
+2026-08-12 08:38:00.028 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ## 🌊 SMC Flow System — XAUUSD (15m) [TV:DB]\nclose=4386.74\n\n### EMA 14/60\nema14=4380.1502 | ema60=4378.6558 | state=BULLISH\nema14_60_cross=NONE | ema14_60_signal=NONE\n\n### UT Bot (key=2.0, atr=6)\nutbot_signal=NONE | utbot_trend=BULL | utbot_stop=4375.5573\n\n### SMC Confluence (trigger + structure + recipe A/B/C + confirm)\nsmc_signal=NONE | smc_recipes=- | structure_bias=NEUTRAL\nin_bull_ob=0 | in_bear_ob=0 | in_bull_fvg=0 | in_bear_fvg=0 | in_fib_golden=0\n\n### Auto Fib (swing 4362.655 → 4404.29)\ngolden_zone=4371.5649 — 4378.5596\nfib_0=4404.29 | fib_236=4394.4641 | fib_382=4388.3854 | fib_500=4383.4725 | fib_618=4378.5596 | fib_786=4371.5649 | fib_1000=4362.655 | fib_1272=4351.3303 | fib_1618=4336.9246\n\n_Recipes: A=ราคาใน OB | B=ราคาใน FVG+OB | C=ราคาใน Fib Golden Zone (0.618–0.786) — ต้องมี structure bias ตรง + trigger (UT Bot/3-Bar Reversal) ภายใน 3 แท่ง + แท่งยืนยัน_\n
+2026-08-12 08:38:00.029 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 2
+2026-08-12 08:38:04.768 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Response complete (1261 chars)
+                                                                                                    >>> ขณะนี้ SMC Flow System สำหรับ XAUUSD ใน Timeframe M15 แสดงผลดังนี้ครับ:
+                                                                                                    
+                                                                                                    **ภาพรวม:**
+                                                                                                    *   **ราคาปัจจุบัน (Close):** 4386.74
+                                                                                                    
+                                                                                                    **EMA 14/60:**
+                                                                                                    *   **EMA14:** 4380.1502
+                                                                                                    *   **EMA60:** 4378.6558
+                                                                                                    *   **สถานะ:** BULLISH (EMA14 อยู่เหนือ EMA60)
+                                                                                                    *   **EMA Cross:** ไม่มีสัญญาณ Cross ล่าสุด
+                                                                                                    
+                                                                                                    **UT Bot:**
+                                                                                                    *   **สัญญาณ UT Bot:** ไม่มี
+                                                                                                    *   **แนวโน้ม UT Bot:** BULL (ขาขึ้น)
+                                                                                                    *   **จุด Stop UT Bot:** 4375.5573
+                                                                                                    
+                                                                                                    **SMC Confluence:**
+                                                                                                    *   **สัญญาณ SMC:** ไม่มี
+                                                                                                    *   **Structure Bias:** NEUTRAL (เป็นกลาง)
+                                                                                                    *   **ราคาอยู่ในโซนสำคัญ:** ไม่อยู่ใน Bullish/Bearish Order Block, Bullish/Bearish FVG หรือ Fib Golden Zone
+                                                                                                    
+                                                                                                    **Auto Fib (จาก Swing Low 4362.655 ถึง Swing High 4404.29):**
+                                                                                                    *   **Golden Zone (0.618 – 0.786):** 4371.5649 – 4378.5596
+                                                                                                    *   **ระดับ Fib อื่นๆ:**
+                                                                                                        *   0: 4404.29
+                                                                                                        *   0.236: 4394.4641
+                                                                                                        *   0.382: 4388.3854
+                                                                                                        *   0.500: 4383.4725
+                                                                                                        *   0.618: 4378.5596
+                                                                                                        *   0.786: 4371.5649
+                                                                                                        *   1.000: 4362.655
+                                                                                                        *   1.272: 4351.3303
+                                                                                                        *   1.618: 4336.9246
+                                                                                                    
+                                                                                                    **สรุป:**
+                                                                                                    ใน Timeframe M15 สำหรับ XAUUSD นั้น EMA14/60 อยู่ในสถานะ Bullish และ UT Bot ก็แสดงแนวโน้มขาขึ้น อย่างไรก็ตาม ยังไม่มีสัญญาณซื้อขายที่ชัดเจนจาก SMC Confluence System ครับ เนื่องจาก Structure Bias ยังเป็นกลาง และราคายังไม่อยู่ในโซน Order Block, FVG หรือ Fib Golden Zone ที่จะยืนยันสัญญาณได้ครับ
+2026-08-12 08:39:49.025 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Sending: model=gemini-2.5-flash, apiKey=AIzaSyBo***VEj8, attachments=0 (binary=0)
+2026-08-12 08:39:49.026 21392-21392 Orchestrator            com.example.personalaibot            D  Chat Request: modelName='gemini-2.5-flash', resolvedProviderId='gemini', internalApiKeyLength=39, attachments=0
+2026-08-12 08:39:49.026 21392-21392 Orchestrator            com.example.personalaibot            D  Routing to GeminiService
+2026-08-12 08:39:49.028 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 1
+2026-08-12 08:39:52.182 21392-21392 GeminiService           com.example.personalaibot            D  Final tools to execute in Round 1: [chart_dashboard_control]
+2026-08-12 08:39:52.183 21392-21392 GeminiService           com.example.personalaibot            D  Tool Request: chart_dashboard_control({action=set_overlay, symbol=XAUUSD, overlay=smc})
+2026-08-12 08:39:52.184 21392-21392 Orchestrator            com.example.personalaibot            D  SideEffect: Chart control set_overlay smc
+2026-08-12 08:39:52.184 21392-21392 JarvisVM                com.example.personalaibot            D  Chart control: action=set_overlay args={action=set_overlay, symbol=XAUUSD, overlay=smc}
+2026-08-12 08:39:52.186 21392-21392 GeminiService           com.example.personalaibot            D  Tool Result: ✅ เปิดอินดิเคเตอร์ smc บนกราฟแล้ว (ที่เปิดอยู่: ema20, smc)
+2026-08-12 08:39:52.187 21392-21392 GeminiService           com.example.personalaibot            D  Tool Loop: Round 2
+2026-08-12 08:39:54.823 21392-21392 JarvisVM                com.example.personalaibot            D  [Chat] Response complete (53 chars)
+                                                                                                    >>> ผมได้เปิด SMC Overlay บนกราฟ XAUUSD ให้ผู้ใช้แล้วครับ
+2026-08-12 08:40:26.713 21392-21580 AutomationService       com.example.personalaibot            D  No active jobs/tasks for 5 cycles — stopping self

@@ -7,6 +7,9 @@ import io.ktor.client.request.*
 import io.ktor.http.*
 import kotlinx.coroutines.*
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * DiagnosticManager — ระบบตรวจสอบสุขภาพและความสมบูรณ์ของ Jarvis Engine
@@ -38,6 +41,9 @@ class DiagnosticManager(
         
         // 4. Automation Service Status
         results.add(checkAutomationHealth())
+
+        // 5. Memory Consolidation (Sleep Cycle) Status
+        results.add(checkMemoryConsolidation())
 
         results
     }
@@ -75,7 +81,13 @@ class DiagnosticManager(
             val priceOanda = oanda["close"]?.toDoubleOrNull() ?: 0.0
             
             if (priceYahoo == 0.0 || priceOanda == 0.0) {
-                return DiagnosticResult("Trading", "WARNING", "ไม่สามารถดึงข้อมูลเปรียบเทียบได้ในขณะนี้")
+                // รายงานให้รู้ว่าแหล่งไหนตาย — เดิมบอกแค่ "ดึงไม่ได้" ดีบักไม่ได้
+                val src = when {
+                    priceYahoo == 0.0 && priceOanda == 0.0 -> "ทั้ง Yahoo (GC=F) และ OANDA ดึงไม่ได้ — อาจเป็นปัญหาเครือข่าย"
+                    priceYahoo == 0.0 -> "Yahoo GC=F ดึงราคาไม่ได้ (อาจไม่มีข้อมูลฟิวเจอร์สหรือติด rate limit) — OANDA=$priceOanda ปกติ"
+                    else -> "OANDA/TA ดึงราคาไม่ได้ — Yahoo=$priceYahoo ปกติ"
+                }
+                return DiagnosticResult("Trading", "WARNING", src, "OANDA: $priceOanda\nYahoo (GC=F): $priceYahoo")
             }
 
             val diff = kotlin.math.abs(priceYahoo - priceOanda)
@@ -123,6 +135,29 @@ class DiagnosticManager(
             DiagnosticResult("Automation", "PASS", "ระบบ Automation พร้อมทำงาน", details)
         } catch (e: Exception) {
             DiagnosticResult("Automation", "FAIL", "อ่านสถานะ automation ไม่ได้: ${e.message}")
+        }
+    }
+
+    private fun checkMemoryConsolidation(): DiagnosticResult {
+        // ตรวจสุขภาพ Sleep Cycle: จำนวนข้อความค้างใน Working Memory + เวลา consolidation ล่าสุด
+        return try {
+            val q = com.example.personalaibot.db.JarvisDatabaseHolder.database?.jarvisDatabaseQueries
+                ?: return DiagnosticResult("Memory", "FAIL", "ฐานข้อมูลยังไม่พร้อม")
+            val msgCount = q.countMessages().executeAsOne()
+            val lastMs = q.getSetting("last_sleep_cycle_at").executeAsOneOrNull()?.toLongOrNull()
+            val lastStr = lastMs?.let {
+                val dt = Instant.fromEpochMilliseconds(it)
+                    .toLocalDateTime(TimeZone.currentSystemDefault())
+                "${dt.date} ${dt.hour.toString().padStart(2, '0')}:${dt.minute.toString().padStart(2, '0')}"
+            } ?: "ยังไม่เคยรัน"
+            val details = "working memory messages: $msgCount (trigger ที่ 200)\nlast consolidation: $lastStr"
+            when {
+                msgCount >= 200 -> DiagnosticResult("Memory", "WARNING", "ข้อความสะสม $msgCount ข้อความ — รอ Sleep Cycle รันในแชทถัดไป", details)
+                lastMs == null -> DiagnosticResult("Memory", "PASS", "Sleep Cycle พร้อมทำงาน (ยังไม่เคย consolidate)", details)
+                else -> DiagnosticResult("Memory", "PASS", "Sleep Cycle ทำงานปกติ", details)
+            }
+        } catch (e: Exception) {
+            DiagnosticResult("Memory", "FAIL", "อ่านสถานะ memory ไม่ได้: ${e.message}")
         }
     }
 }

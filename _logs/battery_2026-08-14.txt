@@ -1,0 +1,91 @@
+2026-08-14 18:45:55.497 32335-32335 HiTouch_Pr...reDetector com.example.personalaibot            I  checkDoublePointerLimit: false
+2026-08-14 18:45:55.588 32335-32335 HwFramewor...rtsFactory com.example.personalaibot            D  HwFrameworkSecurityPartsFactory in.
+2026-08-14 18:45:55.588 32335-32335 HwFramewor...rtsFactory com.example.personalaibot            I  add HwFrameworkSecurityPartsFactory to memory.
+2026-08-14 18:45:55.618 32335-32335 HwViewRootImpl          com.example.personalaibot            I  removeInvalidNode all the node in jank list is out of time
+2026-08-14 18:45:55.619 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:22, errno:103
+2026-08-14 18:45:55.629 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:23, errno:103
+2026-08-14 18:45:55.639 32335-11701 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:21, errno:101
+2026-08-14 18:45:55.649 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:20, errno:101
+2026-08-14 18:45:55.652 32335-32335 VRI[MainActivity]       com.example.personalaibot            I  send MSG_WINDOW_FOCUS_CHANGED msg
+2026-08-14 18:45:55.652 32335-32335 InputEventReceiver      com.example.personalaibot            I  consumeEvents focus, 0
+2026-08-14 18:45:55.652 32335-32335 RmeSchedManager         com.example.personalaibot            I  init Rme, version is: v1.0
+2026-08-14 18:45:55.652 32335-32335 RtgSched                com.example.personalaibot            D  resetRtgSchedHandle failed enable:0
+2026-08-14 18:45:55.654  2821-5256  SWAP_GkiKernelInterface system_server                        E  readAppMemcgInfo result is null: com.example.personalaibot
+2026-08-14 18:45:55.933 32335-32335 SurfaceControl          com.example.personalaibot            I  nativeRelease 0xb4000079d46d9890 count: 1 name: Surface(name=8e86a81 NavigationBar0)/@0xf663af3 - animation-leash of insets_animation#13190
+2026-08-14 18:45:55.934 32335-32335 SurfaceControl          com.example.personalaibot            I  nativeRelease 0xb4000079d46692d0 count: 1 name: Surface(name=6a1ab3e StatusBar)/@0x5049fd5 - animation-leash of insets_animation#13191
+2026-08-14 18:45:55.946 32335-32335 InputMethodManager      com.example.personalaibot            I  handleMessage: MSG_SET_ACTIVE false, was true
+2026-08-14 18:45:55.946 32335-32335 InputMethodManager      com.example.personalaibot            I  handleMessage: MSG_UNBIND 1199 reason=SWITCH_CLIENT
+2026-08-14 18:45:55.946 32335-32335 InputMethodManager      com.example.personalaibot            V  Clearing all accessibility bindings
+2026-08-14 18:45:55.946 32335-32335 InputMethodManager      com.example.personalaibot            V  Clearing binding!
+2026-08-14 18:45:56.367 32335-32335 VRI[MainActivity]       com.example.personalaibot            D  visibilityChanged oldVisibility=true newVisibility=false
+2026-08-14 18:45:56.378 32335-11701 libEGL                  com.example.personalaibot            D  [eglDestroySurface] start surface is 0xb400007944662d00
+2026-08-14 18:45:56.378 32335-11701 BufferQueueProducer     com.example.personalaibot            I  [VRI[MainActivity]#1(BLAST Consumer)1](id:7e4f00000001,api:1,p:32335,c:32335) disconnect: api 1
+2026-08-14 18:45:56.379 32335-11701 HWUI                    com.example.personalaibot            D  endAllActiveAnimators on 0xb4000079c46fbab0 (UnprojectedRipple) with handle 0xb400007ac4689d90
+2026-08-14 18:45:56.383 32335-32335 SurfaceControl          com.example.personalaibot            I  nativeRelease 0xb4000079d466ef10 count: 2 name: com.example.personalaibot/com.example.personalaibot.MainActivity#13192
+2026-08-14 18:45:56.384 32335-32335 VRI[MainActivity]       com.example.personalaibot            D  relayoutWindow: mRelayoutRequested = true
+2026-08-14 18:45:56.385 32335-32335 BufferQueueConsumer     com.example.personalaibot            I  [VRI[MainActivity]#1(BLAST Consumer)1](id:7e4f00000001,api:0,p:-1,c:32335) disconnect
+2026-08-14 18:45:56.386 32335-32335 e.personalaibot         com.example.personalaibot            W  Binder 0xb4000078e4777de0 destroyed after setInheritRt before being parceled.
+2026-08-14 18:45:56.386 32335-32335 FullScreenUtils         com.example.personalaibot            D  isNeedToHideStatusBar: splitscreenstate=0
+2026-08-14 18:45:56.396 32335-32335 HnActivity...ionStateEx com.example.personalaibot            D  onStop : com.example.personalaibot.MainActivity@d323634
+2026-08-14 18:45:56.397 32335-32335 DecorView[]             com.example.personalaibot            I  set decor visibility 4
+2026-08-14 18:45:56.414  2304-3658  dubaid                  dubaid                               E  [DisplayHandler.cpp] RemoveActivityPackage# Remove invisible package: com.example.personalaibot
+2026-08-14 18:46:01.681 32335-32335 ActivityThread          com.example.personalaibot            D  Won't deliver top position change in state=5
+2026-08-14 18:46:01.682 32335-32335 ActivityThread          com.example.personalaibot            I  Performing restart of ActivityRecord{885b700 token=android.os.BinderProxy@d0cb832 {com.example.personalaibot/com.example.personalaibot.MainActivity}} start=false callers:android.app.servertransaction.TransactionExecutor.performLifecycleSequence:254 android.app.servertransaction.TransactionExecutor.cycleToPath:209 android.app.servertransaction.TransactionExecutor.cycleToPath:191 android.app.servertransaction.TransactionExecutor.executeNonLifecycleItem:144 android.app.servertransaction.TransactionExecutor.executeTransactionItems:118 android.app.servertransaction.TransactionExecutor.execute:89 android.app.ActivityThread$H.handleMessage:3539 android.os.Handler.dispatchMessage:124 android.os.Looper.loopOnce:258 android.os.Looper.loop:353 
+2026-08-14 18:46:01.682 32335-32335 ViewRootImpl            com.example.personalaibot            D  Skipping stats log for color mode
+2026-08-14 18:46:01.686 32335-32335 DecorView[]             com.example.personalaibot            I  set decor visibility 0
+2026-08-14 18:46:01.690 32335-32335 ServiceManagerCppClient com.example.personalaibot            W  Failed to get isDeclared for vendor.honor.hardware.iawareperf.IUniPerfAidlInterface/default: Status(-1, EX_SECURITY): 'SELinux denied for service.'
+2026-08-14 18:46:01.690 32335-32335 uniperf client          com.example.personalaibot            E  vendor.honor.hardware.iawareperf.IUniPerfAidlInterface/default is not Declared
+2026-08-14 18:46:01.691 32335-32335 uniperf client          com.example.personalaibot            D  get uniperf service failed!
+2026-08-14 18:46:01.693  2821-5256  SWAP_GkiKernelInterface system_server                        E  readAppMemcgInfo result is null: com.example.personalaibot
+2026-08-14 18:46:01.694 32335-32335 DecorView[]             com.example.personalaibot            I  set decor visibility 0
+2026-08-14 18:46:01.710 32335-32335 VRI[MainActivity]       com.example.personalaibot            D  relayoutWindow: mRelayoutRequested = true
+2026-08-14 18:46:01.711 32335-32335 libc                    com.example.personalaibot            W  Access denied finding property "ro.debuggable"
+2026-08-14 18:46:01.711 32335-32335 BufferQueueConsumer     com.example.personalaibot            I  [](id:7e4f00000002,api:0,p:-1,c:32335) connect: controlledByApp=false
+2026-08-14 18:46:01.712 32335-32335 FullScreenUtils         com.example.personalaibot            D  isNeedToHideStatusBar: splitscreenstate=0
+2026-08-14 18:46:01.713 32335-11701 libEGL                  com.example.personalaibot            D  [eglCreateWindowSurface] start window is 0xb4000079a464c6a0
+2026-08-14 18:46:01.713 32335-11701 BufferQueueProducer     com.example.personalaibot            I  [VRI[MainActivity]#2(BLAST Consumer)2](id:7e4f00000002,api:0,p:-1,c:32335) connect: api=1 producerControlledByApp=true
+2026-08-14 18:46:01.706 32335-32335 e.personalaibot         com.example.personalaibot            W  type=1400 audit(0.0:45786): avc:  denied  { read } for  name="u:object_r:userdebug_or_eng_prop:s0" dev="tmpfs" ino=648 scontext=u:r:untrusted_app:s0:c187,c256,c512,c768 tcontext=u:object_r:userdebug_or_eng_prop:s0 tclass=file permissive=0 app=vendor.qti.hardware.cacert.server
+2026-08-14 18:46:01.744 32335-32335 HwViewRootImpl          com.example.personalaibot            I  removeInvalidNode all the node in jank list is out of time
+2026-08-14 18:46:01.744 32335-32335 RmeSchedManager         com.example.personalaibot            I  init Rme, version is: v1.0
+2026-08-14 18:46:01.744 32335-32335 RtgSchedEvent           com.example.personalaibot            I  current pid:32335 AppType:-1
+2026-08-14 18:46:01.745 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:22, errno:103
+2026-08-14 18:46:01.746 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:23, errno:103
+2026-08-14 18:46:01.770 32335-32335 VRI[MainActivity]       com.example.personalaibot            I  send MSG_WINDOW_FOCUS_CHANGED msg
+2026-08-14 18:46:01.770 32335-32335 InputEventReceiver      com.example.personalaibot            I  consumeEvents focus, 1
+2026-08-14 18:46:01.771 32335-32335 ImeFocusController      com.example.personalaibot            V  onWindowFocus: com.android.internal.policy.DecorView{bbae898 V.E...... R....... 0,0-1200,2640 aid=0}[MainActivity] softInputMode=STATE_UNSPECIFIED|ADJUST_PAN
+2026-08-14 18:46:01.771 32335-32335 InputMethodManager      com.example.personalaibot            V  Restarting due to mRestartOnNextWindowFocus as true
+2026-08-14 18:46:01.771 32335-32335 InputMethodManager      com.example.personalaibot            W  startInputReason = 1
+2026-08-14 18:46:01.804 32335-32335 ImeTracker              com.example.personalaibot            I  com.example.personalaibot:b3a60512: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+2026-08-14 18:46:01.804 32335-32335 InputMethodManager      com.example.personalaibot            I  handleMessage: MSG_SET_ACTIVE true, was false
+2026-08-14 18:46:01.804 32335-32335 InputMethodManager      com.example.personalaibot            V  Starting input: Bind result=InputBindResult{result=SUCCESS_WITH_IME_SESSION method=com.android.internal.inputmethod.IInputMethodSession$Stub$Proxy@e7b3e64 id=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME sequence=1201 result=0 isInputMethodSuppressingSpellChecker=false}
+2026-08-14 18:46:01.805 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:22, errno:103
+2026-08-14 18:46:01.805 32335-32335 SurfaceControl          com.example.personalaibot            I  nativeRelease 0xb4000079d46e9010 count: 1 name: Surface(name=8e86a81 NavigationBar0)/@0xf663af3 - animation-leash of insets_animation#13205
+2026-08-14 18:46:01.805 32335-32335 SurfaceControl          com.example.personalaibot            I  nativeRelease 0xb4000079d4763110 count: 1 name: Surface(name=6a1ab3e StatusBar)/@0x5049fd5 - animation-leash of insets_animation#13206
+2026-08-14 18:46:01.805 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:23, errno:103
+2026-08-14 18:46:05.181 32335-32335 HiTouch_Pr...reDetector com.example.personalaibot            I  checkDoublePointerLimit: false
+2026-08-14 18:46:05.197 32335-32335 HwViewRootImpl          com.example.personalaibot            D  GPLOG: params  TraceInputParams 0 pkg empty self com.example.personalaibot
+2026-08-14 18:46:05.305 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:22, errno:103
+2026-08-14 18:46:05.321 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:23, errno:103
+2026-08-14 18:46:05.324 32335-32335 HwViewRootImpl          com.example.personalaibot            I  removeInvalidNode all the node in jank list is out of time
+2026-08-14 18:46:05.339 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:20, errno:101
+2026-08-14 18:46:05.342 32335-32335 VRI[MainActivity]       com.example.personalaibot            I  send MSG_WINDOW_FOCUS_CHANGED msg
+2026-08-14 18:46:05.342 32335-32335 InputEventReceiver      com.example.personalaibot            I  consumeEvents focus, 0
+2026-08-14 18:46:05.343 32335-11701 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:21, errno:101
+2026-08-14 18:46:05.349  2821-5256  SWAP_GkiKernelInterface system_server                        E  readAppMemcgInfo result is null: com.example.personalaibot
+2026-08-14 18:46:05.379  2821-5256  SWAP_GkiKernelInterface system_server                        E  readAppMemcgInfo result is null: com.example.personalaibot
+2026-08-14 18:46:05.388 32335-32335 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:20, errno:101
+2026-08-14 18:46:05.397 32335-11701 RtgSchedIpcFile         com.example.personalaibot            D  setCommandByIoctl failed ret:-1, cmdid:21, errno:101
+2026-08-14 18:46:05.398 32335-32335 VRI[MainActivity]       com.example.personalaibot            I  send MSG_WINDOW_FOCUS_CHANGED msg
+2026-08-14 18:46:05.398 32335-32335 InputEventReceiver      com.example.personalaibot            I  consumeEvents focus, 1
+2026-08-14 18:46:05.398 32335-32335 RmeSchedManager         com.example.personalaibot            I  init Rme, version is: v1.0
+2026-08-14 18:46:05.398 32335-32335 RtgSched                com.example.personalaibot            D  resetRtgSchedHandle failed enable:0
+2026-08-14 18:46:05.398 32335-32335 ActivityThread          com.example.personalaibot            D  Won't deliver top position change in state=4
+2026-08-14 18:46:05.399 32335-32335 ServiceManagerCppClient com.example.personalaibot            W  Failed to get isDeclared for vendor.honor.hardware.iawareperf.IUniPerfAidlInterface/default: Status(-1, EX_SECURITY): 'SELinux denied for service.'
+2026-08-14 18:46:05.399 32335-32335 uniperf client          com.example.personalaibot            E  vendor.honor.hardware.iawareperf.IUniPerfAidlInterface/default is not Declared
+2026-08-14 18:46:05.399 32335-32335 uniperf client          com.example.personalaibot            D  get uniperf service failed!
+2026-08-14 18:46:05.402 32335-32335 DecorView[]             com.example.personalaibot            I  set decor visibility 0
+2026-08-14 18:46:05.404 32335-32335 FullScreenUtils         com.example.personalaibot            D  isNeedToHideStatusBar: splitscreenstate=0
+2026-08-14 18:46:05.408 32335-32335 ImeFocusController      com.example.personalaibot            V  onWindowFocus: com.android.internal.policy.DecorView{bbae898 V.E...... R....... 0,0-1200,2640 aid=0}[MainActivity] softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+2026-08-14 18:46:05.408 32335-32335 InputMethodManager      com.example.personalaibot            W  startInputReason = 1
+2026-08-14 18:46:05.414 32335-32335 ImeTracker              com.example.personalaibot            I  com.example.personalaibot:b0fb51c2: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+2026-08-14 18:46:05.417 32335-32335 InputMethodManager      com.example.personalaibot            V  Starting input: Bind result=InputBindResult{result=SUCCESS_WITH_IME_SESSION method=com.android.internal.inputmethod.IInputMethodSession$Stub$Proxy@30406ef id=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME sequence=1202 result=0 isInputMethodSuppressingSpellChecker=false}

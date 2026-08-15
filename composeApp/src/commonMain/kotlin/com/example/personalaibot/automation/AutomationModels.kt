@@ -17,7 +17,8 @@ enum class ConditionOperator {
 data class AutomationCondition(
     val field: String,      // e.g. "price", "RSI", "sentiment_score"
     val operator: ConditionOperator,
-    val value: String       // String representation of the threshold
+    val value: String,      // String representation of the threshold
+    val delivery: String = "ai" // "ai" = alert→AI quick-check→ผู้ใช้ | "direct" = alert→notification+แชท โดยตรง (ประหยัดโทเคน)
 )
 
 val automationJson = Json { 
@@ -192,7 +193,75 @@ object AlertFieldCatalog {
         )
     )
 
-    val tools: List<AlertToolOption> = listOf(INDICATORS, SMC, PRICE, TA, DEEP_SUITE, SENTIMENT, FEAR_GREED, CRYPTO_GLOBAL)
+    val SMC_FLOW = AlertToolOption(
+        toolName = "trading_smc_flow",
+        label = "SMC Flow Signals (UT Bot + EMA14/60 + Confluence ⭐)",
+        description = "port จาก TradingView 'SMC Flow System v2' — สัญญาณ BUY/SELL จาก UT Bot trigger, EMA 14/60 cross และ SMC Confluence (structure + OB/FVG + Fib golden zone) — เลือก TF ได้ด้วย suffix เช่น XAUUSD@15m",
+        fields = listOf(
+            AlertFieldOption("close", "Close — ราคาปัจจุบัน", ""),
+            AlertFieldOption("smc_signal", "SMC Confluence Signal", "BUY / SELL / NONE — ใช้กับ == เช่น smc_signal == BUY (confluence ครบ: trigger + structure + zone)", isNumeric = false),
+            AlertFieldOption("smc_recipes", "SMC Recipes ที่เข้า", "A=OB, B=FVG+OB, C=Fib golden — ใช้กับ contains เช่น contains C", isNumeric = false),
+            AlertFieldOption("ema14_60_signal", "EMA 14/60 Cross Signal", "BUY / SELL / NONE — ใช้กับ == (ตัด + แท่งยืนยันแท่งนี้พอดี)", isNumeric = false),
+            AlertFieldOption("ema14_60_cross", "EMA 14/60 Cross Event", "GOLDEN_CROSS / DEATH_CROSS / NONE — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("ema14_60_state", "EMA 14/60 State", "BULLISH (14 เหนือ 60) / BEARISH — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("ema14", "EMA 14", ""),
+            AlertFieldOption("ema60", "EMA 60", ""),
+            AlertFieldOption("ema14_60_spread", "EMA14-60 Spread", ">= 0 = โซนขาขึ้น"),
+            AlertFieldOption("utbot_signal", "UT Bot Signal", "BUY / SELL / NONE — ใช้กับ == (ATR trailing stop flip)", isNumeric = false),
+            AlertFieldOption("utbot_trend", "UT Bot Trend", "BULL / BEAR — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("utbot_stop", "UT Bot Trailing Stop", "ราคาหลุดเส้นนี้ = หมดเทรนด์"),
+            AlertFieldOption("structure_bias", "Structure Bias (SMC)", "BULLISH / BEARISH / NEUTRAL — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("in_fib_golden", "อยู่ใน Fib Golden Zone (0/1)", "1 = ราคาอยู่ในโซน 0.618–0.786 ของ swing"),
+            AlertFieldOption("fib_golden_top", "Fib Golden Zone ขอบบน", ""),
+            AlertFieldOption("fib_golden_bottom", "Fib Golden Zone ขอบล่าง", ""),
+            AlertFieldOption("fib_swing_high", "Swing High ปัจจุบัน", ""),
+            AlertFieldOption("fib_swing_low", "Swing Low ปัจจุบัน", "")
+        )
+    )
+
+    val STRATEGY = AlertToolOption(
+        toolName = "trading_strategy_signal",
+        label = "Strategy Signals (5 กลยุทธ์วิชาการ + Consensus ⭐)",
+        description = "แปลงจาก Strategy Library (Quantpedia) มาคำนวณในเครื่อง — Time-Series Momentum, Trend Following (EMA50/200), Short-Term Reversal (RSI+BB), Donchian Breakout, 52W High proximity — เลือก TF ได้ด้วย suffix เช่น XAUUSD@15m",
+        fields = listOf(
+            AlertFieldOption("close", "Close — ราคาปัจจุบัน", ""),
+            AlertFieldOption("consensus_signal", "Consensus Signal (รวม 5 กลยุทธ์)", "STRONG_BUY / BUY / NEUTRAL / SELL / STRONG_SELL — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("consensus_score", "Consensus Score", "-5 ถึง +5 (BUY=+1 ต่อกลยุทธ์) เช่น consensus_score >= 3"),
+            AlertFieldOption("tsmom_signal", "Time-Series Momentum Signal", "BUY / SELL / NONE — ROC 20 แท่ง ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("tsmom_roc_pct", "TS Momentum ROC (%)", ">= 0 = โมเมนตัมขาขึ้น"),
+            AlertFieldOption("trend_signal", "Trend Following Signal", "BUY / SELL / NONE — EMA50/200 + ราคาเทียบ EMA200 ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("trend_state", "Trend State", "UPTREND / DOWNTREND / RANGE — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("trend_ema50", "EMA 50", ""),
+            AlertFieldOption("trend_ema200", "EMA 200", ""),
+            AlertFieldOption("reversal_signal", "Short-Term Reversal Signal", "BUY / SELL / NONE — RSI สุดโต่ง + แตะ BB ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("reversal_rsi", "RSI (14)", "เช่น reversal_rsi <= 30"),
+            AlertFieldOption("donchian_signal", "Donchian Breakout Signal", "BUY / SELL / NONE — ทะลุช่อง 20 แท่ง ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("donchian_upper", "Donchian Upper (High 20 แท่ง)", "ทะลุเส้นนี้ = breakout ขึ้น"),
+            AlertFieldOption("donchian_lower", "Donchian Lower (Low 20 แท่ง)", "หลุดเส้นนี้ = breakout ลง"),
+            AlertFieldOption("donchian_mid", "Donchian Mid", ""),
+            AlertFieldOption("w52_signal", "52W High Signal", "BUY (ใกล้จุดสูงสุด ≥98%) / SELL (หลุด ≤90%) / NONE — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("w52_high", "Period High", "จุดสูงสุดของข้อมูลที่มี"),
+            AlertFieldOption("w52_proximity_pct", "Proximity to High (%)", "100 = อยู่ที่จุดสูงสุดพอดี")
+        )
+    )
+
+    val SIGNAL_ALERT = AlertToolOption(
+        toolName = "trading_signal_alert",
+        label = "📡 Signal Alert (สัญญาณเทรดใหม่ 8 กลยุทธ์ ⭐)",
+        description = "ตรวจสัญญาณ BUY/SELL ที่ 'เพิ่งเกิด' ในแท่งปิดล่าสุดจาก 8 กลยุทธ์ (Momentum / Trend EMA50-200 / Reversal / Donchian / 52W High / EMA14-60 / UT Bot / 3-Bar Reversal) — พร้อม Entry/SL/TP เฉพาะกลยุทธ์ เลือก TF ด้วย suffix เช่น XAUUSD@15m",
+        fields = listOf(
+            AlertFieldOption("signal_buy", "สัญญาณ BUY ใหม่ (1=เกิด)", "ตั้ง signal_buy >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ BUY ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),
+            AlertFieldOption("signal_sell", "สัญญาณ SELL ใหม่ (1=เกิด)", "ตั้ง signal_sell >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ SELL ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),
+            AlertFieldOption("signal_event", "Signal Event", "BUY / SELL / NONE — ใช้กับ == (สร้าง 2 job เพื่อครบทั้งสองฝั่ง)", isNumeric = false),
+            AlertFieldOption("signal_strategy", "กลยุทธ์ที่เกิดสัญญาณ", "ข้อความ เช่น 'UT Bot' — ใช้กับ contains", isNumeric = false),
+            AlertFieldOption("signal_entry", "ราคาจุดเข้าของสัญญาณ", "ค่าของสัญญาณล่าสุด (informational)"),
+            AlertFieldOption("signal_sl", "Stop Loss ของสัญญาณ", "คำนวณเฉพาะกลยุทธ์ (informational)"),
+            AlertFieldOption("signal_tp", "Take Profit ของสัญญาณ", "คำนวณเฉพาะกลยุทธ์ (informational)"),
+            AlertFieldOption("signal_rr", "Risk:Reward ของสัญญาณ", "informational")
+        )
+    )
+
+    val tools: List<AlertToolOption> = listOf(INDICATORS, SMC, SMC_FLOW, STRATEGY, SIGNAL_ALERT, PRICE, TA, DEEP_SUITE, SENTIMENT, FEAR_GREED, CRYPTO_GLOBAL)
 
     fun toolFor(toolName: String): AlertToolOption? = tools.firstOrNull { it.toolName == toolName }
 

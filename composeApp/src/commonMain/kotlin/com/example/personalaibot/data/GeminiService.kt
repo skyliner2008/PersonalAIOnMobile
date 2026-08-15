@@ -174,6 +174,12 @@ class GeminiService(
      */
     var lastFatalError: String? = null
 
+    /**
+     * เรียกเมื่อ fallback สลับ key/โมเดลแล้วตอบสำเร็จ — ให้ caller persist ค่าที่ใช้ได้จริงลง settings
+     * (กันเคสเปิดแอปใหม่แล้วกลับไปเริ่มที่ key/โมเดลเดิมที่ติดลิมิต)
+     */
+    var onWorkingConfigChanged: ((model: String, apiKey: String) -> Unit)? = null
+
     /** สลับไปใช้ key ใหม่ (ใช้ภายใน fallback rotation เท่านั้น — ไม่ persist) */
     private fun rotateApiKey(newKey: String) {
         logDebug("GeminiService", "API key rotation: → ${com.example.personalaibot.maskApiKey(newKey)}")
@@ -416,6 +422,11 @@ class GeminiService(
         var lastToolCallDetected = false
         lastFatalError = null // reset fatal flag ทุกรอบใหม่ — Orchestrator อ่านหลัง collect จบ
 
+        // จำค่าเริ่มต้น — ถ้า fallback สลับ key/โมเดลแล้วสำเร็จ จะแจ้ง caller persist ลง settings
+        val startModel = modelName
+        val startKey = apiKey
+        var workingConfigReported = false
+
         // ─── Model fallback chain (free tier) ──────────────────────────────
         // เมื่อโมเดลหลักติด 429/503/timeout → สลับไปใช้โมเดลสำรองตามลำดับใน ModelConfig
         val triedModels = mutableSetOf(cleanModelName().removePrefix("models/"))
@@ -487,6 +498,7 @@ class GeminiService(
                 // Buffer text ระหว่าง streaming — ถ้ามี function call ในรอบนี้ ข้อความจะถูกทิ้ง
                 // เพราะเป็น "ความคิด" ของ model ก่อนได้ข้อมูลจริง (อาจ hallucinate ตัวเลข)
                 val textBuffer = StringBuilder()
+                var emittedAnyText = false // Round 2+ stream ตรง ไม่ผ่าน buffer — ใช้ flag นี้กัน log "Empty response" หลอก
                 var lastFinishReason: String? = null
                 var modelFailed = false
 
@@ -536,6 +548,7 @@ class GeminiService(
                                     if (!text.isNullOrEmpty()) {
                                         if (toolHistory.isNotEmpty()) {
                                             emit(text)
+                                            emittedAnyText = true
                                         } else {
                                             textBuffer.append(text)
                                         }
@@ -553,8 +566,15 @@ class GeminiService(
                                 }
                                 if (content == null) {
                                     lastFinishReason?.let { reason ->
-                                        if (reason != "STOP" && reason != "NONE") {
-                                            emit("\n⚠️ Response interrupted: $reason")
+                                        when {
+                                            reason == "STOP" || reason == "NONE" -> {}
+                                            // โมเดลส่ง function call เพี้ยน (เจอจริงตอนสรุปผลยาว) — ไม่โชว์ข้อความดิบให้ผู้ใช้
+                                            // ถ้ายังไม่ได้ emit text อะไรเลย ให้ถือเป็น failure → เข้า fallback/retry
+                                            reason == "MALFORMED_FUNCTION_CALL" -> {
+                                                logDebug("GeminiService", "MALFORMED_FUNCTION_CALL (model=$modelName round=$round emittedAnyText=$emittedAnyText) — suppress raw warning")
+                                                if (!emittedAnyText && textBuffer.isEmpty()) modelFailed = true
+                                            }
+                                            else -> emit("\n⚠️ Response interrupted: $reason")
                                         }
                                     }
                                 }
@@ -572,7 +592,15 @@ class GeminiService(
                     modelFailed = true
                 }
 
-                // ─── Fallback อัตโนมัติ เมื่อหลักติดลิมิต/ล่ม ────────────────
+                // ─── Response ว่างเปล่า (ไม่มี text ไม่มี tool call) = model hiccup ───
+                // เคสจริง: gemini-2.5-flash ตอบ finishReason=STOP parts=0 → ผู้ใช้เห็นแชทว่าง
+                // ถือเป็น failure ให้เข้าสู่ fallback chain (key ถัดไป → โมเดลถัดไป) เหมือนกรณีลิมิต
+                if (!modelFailed && !foundFunctionCall && textBuffer.isEmpty() && !emittedAnyText) {
+                    logDebug("GeminiService", "Empty model response in round $round — model=$modelName finishReason=$lastFinishReason parts=${accumulatedModelParts.size} → treat as failure, try fallback")
+                    modelFailed = true
+                }
+
+                // ─── Fallback อัตโนมัติ เมื่อหลักติดลิมิต/ล่ม/ตอบว่าง ──────
                 if (modelFailed) {
                     // 1) ลอง API key ถัดไปก่อน (โมเดลเดิม — key ใหม่ = โควต้าใหม่)
                     val nextKey = trySwitchFallbackKey()
@@ -593,8 +621,17 @@ class GeminiService(
                     }
                 }
 
-                // Log สาเหตุเมื่อ response ว่างเปล่า (เคสจริง: Empty response โดยไม่รู้สาเหตุ)
-                if (!foundFunctionCall && textBuffer.isEmpty()) {
+                // ─── Fallback สำเร็จ → persist ค่าที่ใช้ได้จริงกลับลง settings ──
+                // กันเคสเปิดแอป/แชทใหม่แล้วกลับไปเริ่มที่ key/โมเดลเดิมที่ติดลิมิต (user request)
+                if (!workingConfigReported && (modelName != startModel || apiKey != startKey)
+                    && (foundFunctionCall || textBuffer.isNotEmpty() || emittedAnyText)) {
+                    workingConfigReported = true
+                    logDebug("GeminiService", "Fallback config works — persist: model=$modelName key=${com.example.personalaibot.maskApiKey(apiKey)}")
+                    onWorkingConfigChanged?.invoke(modelName, apiKey)
+                }
+
+                // Log สาเหตุเมื่อ response ว่างเปล่าจริง (ไม่มี tool call และไม่มี text ทั้ง buffer/stream)
+                if (!foundFunctionCall && textBuffer.isEmpty() && !emittedAnyText) {
                     logDebug("GeminiService", "Empty model response in round $round — model=$modelName finishReason=$lastFinishReason parts=${accumulatedModelParts.size}")
                 }
 
@@ -804,14 +841,16 @@ class GeminiService(
         history: List<ConversationTurn> = emptyList(),
         intentAddon: String = "",
         coreContext: String = "",
-        enableGrounding: Boolean = false
+        enableGrounding: Boolean = false,
+        timeoutMs: Long = 20_000,
+        attempt: Int = 0
     ): String {
         if (apiKey.isBlank()) return "⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน"
         return try {
             val res = client.post(generateContentUrl()) {
                 contentType(ContentType.Application.Json)
                 // nested AI summaries (news/macro calendar) เคยไม่มี timeout → ค้าง 90s ทำ custom tool ช้า
-                timeout { requestTimeoutMillis = 20_000 }
+                timeout { requestTimeoutMillis = timeoutMs }
                 val prunedHistory = if (history.size > 20) history.takeLast(20) else history
                 val contents = prunedHistory.map { turn ->
                     buildJsonObject {
@@ -839,7 +878,11 @@ class GeminiService(
                 "⚠️ Error ${res.status}"
             }
         } catch (e: Exception) {
-            logError("GeminiService", "Generate response failed", e)
+            logError("GeminiService", "Generate response failed (attempt ${attempt + 1}, timeout=${timeoutMs}ms)", e)
+            // Retry 1 ครั้งด้วย timeout นานขึ้น — เคสจริง: calendar AI preview timeout 20s แบบ transient
+            if (attempt == 0) {
+                return generateResponse(prompt, history, intentAddon, coreContext, enableGrounding, timeoutMs = 45_000, attempt = 1)
+            }
             "⚠️ Error: ${com.example.personalaibot.sanitizeSensitive(e.message ?: "unknown").take(300)}"
         }
     }

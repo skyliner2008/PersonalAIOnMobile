@@ -633,6 +633,9 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
                     database.jarvisDatabaseQueries.deleteMessagesByIds(messageIds)
                 }
 
+                // 7. บันทึกเวลา consolidation ล่าสุด — ใช้แสดงใน Diagnostics
+                database.jarvisDatabaseQueries.insertSetting("last_sleep_cycle_at", now.toString())
+
                 true
             } catch(e: Exception) {
                 com.example.personalaibot.logError("DreamEngine", "Sleep cycle failed: ${e.message}", e)

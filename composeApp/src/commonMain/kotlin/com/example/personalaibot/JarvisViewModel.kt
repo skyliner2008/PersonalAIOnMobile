@@ -53,7 +53,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.random.Random
 
-data class Message(val role: String, val content: String, val isStatic: Boolean = false)
+data class Message(val role: String, val content: String, val isStatic: Boolean = false, val metadata: String? = null)
 
 data class Mt5ClientRuntimeInfo(
     val id: String,
@@ -109,6 +109,10 @@ class JarvisViewModel(
     private val _alertVoiceEnabled = MutableStateFlow(false)
     val alertVoiceEnabled: StateFlow<Boolean> = _alertVoiceEnabled.asStateFlow()
 
+    /** Engine เสียงแจ้งเตือน: "ai" = Gemini TTS (เสียงเหมือนคน แต่จำกัดโควต้า/มีดีเลย์) | "device" = Android TTS (ทันที ไม่จำกัด — default) */
+    private val _alertVoiceEngine = MutableStateFlow("device")
+    val alertVoiceEngine: StateFlow<String> = _alertVoiceEngine.asStateFlow()
+
     val scheduledTasks = automationManager.scheduledTasks
 
     fun setAlertAiSummaryEnabled(enabled: Boolean) {
@@ -122,6 +126,29 @@ class JarvisViewModel(
         _alertVoiceEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
             database.jarvisDatabaseQueries.insertSetting("alert_voice", enabled.toString())
+        }
+    }
+
+    fun setAlertVoiceEngine(engine: String) {
+        if (engine !in ALERT_VOICE_ENGINES) return
+        _alertVoiceEngine.value = engine
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("alert_voice_engine", engine)
+        }
+    }
+
+    companion object {
+        /** engine เสียงแจ้งเตือนที่รองรับ: device = Android TTS | live = Gemini Live chain (2.5 Native → 3.1 → เครื่อง)
+         *  ค่าเก่า ai/live31/live25 (ก่อนรวมระบบ 2026-08-15) migrate เป็น "live" */
+        private val ALERT_VOICE_ENGINES = setOf("device", "live")
+        private val LEGACY_LIVE_ENGINES = setOf("ai", "live31", "live25")
+
+        /** normalize ค่าจาก settings — legacy live engines → "live" */
+        fun normalizeAlertVoiceEngine(saved: String?): String = when {
+            saved == null -> "device"
+            saved in ALERT_VOICE_ENGINES -> saved
+            saved in LEGACY_LIVE_ENGINES -> "live"
+            else -> "device"
         }
     }
 
@@ -161,9 +188,19 @@ class JarvisViewModel(
         field: String,
         op: String,
         value: String,
-        interval: Long
+        interval: Long,
+        delivery: String = "ai"
     ) {
-        val operator = when (op) {
+        // Signal Alert: แปลง signal_buy/signal_sell (>= 1) เป็น signal_*_id (> เวลาสร้าง)
+        // เพื่อให้ยิงเฉพาะสัญญาณที่เกิด "หลัง" ตั้ง alert — กันเด้งทันทีจาก marker ที่เกิดก่อนสร้าง
+        val isSignalSide = toolName == "trading_signal_alert" &&
+            (field == "signal_buy" || field == "signal_sell")
+        val effField = if (isSignalSide) "${field}_id" else field
+        val effOp = if (isSignalSide) ">" else op
+        val effValue = if (isSignalSide) {
+            kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
+        } else value
+        val operator = when (effOp) {
             ">" -> com.example.personalaibot.automation.ConditionOperator.GT
             "<" -> com.example.personalaibot.automation.ConditionOperator.LT
             ">=" -> com.example.personalaibot.automation.ConditionOperator.GTE
@@ -173,9 +210,10 @@ class JarvisViewModel(
             else -> com.example.personalaibot.automation.ConditionOperator.GTE
         }
         val condition = com.example.personalaibot.automation.AutomationCondition(
-            field = field,
+            field = effField,
             operator = operator,
-            value = value
+            value = effValue,
+            delivery = delivery
         )
         automationManager.registerJob(
             name = name,
@@ -310,6 +348,11 @@ class JarvisViewModel(
 
     private val _chartSmcResult = MutableStateFlow<com.example.personalaibot.tools.trading.SmcAnalysisResult?>(null)
     val chartSmcResult: StateFlow<com.example.personalaibot.tools.trading.SmcAnalysisResult?> = _chartSmcResult.asStateFlow()
+
+    // ─── Signal markers (BUY/SELL arrows จากทุกกลยุทธ์) ─────────────────────
+    private val signalMarkerProvider = com.example.personalaibot.automation.SignalMarkerProvider(smcApiService)
+    private val _chartSignalMarkers = MutableStateFlow<List<com.example.personalaibot.automation.SignalMarkerProvider.SignalMarker>>(emptyList())
+    val chartSignalMarkers: StateFlow<List<com.example.personalaibot.automation.SignalMarkerProvider.SignalMarker>> = _chartSignalMarkers.asStateFlow()
     
     private val _chartInterval = MutableStateFlow("1h")
     val chartInterval: StateFlow<String> = _chartInterval.asStateFlow()
@@ -322,6 +365,22 @@ class JarvisViewModel(
     
     private val _chartRefreshToken = MutableStateFlow(0L)
     val chartRefreshToken: StateFlow<Long> = _chartRefreshToken.asStateFlow()
+
+    // ─── Chart Dashboard (multi-pane Lightweight Charts, AI-controllable) ──────
+    /** "dashboard" = LWC multi-pane engine (offline) | "tradingview" = TV widget (online) */
+    private val _chartViewMode = MutableStateFlow("dashboard")
+    val chartViewMode: StateFlow<String> = _chartViewMode.asStateFlow()
+
+    /** single | rsi | macd | rsi_macd | volume | full */
+    private val _chartLayout = MutableStateFlow("rsi_macd")
+    val chartLayout: StateFlow<String> = _chartLayout.asStateFlow()
+
+    /** overlay indicators บน main pane: ema20, ema50, ema200, bb */
+    private val _chartOverlays = MutableStateFlow(emptySet<String>())
+    val chartOverlays: StateFlow<Set<String>> = _chartOverlays.asStateFlow()
+
+    private val _chartDataLoading = MutableStateFlow(false)
+    val chartDataLoading: StateFlow<Boolean> = _chartDataLoading.asStateFlow()
 
     // ─── MT5 Trading Terminal ─────────────────────────────────────────────
     private val _showTradingTerminal = MutableStateFlow(false)
@@ -502,6 +561,31 @@ class JarvisViewModel(
             }
         }
 
+        // --- AI-Controlled Chart Dashboard ---
+        orchestrator.setChartControlHandler { args ->
+            val result = applyChartControl(args)
+            // Live mode: โมเดลเสียงตอบเป็นเสียงอย่างเดียว (ห้าม markdown) จึงไม่มี ```chart fence
+            // → สร้างการ์ดกราฟให้เองเมื่อสั่ง open ระหว่าง live session (chat mode โมเดลแนบ fence มาเอง)
+            if (args["action"]?.trim()?.lowercase() == "open" && _isListening.value) {
+                val fence = buildString {
+                    append("```chart\n")
+                    append("""{"symbol":"${_chartSymbol.value}","interval":"${_chartInterval.value}","layout":"${_chartLayout.value}"""")
+                    if (_chartOverlays.value.isNotEmpty()) {
+                        append(""","overlays":[""")
+                        append(_chartOverlays.value.joinToString(",") { "\"$it\"" })
+                        append("]")
+                    }
+                    append("}\n```")
+                }
+                _messages.value = _messages.value + Message("model", fence)
+                // persist ลง DB ด้วย — ไม่งั้นปิด/เปิดแอปใหม่แล้วการ์ดกราฟที่สั่งผ่าน live จะหาย
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching { memoryManager.storeMessage("model", fence) }
+                }
+            }
+            result
+        }
+
         viewModelScope.launch {
             loadSettings()
         }
@@ -647,14 +731,30 @@ class JarvisViewModel(
         val savedAlertVoice = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("alert_voice").executeAsOneOrNull()?.let { it == "true" } ?: false
         }
+        val savedAlertVoiceEngine = withContext(Dispatchers.IO) {
+            normalizeAlertVoiceEngine(database.jarvisDatabaseQueries.getSetting("alert_voice_engine").executeAsOneOrNull())
+        }
         // toggle "Show free models only" — เดิมไม่ได้โหลดกลับ เด้งเป็นไม่ติ๊กทุกครั้ง
         _showFreeModelsOnly.value = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("show_free_models_only").executeAsOneOrNull()?.let { it == "true" } ?: false
         }
 
+        // Chart dashboard settings (view mode / layout / overlays)
+        _chartViewMode.value = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("chart_view_mode").executeAsOneOrNull()
+        }?.takeIf { it == "dashboard" || it == "tradingview" } ?: "dashboard"
+        _chartLayout.value = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("chart_layout").executeAsOneOrNull()
+        }?.takeIf { it in setOf("single", "rsi", "macd", "rsi_macd", "volume", "full") } ?: "rsi_macd"
+        _chartOverlays.value = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("chart_overlays").executeAsOneOrNull()
+        }?.split(",")?.map { it.trim() }?.filter { it in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals") }?.toSet()
+            ?: setOf("ema50")
+
         _apiKey.value = savedKey
         _alertAiSummaryEnabled.value = savedAlertAiSummary
         _alertVoiceEnabled.value = savedAlertVoice
+        _alertVoiceEngine.value = savedAlertVoiceEngine
         _selectedModel.value = savedModel
         _liveModelName.value = savedLiveModel
         _voiceName.value = savedVoiceName
@@ -676,6 +776,18 @@ class JarvisViewModel(
         _groqApiKey.value = savedGroqKey
         _nvidiaNimApiKey.value = savedNvidiaNimKey
         orchestrator.updateConfig(savedKey, savedModel, savedLiveModel, savedVoiceName)
+
+        // Persist ค่า key/โมเดลที่ fallback สลับแล้วใช้งานได้จริงกลับลง settings
+        // — รอบถัดไป/เปิดแอปใหม่จะเริ่มจากตัวที่ใช้ได้ ไม่วนกลับไปตัวที่ติดลิมิต
+        orchestrator.getGeminiService().onWorkingConfigChanged = { workingModel, workingKey ->
+            logDebug("JarvisVM", "Persist working fallback config: model=$workingModel key=${com.example.personalaibot.maskApiKey(workingKey)}")
+            _selectedModel.value = workingModel
+            _apiKey.value = workingKey
+            viewModelScope.launch(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("model_name", workingModel)
+                database.jarvisDatabaseQueries.insertSetting("api_key", workingKey)
+            }
+        }
 
         // Register external providers on startup
         orchestrator.updateProviderKeys(
@@ -708,6 +820,22 @@ class JarvisViewModel(
             */
         }
         loadHistory()
+        // รับข้อความจาก background service (alert/scheduled task) แบบ real-time —
+        // เดิม service ลง DB อย่างเดียว แชทที่เปิดอยู่ไม่เห็นจนกว่าจะเปิดแอปใหม่
+        viewModelScope.launch {
+            com.example.personalaibot.memory.AlertChatBus.incoming.collect { push ->
+                _messages.value = _messages.value + Message(push.role, push.content, metadata = push.metadata)
+            }
+        }
+        // โหลด Agent/User Identity กลับจาก Core Memory — เดิม loadFromCoreMemory ไม่มี caller
+        // ทำให้เปิดแอปใหม่แล้ว identity กลับเป็นค่า default ("ผู้ใช้") ทุกครั้ง
+        runCatching {
+            val coreMap = memoryManager.getCoreMemoryMap()
+            if (coreMap.isNotEmpty()) {
+                com.example.personalaibot.ai.JarvisPersona.loadFromCoreMemory(coreMap)
+                logDebug("JarvisVM", "Identity loaded from Core Memory: user=${com.example.personalaibot.ai.JarvisPersona.identity.userName}, agent=${com.example.personalaibot.ai.JarvisPersona.identity.agentName}")
+            }
+        }.onFailure { logError("JarvisVM", "Identity load from Core Memory failed", it) }
         loadMt5FromDatabase()
         if (savedMt5AuthToken.isNotBlank()) {
             refreshMt5PairingStatus()
@@ -864,7 +992,7 @@ class JarvisViewModel(
         // ซ่อนข้อความฝั่ง user ที่มาจาก live voice (transcription) — ตอนคุยสดไม่แสดง เปิดแอปใหม่ก็ไม่ควรโผล่
         _messages.value = history
             .filterNot { it.role == "user" && it.metadata?.contains("live_voice") == true }
-            .map { Message(it.role, it.content) }
+            .map { Message(it.role, it.content, metadata = it.metadata) }
     }
 
     fun sendMessage(
@@ -930,8 +1058,8 @@ class JarvisViewModel(
                         _messages.value = currentList
                     }
                 }
-                // log เนื้อคำตอบจริงด้วย (preview 800 ตัวอักษร) — เดิมมีแค่จำนวน chars ตรวจพฤติกรรมโมเดลไม่ได้
-                logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)\n>>> ${currentAiMessage.take(800)}")
+                // log เนื้อคำตอบจริงเต็มๆ (logDebug แบ่ง chunk 3500 ตัวอักษรอัตโนมัติ) — ตรวจพฤติกรรมโมเดลจาก logcat ได้ครบ
+                logDebug("JarvisVM", "[Chat] Response complete (${currentAiMessage.length} chars)\n>>> $currentAiMessage")
 
                 // ถ้า response ว่างเปล่า แสดง fallback message
                 if (currentAiMessage.isBlank()) {
@@ -951,6 +1079,12 @@ class JarvisViewModel(
                     memoryManager.storeMessage("model", currentAiMessage)
                     memoryManager.updateKnowledgeGraph("User: $text\nJARVIS: $currentAiMessage")
                     memoryManager.extractAndUpdateCoreMemory(text, currentAiMessage)
+
+                    // Auto Sleep Cycle: แชทสะสมถึง 200 ข้อความ → รวมยอดความจำสั้นไประยะยาว
+                    // (เคยถูก wire ไว้ใน B4 แต่หลุดตอน refactor — triggerSleepCycle ไม่มี caller)
+                    runCatching {
+                        if (memoryManager.getMessageCount() >= 200) triggerSleepCycle()
+                    }.onFailure { logError("JarvisVM", "Auto sleep-cycle check failed", it) }
                 }
                 _isTyping.value = false
                 if (speakResponse && currentAiMessage.isNotBlank() && voiceManager.isAvailable()) {
@@ -1128,17 +1262,22 @@ class JarvisViewModel(
         userCallName: String,
         userNotes: String,
     ) {
-        com.example.personalaibot.ai.JarvisPersona.updateIdentity(
-            com.example.personalaibot.ai.JarvisPersona.IdentityConfig(
-                agentName = agentName,
-                agentCreature = agentCreature,
-                agentVibe = agentVibe,
-                agentGender = agentGender,
-                userName = userName,
-                userCallName = userCallName,
-                userNotes = userNotes
-            )
+        val config = com.example.personalaibot.ai.JarvisPersona.IdentityConfig(
+            agentName = agentName,
+            agentCreature = agentCreature,
+            agentVibe = agentVibe,
+            agentGender = agentGender,
+            userName = userName,
+            userCallName = userCallName,
+            userNotes = userNotes
         )
+        com.example.personalaibot.ai.JarvisPersona.updateIdentity(config)
+        // persist ลง Core Memory — เดิมแก้เฉพาะ in-memory ทำให้เปิดแอปใหม่แล้ว identity กลับเป็นค่า default
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.personalaibot.ai.JarvisPersona.toCoreMemoryMap(config).forEach { (k, v) ->
+                runCatching { memoryManager.setCoreMemory(k, v) }
+            }
+        }
     }
 
     fun toggleCamera() {
@@ -1350,6 +1489,8 @@ class JarvisViewModel(
     fun openChart() {
         _showChart.value = true
         _chartRefreshToken.value = _chartRefreshToken.value + 1
+        // dashboard mode ต้องมีข้อมูลแท่งเทียน — ดึงใหม่ถ้ายังไม่มี
+        if (_chartCandles.value.isEmpty()) refreshChartCandles()
     }
 
     fun updateChartSymbol(symbol: String) {
@@ -1357,6 +1498,7 @@ class JarvisViewModel(
         if (normalized.isBlank()) return
         _chartSymbol.value = normalized
         _chartRefreshToken.value = _chartRefreshToken.value + 1
+        refreshChartCandles(force = true)
     }
 
     fun updateChartInterval(interval: String) {
@@ -1364,6 +1506,7 @@ class JarvisViewModel(
         if (_chartInterval.value == normalized) return
         _chartInterval.value = normalized
         _chartRefreshToken.value = _chartRefreshToken.value + 1
+        refreshChartCandles(force = true)
     }
 
     fun refreshChart() {
@@ -1380,8 +1523,230 @@ class JarvisViewModel(
         _chartRefreshToken.value = _chartRefreshToken.value + 1
     }
 
+    // ─── Chart Dashboard controls ────────────────────────────────────────────
+
+    fun setChartViewMode(mode: String) {
+        val normalized = if (mode == "tradingview") "tradingview" else "dashboard"
+        if (_chartViewMode.value == normalized) return
+        _chartViewMode.value = normalized
+        _chartRefreshToken.value = _chartRefreshToken.value + 1
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("chart_view_mode", normalized)
+        }
+    }
+
+    fun setChartLayout(layout: String) {
+        val valid = setOf("single", "rsi", "macd", "rsi_macd", "volume", "full")
+        if (layout !in valid || _chartLayout.value == layout) return
+        _chartLayout.value = layout
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("chart_layout", layout)
+        }
+    }
+
+    fun toggleChartOverlay(name: String) {
+        val valid = setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")
+        if (name !in valid) return
+        val current = _chartOverlays.value
+        _chartOverlays.value = if (name in current) current - name else current + name
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("chart_overlays", _chartOverlays.value.joinToString(","))
+        }
+        // เปิด SMC แล้วยังไม่มีผลวิเคราะห์ → ดึงเลย
+        if (name == "smc" && "smc" in _chartOverlays.value && _chartSmcResult.value == null) {
+            refreshChartCandles(force = true)
+        }
+        // เปิด signals แล้วยังไม่มี markers → คำนวณเลย
+        if (name == "signals" && "signals" in _chartOverlays.value && _chartSignalMarkers.value.isEmpty()) {
+            refreshChartCandles(force = true)
+        }
+    }
+
+    /**
+     * ดึงแท่งเทียนสำหรับ dashboard (symbol/interval ปัจจุบัน) — incremental cache ใน SmcApiService
+     * เรียกตอนเปิดกราฟแบบไม่มีข้อมูล หรือเปลี่ยน symbol/interval
+     */
+    fun refreshChartCandles(force: Boolean = false) {
+        if (_chartDataLoading.value) return
+        val symbol = _chartSymbol.value
+        val interval = _chartInterval.value
+        viewModelScope.launch(Dispatchers.IO) {
+            _chartDataLoading.value = true
+            try {
+                val result = smcApiService.fetchCandlesWithSource(symbol, interval, 300)
+                _chartCandles.value = result.candles
+                logDebug("JarvisVM", "Chart dashboard candles: ${result.candles.size} bars ($symbol $interval) source=${result.source}")
+                // วาด SMC zones เฉพาะเมื่อผู้ใช้เปิด overlay "smc" เท่านั้น (ไม่ดึงทุกครั้ง ประหยัดทรัพยากร)
+                if ("smc" in _chartOverlays.value) {
+                    runCatching {
+                        val smc = smcApiService.getSmcAnalysis(symbol, interval, strictTvSource = false)
+                        _chartSmcResult.value = smc
+                    }
+                } else {
+                    _chartSmcResult.value = null
+                }
+                // Signal markers เฉพาะเมื่อเปิด overlay "signals" (คำนวณในเครื่องจากแท่งเทียน)
+                if ("signals" in _chartOverlays.value) {
+                    runCatching {
+                        _chartSignalMarkers.value = signalMarkerProvider.fetch("$symbol@$interval")
+                    }.onFailure { logDebug("JarvisVM", "Signal markers failed: ${it.message}") }
+                } else {
+                    _chartSignalMarkers.value = emptyList()
+                }
+            } catch (e: Exception) {
+                logDebug("JarvisVM", "Chart candles fetch failed: ${e.message}")
+            } finally {
+                _chartDataLoading.value = false
+            }
+        }
+    }
+
+    // ─── Chart card cache (mini-chart ในแชท) ────────────────────────────────
+    // แยกข้อมูลตาม symbol+interval ของการ์ดแต่ละใบ — การ์ดเก่าในประวัติแชทจะไม่เปลี่ยนตามการ์ดใหม่
+    // key = "SYMBOL/interval" (normalized), value = Triple(candles, smcResult?, signalMarkers)
+    private val _chartCardCache = MutableStateFlow<Map<String, Triple<List<com.example.personalaibot.tools.trading.Candle>, com.example.personalaibot.tools.trading.SmcAnalysisResult?, List<com.example.personalaibot.automation.SignalMarkerProvider.SignalMarker>>>>(emptyMap())
+    val chartCardCache = _chartCardCache.asStateFlow()
+    private val chartCardLoading = mutableSetOf<String>()
+
+    private fun chartCardKey(symbol: String, interval: String): String =
+        "${normalizeChartSymbol(symbol)}/${normalizeChartInterval(interval)}"
+
+    /**
+     * โหลดข้อมูลให้ mini-chart ของการ์ดใบนั้นโดยเฉพาะ — ไม่แตะ state กราฟหลัก (dashboard)
+     * กันการ์ดเก่าในแชทเปลี่ยนข้อมูล/indicator ตามคำสั่งเปิดกราฟใหม่
+     */
+    fun ensureChartCardData(symbol: String, interval: String, needsSmc: Boolean, needsMarkers: Boolean = false) {
+        val key = chartCardKey(symbol, interval)
+        val cached = _chartCardCache.value[key]
+        if (cached != null && cached.first.isNotEmpty()
+            && (!needsSmc || cached.second != null)
+            && (!needsMarkers || cached.third.isNotEmpty())
+        ) return
+        if (key in chartCardLoading) return
+        viewModelScope.launch(Dispatchers.IO) {
+            chartCardLoading.add(key)
+            try {
+                val sym = normalizeChartSymbol(symbol)
+                val tf = normalizeChartInterval(interval)
+                val result = smcApiService.fetchCandlesWithSource(sym, tf, 300)
+                val smc = if (needsSmc) {
+                    runCatching { smcApiService.getSmcAnalysis(sym, tf, strictTvSource = false) }.getOrNull()
+                } else null
+                val markers = if (needsMarkers) {
+                    runCatching { signalMarkerProvider.fetch("$sym@$tf") }.getOrElse { emptyList() }
+                } else emptyList()
+                _chartCardCache.value = _chartCardCache.value + (key to Triple(result.candles, smc, markers))
+                logDebug("JarvisVM", "Chart card cache: ${result.candles.size} bars ($key) source=${result.source} smc=${smc != null} markers=${markers.size}")
+            } catch (e: Exception) {
+                logDebug("JarvisVM", "Chart card fetch failed ($key): ${e.message}")
+            } finally {
+                chartCardLoading.remove(key)
+            }
+        }
+    }
+
+    /**
+     * เปิดกราฟจาก chart card ในแชท (Rich Chat Rendering) — ใช้ config ที่ AI ฝังมา
+     */
+    fun openChartWithConfig(symbol: String, interval: String, layout: String, overlays: Set<String>) {
+        updateChartSymbol(symbol)
+        updateChartInterval(interval)
+        setChartLayout(layout)
+        val validOverlays = overlays.filter { it in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals") }.toSet()
+        _chartOverlays.value = validOverlays
+        viewModelScope.launch(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.insertSetting("chart_overlays", validOverlays.joinToString(","))
+        }
+        setChartViewMode("dashboard")
+        _showChart.value = true
+        _chartRefreshToken.value = _chartRefreshToken.value + 1
+        refreshChartCandles(force = true)
+    }
+
     fun closeChart() {
         _showChart.value = false
+    }
+
+    /**
+     * รับคำสั่งจาก tool chart_dashboard_control — ปรับหน้ากราฟตามที่ AI สั่ง
+     * @return สรุปผลภาษาไทย (ส่งกลับเข้า tool loop ให้ AI ตอบผู้ใช้)
+     */
+    fun applyChartControl(args: Map<String, String>): String {
+        val action = args["action"]?.trim()?.lowercase() ?: return "⚠️ ไม่ระบุ action"
+        logDebug("JarvisVM", "Chart control: action=$action args=$args")
+        return when (action) {
+            "open" -> {
+                args["symbol"]?.takeIf { it.isNotBlank() }?.let { updateChartSymbol(it) }
+                args["interval"]?.takeIf { it.isNotBlank() }?.let { updateChartInterval(it) }
+                // รีเซ็ต dashboard ทั้งจอทุกครั้งที่ "เปิดกราฟ" — กัน indicator เก่าค้างเต็มจอ
+                // ไม่ระบุ layout = กลับไป single (กราฟเปล่า), ไม่ระบุ overlays = ปิดทั้งหมด
+                setChartLayout(args["layout"]?.takeIf { it.isNotBlank() } ?: "single")
+                val validOverlayNames = setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")
+                val wantOverlays = args["overlays"]
+                    ?.split(",")?.map { it.trim().lowercase() }
+                    ?.filter { it in validOverlayNames }?.toSet()
+                    ?: emptySet()
+                if (wantOverlays != _chartOverlays.value) {
+                    _chartOverlays.value = wantOverlays
+                    viewModelScope.launch(Dispatchers.IO) {
+                        database.jarvisDatabaseQueries.insertSetting("chart_overlays", wantOverlays.joinToString(","))
+                    }
+                }
+                // ไม่สลับหน้าจออัตโนมัติ — กราฟแสดงเป็นการ์ด mini-chart ในแชท ผู้ใช้แตะการ์ดเองถ้าต้องการเต็มจอ
+                _chartRefreshToken.value = _chartRefreshToken.value + 1
+                if (_chartCandles.value.isEmpty()) refreshChartCandles()
+                "✅ เตรียมกราฟ ${_chartSymbol.value} (${_chartInterval.value}) แล้ว — layout=${_chartLayout.value}" +
+                    (if (wantOverlays.isNotEmpty()) ", overlays=${wantOverlays.joinToString(",")}" else "") +
+                    " (แสดงเป็นการ์ดกราฟในแชท — ผู้ใช้แตะการ์ดเพื่อเปิดเต็มจอ ไม่ต้องสลับหน้าจอให้)"
+            }
+            "close" -> {
+                _showChart.value = false
+                "✅ ปิดหน้ากราฟแล้ว"
+            }
+            "set_layout" -> {
+                val layout = args["layout"] ?: return "⚠️ ต้องระบุ layout (single/rsi/macd/rsi_macd/volume/full)"
+                if (layout !in setOf("single", "rsi", "macd", "rsi_macd", "volume", "full")) {
+                    return "⚠️ layout '$layout' ไม่ถูกต้อง — เลือกจาก single, rsi, macd, rsi_macd, volume, full"
+                }
+                setChartLayout(layout)
+                "✅ เปลี่ยน layout กราฟเป็น $layout แล้ว"
+            }
+            "set_symbol" -> {
+                val symbol = args["symbol"] ?: return "⚠️ ต้องระบุ symbol"
+                updateChartSymbol(symbol)
+                "✅ เปลี่ยนกราฟเป็น ${_chartSymbol.value} แล้ว"
+            }
+            "set_interval" -> {
+                val interval = args["interval"] ?: return "⚠️ ต้องระบุ interval (1m/5m/15m/30m/1h/4h/1d)"
+                updateChartInterval(interval)
+                "✅ เปลี่ยน timeframe เป็น ${_chartInterval.value} แล้ว"
+            }
+            "set_overlay" -> {
+                val name = args["overlay"] ?: return "⚠️ ต้องระบุ overlay (ema14/ema20/ema50/ema60/ema200/bb/smc)"
+                if (name !in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")) {
+                    return "⚠️ overlay '$name' ไม่ถูกต้อง — เลือกจาก ema14, ema20, ema50, ema60, ema200, bb, smc"
+                }
+                val visible = args["visible"]?.lowercase() != "false"
+                val current = _chartOverlays.value
+                val want = if (visible) current + name else current - name
+                if (want != current) {
+                    _chartOverlays.value = want
+                    viewModelScope.launch(Dispatchers.IO) {
+                        database.jarvisDatabaseQueries.insertSetting("chart_overlays", want.joinToString(","))
+                    }
+                }
+                if (name == "smc" && visible && _chartSmcResult.value == null) refreshChartCandles(force = true)
+                if (name == "signals" && visible && _chartSignalMarkers.value.isEmpty()) refreshChartCandles(force = true)
+                "✅ ${if (visible) "เปิด" else "ปิด"}อินดิเคเตอร์ $name บนกราฟแล้ว (ที่เปิดอยู่: ${want.joinToString(", ").ifBlank { "ไม่มี" }})"
+            }
+            "set_view" -> {
+                val view = args["view"] ?: return "⚠️ ต้องระบุ view (dashboard/tradingview)"
+                setChartViewMode(view)
+                if (view == "dashboard" && _chartCandles.value.isEmpty()) refreshChartCandles()
+                "✅ สลับโหมดกราฟเป็น ${if (view == "dashboard") "Dashboard (multi-pane)" else "TradingView"} แล้ว"
+            }
+            else -> "⚠️ ไม่รู้จัก action '$action' — ใช้ open/close/set_layout/set_symbol/set_interval/set_overlay/set_view"
+        }
     }
 
     fun handleChartCapture(base64Image: String) {

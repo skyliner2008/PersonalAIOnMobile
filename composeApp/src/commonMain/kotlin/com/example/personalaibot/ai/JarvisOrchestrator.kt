@@ -741,6 +741,16 @@ class JarvisOrchestrator(
         voiceChangeCallback?.invoke(newVoice)
     }
 
+    override suspend fun onChartControl(args: Map<String, String>): String {
+        com.example.personalaibot.logDebug("Orchestrator", "SideEffect: Chart control ${args["action"]} ${args["layout"] ?: args["overlay"] ?: args["symbol"] ?: ""}")
+        return chartControlCallback?.invoke(args)
+            ?: "⚠️ ระบบกราฟยังไม่พร้อมใช้งาน"
+    }
+
+    fun setChartControlHandler(handler: (Map<String, String>) -> String) {
+        this.chartControlCallback = handler
+    }
+
     override suspend fun onSaveDiagnosticReport(filename: String, content: String) {
         // บันทึกรายงานลงในโฟลเดอร์ Obsidian Wiki สำหรับการตรวจสอบย้อนหลัง
         val path = ".obsidian-wiki/Diagnostic/$filename"
@@ -837,9 +847,9 @@ class JarvisOrchestrator(
                     ?: "Alert ${args["symbol"] ?: ""}".trim()
                 val symbol = args["symbol"]?.trim()?.uppercase()
                     ?: return "❌ ต้องระบุ symbol ที่ต้องการเฝ้าดู (เช่น XAUUSD, BTCUSDT)"
-                val toolName = args["tool_name"]?.trim().takeUnless { it.isNullOrBlank() } ?: "trading_price"
-                val field = args["condition_field"]?.trim().takeUnless { it.isNullOrBlank() } ?: "price"
-                val operator = when (args["condition_operator"]?.trim()) {
+                val toolNameRaw = args["tool_name"]?.trim().takeUnless { it.isNullOrBlank() } ?: "trading_price"
+                val fieldRaw = args["condition_field"]?.trim().takeUnless { it.isNullOrBlank() } ?: "price"
+                val operatorRaw = when (args["condition_operator"]?.trim()) {
                     ">"  -> com.example.personalaibot.automation.ConditionOperator.GT
                     "<"  -> com.example.personalaibot.automation.ConditionOperator.LT
                     ">=" -> com.example.personalaibot.automation.ConditionOperator.GTE
@@ -851,6 +861,29 @@ class JarvisOrchestrator(
                 val value = args["condition_value"]?.trim()
                     ?: return "❌ ต้องระบุ condition_value (ค่าเปรียบเทียบ เช่น 4800)"
                 val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 15L
+                val delivery = when (args["delivery"]?.trim()?.lowercase()) {
+                    "direct" -> "direct"   // ส่ง notification+แชทโดยตรง ไม่ผ่าน AI (ประหยัดโทเคน)
+                    else -> "ai"           // default: alert → AI quick-check → ผู้ใช้
+                }
+
+                // Normalize: AI บางเครื่อง/บางโมเดลเลือก trading_technical_analysis.signal (STRONG BUY/SELL)
+                // แทน trading_signal_alert (signal_buy/sell) — แปลงอัตโนมัติให้ผลลัพธ์ตรงกันทุกเครื่อง
+                // (payload ครบ Entry/SL/TP/RR/ATR + baseline กันสัญญาณเก่าเด้ง)
+                val isTaTradeSignal = toolNameRaw == "trading_technical_analysis" && fieldRaw == "signal" &&
+                    value.uppercase().let { it.contains("BUY") || it.contains("SELL") }
+                val toolName: String
+                val field: String
+                val operator: com.example.personalaibot.automation.ConditionOperator
+                if (isTaTradeSignal) {
+                    toolName = "trading_signal_alert"
+                    field = if (value.uppercase().contains("BUY")) "signal_buy" else "signal_sell"
+                    operator = com.example.personalaibot.automation.ConditionOperator.GTE
+                    com.example.personalaibot.logDebug("Orchestrator", "Normalized TA signal alert → trading_signal_alert/$field")
+                } else {
+                    toolName = toolNameRaw
+                    field = fieldRaw
+                    operator = operatorRaw
+                }
 
                 // จำกัดให้ตั้งได้เฉพาะ tool/field ที่ background engine ดึงค่าได้จริง
                 if (!com.example.personalaibot.automation.AlertFieldCatalog.isFieldSupported(toolName, field)) {
@@ -865,15 +898,26 @@ class JarvisOrchestrator(
                     return "❌ field '$field' เป็นข้อความ (เช่น BULLISH, STRONG BUY) — ใช้ได้เฉพาะ operator == หรือ contains เท่านั้น"
                 }
 
+                // Signal Alert: แปลง signal_buy/signal_sell (>= 1) เป็น signal_*_id (> เวลาสร้าง)
+                // ยิงเฉพาะสัญญาณที่เกิด "หลัง" ตั้ง alert — กันเด้งทันทีจาก marker เก่าที่ค้างอยู่
+                val isSignalSide = toolName == "trading_signal_alert" &&
+                    (field == "signal_buy" || field == "signal_sell")
+                val effField = if (isSignalSide) "${field}_id" else field
+                val effOperator = if (isSignalSide) com.example.personalaibot.automation.ConditionOperator.GT else operator
+                val effValue = if (isSignalSide) {
+                    kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
+                } else value
+
                 automationManager.registerJob(
                     name = name,
                     symbol = symbol,
                     exchange = null,
                     toolName = toolName,
-                    condition = com.example.personalaibot.automation.AutomationCondition(field, operator, value),
+                    condition = com.example.personalaibot.automation.AutomationCondition(effField, effOperator, effValue, delivery),
                     intervalMinutes = interval
                 )
-                "✅ สร้างการแจ้งเตือน '$name' แล้ว — เฝ้าดู $symbol ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที"
+                val deliveryDesc = if (delivery == "direct") "โหมดส่งตรง (notification+แชท ไม่ผ่าน AI)" else "โหมด AI วิเคราะห์ก่อนแจ้ง"
+                "✅ สร้างการแจ้งเตือน '$name' แล้ว — เฝ้าดู $symbol ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที | $deliveryDesc"
             }
             "delete" -> {
                 val id = args["alert_id"]?.toLongOrNull()
@@ -1022,5 +1066,6 @@ class JarvisOrchestrator(
 
     private var visionToggleCallback: ((Boolean) -> Unit)? = null
     private var voiceChangeCallback: ((String) -> Unit)? = null
+    private var chartControlCallback: ((Map<String, String>) -> String)? = null
     private var displayReportCallback: ((String) -> Unit)? = null
 }

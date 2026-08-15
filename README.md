@@ -40,6 +40,8 @@
 - **SMC Alert Provider** — แปลง SMC analysis เป็น field เฝ้าติดตามได้ 18 ตัว: zone (Premium/Discount), BOS/CHoCH, Order Blocks, FVG, Liquidity zones + ดาว
 - **Deep Analysis Suite ครบ 5 มิติ** — LSD state + confluence, Orderflow Delta, Fibo Score, Momentum, Squeeze (9 fields) พร้อม TV local fallback + circuit breaker เมื่อ bridge ล่ม
 - **Multi-Timeframe ทุก tool** — ระบุ TF ได้ด้วย suffix `symbol@TF` เช่น `XAUUSD@15m` (1m/5m/15m/30m/1h/4h/1D)
+- **Chart Dashboard (Lightweight Charts v5.1, offline)** — กราฟ multi-pane ในตัวแอป: layouts (single / RSI / MACD / RSI+MACD / Volume / Full), overlays EMA20/50/200 + Bollinger Bands, วาด SMC zones (OB/FVG), ข้อมูลแท่งเทียนจาก TV incremental cache, สลับไป TradingView widget ได้ทุกเมื่อ — **AI ปรับ layout/indicator เองผ่าน tool `chart_dashboard_control`** ทั้งแชทและ Live ("เปิดกราฟทองคำ 1 ชั่วโมง เพิ่ม RSI กับ MACD")
+- **Rich Chat Rendering** — ตาราง markdown แสดงเป็นตารางจริง (header สี + scroll แนวนอน) และ AI แนบ **chart card** ในแชทได้ (```chart fence) แตะการ์ดเพื่อเปิดกราฟเต็มจอด้วย config นั้นทันที
 
 ### 🔔 4. Alert System V2 (ระบบเฝ้าติดตามตลาด)
 
@@ -135,9 +137,9 @@
 
 ---
 
-## 📦 Tool Catalogue (Total: 88 Tools)
+## 📦 Tool Catalogue (Total: 89 Tools)
 
-### 🧠 BUILT-IN & SYSTEM TOOLS (20 tools)
+### 🧠 BUILT-IN & SYSTEM TOOLS (21 tools)
 - `calculate`: คำนวณนิพจน์คณิตศาสตร์
 - `get_current_datetime`: ข้อมูลวันเวลาและปฏิทิน
 - `remember_fact`: บันทึกข้อมูลลงความจำระยะยาว
@@ -150,6 +152,7 @@
 - `search_web`: ค้นหาเว็บ (ถูกซ่อนอัตโนมัติใน trading context)
 - `identity_update`: AI ปรับแต่งตัวตน/ข้อมูลผู้ใช้เมื่อถูกสั่ง
 - `analyze_and_display_report`: ส่งรายงานยาวลงแชทแล้วพูดสรุป
+- `chart_dashboard_control`: 📊 AI ควบคุมหน้ากราฟเอง — เปิด/ปิดกราฟ, เปลี่ยน symbol/timeframe, ปรับ layout (single/rsi/macd/rsi_macd/volume/full), เปิด-ปิด indicator (EMA20/50/200, Bollinger), สลับ Dashboard↔TradingView
 - `system_run_diagnostics`: ตรวจสุขภาพระบบ (Self-healing)
 - `system_check_connectivity`: ตรวจการเชื่อมต่อ API
 - `system_create_agent_tool`: 🤖 AI สร้าง/แก้ไข tool เอง (persist ข้าม session)

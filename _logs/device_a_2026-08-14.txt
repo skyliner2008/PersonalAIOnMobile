@@ -1,0 +1,75 @@
+2026-08-14 18:37:48.282  2449-2449  JARVIS_VM               com.example.personalaibot            D  Starting Live Voice Input
+2026-08-14 18:37:48.285  2449-4348  JARVIS_VM               com.example.personalaibot            D  Connecting Live session (with memory context)...
+2026-08-14 18:37:48.285  2449-2531  JARVIS_VM               com.example.personalaibot            D  Microphone starting...
+2026-08-14 18:37:48.285  2449-2531  PcmAudio                com.example.personalaibot            D  Starting Microphone...
+2026-08-14 18:37:48.289  2449-4348  LiveGemini              com.example.personalaibot            D  Connecting to Live API with model: gemini-3.1-flash-live-preview (attempt 1)
+2026-08-14 18:37:48.362  2449-2531  PcmAudio                com.example.personalaibot            D  AEC enabled: true
+2026-08-14 18:37:48.375  2449-2531  PcmAudio                com.example.personalaibot            D  NoiseSuppressor enabled: true
+2026-08-14 18:37:48.392  2449-2531  PcmAudio                com.example.personalaibot            D  MIC_STARTED successfully
+2026-08-14 18:37:49.182  2449-2531  LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-08-14 18:37:55.173  2449-2509  LiveGemini              com.example.personalaibot            D  🎤 User (Progress): ตั้งแจ้งเตือน signal ทองคำ timeframe M15
+2026-08-14 18:37:55.446  2449-2532  LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({condition_value=1, tool_name=trading_signal_alert, interval_minutes=15, name=Signal Buy Gold 15m, condition_operator=>=, symbol=XAUUSD@15m, action=create, condition_field=signal_buy})
+2026-08-14 18:37:55.448  2449-2509  LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({tool_name=trading_signal_alert, action=create, symbol=XAUUSD@15m, name=Signal Sell Gold 15m, condition_value=1, interval_minutes=15, condition_operator=>=, condition_field=signal_sell})
+2026-08-14 18:37:55.464  2449-2532  LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Signal Buy Gold 15m' แล้ว — เฝ้าดู XAUUSD@15M (signal_buy >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-14 18:37:55.469  2449-2532  LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Signal Sell Gold 15m' แล้ว — เฝ้าดู XAUUSD@15M (signal_sell >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-14 18:37:56.884  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): เรียบร้อยค่ะเจ้านาย
+2026-08-14 18:37:57.398  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-14 18:37:57.488  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จาวิส
+2026-08-14 18:37:57.954  2449-4348  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตั้ง
+2026-08-14 18:37:58.076  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้ง
+2026-08-14 18:37:58.196  2449-4348  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:37:58.274  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-14 18:37:58.324  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ซื้อ
+2026-08-14 18:37:58.386  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): ขาย
+2026-08-14 18:37:58.542  2449-4348  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-08-14 18:37:58.727  2449-4348  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในไทม์เฟรม
+2026-08-14 18:37:59.011  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-14 18:37:59.175  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-14 18:37:59.276  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไว้ให้
+2026-08-14 18:37:59.453  2449-4679  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้วนะคะ
+2026-08-14 18:37:59.637  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทั้ง
+2026-08-14 18:37:59.710  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-14 18:37:59.883  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บาย
+2026-08-14 18:38:00.148  2449-4679  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และเซล
+2026-08-14 18:38:00.313  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลย
+2026-08-14 18:38:00.516  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยระบบ
+2026-08-14 18:38:00.638  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะเช็ค
+2026-08-14 18:38:00.771  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทุก
+2026-08-14 18:38:00.915  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-14 18:38:01.089  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-14 18:38:01.236  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-14 18:38:01.323  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ถ้ามี
+2026-08-14 18:38:01.535  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-14 18:38:01.622  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ใหม่
+2026-08-14 18:38:01.758  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เกิดขึ้น
+2026-08-14 18:38:02.166  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จาวิส
+2026-08-14 18:38:02.348  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะรีบ
+2026-08-14 18:38:02.455  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สรุป
+2026-08-14 18:38:02.522  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บริบท
+2026-08-14 18:38:02.676  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  วิเคราะห์
+2026-08-14 18:38:02.862  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้วแจ้ง
+2026-08-14 18:38:02.968  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:38:03.212  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้เจ้านาย
+2026-08-14 18:38:03.351  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทราบ
+2026-08-14 18:38:03.446  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทันที
+2026-08-14 18:38:03.610  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลยค่ะ
+2026-08-14 18:38:03.647  2449-4679  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะได้
+2026-08-14 18:38:03.790  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไม่พลาด
+2026-08-14 18:38:03.908  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โอกาส
+2026-08-14 18:38:04.107  2449-2532  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในการ
+2026-08-14 18:38:04.301  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): เทรด
+2026-08-14 18:38:04.551  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-14 18:38:04.652  2449-2511  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีอะไรให้
+2026-08-14 18:38:04.844  2449-2510  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จาวิส
+2026-08-14 18:38:04.977  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ช่วยเพิ่ม
+2026-08-14 18:38:04.990  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เติม
+2026-08-14 18:38:05.213  2449-2531  LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไหมคะ
+2026-08-14 18:38:12.015  2449-2449  JARVIS_VM               com.example.personalaibot            D  Stopping Live Voice Input
+2026-08-14 18:38:12.015  2449-2449  PcmAudio                com.example.personalaibot            D  Stopping Mic...
+2026-08-14 18:38:12.017  2449-4684  PcmAudio                com.example.personalaibot            D  Mic thread stopped
+2026-08-14 18:38:12.101  2449-2508  LiveGemini              com.example.personalaibot            D  Session disconnected
+2026-08-14 18:38:12.108  2449-2531  LiveGemini              com.example.personalaibot            D  🔌 Session ending. Flushing buffers.

@@ -738,3 +738,345 @@
 - LiveToolBridge: ยกเว้น [VOICE RULE] 5-8 ประโยคสำหรับ tool นี้ → ใช้ [VOICE RULE - NARRATION] เล่าครบทุกหัวข้อ ไม่จำกัดความยาว ห้ามหยุดกลางทาง
 - JarvisPersona LIVE_RULES ข้อ 8 (โหมดเล่ายาว): เรียก tool ทันทีเมื่อขอรีวิว/แนะนำตัว / เล่ายาวได้เต็มที่ / ห้ามใช้ analyze_and_display_report (user ต้องการฟัง ไม่ใช่อ่าน) / ห้าม markdown ออกเสียง
 - Build assembleDebug SUCCESS — ต้องติดตั้ง APK ใหม่แล้วลองสั่ง "รีวิวตัวเองให้ฟังหน่อย" ทั้งโหมดแชทและ live
+
+## 2026-08-11 — ✅ หมวด 9 File Tools ผ่าน + system_self_review ผ่าน (user ยืนยัน)
+- user เทสเครื่องจริง: หมวด 9 (attachments/xlsx/file_write) ผ่าน และ "รีวิวตัวเอง" (system_self_review + narration mode) ผ่าน
+- อัปเดต App_Review_Checklist หมวด 9 → ✅ (2026-08-11)
+- สถานะรวม: ผ่าน 14/15 หมวด — เหลือ หมวด 10 (System Tools) และ หมวด 12 (UI/UX) รอเทสเครื่องจริง
+
+## 2026-08-11 — ออกแบบชุดทดสอบหมวด 10 (System Tools) 10 ข้อ
+- ครอบคลุม: diagnostics (แชท+live), connectivity, custom tool CRUD แบบเร็ว, persistence ข้าม session, edge case tool ไม่มีจริง
+- ไฟล์: .obsidian-wiki/04_Tasks/Test_Plan_Section10_SystemTools.md (ตารางติ๊กผล + เกณฑ์ผ่าน)
+
+## 2026-08-11 — เทสหมวด 10 รอบ 1: ผ่าน 7/10 (จาก logcat 00:47-00:52)
+- ผ่าน: diagnostics (แชท+live), connectivity, สร้าง/ลิสต์/แก้/ใช้ custom tool **ใน Live** ครบ (btc_quick_check + MACD)
+- ค้างเทส: ข้อ 8 ลบ tool, ข้อ 9 persistence ปิด/เปิดแอป, ข้อ 10 ลบ tool ที่ไม่มีจริง
+- พบเพิ่ม (minor): (1) log "Empty model response in round 2" เขียนผิดเงื่อนไข — คำตอบจริงมาครบ 690 chars (2) Diagnostic หมวด Trading WARNING ดึงข้อมูลเปรียบเทียบไม่ได้ ไม่กระทบใช้งาน
+
+## 2026-08-11 — เทสหมวด 10 รอบ 2: ข้อ 8 ผ่าน / ข้อ 10 พบบั๊ก + แก้ 3 จุด
+- ข้อ 8 (ลบ btc tool ใน live): ผ่าน — ลบไฟล์+ถอด registry+พูดยืนยัน
+- ข้อ 10 (ลบ tool ไม่มีจริง): พบบั๊ก — AI พูด "สักครู่ เดี๋ยวเช็คให้" แล้วจบเทิร์นโดยไม่เรียก tool (promise-then-stall) ต้องถามซ้ำ 2 รอบถึงเรียก system_list แล้วตอบไม่มี tool นี้
+- Fix 1: LIVE_RULES ข้อ 9 (NO EMPTY PROMISES) — คำขอที่ต้องใช้ tool ต้องเรียกใน turn เดียวกัน ห้ามพูด "สักครู่/เดี๋ยวเช็คให้" แล้วจบเทิร์นเด็ดขาด
+- Fix 2: log "Empty model response" หลอก — Round 2+ stream text ตรงไม่ผ่าน textBuffer → เพิ่ม emittedAnyText flag (GeminiService)
+- Fix 3: Diagnostic Trading WARNING บอกแหล่งที่ตายชัดเจน (Yahoo GC=F vs OANDA) พร้อมค่าที่ดึงได้ แทนข้อความกว้างๆ (DiagnosticManager)
+- Build assembleDebug SUCCESS — รอ user เทสข้อ 10 อีกรอบ + ข้อ 9 (persistence) ปิดหมวด 10
+
+## 2026-08-11 — ข้อ 10 ผ่านหลัง fix (logcat 01:27)
+- สั่ง "ลบ Tool ชื่อ Not Exit Tool" → เรียก system_delete_agent_tool ทันที 0.006s ในเทิร์นเดียว ตอบถูก (ไม่พบ + บอก tool ที่มี) ไม่ต้องถามซ้ำ — LIVE_RULES ข้อ 9 ทำงาน
+- เหลือข้อ 9 (persistence ปิด/เปิดแอป) ข้อเดียวก่อนปิดหมวด 10
+
+## 2026-08-11 — ✅ หมวด 10 System Tools ผ่านครบ 10/10 (user ยืนยัน)
+- ข้อ 9 persistence ผ่าน — ปิด/เปิดแอปแล้ว custom tools โหลดกลับใช้งานได้ทันที
+- อัปเดต App_Review_Checklist หมวด 10 → ✅
+- สถานะรวม: ผ่าน 15 หมวดยกเว้น หมวด 12 (UI/UX) — เหลือหมวดเดียว
+
+## 2026-08-11 — รีวิว Sleep Cycle (Memory Consolidation): engine สมบูรณ์ แต่ trigger หลุด → wire กลับ
+- ตรวจตามคำขอ user: performSleepCycle ครบถ้วนถูกต้อง (ดึง 100 ข้อความเก่าสุด → LLM consolidation JSON → archive summary+facts พร้อม embedding → upsert graph nodes/edges → archive raw transcript ก่อนลบ → ลบข้อความที่ประมวลผล)
+- 🔴 พบ: triggerSleepCycle/getMessageCount ไม่มี caller เลยในโค้ดปัจจุบัน (B4 เคย wire ใน sendMessage แต่หลุดตอน refactor) → Sleep Cycle ไม่เคยรันอัตโนมัติ ChatMessage โตไม่จำกัด
+- Fix: wire กลับใน sendMessage — หลัง storeMessage เช็ค getMessageCount() >= 200 → triggerSleepCycle() (runCatching กันกระทบแชท)
+- หมายเหตุ minor: live voice turns persist ผ่าน LiveGeminiService ไม่ผ่าน sendMessage — trigger จะเช็คในข้อความแชทถัดไป; node insert ยังไม่ใช้ weight_delta เริ่มต้น (รู้ตัวตาม comment)
+- Build assembleDebug SUCCESS — ต้องติดตั้ง APK ใหม่
+
+## 2026-08-11 — เพิ่มสถานะ Sleep Cycle ใน Diagnostics
+- เพิ่ม category ที่ 5 "Memory" ใน DiagnosticManager: แสดงจำนวนข้อความใน working memory (trigger ที่ 200) + เวลา consolidation ล่าสุด
+- WARNING เมื่อข้อความ >= 200 (รอ sleep cycle รันในแชทถัดไป), PASS เมื่อปกติ
+- JarvisMemoryManager.performSleepCycle บันทึก setting `last_sleep_cycle_at` หลัง consolidate เสร็จ
+- Build :composeApp:assembleDebug ผ่าน (แก้ import kotlinx.datetime ขาดหาย 1 จุด)
+
+## 2026-08-11 — แก้ empty response + timeout จาก log ทดสอบ
+- GeminiService: response ว่าง (finishReason=STOP, parts=0, ไม่มี tool call) ถือเป็น failure → เข้า fallback chain อัตโนมัติ (key ถัดไป → โมเดลถัดไป) แทนการแสดงแชทว่าง
+- generateResponse (nested AI summary เช่น calendar preview): timeout 20s → retry อัตโนมัติ 1 ครั้งด้วย 45s ก่อนแจ้ง error
+- Diagnostics หมวด Memory ทำงานถูกต้อง (user ยืนยันจาก log: PASS, messages=8, last consolidation=ยังไม่เคยรัน)
+- Build :composeApp:assembleDebug ผ่าน
+
+## 2026-08-11 — แก้ log ตัดกลางข้อความ + MALFORMED_FUNCTION_CALL
+- Logger.android: logDebug แบ่ง chunk 3500 chars อัตโนมัติ ([part x/y]) กัน logcat จำกัด ~4000 bytes/บรรทัด — log ยาวไม่ถูกตัดกลางข้อความอีก
+- JarvisVM: "Response complete" log เนื้อคำตอบเต็ม (เดิม take(800))
+- GeminiService: finishReason=MALFORMED_FUNCTION_CALL ไม่โชว์ข้อความดิบ "⚠️ Response interrupted" ในแชทอีก — ถ้ายังไม่ได้ตอบอะไรเลยจะถือเป็น failure เข้า fallback chain อัตโนมัติ; ถ้าตอบไปแล้วจะ suppress เฉยๆ (log ไว้ตรวจได้)
+- Build :composeApp:assembleDebug ผ่าน
+
+## 2026-08-11 — Persist key/โมเดลที่ fallback ใช้ได้จริงลง settings
+- GeminiService: เพิ่ม callback onWorkingConfigChanged — เมื่อ fallback สลับ key/โมเดลแล้วตอบสำเร็จ จะแจ้ง caller (ยิงครั้งเดียวต่อ request)
+- JarvisViewModel: wire callback → insertSetting model_name/api_key + อัปเดต StateFlow ทันที
+- ผล: แชทถัดไป/เปิดแอปใหม่เริ่มจาก key+โมเดลที่ใช้งานได้จริง ไม่วนกลับไปเริ่มตัวที่ติดลิมิต (แก้เคส user เจอ: สลับ key รอบแรกแต่รอบ 2-3 กลับมาใช้ key เดิม)
+- Build :composeApp:assembleDebug ผ่าน
+
+## 2026-08-11 — ปรับความยาวคำตอบ/เสียงพูดหลังรายงาน
+- ToolExecutor analyze_and_display_report: เดิมสั่ง "สรุปสั้นๆ เท่านั้น" → แชทตอบนิดเดียว (650 chars) ทั้งที่ข้อมูลเยอะ; เปลี่ยนเป็นสรุปครบ ผลหลัก+ตัวเลขสำคัญ 3-5 จุด+จุดระวัง รวม 6-10 ประโยค (ไม่อ่านตารางซ้ำ)
+- VOICE RULE (LiveToolBridge + LiveGeminiService): 5-8 ประโยค → 8-12 ประโยค, ตัวเลขสำคัญ 2-4 → 3-5 จุด "เล่าให้ครบทุกส่วนสำคัญ" (user: live พูดน้อยเกินทั้งที่ข้อมูลเยอะ)
+- Build :composeApp:assembleDebug ผ่าน
+
+## 2026-08-11 — ออกแบบชุดทดสอบหมวด 12 (UI/UX)
+- สร้าง .obsidian-wiki/04_Tasks/Test_Plan_Section12_UIUX.md — 41 ข้อ 8 กลุ่ม (หน้าแชท, TopBar, Settings persist, หน้าสร้าง Alert, Automation, Tool/Trading screens, Live panel, Responsive)
+- รวม regression ทุกบั๊ก UI ที่เคยแก้: dropdown crash, toggle ไม่จำค่า, input เลื่อนไม่ได้, เมนูใหญ่เกิน, live เปลี่ยนเสียงเงียบ
+- ข้อ 3 (ตารางในแชท) จดเป็น input ให้ roadmap Rich Chat Rendering ไม่ถือ fail
+
+## 2026-08-11 — ปิดหมวด 12 UI/UX → checklist ครบ 15/15 🎉
+- user เทสเครื่องจริงผ่านทั้ง 8 กลุ่ม (A–H) ครบ 41 ข้อ ตาม Test_Plan_Section12_UIUX.md
+- มีจุดปรับปรุงเล็กๆ น้อยๆ — user สั่งข้ามไปก่อน
+- App_Review_Checklist.md อัปเดต: หมวด 12 = ✅ เสร็จสมบูรณ์ ทุกหมวดแล้ว
+
+## 2026-08-11 — Chart Dashboard (multi-pane LWC) + Rich Chat Rendering V1
+- Phase 1: asset ใหม่ chart_dashboard/ (index.html + dashboard_engine.js) — Lightweight Charts v5.1 multi-pane offline: layouts single/rsi/macd/rsi_macd/volume/full, overlays EMA20/50/200 + Bollinger, subpanes RSI(14)/MACD(12,26,9)/Volume/ATR, SMC zones (OB/FVG), header ราคา+%change, screenshot bridge
+- TradingChartScreen V2: สลับโหมด Dashboard ↔ TradingView ได้ด้วย chips, เลือก layout/overlay จาก control bar, persist chart_view_mode/chart_layout/chart_overlays ลง settings
+- JarvisViewModel: refreshChartCandles() ดึงแท่งเทียนผ่าน SmcApiService (incremental cache) + SMC analysis best-effort; sync ChartStateManager อยู่แล้ว
+- AI tool ใหม่ chart_dashboard_control (open/close/set_layout/set_symbol/set_interval/set_overlay/set_view) — AI ปรับ layout กราฟเองได้ทั้งแชทและ Live (LIVE_RULES ข้อ 10, CHAT_RULES ข้อ 6)
+- Phase 2: MessageBubble ใหม่ — parse markdown table → ตารางจริง (header สี cyan, zebra, scroll แนวนอน), ```chart fence → ChartCard แตะเปิดกราฟเต็มจอด้วย config นั้น (openChartWithConfig)
+- Build :composeApp:assembleDebug ผ่าน
+
+## 2026-08-11 — Chart Dashboard: pageReady fix + Phase 3 mini-chart ในแชท
+- แก้บั๊ก dashboard ไม่มีแท่งเทียน (เหลือแต่กล่อง FVG): `evaluateJavaScript` ยิงก่อน WebView โหลดเสร็จเลยถูกทิ้งเงียบๆ → guard ทุก LaunchedEffect ด้วย `LoadingState.Finished` ใน TradingChartScreen.DashboardWebView
+- Phase 3: ฝัง live mini-chart (Lightweight Charts engine เดียวกับ dashboard, สูง 220dp) ลงใน chart card ในแชทเลย ไม่ใช่แค่การ์ดลิงก์
+  - MessageBubble รับ `liveChartSymbol`/`liveChartCandles` จาก App.kt (viewModel.chartCandles/chartSymbol)
+  - symbol ตรงกัน (normalize: ตัด prefix/exchange, `=X`) + มี candles → แสดงกราฟสด + badge LIVE; ไม่ตรง → fallback การ์ดลิงก์แบบเดิม
+  - mini chart guard pageReady เช่นกัน + แตะเปิดเต็มจอ
+- Build: `:composeApp:assembleDebug` BUILD SUCCESSFUL
+
+## 2026-08-12 — แก้ overlay เกินบน chart dashboard/mini-chart
+- ปัญหา: สั่ง "เปิดกราฟ XAUUSD 1h ใส่ RSI กับ MACD" แต่กราฟมี FVG + EMA50 ติดมาด้วย
+- สาเหตุ: (1) parseChartConfig default overlays=ema50 (2) dashboard วาด SMC ทุกครั้งที่มี smcResult (3) action open ไม่รีเซ็ต overlay ค้างจากครั้งก่อน
+- แก้: default overlays = ว่าง (ทั้ง ViewModel, chart card, tool open ไม่ระบุ=ปิดทั้งหมด), FVG/OB กลายเป็น overlay "smc" ต้องเปิดเอง (chip SMC บน control bar, set_overlay รองรับ smc), refreshChartCandles ดึง SMC เฉพาะตอนเปิด smc, mini-chart ในแชทวาด SMC เฉพาะเมื่อ config ขอ
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-12 — ขยายการวาด SMC: Liquidity + Premium/Discount/Equilibrium
+- helper ใหม่ `ui/components/SmcZonesJson.kt` (buildSmcZonesJson) ใช้ร่วมกันทั้ง dashboard เต็มจอและ mini-chart ในแชท
+- วาดเพิ่มจากเดิม (OB/FVG): Liquidity zones เป็นเส้น dashed EQL(เขียว)/EQH(แดง) พร้อม ★ ตาม confluence (สูงสุด 8 เส้น), เส้น Premium ≥ (แดงจาง), EQ (ส้ม), Discount ≤ (เขียวจาง)
+- dashboard_engine.js: drawSMCInternal รองรับ zone แบบ line (line=true + price)
+- แสดงเฉพาะตอนเปิด overlay smc เหมือนเดิม; asset copy ไป commonMain resources แล้ว
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-12 — Tool ใหม่ trading_smc_flow (port จาก TV "SMC Flow System v2") + overlay EMA14/60
+- SmcFlowAlertProvider.kt (ใหม่): port ส่วนสัญญาณของ Pine — UT Bot (key=2.0, ATR6, trailing stop), EMA14/60 cross + แท่งยืนยัน, 3-Bar Reversal, SMC Confluence (trigger≤3แท่ง + structure bias จาก SmcApiService + recipe A=OB / B=FVG+OB / C=Fib golden 0.618-0.786), Auto Fib levels จาก swing structureHigh/Low (คำนวณอย่างเดียว ไม่วาด)
+- ใช้ได้ 3 ทาง: (1) AI chat tool trading_smc_flow (registry+definition+executor) (2) alert background (JarvisAutomationService dispatch) (3) ปุ่ม Auto Test + preset ลัด 5 อัน (SMC Flow BUY/SELL, EMA14/60 ตัดขึ้น/ลง, เข้า Fib Golden Zone)
+- AlertFieldCatalog เพิ่ม SMC_FLOW (18 fields) + AI tool description อัปเดต (กันตั้งเงื่อนไขมั่ว)
+- กราฟ: เพิ่ม overlay ema14 (เหลือง) / ema60 (ฟ้า) — JS OVERLAY_DEFS + chips + valid sets + chart_dashboard_control enum (+param overlays สำหรับ open)
+- แหล่งอ้างอิง Pine: .obsidian-wiki/05_Refs/SMC_Flow_System_v2.pine
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-12 — Chart open = full reset + mini-chart auto-load + persona chart rules
+- ปัญหา 1: "เปิดกราฟ XAUUSD 1h ใส่ smc" แต่กราฟค้าง RSI+MACD จากครั้งก่อน → แก้ action=open รีเซ็ตทั้งจอ: ไม่ระบุ layout=single, ไม่ระบุ overlays=ปิดหมด (เดิมรีเซ็ตแค่ overlay)
+- ปัญหา 2: chart card ในแชทเป็นแค่ข้อความ → AI ใช้ set_overlay แทน open และไม่แนบ chart fence → แก้ persona ทั้ง CHAT_RULES#6 และ LIVE_RULES#10: "เปิดกราฟ ... ใส่ X" = open เสมอ (map rsi/macd→layout, ema*/bb/smc→overlays), ทุกคำตอบเกี่ยวกับกราฟ/ผลวิเคราะห์ต้องแนบ chart fence เสมอ
+- เพิ่ม ensureChartData(symbol, interval) ใน ViewModel + onChartCardShown ใน MessageBubble — การ์ดปรากฏแต่ข้อมูลไม่ตรง → โหลด candles เงียบๆ ให้ mini-chart ขึ้นเอง (ไม่เปิดหน้ากราฟ)
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-12 — เติมค่า null ของ trading_technical_analysis จากแท่งเทียน local
+- ปัญหา (log 09:00): TV scanner คืน null เพียบ (EMA20/50/200, MACD hist, Stoch, CCI, AO, BB upper/lower/width, RSI prev, +DI/-DI) และ TF 1D ได้ N/A ทั้งแถว — เดิมทราบตั้งแต่ 2026-08-04 แต่ยังไม่ได้เติม
+- IndicatorAlertProvider เพิ่มคำนวณ: rsi14_prev, AO (SMA5-34 ของ median), ADX/+DI/-DI (Wilder 14)
+- TradingToolExecutor.executeTechnicalAnalysis: fillTaFromLocal — key ที่ scanner null/N/A เติมด้วยค่า local (RSI, MACD ครบ, Stoch, CCI, AO, EMA, BB ครบ, ATR, ADX/DI, close) — signal/score ของ scanner คงเดิม
+- JarvisAutomationService.fetchTechnicalAnalysisWithFallback: เติม null หลัง scanner สำเร็จ + ถ้า scanner ล้มทุก exchange ใช้ local ทั้งชุด (alert ที่อิง TA จะไม่ ERR อีก)
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-12 — แก้ 3 บั๊กจากการทดสอบ Chart/Rich Chat
+- chart_dashboard_control ไม่สลับหน้าจอไป Chart Dashboard อัตโนมัติอีกต่อไป (open/set_layout/set_symbol/set_interval/set_overlay/set_view) — กราฟแสดงเป็นการ์ด mini-chart ในแชท ผู้ใช้แตะการ์ดเองเพื่อเปิดเต็มจอ (JarvisViewModel.applyChartControl; openChart/openChartWithConfig ยังเปิดเต็มจอตามเดิมเมื่อผู้ใช้กดเอง)
+- แก้ Live mode: custom tool (เช่น custom_gold_check) ตอบกลับแล้วโมเดลพูด "รอสักครู่" แล้วจบ turn โดยไม่เรียก tool ต่อ → เพิ่มข้อความ STRICT ท้าย executeCustomSkill ห้ามพูดก่อน/ห้ามจบ turn จนกว่าจะเรียก tool ครบ (ToolExecutor.kt)
+- แชทตอบสั้นเกิน (ก้อนเดียว) หลังอัปเดต Rich Chat → เสริม CHAT_RULES#5 สั่งตอบยาวครบทุกหัวข้อหลายย่อหน้า ห้ามสรุปย่อหน้าเดียวสำหรับงานวิเคราะห์ (JarvisPersona.kt)
+- LIVE_RULES#10 ปรับข้อความยืนยันกราฟเป็น "แตะการ์ดกราฟในแชทเพื่อดูเต็มจอ" ให้ตรงพฤติกรรมใหม่
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — แก้ User Identity กลับเป็นค่า default "ผู้ใช้"
+- Root cause 1: JarvisPersona.loadFromCoreMemory ไม่มี caller เลย → เปิดแอปใหม่ identity เป็น default เสมอ (AI ดูเหมือนจำได้เพราะ core memory context ถูก inject เข้า prompt แยกต่างหาก) → เพิ่มโหลดจาก Core Memory ตอนท้าย loadSettings (JarvisViewModel)
+- Root cause 2: Settings save → JarvisViewModel.updateIdentity แก้เฉพาะ in-memory ไม่ persist → เพิ่ม persist ลง Core Memory ทุก key ผ่าน memoryManager.setCoreMemory
+- ผลกระทบเดิม: ถ้า AI เรียก identity_update หลัง restart (persona ยังเป็น default) onUpdateIdentity จะเขียน map ทั้งก้อนทับ user_name ที่ตั้งไว้ใน DB ด้วย "ผู้ใช้" — แก้ต้นทางด้วย startup load แล้ว
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — แก้ live mode สั่งเปิดกราฟแล้วไม่มีการ์ดกราฟในแชท
+- ต้นเหตุ: โมเดล live ตอบเป็นเสียง ห้าม markdown (LIVE_RULES) จึงไม่มี ```chart fence ให้ MessageBubble สร้างการ์ด
+- แก้: setChartControlHandler ใน JarvisViewModel เมื่อ action=open ระหว่าง live session (_isListening) ให้ append Message("model", chart fence) เองตาม state กราฟปัจจุบัน — chat mode ไม่ซ้ำเพราะโมเดลแนบ fence มาเอง
+- ยืนยันจาก log: custom_gold_check ใน live ทำงานครบ (deep suite + smc + TA ทุก TF → analyze_and_display_report → Turn Complete ปกติ)
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — แก้ mini-chart การ์ดเก่าในแชทเปลี่ยน/หายตามการ์ดใหม่
+- ต้นเหตุ: การ์ดทุกใบอ่าน candles/smc จาก state กลาง (liveChartCandles/liveChartSmcResult) และเช็คแค่ symbol (ไม่เช็ค interval) → พอสั่งเปิดกราฟใหม่ การ์ดเก่า recompose ด้วยข้อมูลใหม่
+- แก้: เพิ่ม chartCardCache ใน JarvisViewModel แยกข้อมูลตาม key "SYMBOL/interval" + ensureChartCardData(symbol, interval, needsSmc) โหลด candles+SMC เฉพาะการ์ดนั้น ไม่แตะ state กราฟหลัก
+- MessageBubble: เปลี่ยน param จาก liveChart* เป็น chartCardCache map; ChartCard อ่าน entry ของตัวเอง; App.kt wire ใหม่
+- Chart Dashboard เต็มจอ (openChartWithConfig) ไม่เปลี่ยน — สลับการ์ดไปมายังถูกต้องตามเดิม
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — แก้ mini-chart จาก live mode หายหลังปิด/เปิดแอป
+- ต้นเหตุ: การ์ดกราฟที่ระบบสร้างให้ตอน live (chart fence) append เข้า _messages ใน memory อย่างเดียว ไม่ได้ storeMessage ลง DB → ประวัติแชทโหลดจาก DB ตอนเปิดแอปใหม่จึงไม่มีการ์ด
+- แก้: persist fence ลง DB ผ่าน memoryManager.storeMessage ด้วย (JarvisViewModel chart control handler)
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — Strategy Signals v1: แปลงกลยุทธ์จาก Strategy Library (Quantpedia) มาคำนวณในเครื่อง
+- ใหม่: automation/StrategySignalProvider.kt — 5 กลยุทธ์จาก OHLCV ล้วน (TV candles 300 แท่ง): tsmom (ROC20), trend (EMA50/200+ราคา vs EMA200), reversal (RSI14+BB20,2), donchian (breakout ช่อง 20 แท่ง), w52high (proximity สูงสุดของข้อมูล) + consensus_signal/score
+- Tool ใหม่ trading_strategy_signal (symbol, interval, strategy=all|tsmom|trend|reversal|donchian|w52high) — wire: ToolRegistry (2 list), TradingToolDefinitions (declaration + alert docs 2 จุด + tool_name param), TradingToolExecutor, JarvisAutomationService dispatch, AlertDataTester step 4.6
+- Alert: AlertFieldCatalog.STRATEGY (18 fields) + presets 4 อัน (Consensus STRONG_BUY/STRONG_SELL, Donchian Breakout ขึ้น/ลง)
+- Chart: overlay ใหม่ "donchian" (DC20 upper/mid/lower) ใน dashboard engine JS (+copy ไป commonMain resources), chip DC20 ใน TradingChartScreen, valid sets ทุกจุด (JarvisViewModel x4, ToolRegistry enum, loadSettings), mini-chart (MessageBubble)
+- Persona: CHAT_RULES#7 รู้จัก trading_strategy_signal + map overlay donchian; LIVE_RULES#10 เพิ่ม donchian
+- Build: assembleDebug ผ่าน
+
+## 2026-08-12 — ทดสอบ trading_strategy_signal ผ่านทั้ง chat + live
+- ผู้ใช้ทดสอบ "ขอสัญญาณกลยุทธ์ xauusd 15m strategy all" ทั้ง 2 โหมด — tool คืนค่าครบ 5 กลยุทธ์ + consensus (chat ตอบ 1309 chars, live เรียก native tool + Turn Complete ปกติ)
+
+## 2026-08-12 Signal Markers (overlay "signals")
+- เพิ่ม SignalMarkerProvider (automation/) คำนวณ marker ย้อนหลัง edge-triggered 8 ชนิด: MOM(ROC20 flip), TR(EMA50/200 cross), REV(RSI+BB), DC(Donchian breakout), 52H, E(EMA14/60), UT(UT Bot flip), 3BR — จำกัด 12/ชนิด ไม่ทำ SMC Confluence (หนักเกิน)
+- JS engine: overlay "signals" + state.signalMarkers + applyMarkers() ผ่าน LightweightCharts v5 createSeriesMarkers + bridge drawMarkers(json) + legend "◆ Signals N"
+- ViewModel: chartSignalMarkers StateFlow, refreshChartCandles คำนวณเมื่อเปิด signals, toggle/set_overlay ดึงอัตโนมัติ, chartCardCache เปลี่ยน Pair→Triple(candles, smc, markers) + ensureChartCardData(needsMarkers)
+- UI: chip SIG ใน TradingChartScreen, DashboardWebView+MiniChart ยิง drawMarkers, App.kt wire chartSignalMarkers
+- ToolRegistry enum overlay +signals, persona CHAT#6/LIVE#10 รู้จัก signals
+- Build assembleDebug ผ่าน
+
+## 2026-08-13 Signal Alert System (ชั้น 1-3)
+- SignalAlertProvider (ใหม่): ตรวจ edge สัญญาณใหม่เฉพาะ "แท่งปิดล่าสุด" (n-2) จาก 8 กลยุทธ์ โดย reuse SignalMarkerProvider.compute() (refactor fetch→compute แชร์โค้ดกัน) — payload: signal_buy/signal_sell (0/1), signal_event, strategy, side, entry/sl/tp/rr, reason (ไทย), context snapshot (trend/RSI/BB/ATR/DC20)
+- TP/SL เฉพาะกลยุทธ์: MOM/TR/E=2xATR14→3xATR14, UT=2xATR6→2R, DC=1.5→2.5xATR14, REV=1xATR→BB basis, 3BR=จุดสุดแท่งกลาง→2R, 52H=1.5→2xATR14
+- Job type trading_signal_alert: เชื่อม checkJob ใน JarvisAutomationService + AlertFieldCatalog.SIGNAL_ALERT (UI dropdown อัตโนมัติ + AI create ผ่าน automation_manage_alerts validate ผ่าน)
+- fireJobAlert แยก prompt พิเศษสำหรับ signal alert: ส่ง payload ครบให้ AI quick-check (เฉพาะข้อมูลที่ให้ ไม่วิเคราะห์เพิ่ม ~10 วิ) fallback body แสดง entry/SL/TP เองถ้า AI ปิด
+- Dedup ใช้กลไก is_triggered เดิม (edge อยู่ 1 แท่ง → reset อัตโนมัติเมื่อแท่งใหม่ไม่มีสัญญาณ)
+- Build assembleDebug ผ่าน
+
+## 2026-08-13 Signal Stats + Alert 2 โหมดส่ง
+- SignalMarkerProvider.compute(candles, maxPerKind) — stats ใช้ uncapped ได้
+- SignalAlertProvider.fetchStats(symbol@tf, strategy): backtest สัญญาณย้อนหลังทุกจุด จำลอง TP/SL เฉพาะกลยุทธ์ (ชน SL ก่อน=แพ้ -1R, TP ก่อน=ชนะ +winR, แท่งชนทั้งคู่ถือแพ้ conservative, ค้าง=timeout คิด R จากปิดสุดท้าย) → win-rate/avgR ต่อกลยุทธ์
+- Tool ใหม่ trading_signal_stats (def + ToolRegistry 2 จุด + executor) + persona rules #8/#9
+- โหมดส่ง alert ต่อ job: AutomationCondition.delivery ("ai" default | "direct") เก็บใน condition_json (ไม่ต้อง migrate DB)
+  - direct: ไม่เรียก AI → notification สั้น (เหตุผล/Entry/SL/TP/RR) + insert เข้า ChatMessage โดยตรง (JarvisMemoryManager.storeMessage, metadata type=signal_alert_direct)
+  - เชื่อมครบ: Orchestrator onManageAlerts(delivery) → tool def 2 จุด → ViewModel.createAlert → App.kt → AutomationScreen (dropdown ส่วนที่ 4 + hint เมื่อเลือก Signal Alert) + presets 📡 Signal BUY/SELL ใหม่
+- Build assembleDebug ผ่าน
+
+## 2026-08-13 Review การคำนวณกลยุทธ์ทั้งหมด
+- StrategySignalProvider (live state tool): ถูกต้องตามหลัก ไม่แก้ (TSMOM ROC20, Trend close>EMA200+EMA50>EMA200, Reversal RSI<30+BB lower, Donchian ไม่รวมแท่งปัจจุบัน, W52 proximity, consensus STRONG >= +3)
+- SignalMarkerProvider แก้ 3 จุด:
+  - REV: level-triggered (mark ทุกแท่ง RSI<30+close<=BB lower) -> edge (bullNow && !bullPrev) กัน marker ซ้ำรัว/alert ผิดจังหวะ
+  - DC: lastSide อัปเดตเฉพาะตอน mark ทำ breakout ซ้ำฝั่งเดิมหลุด -> sides[] ทุกแท่ง + state-change edge
+  - 52H: state-change edge เหมือน DC + สี SELL แยก (#FF8A65)
+- TP/SL SignalAlertProvider.computeTpSl review ผ่าน ไม่แก้ (MOM/TR/E=2xATR14->3x, UT=2xATR6->2R, DC=1.5->2.5xATR, REV=1xATR->BB basis, 3BR=จุดสุดแท่งกลาง-0.2ATR min 0.5ATR->2R, 52H=1.5->2xATR)
+- BUILD SUCCESSFUL 1m49s
+
+## 2026-08-13 แก้ Signal Alert เด้งทันทีตอนสร้าง
+- ปัญหา: สร้าง alert ขณะ marker ค้างในแท่งปิดล่าสุด → ยิงแจ้งทันที 1 ครั้งทั้งที่สัญญาณเกิดก่อนตั้ง
+- SignalAlertProvider: เพิ่ม field signal_buy_id / signal_sell_id = timestamp(ms) ของแท่งที่เกิด edge ("0"=ไม่มี)
+- ตอนสร้าง alert (ทั้ง 2 เส้นทาง: JarvisViewModel.createAlert และ Orchestrator automation_manage_alerts) แปลง signal_buy/sell >= 1 → signal_*_id > <เวลาที่สร้าง ms> อัตโนมัติ → ยิงเฉพาะสัญญาณใหม่หลังสร้าง
+- อัปเดต hint ใน AlertFieldCatalog
+- Alert เก่าที่สร้างก่อนแพตช์นี้ยังใช้ semantics เดิม — ลบแล้วสร้างใหม่ถ้าต้องการพฤติกรรมใหม่
+- BUILD SUCCESSFUL 2m11s
+
+## 2026-08-13 ระบบบันทึก Signal + สถิติ TP/SL จริง + UI delivery
+- UI แก้ไข Alert (AlertEditDialog): เพิ่มตัวเลือกโหมดส่ง "AI วิเคราะห์ก่อนแจ้ง" / "แจ้งตรง" (OutlinedButton 2 ทางเลือก + hint)
+- DB: ตาราง SignalAlertRecord (job_id/symbol/side/strategy/reason/entry/sl/tp/rr/bar_time/delivery/outcome OPEN|TP|SL/hit_at/hit_price/result_r) + migration 3.sqm + queries (insert/dup-check/open/close/since)
+- AutomationManager: recordSignalAlert (กันซ้ำด้วย job_id+bar_time), getOpenSignalAlerts, closeSignalAlert, getSignalAlertsSince
+- JarvisAutomationService: fireJobAlert บันทึก signal ทุกครั้งที่ยิง (ทั้งโหมด ai/direct); trackSignalOutcomes() ทุก cycle — ไล่แท่งหลังจุดสัญญาณ ชน SL ก่อน=SL(-1R), ชน TP=+RR, แท่งชนทั้งคู่ถือ SL, cache candles ต่อ symbol/cycle
+- Tool trading_signal_stats: เพิ่ม source=live (range=today/7d/all) อ่านสถิติจริงจาก DB — รายการ signal + ผล TP/SL + สรุปรวม/รายกลยุทธ์; executor ใช้ JarvisDatabaseHolder
+- อัปเดต persona rule #8 ให้ AI รู้จัก source=live
+- BUILD SUCCESSFUL 2m8s
+
+## 2026-08-14 — Setup Checklist
+- เปลี่ยน section Permissions ใน SettingsDialog เป็น Setup Checklist 6 ข้อ: การแจ้งเตือน / ไมค์ / กล้อง / Overlay / All-files / Battery optimization
+- data class SetupCheckItem (commonMain) รับสถานะ+onFix จาก MainActivity; สถานะอัปเดตทุก onResume ผ่าน mutableStateMap
+- ปุ่ม "ตั้งค่า" พาไปหน้าระบบที่เกี่ยวข้อง (APP_NOTIFICATION_SETTINGS, runtime permission, OVERLAY, ALL_FILES, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+- BUILD SUCCESSFUL
+
+## 2026-08-14 — Normalize signal alert ให้ตรงกันทุกเครื่อง
+- สาเหตุ 2 เครื่องต่างกัน: AI เครื่อง B เลือก tool trading_technical_analysis field signal contains BUY (TA signal) แทน trading_signal_alert → 🎯 ต่างกัน + notification สั้น (ไม่มี Entry/SL/TP/RR/ATR เพราะ payload ครบเฉพาะ trading_signal_alert)
+- Fix: onManageAlerts create แปลงอัตโนมัติ trading_technical_analysis.signal contains/== BUY|SELL → trading_signal_alert signal_buy/signal_sell >= 1 (ได้ baseline กันสัญญาณเก่าเด้งด้วย)
+- BUILD SUCCESSFUL
+
+## 2026-08-14 — แก้ Setup Checklist: ปุ่ม Battery Optimization กดแล้วไม่ไปหน้าตั้งค่า
+- สาเหตุ: AndroidManifest ไม่ได้ประกาศ `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` → intent `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` ถูกระบบเมินเงียบๆ (ไม่ throw ทำให้ catch/fallback เดิมไม่ทำงาน) — พบบนเครื่อง Honor
+- Fix 1: เพิ่ม `<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />` ใน AndroidManifest.xml
+- Fix 2: MainActivity buildSetupChecks (รายการ battery) — เช็ก `resolveActivity` ก่อนสั่ง startActivity และไล่ fallback 3 ระดับ: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS → IGNORE_BATTERY_OPTIMIZATION_SETTINGS → APPLICATION_DETAILS_SETTINGS
+- BUILD SUCCESSFUL (debug APK 19:39)
+
+## 2026-08-14 — แก้ Alert 2 ข้อ: โหมด AI ไม่ส่งเข้าแชท + เสียงแจ้งเตือนแบบหุ่นยนต์
+- Fix #1 (ไม่เข้าแชท): JarvisAutomationService.fireJobAlert โหมด delivery="ai" เดิมส่งแค่ notification — เพิ่ม storeMessage เข้าแชทเหมือนโหมด direct (metadata type=signal_alert_ai) → เปิดแชทเห็นเหตุผล/Entry/SL/TP/RR
+- Fix #2 (เสียงหุ่นยนต์/สะกดคำอังกฤษ): เดิมใช้ Android TextToSpeech th-TH ที่สะกดคำอังกฤษทีละตัว (R-e-v-e-r-s-a-l) — เพิ่มเส้นทางเสียงแบบคนด้วย Gemini TTS:
+  - speakAlert(): sanitizeForSpeech (ตัด emoji/markdown) → geminiTtsPcm (model gemini-2.5-flash-preview-tts, voiceName=Aoede, responseModalities=AUDIO → PCM16 mono 24kHz) → playPcmBlocking (AudioTrack stream รอจนจบ + timeout 60s) → fallback Android TTS ถ้าไม่มี api_key/ล้มเหลว
+  - เปลี่ยนจุดเรียก speak() ทั้ง 3 แห่ง (fireScheduledTask / direct / ai) เป็น speakAlert()
+- แก้ compile: import kotlinx.serialization.json.* + io.ktor.http.* และใช้ playbackHeadPosition (เดิมพิมพ์ playHeadPosition)
+- BUILD SUCCESSFUL (debug APK 23:05)
+
+## 2026-08-15 — แก้ Alert ไม่เข้าแชท (root cause ตัวจริง) + วินิจฉัย notification 2 เครื่องต่างกัน
+- Root cause แชท: service แทรกข้อความลง SQLite เท่านั้น แต่หน้าแชทอ่าน DB ครั้งเดียวตอน loadHistory() ตอนเปิดแอป — ข้อความที่มาระหว่างเปิดแชทอยู่ไม่แสดง
+- Fix: เพิ่ม AlertChatBus (commonMain, MutableSharedFlow in-process) — service push ข้อความเข้า bus + persist DB พร้อมกัน ผ่าน helper pushToChat(); JarvisViewModel collect แล้ว append เข้า _messages ทันที
+- ครอบคลุม 3 จุด: fireJobAlert โหมด ai, โหมด direct, fireScheduledTask (เดิม scheduled task ไม่ลงแชทเลย)
+- วินิจฉัย notification ยาว/สั้น 2 เครื่อง (จาก screenshot 01:10): เครื่อง A = AI quick-check สำเร็จ (ข้อความสนทนาไทย), เครื่อง B = fallback body สั้น (generateAiText คืน null) — ไม่ใช่ APK ต่างกัน; สาเหตุที่เป็นไปได้: toggle alert_ai_summary ปิดอยู่บน B หรือ AI call ล้มเหลว (model_name=gemini-3.1-pro อาจใช้ generateContent ไม่ได้/quota) — debug ด้วย logcat grep "AI wake-up"
+- BUILD SUCCESSFUL (debug APK)
+
+## 2026-08-15 — การ์ด Signal ในแชท + แก้ AI wake-up ไม่ fallback (404) + ลดดีเลย์เสียง
+- การ์ดแชท: fireJobAlert ส่งข้อความแชทเป็น markdown card (MessageBubble รองรับ table/bold อยู่แล้ว) — header 🟢BUY/🔴SELL + symbol, กลยุทธ์, ตาราง Entry/TP/SL/RR/ATR14, เหตุผล, ท้ายการ์ดมี "JARVIS quick-check" (เฉพาะโหมด ai ที่ AI ตอบสำเร็จ) — ใช้ทั้งโหมด ai/direct; SignalAlertProvider เพิ่ม field signal_atr
+- Fix 404 ไม่ fallback: generateAiText เดิมเรียก model_name เดียว (เครื่อง B ตั้ง gemini-3.1-pro → 404 "not supported for generateContent" → notification สั้น) — ใหม่ไล่ ModelConfig.GEMINI_FALLBACK_MODELS จนสำเร็จ และ persist โมเดลที่ใช้ได้จริงกลับลง settings
+- ลดดีเลย์เสียงแจ้งเตือน: เพิ่ม buildSignalSpeech() — พูดเฉพาะประโยคสั้น (ฝั่งซื้อ/ขาย + symbol ภาษาไทย + TF + Entry/SL/TP) แทนข้อความยาวทั้งก้อน ทำให้ Gemini TTS synthesize เร็วขึ้นมาก; notification/แชทยังใช้ข้อความเต็มเหมือนเดิม
+- หมายเหตุเรื่องดีเลย์: Live mode (gemini-3.1-flash-live) เป็น streaming realtime จึงไม่ดีเลย์ ส่วน alert voice เป็น one-shot cloud TTS ต้องรอ synthesize ครบก่อนเล่น → ดีเลย์ 2-5 วิเป็นปกติ; Android TTS ไม่ดีเลย์เพราะ synthesize ในเครื่อง
+- BUILD SUCCESSFUL (debug APK)
+
+## 2026-08-15 — การ์ดในแชทสำหรับ Alert ทุกประเภท (ไม่ใช่แค่ signal)
+- เพิ่ม buildAlertChatCard() ใน JarvisAutomationService — alert ทั่วไป (ราคา/indicator/SMC/sentiment ฯลฯ) ส่งเข้าแชทเป็นการ์ด: header 🎯 + ชื่อ alert + symbol, ตาราง เงื่อนไข (parse จาก condition_json แปลง GT/GTE → > / >=) / ค่าปัจจุบัน / ข้อมูลประกอบจาก provider (สูงสุด 8 แถว ตัด error/ค่าว่าง), ท้ายการ์ด JARVIS quick-check (เฉพาะโหมด ai ที่ AI ตอบสำเร็จ)
+- ใช้ทั้งโหมด ai และ direct — เดิม alert ที่ไม่ใช่ signal ส่ง text ยาวติดกันอ่านยาก
+- Scheduled task ในแชทมี header ⏰ **ชื่อ task** นำหน้า
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — ตัวเลือกเสียงแจ้งเตือน AI/เครื่อง + การ์ด 3D ในแชท
+- เสียงแจ้งเตือนเลือก engine ได้ (สาเหตุ: ทดสอบ 2 เครื่องดีเลย์ 10-20 วิ — log เครื่อง B แสดง chain = generateAiText timeout 20s→retry 45s บนเน็ตช้า + TTS cloud ต่อท้าย):
+  - setting ใหม่ `alert_voice_engine` = "ai" (Gemini TTS เสียงเหมือนคน มีดีเลย์) | "device" (Android TTS ทันที ไม่มีดีเลย์) — default "ai"
+  - speakAlert() เช็ก setting ต้นฟังก์ชัน: device → Android TTS ทันที ข้าม cloud; ai → เส้นทาง Gemini TTS เดิม (fallback Android TTS เมื่อล้มเหลว)
+  - ViewModel: _alertVoiceEngine StateFlow + setAlertVoiceEngine() (validate ai/device + persist) + โหลดกลับตอน init
+  - UI: AutomationScreen AlertSettingsCard เพิ่มแถว chip 2 ตัว (✨ เสียง AI (สวย/ช้านิด) / ⚡ เสียงเครื่อง (ทันที)) แสดงเมื่อเปิดเสียงพูด — plumb ผ่าน App.kt
+  - คำอธิบายที่ตอบผู้ใช้: Live mode (gemini-3.1-flash-live) เป็น websocket streaming realtime รับ text/image/audio/video และส่งเสียงออกได้จริง แต่เปิด session ต่อ alert หนักกว่า one-shot TTS จึงยังไม่เปลี่ยน
+- การ์ด alert ในแชทแบบ 3D (ผู้ใช้ว่าตาราง markdown เรียบไป + field เยอะเกิน):
+  - AlertChatBus.tryEmit รับ metadata (data class ChatPush) — pushToChat ส่ง metadata เข้า bus ด้วย (เดิมส่งแค่ DB)
+  - Message data class เพิ่ม field metadata; loadHistory + collector map metadata มาด้วย
+  - JarvisAutomationService เพิ่ม conditionText() (ใช้ร่วมกัน) + signalChatMeta()/alertChatMeta() สร้าง JSON {kind:"signal"|"alert", side/symbol/entry/tp/sl/rr/atr/reason/summary หรือ name/condition/current}
+  - buildAlertChatCard ตัด provider dump 8 แถวออก เหลือเฉพาะ เงื่อนไข + ค่าปัจจุบัน (field เฉพาะจำเป็นต่อเงื่อนไข)
+  - MessageBubble: parse metadata ก่อน render — kind=signal → SignalAlertCard3D (ป้ายเขียว BUY/แดง SELL + gradient + shadow 12dp + field Entry/TP/SL/RR/ATR14 + เหตุผล + quick-check), kind=alert → GenericAlertCard (accent cyan + เงื่อนไข/ค่าปัจจุบัน); ไม่มี metadata → markdown เดิม (backward compatible กับข้อความเก่า)
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — Pipeline trace log ละเอียดของ AutomationService + แก้ AI summary แถม ```chart fence
+- ผู้ใช้พบเครื่อง B: เลือกเสียง Gemini TTS แต่ได้ยินเสียง Android TTS (คือ fallback path — TTS ล้มเหลว แต่ log เดิมไม่บอกขั้นไหนพัง) และ quick-check มีข้อความดิบ ```chart {...}``` หลุดมาในการ์ด (โมเดลแหกคำสั่งห้ามใช้ markdown)
+- เพิ่ม pipeline trace log ครบทุกขั้นตอนตั้งแต่เงื่อนไขถูกต้อง (grep "AutomationService" แล้วดู emoji นำหน้า):
+  - 🔔 FIRE: ชื่อ job / tool / symbol / ค่าที่ trigger / mode (ai|direct) / toggle aiSummary / voice on-off + engine / โมเดลหลัก — บรรทัดเดียวเห็น config ทั้ง chain
+  - 🧠 AI summary: start (fallback chain ที่จะไล่), OK (model ที่สำเร็จจริง + เวลา ms + ความยาว), FAILED ต่อโมเดล (เวลา + error), skipped (toggle ปิด / ไม่มี api_key), FAILED ทุกโมเดล → ใช้ template
+  - 🔊 speakAlert: engine ที่เลือก (ai|device) + ttsReady + ความยาวข้อความ, ผลลัพธ์ชัดเจน: "→ Android TTS (device mode)", "→ Gemini TTS OK N bytes (N ms)", "Gemini TTS FAILED ... → fallback Android TTS", "ไม่มี api_key → Android TTS"
+  - 💬 pushToChat: kind/metadata + busEmitted (false = แชทไม่ได้เปิดอยู่ แต่ persist DB ปกติ) + bodyLen
+- แก้ข้อความผิดปกติ: เพิ่ม stripCodeFences() — ตัด ```...``` ทุกก้อนออกจาก aiText ก่อนใช้ (การ์ด/notification/เสียง) + เสริม intentAddon "ห้ามใส่ code block หรือ chart"
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — ประหยัดโควต้า Gemini TTS (จำกัดปริมาณการใช้)
+- ผู้ใช้ชี้ประเด็น Gemini TTS จำกัดปริมาณการใช้ (free tier ต่ำ / tier 1 ~15 RPM) — log จริงเครื่อง B: TTS ข้อความ 204 ตัวอักษร = audio 918 KB (~19 วิ) synthesize 14 วิ ต่อ alert เดียว
+- แก้ 3 จุด:
+  1. alert ทั่วไป (โหมด ai) เดิมพูด aiText เต็ม ~200+ ตัวอักษร → เปลี่ยนเป็น buildAlertSpeech() template สั้น ~40-60 ตัวอักษร ("แจ้งเตือน X ทองคำ เข้าเงื่อนไขแล้ว ค่าปัจจุบัน Y") — ลดต้นทุนเสียง ~70% ต่อ alert (quick-check เต็มยังอยู่ในการ์ดแชท/notification)
+  2. default alert_voice_engine เปลี่ยนจาก "ai" → "device" ทั้ง 4 จุด (ViewModel field, init load, speakAlert ifBlank, UI param) — ผู้ใช้ใหม่ได้เสียงทันทีไม่จำกัด; ค่าที่เคยเลือกไว้ (ai) ไม่ถูกทับ เพราะ persist ใน settings แล้ว
+  3. label chip ใน AutomationScreen บอก trade-off ชัด: "⚡ เครื่อง (ทันที/ไม่จำกัด)" ขึ้นก่อน, "✨ AI (สวย/จำกัดโควต้า)"
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — เสียงแจ้งเตือนผ่าน Gemini Live API (ทดสอบเทียบ TTS vs Live)
+- ผู้ใช้ขอเพิ่ม gemini-3.1-flash-live + gemini-2.5-flash-native-audio-dialog เป็น engine เสียงแจ้งเตือน เพื่อเทียบดีเลย์/ความถูกต้องกับ Gemini TTS one-shot — และ Live ให้พูดข้อความยาวเต็ม (ไม่ใช้ template สั้นประหยัดโควต้า)
+- alert_voice_engine รองรับ 4 ค่า: "device" (Android TTS ทันที/ไม่จำกัด — default), "ai" (Gemini TTS one-shot REST + ข้อความสั้น), "live31" (gemini-3.1-flash-live), "live25" (gemini-2.5-flash-native-audio-dialog)
+- speakAlert(shortText, fullText): live* ใช้ fullText (AI quick-check เต็ม / body เต็ม), device/ai ใช้ shortText — จุดเรียกทั้งโหมด direct/ai ส่งทั้งคู่; scheduled task ใช้ body ทั้งคู่
+- speakViaLive() ใหม่ใน JarvisAutomationService — one-shot Live API: เปิด websocket BidiGenerateContent (reuse wire format Live* classes จาก LiveGeminiService) → setup (model + responseModalities=AUDIO + voice Aoede + system prompt "อ่านข้อความตรงๆ ห้ามตอบโต้") → รอ setupComplete → ส่ง clientContent(turnComplete=true, encodeDefaults=true) → รับ audio chunk เล่นทันทีแบบ streaming (LinkedBlockingQueue + AudioTrack MODE_STREAM บน Dispatchers.IO — ได้ยินตั้งแต่ chunk แรก ไม่รอ synthesize ครบเหมือน TTS) → turnComplete → close; timeout 90s; ล้มเหลว/ไม่ได้เสียง → fallback Android TTS
+- log เทียบประสิทธิภาพ: "Live session READY (N ms)", "Live first audio chunk (N ms)", "→ Live (model) OK N bytes (total, first chunk)" — เทียบกับ "Gemini TTS OK N bytes (N ms)" ได้ตรงๆ
+- UI AutomationScreen: chip "✨ AI" เลือกแล้วมี sub-chips 3 ตัว: 🗣 TTS / 🎙 Live 3.1 / 🎙 Live 2.5 Native
+- แก้ compile: import io.ktor.websocket.* / plugins.websocket.* แบบ wildcard (member close/readText ไม่ resolve ด้วย import เดี่ยว) และ break ใน let-lambda ไม่ได้ก่อน Kotlin 2.2 → ใช้ flag shouldClose
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — ผลทดสอบเสียง 4 แบบ + แก้ชื่อโมเดล Live ผิด
+- ผลทดสอบจริงเครื่อง B (13:02-13:07):
+  - live31/live25: พังเงียบๆ ใน ~0.4 วิ → fallback Android TTS (ไม่มี error log) — root cause: ชื่อโมเดลผิด ใช้ "gemini-3.1-flash-live" แทนที่ถูก "gemini-3.1-flash-live-preview" (เทียบ DEFAULT_LIVE_MODEL ใน ModelConfig ที่ Live mode ใช้จริง) และ native-audio ตัวเก่า "gemini-2.5-flash-preview-native-audio-dialog" ถูก deprecate แล้ว
+  - Gemini TTS (ข้อความสั้น 67 ตัวอักษร): OK แต่ยัง 14,058ms — พิสูจน์ว่าดีเลย์ TTS เป็น fixed overhead (synthesize+download) ไม่ได้แปรตามความยาวข้อความ
+  - device: ทันที (2ms หลัง push)
+  - AI summary: 2.7-5.2 วิ (gemini-2.5-flash)
+- แก้: live31 → gemini-3.1-flash-live-preview, live25 → gemini-2.5-flash-native-audio-preview-12-2025 (ตัวปัจจุบัน)
+- เพิ่ม log "Live ws closed: code=... reason=..." ทุกครั้งที่ websocket ปิด — กันเคส server ปิดเงียบๆ แล้ว debug ไม่เจออีก
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — รวมระบบเสียงแจ้งเตือน: ตัด Gemini TTS, chain Live เดียว, footer การ์ดบอก engine
+- หลังทดสอบ 4 engines จริง: ผู้ใช้ตัดสินใจตัด Gemini TTS one-shot ออก (ติดโควต้า + ดีเลย์คงที่ ~14 วิ) และรวม Live 3.1/Live 2.5 เป็นตัวเลือกเดียว
+- alert_voice_engine เหลือ 2 ค่า: "device" (Android TTS ทันที/ไม่จำกัด — default) | "live" (chain: Live 2.5 Native [gemini-2.5-flash-native-audio-preview-12-2025] → Live 3.1 [gemini-3.1-flash-live-preview] → Android TTS)
+- migrate ค่าเก่าที่ persist ไว้ (ai/live31/live25) → "live" ผ่าน JarvisViewModel.normalizeAlertVoiceEngine; ฝั่ง service ก็ถือค่า legacy เป็น live เช่นกัน
+- ลบ geminiTtsPcm/playPcmBlocking (dead code) ออกจาก JarvisAutomationService
+- แก้เสียงแจ้งเตือนไม่ตรง persona Live mode (ผู้ใช้สังเกตบุคลิกต่างกัน): speakViaLive เดิม hardcode voice Aoede + system prompt สั้น → ใหม่ใช้ voice_name จาก Settings + JarvisPersona.CORE_IDENTITY เหมือน Live mode + กฎ "อ่านข้อความตรงๆ ห้ามตอบโต้"
+- การ์ดแชทมี footer "🔊 เสียง: <engine>" ล่างการ์ด — ระบบรู้ engine จริงจาก callback onVoiceStart ใน speakAlert (ยิงครั้งเดียวด้วย AtomicBoolean): Live เมื่อ first audio chunk มาถึง, Android TTS เมื่อพูด, มี suffix "(fallback)" ถ้าหล่น chain
+- เปลี่ยนลำดับ deliver: fireJobAlert ทั้ง 2 โหมดใช้ deliverChatAndVoice() — เปิดเสียง → พูดก่อน การ์ด push ตอนเสียงเริ่มจริง (Live ~2-5 วิ, เครื่อง ทันที); ปิดเสียง → push ทันทีไม่มี footer; กันพลาด: callback ไม่ถูกเรียก → push แบบไม่มี footer
+- UI AutomationScreen เหลือ 2 chip: ⚡ เครื่อง (ทันที/ไม่จำกัด) | ✨ AI Live (สวย/จำกัดโควต้า) — เอา sub-chips ทดสอบออก
+- BUILD SUCCESSFUL (debug APK)
+
+
+## 2026-08-15 — เสียงแจ้งเตือนเริ่ม chain จากโมเดล Live ที่ผู้ใช้เลือกใน Settings
+- ผู้ใช้ขอไม่ให้สับสน: โมเดลเสียงแจ้งเตือนตัวแรกต้องตรงกับโมเดล Live ที่เลือกใน Settings (live_model_name) เสมอ — เลือก Live 3.1 → chain: 3.1 → 2.5 Native → Android TTS; เลือก Live 2.5 → chain: 2.5 → 3.1 → Android TTS
+- แก้ JarvisAutomationService: LIVE_VOICE_CHAIN คงที่ → liveVoiceChain() อ่าน setting live_model_name (default ModelConfig.DEFAULT_LIVE_MODEL) ดันขึ้นต้น chain + ตัวที่เหลือตามหลัง (dedup); โมเดลนอกลิสต์รองรับด้วย (label = ชื่อดิบ)
+- log เพิ่ม "🔊 Live chain: X → Y (ตามโมเดล Live ที่เลือกใน Settings)" ทุกครั้งก่อนพูด — เช็กลำดับ chain จาก logcat ได้
+- BUILD SUCCESSFUL (debug APK)

@@ -1,0 +1,20 @@
+-- Migration v3 → v4: ตาราง SignalAlertRecord (บันทึก signal ที่ alert ยิง + ผล TP/SL)
+CREATE TABLE IF NOT EXISTS SignalAlertRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    reason TEXT,
+    entry REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    rr REAL,
+    bar_time INTEGER NOT NULL,
+    delivery TEXT NOT NULL DEFAULT 'ai',
+    outcome TEXT NOT NULL DEFAULT 'OPEN',
+    hit_at INTEGER,
+    hit_price REAL,
+    result_r REAL,
+    created_at INTEGER NOT NULL
+);

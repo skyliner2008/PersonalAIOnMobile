@@ -109,6 +109,14 @@ private val ProviderMetas = listOf(
 /** provider ที่ปุ่ม "Show free models only" ใช้ได้ (Groq ทุก model ฟรี ถือว่าผ่าน filter เสมอ) */
 private val freeFilterProviders = setOf("openrouter", "groq")
 
+/** รายการเช็กสิทธิ์/การตั้งค่าระบบ (สร้างจากฝั่ง Android แล้วส่งเข้ามา) */
+data class SetupCheckItem(
+    val title: String,
+    val description: String,
+    val granted: Boolean,
+    val onFix: () -> Unit,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(
@@ -118,6 +126,7 @@ fun SettingsDialog(
     onStopWidget: () -> Unit = {},
     requestAllFilesPermission: () -> Unit = {},
     allFilesAccessGranted: Boolean = false,
+    setupChecks: List<SetupCheckItem> = emptyList(),
 ) {
     val currentApiKey by viewModel.apiKey.collectAsStateWithLifecycle()
     val currentModel by viewModel.selectedModel.collectAsStateWithLifecycle()
@@ -753,33 +762,71 @@ fun SettingsDialog(
             }
         }
 
-        // ─── Permissions section ────────────────────────────────────────────
+        // ─── Setup Checklist section ────────────────────────────────────────
         SectionCard(
-            title = "Permissions",
+            title = "Setup Checklist",
             icon = Icons.Default.Warning,
             expanded = sectPermissions,
             onToggle = { sectPermissions = !sectPermissions },
         ) {
-            val tint = if (allFilesAccessGranted) JarvisTheme.Green else JarvisTheme.Amber
-            Surface(
-                color = tint.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        if (allFilesAccessGranted) "✓ File permission granted" else "File permission required",
-                        color = tint,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = BodySize,
-                    )
-                    if (!allFilesAccessGranted) {
-                        Button(
-                            onClick = requestAllFilesPermission,
-                            colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Purple.copy(alpha = 0.35f)),
-                            modifier = Modifier.heightIn(min = FieldHeight),
+            if (setupChecks.isEmpty()) {
+                val tint = if (allFilesAccessGranted) JarvisTheme.Green else JarvisTheme.Amber
+                Surface(
+                    color = tint.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            if (allFilesAccessGranted) "✓ File permission granted" else "File permission required",
+                            color = tint,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = BodySize,
+                        )
+                        if (!allFilesAccessGranted) {
+                            Button(
+                                onClick = requestAllFilesPermission,
+                                colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Purple.copy(alpha = 0.35f)),
+                                modifier = Modifier.heightIn(min = FieldHeight),
+                            ) {
+                                Text("Grant permission", color = Color.White, fontSize = BodySize)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    setupChecks.forEach { item ->
+                        val tint = if (item.granted) JarvisTheme.Green else JarvisTheme.Amber
+                        Surface(
+                            color = tint.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Grant permission", color = Color.White, fontSize = BodySize)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        (if (item.granted) "✓ " else "⚠ ") + item.title,
+                                        color = tint,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = BodySize,
+                                    )
+                                    Text(item.description, color = Color.Gray, fontSize = 12.sp)
+                                }
+                                if (!item.granted) {
+                                    Button(
+                                        onClick = item.onFix,
+                                        colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Purple.copy(alpha = 0.35f)),
+                                        modifier = Modifier.heightIn(min = FieldHeight),
+                                    ) {
+                                        Text("ตั้งค่า", color = Color.White, fontSize = BodySize)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

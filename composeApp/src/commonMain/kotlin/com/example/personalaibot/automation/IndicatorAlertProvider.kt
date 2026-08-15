@@ -80,6 +80,7 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
 
         // ── RSI (14, Wilder) ──
         val rsi = rsi(closes, 14)
+        val rsiPrev = rsi(closes.dropLast(1), 14)
 
         // ── Stochastic (14,3,3) ──
         val stochK = stochK(closes, highs, lows, 14)
@@ -87,6 +88,13 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
 
         // ── CCI (20) ──
         val cci = cci(candles, 20)
+
+        // ── Awesome Oscillator (median price, SMA5 - SMA34) ──
+        val medians = candles.map { (it.high + it.low) / 2.0 }
+        val ao = if (medians.size >= 34) medians.takeLast(5).average() - medians.takeLast(34).average() else null
+
+        // ── ADX + DI (14, Wilder) ──
+        val adxPack = adx(candles, 14)
 
         // ── Bollinger Bands (20, 2) ──
         val bb = bollinger(closes, 20, 2.0)
@@ -110,9 +118,16 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
             put("macd_signal", fmt(macdSignal))
             put("macd_hist", fmt(macdHist))
             rsi?.let { put("rsi14", fmt(it)) }
+            rsiPrev?.let { put("rsi14_prev", fmt(it)) }
             stochK.lastOrNull()?.let { put("stoch_k", fmt(it)) }
             stochD?.let { put("stoch_d", fmt(it)) }
             cci?.let { put("cci20", fmt(it)) }
+            ao?.let { put("ao", fmt(it)) }
+            adxPack?.let { (adxV, diPlus, diMinus) ->
+                put("adx", fmt(adxV))
+                put("di_plus", fmt(diPlus))
+                put("di_minus", fmt(diMinus))
+            }
             bb?.let { (basis, upper, lower) ->
                 put("bb_basis", fmt(basis))
                 put("bb_upper", fmt(upper))
@@ -195,8 +210,7 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
         return Triple(basis, basis + mult * sd, basis - mult * sd)
     }
 
-    private fun atr(candles: List<Candle>, period: Int): Double? {
-        if (candles.size <= period) return null
+    private fun atr(candles: List<Candle>, period: Int): Double? {        if (candles.size <= period) return null
         val trs = ArrayList<Double>()
         for (i in 1 until candles.size) {
             val h = candles[i].high
@@ -209,5 +223,43 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
             atr = (atr * (period - 1) + trs[i]) / period
         }
         return atr
+    }
+
+    /** ADX (Wilder) → Triple(ADX, +DI, -DI); ต้องมีแท่งอย่างน้อย period*2+1 */
+    private fun adx(candles: List<Candle>, period: Int): Triple<Double, Double, Double>? {
+        if (candles.size <= period * 2) return null
+        val n = candles.size
+        val tr = DoubleArray(n); val pdm = DoubleArray(n); val ndm = DoubleArray(n)
+        for (i in 1 until n) {
+            val h = candles[i].high; val l = candles[i].low
+            val ph = candles[i - 1].high; val pl = candles[i - 1].low; val pc = candles[i - 1].close
+            tr[i] = maxOf(h - l, abs(h - pc), abs(l - pc))
+            val up = h - ph; val dn = pl - l
+            pdm[i] = if (up > dn && up > 0) up else 0.0
+            ndm[i] = if (dn > up && dn > 0) dn else 0.0
+        }
+        // Wilder smoothing ของ TR/+DM/-DM: seed = ผลรวม period แรก แล้วไล่ถึงแท่งสุดท้าย
+        var sTr = (1..period).sumOf { tr[it] }
+        var sPdm = (1..period).sumOf { pdm[it] }
+        var sNdm = (1..period).sumOf { ndm[it] }
+        val dxList = ArrayList<Double>()
+        var lastPdi = 0.0; var lastNdi = 0.0
+        for (i in period + 1 until n) {
+            sTr = sTr - sTr / period + tr[i]
+            sPdm = sPdm - sPdm / period + pdm[i]
+            sNdm = sNdm - sNdm / period + ndm[i]
+            if (sTr == 0.0) continue
+            lastPdi = 100.0 * sPdm / sTr
+            lastNdi = 100.0 * sNdm / sTr
+            val denom = lastPdi + lastNdi
+            dxList.add(if (denom == 0.0) 0.0 else 100.0 * abs(lastPdi - lastNdi) / denom)
+        }
+        if (dxList.size < period) return null
+        // ADX = Wilder smooth ของ DX (seed = average period แรก)
+        var adxV = dxList.take(period).average()
+        for (k in period until dxList.size) {
+            adxV = (adxV * (period - 1) + dxList[k]) / period
+        }
+        return Triple(adxV, lastPdi, lastNdi)
     }
 }

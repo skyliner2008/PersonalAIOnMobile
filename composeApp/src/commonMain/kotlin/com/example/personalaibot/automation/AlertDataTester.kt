@@ -19,6 +19,8 @@ class AlertDataTester(client: HttpClient) {
     private val smcApi = SmcApiService(client)
     private val indicatorProvider = IndicatorAlertProvider(smcApi)
     private val smcAlertProvider = SmcAlertProvider(smcApi)
+    private val smcFlowProvider = SmcFlowAlertProvider(smcApi)
+    private val strategySignalProvider = StrategySignalProvider(smcApi)
     private val advancedEngine = AdvancedTradingEngine(smcApi)
 
     data class TestResult(
@@ -85,6 +87,12 @@ class AlertDataTester(client: HttpClient) {
 
         // 4) SMC zones
         step("trading_smc") { smcAlertProvider.fetch(symbol) }
+
+        // 4.5) SMC Flow signals (UT Bot + EMA14/60 + confluence)
+        step("trading_smc_flow") { smcFlowProvider.fetch(symbol) }
+
+        // 4.6) Strategy signals (5 กลยุทธ์จาก Strategy Library + consensus)
+        step("trading_strategy_signal") { strategySignalProvider.fetch(symbol) }
 
         // 5) Deep analysis suite (ครบทั้ง 5 มิติ — เลือก TF ได้ด้วย @TF)
         step("trading_deep_analysis_suite") {

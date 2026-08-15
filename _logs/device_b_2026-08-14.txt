@@ -1,0 +1,97 @@
+---------------------------- PROCESS STARTED (32335) for package com.example.personalaibot ----------------------------
+2026-08-14 18:41:22.141 32335-11714 AndroidONNX             com.example.personalaibot            D  Loading Multilingual tokenizer...
+2026-08-14 18:41:22.143 32335-32335 PcmAudio                com.example.personalaibot            D  Initializing AudioTrack (Speaker)
+2026-08-14 18:41:22.146 32335-11712 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools'
+2026-08-14 18:41:22.147 32335-11712 FileToolExecutor        com.example.personalaibot            D  Storage Root: /storage/emulated/0 | isManager: true
+2026-08-14 18:41:22.148 32335-11712 FileToolExecutor        com.example.personalaibot            D  Path '/storage/emulated/0/custom_agent_tools' not found, trying fallback...
+2026-08-14 18:41:22.148 32335-11712 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools'
+2026-08-14 18:41:22.148 32335-11712 FileToolExecutor        com.example.personalaibot            D  executeList on: /storage/emulated/0/custom_agent_tools
+2026-08-14 18:41:22.170 32335-32335 PcmAudio                com.example.personalaibot            D  AudioTrack Ready
+2026-08-14 18:41:22.944 32335-32335 Orchestrator            com.example.personalaibot            D  Gemini fallback chain = [gemini-2.5-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-3-flash, gemini-2.5-flash-lite, gemini-3.5-flash]
+2026-08-14 18:41:22.947 32335-32335 Orchestrator            com.example.personalaibot            D  Gemini API keys for rotation: 1 key(s)
+2026-08-14 18:41:22.950 32335-32335 Orchestrator            com.example.personalaibot            D  Model caps loaded: tools-ok = {}
+2026-08-14 18:41:22.957 32335-32335 GeminiService           com.example.personalaibot            D  Updating Gemini config: model=gemini-3.1-pro, key=AQ.A...b4gg
+2026-08-14 18:41:23.232 32335-32335 JarvisVM                com.example.personalaibot            D  Identity loaded from Core Memory: user=ผู้ใช้, agent=JARVIS
+2026-08-14 18:41:24.928 32335-11714 AndroidONNX             com.example.personalaibot            D  Loading ONNX model...
+2026-08-14 18:41:25.790 32335-11714 AndroidONNX             com.example.personalaibot            D  Multilingual model loaded successfully.
+2026-08-14 18:41:25.791 32335-32335 JarvisVM                com.example.personalaibot            D  Local ONNX model already on device — marked Ready
+2026-08-14 18:41:27.406 32335-11869 ProfileInstaller        com.example.personalaibot            D  Installing profile for com.example.personalaibot
+2026-08-14 18:41:37.078 32335-32335 JARVIS_VM               com.example.personalaibot            D  Starting Live Voice Input
+2026-08-14 18:41:37.083 32335-11734 JARVIS_VM               com.example.personalaibot            D  Connecting Live session (with memory context)...
+2026-08-14 18:41:37.084 32335-11714 JARVIS_VM               com.example.personalaibot            D  Microphone starting...
+2026-08-14 18:41:37.084 32335-11714 PcmAudio                com.example.personalaibot            D  Starting Microphone...
+2026-08-14 18:41:37.096 32335-11734 LiveGemini              com.example.personalaibot            D  Connecting to Live API with model: gemini-3.1-flash-live-preview (attempt 1)
+2026-08-14 18:41:37.141 32335-11714 PcmAudio                com.example.personalaibot            D  AEC enabled: true
+2026-08-14 18:41:37.150 32335-11714 PcmAudio                com.example.personalaibot            D  NoiseSuppressor enabled: true
+2026-08-14 18:41:37.185 32335-11714 PcmAudio                com.example.personalaibot            D  MIC_STARTED successfully
+2026-08-14 18:41:38.154 32335-11714 LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-08-14 18:41:43.132 32335-11714 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): 방장테언 시그널 황금 time frame m15
+2026-08-14 18:41:43.746 32335-11714 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({symbol=XAUUSD@15m, condition_field=signal_buy, action=create, name=Gold M15 BUY Alert, condition_value=1, condition_operator=>=, tool_name=trading_signal_alert})
+2026-08-14 18:41:43.749 32335-11712 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({condition_value=1, condition_operator=>=, name=Gold M15 SELL Alert, condition_field=signal_sell, action=create, tool_name=trading_signal_alert, symbol=XAUUSD@15m})
+2026-08-14 18:41:43.775 32335-11714 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Gold M15 BUY Alert' แล้ว — เฝ้าดู XAUUSD@15M (signal_buy >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-14 18:41:43.786 32335-11714 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Gold M15 SELL Alert' แล้ว — เฝ้าดู XAUUSD@15M (signal_sell >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-14 18:41:44.806 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): จัดการตั้ง
+2026-08-14 18:41:45.054 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้ง
+2026-08-14 18:41:45.072 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:41:45.210 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-14 18:41:45.284 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-08-14 18:41:45.475 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในไทม์เฟรม
+2026-08-14 18:41:45.598 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-14 18:41:45.731 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-14 18:41:45.794 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เรียบร้อย
+2026-08-14 18:41:45.902 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้วค่ะ
+2026-08-14 18:41:46.074 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-14 18:41:46.162 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระบบ
+2026-08-14 18:41:46.316 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะคอย
+2026-08-14 18:41:46.365 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตรวจสอบ
+2026-08-14 18:41:46.516 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทั้งสัญญาณ
+2026-08-14 18:41:46.678 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ซื้อ
+2026-08-14 18:41:46.750 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และขาย
+2026-08-14 18:41:46.905 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลยนะคะ
+2026-08-14 18:41:47.032 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เมื่อมี
+2026-08-14 18:41:47.152 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-14 18:41:47.350 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ใหม่เกิดขึ้น
+2026-08-14 18:41:47.462 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระบบ
+2026-08-14 18:41:47.563 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะส่ง
+2026-08-14 18:41:47.691 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้ง
+2026-08-14 18:41:47.710 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:41:47.798 32335-11977 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ผู้ใช้
+2026-08-14 18:41:47.875 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทราบ
+2026-08-14 18:41:47.986 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทันที
+2026-08-14 18:41:48.091 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผ่าน ทาง
+2026-08-14 18:41:48.156 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แชท
+2026-08-14 18:41:48.210 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และ
+2026-08-14 18:41:48.352 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  หน้าต่าง
+2026-08-14 18:41:48.363 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้ง
+2026-08-14 18:41:48.438 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:41:48.637 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บนมือถือค่ะ
+2026-08-14 18:41:48.861 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยจะมี
+2026-08-14 18:41:49.022 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  การวิเคราะห์
+2026-08-14 18:41:49.149 32335-11734 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บริบท
+2026-08-14 18:41:49.232 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-08-14 18:41:49.338 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ด้วย
+2026-08-14 18:41:49.382 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-14 18:41:49.559 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพื่อให้
+2026-08-14 18:41:49.666 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตัดสินใจ
+2026-08-14 18:41:49.766 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้แม่นยำ
+2026-08-14 18:41:49.975 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขึ้น
+2026-08-14 18:41:50.126 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ต้องการ
+2026-08-14 18:41:50.221 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตั้งค่า
+2026-08-14 18:41:50.264 32335-11979 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้ง
+2026-08-14 18:41:50.407 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เตือน
+2026-08-14 18:41:50.421 32335-11714 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อะไร
+2026-08-14 18:41:50.549 32335-11712 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-08-14 18:41:50.677 32335-11978 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อีกไหมคะ
+2026-08-14 18:42:01.037 32335-32335 JARVIS_VM               com.example.personalaibot            D  Stopping Live Voice Input
+2026-08-14 18:42:01.038 32335-32335 PcmAudio                com.example.personalaibot            D  Stopping Mic...
+2026-08-14 18:42:01.043 32335-11986 PcmAudio                com.example.personalaibot            D  Mic thread stopped
+2026-08-14 18:42:01.081 32335-11714 LiveGemini              com.example.personalaibot            D  🔌 Session ending. Flushing buffers.
+2026-08-14 18:42:01.083 32335-11979 LiveGemini              com.example.personalaibot            D  Session disconnected
+2026-08-14 18:42:22.783 32335-11976 AutomationService       com.example.personalaibot            D  Checking job: Gold M15 BUY Alert for XAUUSD@15M
+2026-08-14 18:42:22.876 32335-11976 AutomationService       com.example.personalaibot            D  Job Gold M15 BUY Alert → signal_buy_id=0 | condition=GT 1786707703758 | met=false
+2026-08-14 18:42:22.877 32335-11976 AutomationService       com.example.personalaibot            D  Checking job: Gold M15 SELL Alert for XAUUSD@15M
+2026-08-14 18:42:22.916 32335-11976 AutomationService       com.example.personalaibot            D  Job Gold M15 SELL Alert → signal_sell_id=0 | condition=GT 1786707703777 | met=false

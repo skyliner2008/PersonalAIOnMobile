@@ -30,6 +30,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -66,6 +67,8 @@ fun AutomationScreen(
     alertVoice: Boolean,
     onAlertAiSummaryChange: (Boolean) -> Unit,
     onAlertVoiceChange: (Boolean) -> Unit,
+    alertVoiceEngine: String = "device",
+    onAlertVoiceEngineChange: (String) -> Unit = {},
     onDelete: (Long) -> Unit,
     onDeleteTask: (Long) -> Unit,
     onUpdateInterval: (Long, Long) -> Unit,
@@ -75,7 +78,7 @@ fun AutomationScreen(
     alertTestStatus: String = "",
     alertTestResults: List<com.example.personalaibot.automation.AlertDataTester.TestResult> = emptyList(),
     onRunTest: () -> Unit = {},
-    onCreateAlert: (String, String, String, String, String, String, Long) -> Unit = { _, _, _, _, _, _, _ -> },
+    onCreateAlert: (String, String, String, String, String, String, Long, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onCreateScheduledTask: (String, String, String, Long, String?) -> Unit = { _, _, _, _, _ -> }
 ) {
     var showCreateAlert by remember { mutableStateOf(false) }
@@ -94,7 +97,9 @@ fun AutomationScreen(
                 aiSummary = alertAiSummary,
                 voice = alertVoice,
                 onAiSummaryChange = onAlertAiSummaryChange,
-                onVoiceChange = onAlertVoiceChange
+                onVoiceChange = onAlertVoiceChange,
+                voiceEngine = alertVoiceEngine,
+                onVoiceEngineChange = onAlertVoiceEngineChange
             )
         }
 
@@ -174,8 +179,8 @@ fun AutomationScreen(
     if (showCreateAlert) {
         CreateAlertDialog(
             onDismiss = { showCreateAlert = false },
-            onConfirm = { name, symbol, toolName, field, op, value, interval ->
-                onCreateAlert(name, symbol, toolName, field, op, value, interval)
+            onConfirm = { name, symbol, toolName, field, op, value, interval, delivery ->
+                onCreateAlert(name, symbol, toolName, field, op, value, interval, delivery)
                 showCreateAlert = false
             }
         )
@@ -243,33 +248,83 @@ private fun AlertSettingsCard(
     aiSummary: Boolean,
     voice: Boolean,
     onAiSummaryChange: (Boolean) -> Unit,
-    onVoiceChange: (Boolean) -> Unit
+    onVoiceChange: (Boolean) -> Unit,
+    voiceEngine: String = "device",
+    onVoiceEngineChange: (String) -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = JarvisTheme.Card)
     ) {
-        // แบบกะทัดรัด: แถวเดียว ไอคอน + toggle 2 ตัวข้างกัน
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column {
+            // แบบกะทัดรัด: แถวเดียว ไอคอน + toggle 2 ตัวข้างกัน
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⚙️", fontSize = 14.sp)
+                CompactToggle(
+                    label = "🤖 AI สรุป",
+                    checked = aiSummary,
+                    onChange = onAiSummaryChange,
+                    modifier = Modifier.weight(1f)
+                )
+                CompactToggle(
+                    label = "🔊 เสียงพูด",
+                    checked = voice,
+                    onChange = onVoiceChange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            // ตัวเลือก engine เสียง — แสดงเมื่อเปิดเสียงพูด (AI Live = cloud เสียงเหมือนคน จำกัดโควต้า / เครื่อง = Android TTS ทันที ไม่จำกัด)
+            if (voice) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 30.dp, end = 12.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    VoiceEngineChip(
+                        label = "⚡ เครื่อง (ทันที/ไม่จำกัด)",
+                        selected = voiceEngine == "device",
+                        onClick = { onVoiceEngineChange("device") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    VoiceEngineChip(
+                        label = "✨ AI Live (สวย/จำกัดโควต้า)",
+                        selected = voiceEngine == "live",
+                        onClick = { onVoiceEngineChange("live") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceEngineChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    if (selected) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.height(32.dp),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Cyan)
         ) {
-            Text("⚙️", fontSize = 14.sp)
-            CompactToggle(
-                label = "🤖 AI สรุป",
-                checked = aiSummary,
-                onChange = onAiSummaryChange,
-                modifier = Modifier.weight(1f)
-            )
-            CompactToggle(
-                label = "🔊 เสียงพูด",
-                checked = voice,
-                onChange = onVoiceChange,
-                modifier = Modifier.weight(1f)
-            )
+            Text(label, color = Color.Black, fontSize = 11.sp, maxLines = 1, fontWeight = FontWeight.Bold)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.height(32.dp),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp)
+        ) {
+            Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, maxLines = 1)
         }
     }
 }
@@ -457,12 +512,13 @@ private fun CronJobCard(
             field = condition.field,
             operatorText = opText,
             currentValue = condition.value,
+            currentDelivery = condition.delivery,
             onDismiss = { showEditDialog = false },
-            onConfirm = { newName, newInterval, newValue ->
+            onConfirm = { newName, newInterval, newValue, newDelivery ->
                 if (newName != job.name) onRename(newName)
                 onUpdateInterval(newInterval)
-                if (newValue != condition.value) {
-                    onUpdateCondition(condition.copy(value = newValue))
+                if (newValue != condition.value || newDelivery != condition.delivery) {
+                    onUpdateCondition(condition.copy(value = newValue, delivery = newDelivery))
                 }
                 showEditDialog = false
             }
@@ -482,12 +538,14 @@ private fun AlertEditDialog(
     field: String,
     operatorText: String,
     currentValue: String,
+    currentDelivery: String,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, interval: Long, value: String) -> Unit
+    onConfirm: (name: String, interval: Long, value: String, delivery: String) -> Unit
 ) {
     var nameText by remember { mutableStateOf(currentName) }
     var intervalText by remember { mutableStateOf(currentInterval.toString()) }
     var valueText by remember { mutableStateOf(currentValue) }
+    var delivery by remember { mutableStateOf(if (currentDelivery == "direct") "direct" else "ai") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -539,13 +597,38 @@ private fun AlertEditDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+                // ── โหมดส่งแจ้งเตือน ──
+                Text("โหมดส่งแจ้งเตือน", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ai" to "🤖 AI วิเคราะห์ก่อนแจ้ง", "direct" to "⚡ แจ้งตรง").forEach { (mode, label) ->
+                        val selected = delivery == mode
+                        OutlinedButton(
+                            onClick = { delivery = mode },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (selected) JarvisTheme.Cyan.copy(alpha = 0.2f) else Color.Transparent,
+                                contentColor = if (selected) JarvisTheme.Cyan else Color.White.copy(alpha = 0.7f)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, if (selected) JarvisTheme.Cyan else Color.White.copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Text(label, fontSize = 12.sp)
+                        }
+                    }
+                }
+                Text(
+                    if (delivery == "ai") "alert → AI ตรวจสอบบริบทก่อน แล้วค่อยแจ้ง (ใช้โทเคน)"
+                    else "ส่ง notification+แชททันที ไม่ผ่าน AI (ประหยัดโทเคน)",
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp
+                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     val newInterval = (intervalText.toLongOrNull() ?: currentInterval).coerceIn(1, 1440)
-                    onConfirm(nameText.trim().ifBlank { currentName }, newInterval, valueText.trim().ifBlank { currentValue })
+                    onConfirm(nameText.trim().ifBlank { currentName }, newInterval, valueText.trim().ifBlank { currentValue }, delivery)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Cyan)
             ) {
@@ -585,7 +668,18 @@ private val ALERT_PRESETS = listOf(
     AlertPreset("🌟 High Confluence", "trading_deep_analysis_suite", "summaryScore", ">=", "85"),
     AlertPreset("🔄 LSD ขาขึ้น", "trading_deep_analysis_suite", "lsdState", "==", "BULLISH"),
     AlertPreset("⚡ Squeeze Breakout", "trading_deep_analysis_suite", "isSqueeze", "==", "1"),
-    AlertPreset("📦 แรงซื้อนำ (Delta)", "trading_deep_analysis_suite", "deltaLabel", "contains", "BUYING")
+    AlertPreset("📦 แรงซื้อนำ (Delta)", "trading_deep_analysis_suite", "deltaLabel", "contains", "BUYING"),
+    AlertPreset("🔵 SMC Flow BUY", "trading_smc_flow", "smc_signal", "==", "BUY"),
+    AlertPreset("🟣 SMC Flow SELL", "trading_smc_flow", "smc_signal", "==", "SELL"),
+    AlertPreset("🟡 EMA14/60 ตัดขึ้น", "trading_smc_flow", "ema14_60_signal", "==", "BUY"),
+    AlertPreset("🟠 EMA14/60 ตัดลง", "trading_smc_flow", "ema14_60_signal", "==", "SELL"),
+    AlertPreset("🎯 เข้า Fib Golden Zone", "trading_smc_flow", "in_fib_golden", "==", "1"),
+    AlertPreset("📈 Strategy Consensus BUY", "trading_strategy_signal", "consensus_signal", "==", "STRONG_BUY"),
+    AlertPreset("📉 Strategy Consensus SELL", "trading_strategy_signal", "consensus_signal", "==", "STRONG_SELL"),
+    AlertPreset("🚀 Donchian Breakout ขึ้น", "trading_strategy_signal", "donchian_signal", "==", "BUY"),
+    AlertPreset("🔻 Donchian Breakout ลง", "trading_strategy_signal", "donchian_signal", "==", "SELL"),
+    AlertPreset("📡 Signal BUY ใหม่", "trading_signal_alert", "signal_buy", ">=", "1"),
+    AlertPreset("📡 Signal SELL ใหม่", "trading_signal_alert", "signal_sell", ">=", "1")
 )
 
 /**
@@ -596,7 +690,7 @@ private val ALERT_PRESETS = listOf(
 @Composable
 private fun CreateAlertDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, symbol: String, toolName: String, field: String, op: String, value: String, interval: Long) -> Unit
+    onConfirm: (name: String, symbol: String, toolName: String, field: String, op: String, value: String, interval: Long, delivery: String) -> Unit
 ) {
     val catalog = com.example.personalaibot.automation.AlertFieldCatalog
     var name by remember { mutableStateOf("") }
@@ -606,6 +700,8 @@ private fun CreateAlertDialog(
     var op by remember { mutableStateOf(">=") }
     var value by remember { mutableStateOf("") }
     var interval by remember { mutableStateOf("15") }
+    // โหมดส่งแจ้งเตือน: ai = alert→AI วิเคราะห์→ผู้ใช้ | direct = ส่ง notification+แชทโดยตรง (ประหยัดโทเคน)
+    var delivery by remember { mutableStateOf("ai") }
 
     val operators = listOf(">", "<", ">=", "<=", "==", "contains")
     val allowedOps = if (selectedField.isNumeric) operators else listOf("==", "contains")
@@ -714,6 +810,22 @@ private fun CreateAlertDialog(
                 AlertTextField("ตรวจสอบทุกกี่นาที (1-1440)", interval) {
                     if (it.all(Char::isDigit)) interval = it
                 }
+
+                // ── ส่วนที่ 4: โหมดส่งแจ้งเตือน ──
+                Text("4️⃣ โหมดส่งแจ้งเตือน", color = JarvisTheme.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                AlertDropdown(
+                    label = "รูปแบบการแจ้ง",
+                    selected = if (delivery == "ai") "🤖 AI วิเคราะห์ก่อนแจ้ง (ใช้โทเคน)" else "⚡ ส่งตรง notification+แชท (ประหยัดโทเคน)",
+                    options = listOf("🤖 AI วิเคราะห์ก่อนแจ้ง (ใช้โทเคน)", "⚡ ส่งตรง notification+แชท (ประหยัดโทเคน)")
+                ) { idx -> delivery = if (idx == 0) "ai" else "direct" }
+                if (selectedTool.toolName == "trading_signal_alert") {
+                    Text(
+                        "💡 Signal Alert อาจเกิดถี่ — แนะนำโหมดส่งตรงช่วงเฝ้าดูความถี่ของสัญญาณ แล้วค่อยเปลี่ยนเป็น AI ทีหลัง",
+                        color = JarvisTheme.Cyan.copy(alpha = 0.8f), fontSize = 10.sp,
+                        maxLines = 3,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
             }
         },
         confirmButton = {
@@ -722,7 +834,7 @@ private fun CreateAlertDialog(
                     if (name.isBlank()) name = "Alert $symbol"
                     onConfirm(
                         name, symbol, selectedTool.toolName, selectedField.field,
-                        op, value, interval.toLongOrNull()?.coerceIn(1, 1440) ?: 15
+                        op, value, interval.toLongOrNull()?.coerceIn(1, 1440) ?: 15, delivery
                     )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Cyan),

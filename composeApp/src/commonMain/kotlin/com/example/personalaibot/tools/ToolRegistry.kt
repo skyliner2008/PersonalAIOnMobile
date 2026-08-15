@@ -36,7 +36,10 @@ object ToolRegistry {
         "trading_smc_sweeps",
         "trading_smc_liquidity",
         "trading_smc_orderblocks",
-        "trading_smc_structure"
+        "trading_smc_structure",
+        "trading_smc_flow",
+        "trading_strategy_signal",
+        "trading_signal_stats"
     )
 
     val mt5OnlyTradingFunctionNames = setOf(
@@ -226,6 +229,27 @@ object ToolRegistry {
             description = "Returns the bundled self-review document of JARVIS/PersonalAIBot (identity, 8 core capabilities, key numbers, roadmap). Use when the user asks you to review yourself, introduce your capabilities, or read/summarize the project README aloud (e.g. 'รีวิวตัวเองให้ฟังหน่อย', 'แนะนำตัวเอง'). NARRATION MODE: the user wants to HEAR the full review — narrate it aloud in natural spoken Thai, section by section, with NO length limit. Do NOT use analyze_and_display_report for this. Do NOT cut it short.",
             parameters = null
         ))
+        put("chart_dashboard_control", FunctionDeclaration(
+            name = "chart_dashboard_control",
+            description = """Controls the on-screen chart dashboard (Lightweight Charts multi-pane). Use when the user asks to open/show/close a chart, change chart symbol or timeframe, change the pane layout, or toggle indicators — e.g. 'เปิดกราฟทองคำ', 'เปลี่ยนเป็น 4h', 'เพิ่ม RSI กับ MACD', 'เปิด EMA200', 'เอา Bollinger Bands ออก', 'สลับไปกราฟ TradingView'.
+                |Layouts: single (chart only), rsi, macd, rsi_macd, volume, full (volume+rsi+macd subpanes).
+                |Overlays on main pane: ema14, ema20, ema50, ema60, ema200, bb (Bollinger Bands), smc (SMC zones: Order Block / FVG / Liquidity / Premium-Discount — เปิดเมื่อผู้ใช้ขอ SMC เท่านั้น ไม่เปิดอัตโนมัติ).
+                |open จะรีเซ็ต overlay ทั้งหมดตามพารามิเตอร์ overlays (ไม่ระบุ = ปิดทั้งหมด).""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "What to do", enum = listOf("open", "close", "set_layout", "set_symbol", "set_interval", "set_overlay", "set_view")),
+                    "symbol" to ParameterProperty("STRING", "Symbol for set_symbol/open, e.g. XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty("STRING", "Timeframe for set_interval/open: 1m 5m 15m 30m 1h 4h 1d"),
+                    "layout" to ParameterProperty("STRING", "Layout for set_layout", enum = listOf("single", "rsi", "macd", "rsi_macd", "volume", "full")),
+                    "overlay" to ParameterProperty("STRING", "Indicator for set_overlay", enum = listOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")),
+                    "overlays" to ParameterProperty("STRING", "Comma-separated overlays for open (e.g. 'ema14,ema60' — replaces all; omit = none)"),
+                    "visible" to ParameterProperty("BOOLEAN", "true=show overlay, false=hide (set_overlay only, default true)"),
+                    "view" to ParameterProperty("STRING", "set_view: dashboard (offline multi-pane) or tradingview (online TV widget)", enum = listOf("dashboard", "tradingview"))
+                ),
+                required = listOf("action")
+            )
+        ))
         put("analyze_and_display_report", FunctionDeclaration(
             name = "analyze_and_display_report",
             description = """Displays a detailed markdown report in the chat UI while you continue speaking a short voice summary.
@@ -307,7 +331,10 @@ object ToolRegistry {
         "automation_manage_schedule",
         "trading_deep_analysis_suite",
         "trading_harmonic_scan",
-        "trading_elliot_modern_analysis"
+        "trading_elliot_modern_analysis",
+        "trading_smc_flow",
+        "trading_strategy_signal",
+        "trading_signal_stats"
     )
 
     private val tvOnlyTradingToolNames = setOf(

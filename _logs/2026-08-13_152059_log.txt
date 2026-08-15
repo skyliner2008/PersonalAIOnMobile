@@ -1,0 +1,290 @@
+2026-08-13 15:20:59.117 20822-20822 PcmAudio                com.example.personalaibot            D  Initializing AudioTrack (Speaker)
+2026-08-13 15:20:59.117 20822-20854 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools'
+2026-08-13 15:20:59.117 20822-20854 FileToolExecutor        com.example.personalaibot            D  Storage Root: /storage/emulated/0 | isManager: true
+2026-08-13 15:20:59.119 20822-20856 AndroidONNX             com.example.personalaibot            D  Loading Multilingual tokenizer...
+2026-08-13 15:20:59.122 20822-20854 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools'
+2026-08-13 15:20:59.122 20822-20854 FileToolExecutor        com.example.personalaibot            D  executeList on: /storage/emulated/0/custom_agent_tools
+2026-08-13 15:20:59.139 20822-20854 FileToolExecutor        com.example.personalaibot            D  Resolving path: 'custom_agent_tools/custom_gold_check.json'
+2026-08-13 15:20:59.139 20822-20854 FileToolExecutor        com.example.personalaibot            D  Resolved path result: '/storage/emulated/0/custom_agent_tools/custom_gold_check.json'
+2026-08-13 15:20:59.173 20822-20854 Orchestrator            com.example.personalaibot            D  Loaded 1 custom tool(s) from custom_agent_tools/
+2026-08-13 15:20:59.224 20822-20822 PcmAudio                com.example.personalaibot            D  AudioTrack Ready
+2026-08-13 15:20:59.563 20822-20822 Orchestrator            com.example.personalaibot            D  Gemini fallback chain = [gemini-2.5-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-3-flash, gemini-2.5-flash-lite, gemini-3.5-flash]
+2026-08-13 15:20:59.567 20822-20822 Orchestrator            com.example.personalaibot            D  Gemini API keys for rotation: 7 key(s)
+2026-08-13 15:20:59.581 20822-20822 Orchestrator            com.example.personalaibot            D  Model caps loaded: tools-ok = {groq=3, nvidia_nim=11, openrouter=6}
+2026-08-13 15:20:59.593 20822-20822 GeminiService           com.example.personalaibot            D  Updating Gemini config: model=gemini-2.5-flash, key=AIza...ElLY
+2026-08-13 15:20:59.811 20822-20822 JarvisVM                com.example.personalaibot            D  Identity loaded from Core Memory: user=เจ้านาย, agent=จาวิส
+2026-08-13 15:21:01.083 20822-20856 AndroidONNX             com.example.personalaibot            D  Loading ONNX model...
+2026-08-13 15:21:02.753 20822-20856 AndroidONNX             com.example.personalaibot            D  Multilingual model loaded successfully.
+2026-08-13 15:21:02.754 20822-20822 JarvisVM                com.example.personalaibot            D  Local ONNX model already on device — marked Ready
+2026-08-13 15:21:40.869 20822-20822 JARVIS_VM               com.example.personalaibot            D  Starting Live Voice Input
+2026-08-13 15:21:40.881 20822-20880 JARVIS_VM               com.example.personalaibot            D  Connecting Live session (with memory context)...
+2026-08-13 15:21:40.882 20822-20856 JARVIS_VM               com.example.personalaibot            D  Microphone starting...
+2026-08-13 15:21:40.883 20822-20856 PcmAudio                com.example.personalaibot            D  Starting Microphone...
+2026-08-13 15:21:40.884 20822-20880 LiveGemini              com.example.personalaibot            D  Connecting to Live API with model: gemini-3.1-flash-live-preview (attempt 1)
+2026-08-13 15:21:40.959 20822-20856 PcmAudio                com.example.personalaibot            D  AEC enabled: true
+2026-08-13 15:21:40.969 20822-20856 PcmAudio                com.example.personalaibot            D  NoiseSuppressor enabled: true
+2026-08-13 15:21:40.984 20822-20856 PcmAudio                com.example.personalaibot            D  MIC_STARTED successfully
+2026-08-13 15:21:42.210 20822-603   LiveGemini              com.example.personalaibot            D  ✅ Live session READY
+2026-08-13 15:21:45.706 20822-20856 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): Sideline ทองคำ Timeframe M15
+2026-08-13 15:21:45.719 20822-20856 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_smc_analysis({interval=15m, symbol=XAUUSD})
+2026-08-13 15:21:45.720 20822-602   LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_strategy_signal({symbol=XAUUSD, interval=15m})
+2026-08-13 15:21:45.734 20822-20856 SmcApiService           com.example.personalaibot            D  TV incremental refresh XAUUSD/15m: missingBars=4 fetchDelta=10 dbBars=300
+2026-08-13 15:21:58.905 20822-603   SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=series_loading
+2026-08-13 15:21:58.906 20822-603   SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=symbol_resolved
+2026-08-13 15:21:58.907 20822-603   SmcApiService           com.example.personalaibot            D  TV packet[OANDA:XAUUSD/15]: m=timescale_update
+2026-08-13 15:21:58.910 20822-603   SmcApiService           com.example.personalaibot            D  TV bars loaded: 10 for OANDA:XAUUSD/15
+2026-08-13 15:21:59.527 20822-602   LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_smc_analysis → =============================
+                                                                                                    🧠 **SMC Analysis — XAUUSD (15m)**
+                                                                                                    💰 ราคาปัจจุบัน: **4366.86**|ATR: 8.3754
+                                                                                                    
+                                                                                                    **📐 Market Structure**
+                                                                                                      🟢 Trend: **BULLISH**
+                                                                                                      Structure High: 4449.83
+                                                                                                      Structure Low:  4398.43
+                                                                                                      Last Event: — ไม่มี event ล่าสุด
+                                                                                                    
+                                                                                                    **📊 Premium / Discount Zones**
+                                                                                                      Zone ปัจจุบัน: 🟢 DISCOUNT (ถูก — บริเวณ Long)
+                                                                                                      Premium  ≥ 4436.98
+                                                                                                      Equilibrium: 4424.13
+                                                                                                      Discount ≤ 4411.28
+                                                                                                    
+                                                                                                    **🟢 Bullish OB (Demand Zones)**
+                                                                                                      — ไม่พบ Active Bullish OB
+                                                                                                    **🔴 Bearish OB (Supply Zones)**
+                                                                                                      — ไม่พบ Active Bearish OB
+                                                                                                    
+                                                                                                    **⬛ Fair Value Gaps (FVG)**
+                                                                                                      🔴 Bear FVG: 4389.52 — 4400.80  (size: 11.2800)
+                                                                                                      🔴 Bear FVG: 4400.53 — 4405.53  (size: 5.0000)
+                                                                                                      🔴 Bear FVG: 4414.25 — 4417.87  (size: 3.6200)
+                                                                                                      🟢 Bull FVG: 4422.37 — 4424.60  (size: 2.2300)
+                                                                                                      🟢 Bull FVG: 4414.62 — 4419.36  (size: 4.7400)
+                                                                                                    
+                                                                                                    **💧 Liquidity Zones (Pending Sweeps)**
+                                                                                                      🔻 EQL 4364.17  ★★★ (touches: 1)
+                                                                                                      🔺 EQH 4449.83  ★★★ (touches: 2)
+                                                                                                      🔺 EQH 4385.68  ★ (touches: 2)
+                                                                                                      🔺 EQH 4378.86  ★ (touches: 6)
+                                                                                                      🔺 EQH 4370.72  ★ (touches: 1)
+                                                                                                    =============================
+                                                                                                    
+                                                                                                    **🎯 SMC Bias: 🟢 **BUY BIAS** — Bullish structure + Discount zone (รอ pullback ถึง OB)**
+                                                                                                    [Data] candle_source=TV:DB | price_source=UNIFIED_PRICE:TV:OANDA | bars=300 | strict_tv=true
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-13 15:21:59.528 20822-603   LiveGemini              com.example.personalaibot            D  🔧 Native tool call: trading_smc_flow({interval=15m, symbol=XAUUSD})
+2026-08-13 15:21:59.542 20822-602   LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_strategy_signal → ## 📐 Strategy Signals — XAUUSD (15m) [TV:DB]
+                                                                                                    close=4368.375 | consensus=NEUTRAL (score=0, buy=1, sell=1)
+                                                                                                    
+                                                                                                    ### 1) Time-Series Momentum (ROC 20 แท่ง)
+                                                                                                    tsmom_signal=SELL | roc=-0.9273%
+                                                                                                    ### 2) Trend Following (EMA50/200)
+                                                                                                    trend_signal=NONE | state=RANGE | ema50=4396.3767 | ema200=4393.9426
+                                                                                                    ### 3) Short-Term Reversal (RSI + BB)
+                                                                                                    reversal_signal=NONE | rsi=32.221 | bb_upper=4411.9517 | bb_lower=4359.9248
+                                                                                                    ### 4) Donchian Breakout (20 แท่ง)
+                                                                                                    donchian_signal=NONE | upper=4410.56 | mid=4387.365 | lower=4364.17
+                                                                                                    ### 5) 52-Weeks High Proximity
+                                                                                                    w52_signal=BUY | period_high=4449.83 | proximity=98.1695%
+                                                                                                    
+                                                                                                    _Consensus: STRONG_BUY/BUY เมื่อ score ≥ +1 (STRONG ≥ +3), SELL/STRONG_SELL เมื่อ ≤ -1 — คำนวณในเครื่องจากแท่งเทียน TV ไม่พึ่ง QuantConnect_
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-13 15:21:59.688 20822-602   LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: trading_smc_flow → ## 🌊 SMC Flow System — XAUUSD (15m) [TV:DB]
+                                                                                                    close=4368.375
+                                                                                                    
+                                                                                                    ### EMA 14/60
+                                                                                                    ema14=4379.4648 | ema60=4398.0952 | state=BEARISH
+                                                                                                    ema14_60_cross=NONE | ema14_60_signal=NONE
+                                                                                                    
+                                                                                                    ### UT Bot (key=2.0, atr=6)
+                                                                                                    utbot_signal=NONE | utbot_trend=BULL | utbot_stop=4381.3851
+                                                                                                    
+                                                                                                    ### SMC Confluence (trigger + structure + recipe A/B/C + confirm)
+                                                                                                    smc_signal=NONE | smc_recipes=- | structure_bias=BULLISH
+                                                                                                    in_bull_ob=0 | in_bear_ob=0 | in_bull_fvg=0 | in_bear_fvg=0 | in_fib_golden=0
+                                                                                                    
+                                                                                                    ### Auto Fib (swing 4398.43 → 4449.83)
+                                                                                                    golden_zone=4409.4296 — 4418.0648
+                                                                                                    fib_0=4449.83 | fib_236=4437.6996 | fib_382=4430.1952 | fib_500=4424.13 | fib_618=4418.0648 | fib_786=4409.4296 | fib_1000=4398.43 | fib_1272=4384.4492 | fib_1618=4366.6648
+                                                                                                    
+                                                                                                    _Recipes: A=ราคาใน OB | B=ราคาใน FVG+OB | C=ราคาใน Fib Golden Zone (0.618–0.786) — ต้องมี structure bias ตรง + trigger (UT Bot/3-Bar Reversal) ภายใน 3 แท่ง + แท่งยืนยัน_
+                                                                                                    
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-13 15:22:00.606 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): สรุปสถานการณ์ทองคำ
+2026-08-13 15:22:00.996 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Timeframe
+2026-08-13 15:22:01.066 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-13 15:22:01.172 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-13 15:22:01.211 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:01.440 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-13 15:22:01.536 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-13 15:22:01.681 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยรวม
+2026-08-13 15:22:01.831 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่อนข้าง
+2026-08-13 15:22:01.932 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ผสมผสาน
+2026-08-13 15:22:02.057 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:02.253 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในด้าน
+2026-08-13 15:22:02.316 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กลยุทธ์
+2026-08-13 15:22:02.369 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เนี่ย
+2026-08-13 15:22:02.534 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บอกว่าเป็นกลาง
+2026-08-13 15:22:02.655 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:02.779 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพราะมี
+2026-08-13 15:22:02.882 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทั้งสัญญาณ
+2026-08-13 15:22:03.018 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ซื้อและ
+2026-08-13 15:22:03.072 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขาย
+2026-08-13 15:22:03.191 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปนกัน
+2026-08-13 15:22:03.258 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อยู่
+2026-08-13 15:22:03.353 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดย
+2026-08-13 15:22:03.551 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โมเมนตัม
+2026-08-13 15:22:03.684 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระยะสั้น
+2026-08-13 15:22:03.791 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นฝั่ง
+2026-08-13 15:22:03.861 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขายที่
+2026-08-13 15:22:03.993 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้เปรียบ
+2026-08-13 15:22:04.150 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กว่านิดหน่อย
+2026-08-13 15:22:04.228 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:04.375 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ราคา
+2026-08-13 15:22:04.503 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ปิดล่าสุด
+2026-08-13 15:22:04.623 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อยู่ที่
+2026-08-13 15:22:04.721 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ประมาณ
+2026-08-13 15:22:04.840 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สี่พันสามร้อยหกสิบแปด
+2026-08-13 15:22:05.173 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดอลลาร์
+2026-08-13 15:22:05.261 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:05.339 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่ถ้า
+2026-08-13 15:22:05.517 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดูตาม
+2026-08-13 15:22:05.646 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โครงสร้าง
+2026-08-13 15:22:05.744 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตลาด
+2026-08-13 15:22:05.760 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แบบ
+2026-08-13 15:22:05.933 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  SMC
+2026-08-13 15:22:06.036 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:06.172 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังมอง
+2026-08-13 15:22:06.316 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เป็นขา
+2026-08-13 15:22:06.375 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขึ้นอยู่
+2026-08-13 15:22:06.423 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:06.551 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพราะฉะนั้น
+2026-08-13 15:22:06.644 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-13 15:22:06.731 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ราคา
+2026-08-13 15:22:06.807 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ลงมา
+2026-08-13 15:22:06.953 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในโซน
+2026-08-13 15:22:07.018 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  discount
+2026-08-13 15:22:07.063 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่น่า
+2026-08-13 15:22:07.179 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สนใจ
+2026-08-13 15:22:07.319 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้วนะคะ
+2026-08-13 15:22:07.458 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เจ้านาย
+2026-08-13 15:22:07.560 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  อาจจะ
+2026-08-13 15:22:07.678 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  รอจังหวะ
+2026-08-13 15:22:07.739 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เปิด
+2026-08-13 15:22:07.773 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Long
+2026-08-13 15:22:07.867 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ได้
+2026-08-13 15:22:07.960 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:08.146 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แต่ต้อง
+2026-08-13 15:22:08.151 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระวัง
+2026-08-13 15:22:08.296 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แนว Liquidity
+2026-08-13 15:22:08.510 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ด้านล่าง
+2026-08-13 15:22:08.627 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แถวๆ
+2026-08-13 15:22:08.662 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สี่พันสามร้อยหกสิบสี่
+2026-08-13 15:22:08.974 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดอลลาร์
+2026-08-13 15:22:09.059 20822-603   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไว้ด้วย
+2026-08-13 15:22:09.162 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:09.327 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพราะมี
+2026-08-13 15:22:09.415 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โอกาส
+2026-08-13 15:22:09.500 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ที่ราคา
+2026-08-13 15:22:09.571 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะลง
+2026-08-13 15:22:09.666 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไปกวาด
+2026-08-13 15:22:09.789 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ก่อนจะ
+2026-08-13 15:22:09.838 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เด้งขึ้น
+2026-08-13 15:22:09.943 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:10.140 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สรุป
+2026-08-13 15:22:10.180 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  คือ
+2026-08-13 15:22:10.309 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ภาพใหญ่
+2026-08-13 15:22:10.385 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ยังดู
+2026-08-13 15:22:10.476 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ดี แต่
+2026-08-13 15:22:10.628 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ระยะสั้น
+2026-08-13 15:22:10.700 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีแรง
+2026-08-13 15:22:10.870 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ขายกดดัน
+2026-08-13 15:22:10.967 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:11.122 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  รอสัญญาณ
+2026-08-13 15:22:11.246 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  กลับตัว
+2026-08-13 15:22:11.376 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ชัดๆ
+2026-08-13 15:22:11.454 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่อยเข้า
+2026-08-13 15:22:11.503 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ก็ยัง
+2026-08-13 15:22:11.664 20822-20856 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทันค่ะ
+2026-08-13 15:22:40.968 20822-602   LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 1937282 bytes). Persisting to DB.
+2026-08-13 15:22:50.387 20822-32727 LiveGemini              com.example.personalaibot            D  🎤 User (Progress): ตั้ง signal talk ตั้ง signal แจ้งเตือนทองคำ M15
+2026-08-13 15:22:50.559 20822-20880 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({name=Gold M15 Buy Alert, tool_name=trading_signal_alert, condition_field=signal_buy, condition_operator=>=, symbol=XAUUSD@15m, action=create, condition_value=1})
+2026-08-13 15:22:50.560 20822-20880 LiveGemini              com.example.personalaibot            D  🔧 Native tool call: automation_manage_alerts({action=create, condition_value=1, tool_name=trading_signal_alert, symbol=XAUUSD@15m, condition_field=signal_sell, condition_operator=>=, name=Gold M15 Sell Alert})
+2026-08-13 15:22:50.567 20822-32727 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Gold M15 Buy Alert' แล้ว — เฝ้าดู XAUUSD@15M (signal_buy >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-13 15:22:50.571 20822-32727 LiveGemini              com.example.personalaibot            D  ✅ Tool response sent: automation_manage_alerts → ✅ สร้างการแจ้งเตือน 'Gold M15 Sell Alert' แล้ว — เฝ้าดู XAUUSD@15M (signal_sell >= 1) ทุก 15 นาที | โหมด AI วิเคราะห์ก่อนแจ้ง
+                                                                                                    
+                                                                                                    [VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown
+2026-08-13 15:22:51.367 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress): เรียบร้อยค่ะเจ้านาย!
+2026-08-13 15:22:51.755 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนี้
+2026-08-13 15:22:51.959 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จาวิส
+2026-08-13 15:22:52.076 20822-32738 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตั้งการ
+2026-08-13 15:22:52.242 20822-32738 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้งเตือน
+2026-08-13 15:22:52.340 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-13 15:22:52.459 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทองคำ
+2026-08-13 15:22:52.651 20822-32738 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  Timeframe
+2026-08-13 15:22:52.713 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-13 15:22:52.795 20822-32738 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-13 15:22:52.902 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้แล้ว
+2026-08-13 15:22:52.990 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:53.092 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทั้งสัญญาณ
+2026-08-13 15:22:53.400 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ซื้อ
+2026-08-13 15:22:53.615 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  และขาย
+2026-08-13 15:22:53.733 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลย
+2026-08-13 15:22:53.888 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:54.165 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โดยระบบ
+2026-08-13 15:22:54.516 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะตรวจสอบ
+2026-08-13 15:22:54.812 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทุกๆ
+2026-08-13 15:22:54.994 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  15
+2026-08-13 15:22:55.203 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นาที
+2026-08-13 15:22:55.276 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลย
+2026-08-13 15:22:55.492 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:55.822 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ถ้ามี
+2026-08-13 15:22:56.042 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  สัญญาณ
+2026-08-13 15:22:56.234 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ใหม่เกิดขึ้น
+2026-08-13 15:22:56.581 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เนี่ย ตัว
+2026-08-13 15:22:56.741 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จาวิส
+2026-08-13 15:22:56.844 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะวิเคราะห์
+2026-08-13 15:22:56.934 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บริบท
+2026-08-13 15:22:57.016 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ตอนนั้น
+2026-08-13 15:22:57.129 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ก่อน
+2026-08-13 15:22:57.215 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แล้วค่อย
+2026-08-13 15:22:57.322 20822-601   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  แจ้งเตือน
+2026-08-13 15:22:57.417 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เจ้านาย
+2026-08-13 15:22:57.495 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ค่ะ
+2026-08-13 15:22:57.650 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  จะได้
+2026-08-13 15:22:57.726 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ไม่พลาด
+2026-08-13 15:22:57.821 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  โอกาส
+2026-08-13 15:22:57.890 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ในการ
+2026-08-13 15:22:58.005 20822-32727 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ทำกำไร
+2026-08-13 15:22:58.135 20822-602   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  นะคะ
+2026-08-13 15:22:58.222 20822-604   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  มีอะไร
+2026-08-13 15:22:58.393 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  ให้ช่วย
+2026-08-13 15:22:58.507 20822-862   LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เพิ่มเติม
+2026-08-13 15:22:58.582 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  บอกได้
+2026-08-13 15:22:58.715 20822-20880 LiveGemini              com.example.personalaibot            D  🤖 JARVIS (Progress):  เลยค่ะ
+2026-08-13 15:22:59.107 20822-862   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Buy Alert for XAUUSD@15M
+2026-08-13 15:22:59.160 20822-862   AutomationService       com.example.personalaibot            D  Job Gold M15 Buy Alert → signal_buy=0 | condition=GTE 1 | met=false
+2026-08-13 15:22:59.161 20822-862   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Sell Alert for XAUUSD@15M
+2026-08-13 15:22:59.227 20822-862   AutomationService       com.example.personalaibot            D  Job Gold M15 Sell Alert → signal_sell=1 | condition=GTE 1 | met=true
+2026-08-13 15:23:11.931 20822-602   LiveGemini              com.example.personalaibot            D  🏁 Turn Complete (audio: 987870 bytes). Persisting to DB.
+2026-08-13 15:23:16.813 20822-20822 JARVIS_VM               com.example.personalaibot            D  Microphone muted: true
+2026-08-13 15:23:17.713 20822-20822 JARVIS_VM               com.example.personalaibot            D  Stopping Live Voice Input
+2026-08-13 15:23:17.713 20822-20822 PcmAudio                com.example.personalaibot            D  Stopping Mic...
+2026-08-13 15:23:17.716 20822-609   PcmAudio                com.example.personalaibot            D  Mic thread stopped
+2026-08-13 15:23:17.780 20822-32727 LiveGemini              com.example.personalaibot            D  Session disconnected
+2026-08-13 15:23:17.782 20822-603   LiveGemini              com.example.personalaibot            D  🔌 Session ending. Flushing buffers.
+2026-08-13 15:23:29.231 20822-601   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Sell Alert for XAUUSD@15M
+2026-08-13 15:23:29.265 20822-601   AutomationService       com.example.personalaibot            D  Job Gold M15 Sell Alert → signal_sell=1 | condition=GTE 1 | met=true
+2026-08-13 15:23:59.270 20822-601   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Buy Alert for XAUUSD@15M
+2026-08-13 15:23:59.309 20822-601   AutomationService       com.example.personalaibot            D  Job Gold M15 Buy Alert → signal_buy=0 | condition=GTE 1 | met=false
+2026-08-13 15:23:59.310 20822-601   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Sell Alert for XAUUSD@15M
+2026-08-13 15:23:59.346 20822-601   AutomationService       com.example.personalaibot            D  Job Gold M15 Sell Alert → signal_sell=1 | condition=GTE 1 | met=true
+2026-08-13 15:24:29.353 20822-603   AutomationService       com.example.personalaibot            D  Checking job: Gold M15 Sell Alert for XAUUSD@15M
+2026-08-13 15:24:29.385 20822-603   AutomationService       com.example.personalaibot            D  Job Gold M15 Sell Alert → signal_sell=1 | condition=GTE 1 | met=true
