@@ -45,6 +45,9 @@ object SmcSignalDetector {
     // เหลือเฉพาะสัญญาณที่ TP (nearest level) ไกล ≥1.8R → win rate ต่ำมาก + SL structure แคบทำให้
     // commission (0.045%/ข้าง × notional ใหญ่จาก tight SL) กิน ~0.6-0.7R ต่อไม้ → PF ติดลบทุก TF (พิสูจน์จาก backtest 2026-08-17)
     private const val MIN_RRR = 1.2
+    // ระยะ SL ขั้นต่ำเทียบ ATR14 — พิสูจน์จาก forensics 2026-08-18: สัญญาณที่ SL ติดจมูก (0.6–3.9 จุด บน 15m
+    // ทั้งที่ ATR ~3-5) โดน noise กวาด 100% ก่อน TP เสมอ → เทรดไม่ได้จริง ต้องตัดทิ้ง (ใช้ทั้ง live alert และ backtest)
+    private const val MIN_SL_ATR = 0.75
     private const val OB_PROXIMITY_PCT = 0.15   // % tolerance ราคาชน OB
     private const val FVG_FILL_PCT = 0.50       // FVG ต้อง fill ≥50%
 
@@ -64,12 +67,15 @@ object SmcSignalDetector {
         signals += detectFvgFill(lastPrice, smc, bias)
         signals += detectRsiDivergence(lastPrice, window, smc)
 
-        // กรอง 4 ชั้น (ชดเชย Gates/MTF ของต้นฉบับ MT5 ที่ไม่ได้ port):
+        // กรอง 5 ชั้น (ชดเชย Gates/MTF ของต้นฉบับ MT5 ที่ไม่ได้ port):
         //  1) คุณภาพขั้นต่ำ: RRR + confluence stars
         //  2) validity: SL/TP ต้องอยู่ถูกฝั่งกับทิศทาง
         //  3) เทรดตามทิศโครงสร้างเท่านั้น (BUY เมื่อ BULLISH / SELL เมื่อ BEARISH)
         //  4) Premium/Discount: สัญญาณ reversal — BUY เฉพาะโซน DISCOUNT, SELL เฉพาะ PREMIUM
         //     (ยกเว้น CONTINUATION ที่ตามเทรนด์อยู่แล้ว)
+        //  5) ระยะ SL ≥ 0.75×ATR14 — SL ติดจมูกโดน noise กวาดก่อน TP เสมอ (forensics 2026-08-18)
+        val atr14 = computeAtr(window, 14)
+        val minSlDist = atr14 * MIN_SL_ATR
         return signals.filter { sig ->
             if (sig.riskRewardRatio < MIN_RRR || sig.confluenceStars < MIN_CONFLUENCE_STARS) return@filter false
             val valid = (sig.side == "BUY" && sig.sl < sig.entry && sig.tp > sig.entry) ||
@@ -83,6 +89,7 @@ object SmcSignalDetector {
                 else smc.premiumDiscount.zone == PremiumDiscountZone.PREMIUM
                 if (!pdOk) return@filter false
             }
+            if (minSlDist > 0 && kotlin.math.abs(sig.entry - sig.sl) < minSlDist) return@filter false
             true
         }
     }

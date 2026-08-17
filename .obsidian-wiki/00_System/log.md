@@ -1325,3 +1325,75 @@
 - Build: `./gradlew :composeApp:assembleDebug` → BUILD SUCCESSFUL
 
 **ค้าง (รู้แล้ว ยังไม่แก้):** สัญญาณ SMC 57 vs เช้า 174 บน XAUUSD 1h ชุดเดียวกันหลังปรับ MIN_RRR 1.8→1.2 (คาดว่าสัญญาณควรเพิ่ม) — ไฟล์ uncommitted ไม่มี history เทียบ อาจมีการแก้ filter อื่นระหว่างวัน; backtest SMC 1h ล่าสุด: 42 ไม้ win 23.8% PF 0.52 — ทำกำไรเฉพาะตลาด SIDEWAYS (+0.24 avgR) แต่ขาดทุนหนักใน BULL/BEAR
+
+## 2026-08-17 ตรวจ log ทดสอบ 19:36 + แก้ 429 storm / commission model
+
+**สิ่งที่ทำงานถูก (ยืนยันจาก log):**
+- Live greeting ทำงาน: "สวัสดีค่ะเจ้านาย พร้อมคุยแล้วค่ะ" หลัง session READY ~1 วิ (รอบแรกโดน VAD แทรก → TTS fallback ทำงานถูก)
+- LongTask multi-session ครบ: backtest all (47s) → optimize (20s) → evolve ×3 — ระหว่างรอ live คุยต่อได้, เสร็จแล้วแจ้งเข้า live อัตโนมัติ
+- evolve 3 รอบมาจากผู้ใช้สั่ง 3 ครั้งจริง (ไม่ใช่บั๊กเรียกซ้ำ) — apply=off ไม่บันทึก, apply=on บันทึก 1 กลยุทธ์ ถูกต้อง
+- heuristic fallback ของ evolution ทำงาน — task จบ ok=true แม้ AI reflection ตาย
+
+**ปัญหาที่พบและแก้:**
+1. **429 storm**: evolve ยิง gemini-3.5-flash-lite 294 ครั้งใน ~6 วิ (64 reflection calls รัวๆ ไม่มี backoff) → เพิ่ม circuit breaker ใน BacktestEvolution: เจอ 429/quota ครั้งแรกปิด AI ทั้ง task เหลือใช้ heuristic + delay(400) หลัง AI call สำเร็จ กัน burst (instance ใหม่ทุก task = reset อัตโนมัติ)
+2. **Commission model ผิดสเกล**: BacktestConfig.commissionPct=0.00045 (4.5 bps/ข้าง จาก moss ซึ่งเป็นสเกล crypto) — กับทอง ~4380 กลายเป็น ~0.3–0.6R ต่อไม้ ทำไม้แพ้ลึกเกิน −1R (เช่น SMC avgR −1.41) บิดผลทุกกลยุทธ์ → เปลี่ยน default เป็น 0.0 (CFD/forex ต้นทุนอยู่ใน spread 0.2 อยู่แล้ว) ⚠️ ผล backtest/tuning หลังจากนี้จะสูงกว่าก่อนหน้าเล็กน้อยทุกกลยุทธ์ เทียบกับประวัติ trial เก่าไม่ได้ตรงๆ
+3. **SMC backtest 1h: 57 สัญญาณ → 3 ไม้ 0% win** (จาก 42 ไม้ 23.8% ตอน 18:49) — ยังหา root cause ไม่เจอ: โค้ด backtest path ไม่ได้เปลี่ยนระหว่าง 2 รอบ สันนิษฐานข้อมูลแท่งเทียนเปลี่ยน (ตลาดเปิดจันทร์ bars ใหม่เข้ามา structure SL/TP ขยับ) ตอนนี้มี git history แล้ว เทียบย้อนได้ครั้งหน้า
+
+Build: `./gradlew :composeApp:assembleDebug` → BUILD SUCCESSFUL
+
+## 2026-08-17 ตรวจ log ทดสอบ 23:46 (หลังแก้ 429/commission)
+
+**ผลยืนยัน:**
+- ✅ Circuit breaker ทำงาน — 429 เหลือแค่ 5 บรรทัด (จาก 294) evolve จบเร็ว ไม่ยิงซ้ำ
+- ✅ Commission fix มีผลจริง — SMC avgR ดีขึ้นทุก TF (15m: −1.41→−0.81, 1h: −1.06→−1.00, 4h: PF 0.33→0.50) ยืนยันว่า 4.5bps บิดผลมาก่อน
+- ✅ LongTask + live + สรุปเสียง ครบทุกรอบ; optimize auto-apply 4 กลยุทธ์; evolve heuristic ปรับ params สมเหตุสมผล
+- ✅ Backtest ครั้งนี้ดึง 5000 แท่ง (1h)
+
+**แก้เพิ่มรอบนี้:**
+- เพิ่ม SMC trade forensics: dump ทุกไม้ SMC (entry/SL/TP/ระยะ/RR/exit/pnlR) ใต้ tag JarvisVM — เพราะ dump เดิมอยู่ใต้ tag "Backtest" ที่ไม่อยู่ใน filter ที่ผู้ใช้ capture จึงไม่เห็นใน log
+- แก้อักษรจีนหลงในข้อความ UI "微调" → "ปรับเล็กน้อย" (ruleNote + comments)
+
+**ค้าง — SMC 0% win 15m/1h (3-7 ไม้จาก 37-57 สัญญาณ):** ไม่ใช่ต้นทุนแล้ว (avgR 1h = −1.00 เป๊ะ = โดน SL ล้วน) สมมติฐานถัดไป: entry-at-close ไม่ตรงจุดเข้าจริงของ SMC (live เข้าตอนราคาแตะโซน OB/FVG ไม่ใช่ปิดแท่งสัญญาณ) — รอ forensics dump จากรอบทดสอบหน้ามายืนยัน
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 Forensics SMC — พบ root cause: SL ติดจมูก + filter SL ขั้นต่ำ
+
+**Forensics dump (รอบ 00:16) เปิดความจริง:**
+- 15m: SL dist 0.6 / 2.4 / 3.9 / 8.1 จุด ทั้งที่ ATR(15m) ~3-5 → ต่ำกว่า noise 1 แท่ง โดนกวาด 100% ก่อน TP
+- 1h: SL dist 42-113 (สมเหตุสมผล) แต่ 3 ไม้ก็แพ้หมด, 4h: 4 ไม้ ชนะ 1 (TP +1.52R)
+- ไม้ SELL SL=0.6 แพ้แค่ −0.14R เพราะ leverage clamp 10x บังคับ qty เล็กลง — engine คำนวณถูกแล้ว
+- สรุป: ไม่ใช่ entry ผิดจุด/ไม่ใช่ต้นทุน แต่ detector ปล่อยสัญญาณที่ structure SL แคบระดับ noise → แพ้ทิ้งทันที
+
+**แก้ไข — SmcSignalDetector.kt:**
+- เพิ่มชั้นกรองที่ 5: `MIN_SL_ATR = 0.75` — ตัดสัญญาณที่ |entry−SL| < 0.75×ATR14 (computeAtr จาก SmcUtils) ใช้ได้ทั้ง live alert และ backtest เพราะอยู่ใน detect() ตรงกลาง
+- ผลข้างเคียง: live signal alert ของ SMC จะเด้งน้อยลง (ตัดสัญญาณขยะทิ้ง) — เป็นพฤติกรรมที่ตั้งใจ
+
+**อื่นๆ ใน log 00:16:** 429 เหลือ 4 บรรทัด (breaker ปกติ), evolve/optimize/backtest จบครบ, เสียงสรุปปกติ
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 แก้ non-stream generateResponse ไม่มี fallback (429 ซ้ำทุกรอบ)
+
+**ปัญหาที่ผู้ใช้รายงาน:** 429 ที่ gemini-3.5-flash-lite ขึ้นซ้ำทุกรอบ ทั้งที่มีระบบ fallback ทั้ง key และโมเดล
+**Root cause:** path streaming (generateResponseFlow) มี key rotation + model chain + persist ครบ แต่ path non-stream (generateResponse — ที่ evolution reflection และ nested AI summaries ใช้) ยิงโมเดลเดียวครั้งเดียวแล้วคืน "⚠️ Error 429" ไม่เคยสลับ
+
+**แก้ไข — GeminiService.generateResponse():**
+- เพิ่ม fallback เทียบ streaming path: 429/500/503 → หมุน API key ถัดไปใน apiKeysOverride ก่อน (โควต้าแยกต่อ key) → ถ้าหมดค่อยสลับโมเดลตาม fallbackModelsOverride/ModelConfig.GEMINI_FALLBACK_MODELS
+- สำเร็จด้วยค่าที่สลับแล้ว → onWorkingConfigChanged persist ลง settings (รอบถัดไปเริ่มที่ค่าที่ใช้ได้ ไม่กลับไปชนลิมิตเดิม)
+- exception/timeout: retry 1 ครั้งที่ 45s (พฤติกรรมเดิม) แล้วค่อยหมุน key/โมเดล
+- เมื่อ chain หมด → คืน "⚠️ Error 429 (ลองทุก key+โมเดลแล้ว)" ยังมี "429" ในข้อความ → circuit breaker ของ BacktestEvolution ยังทำงานถูก
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 ตรวจ log 00:50 — fallback non-stream ใช้งานจริง + SMC filter มีผล
+
+**ยืนยันจาก log:**
+- ✅ Non-stream fallback ทำงาน: "API key rotation → ..." + "Non-stream fallback works — persist" (หมุน 3 keys สลับกันเมื่อโควต้าเต็ม โมเดลคง flash-lite เพราะ key ใหม่หลุดลิมิต) — 429 เหลือ 18 บรรทัดจาก ~192 reflection calls (interval=all = 3TF×8กลยุทธ์×8รอบ)
+- ✅ AI reflection กลับมาทำงาน 16/16 รอบ (0 heuristic) — ก่อนหน้าหลุด heuristic หมดเพราะ 429
+- ✅ SMC MIN_SL_ATR filter มีผล: สัญญาณ 15m 37→20, ไม้ 7→3 (ไม้ SL=0.6/2.4/3.9 หายหมด)
+- ✅ Classic strategies สุขภาพดีหลัง commission fix: 15m รวม +32.7%, EMA14/60 PF 4.60, 52W PF 5.02, ไม้แพ้ = −1.00R เป๊ะ (ไม่มีต้นทุนบิด)
+
+**สถานะ SMC ล่าสุด:** 15m 0% (3 ไม้), 1h 0% (3 ไม้), 4h 50% (+0.26R, PF 1.44) — sample เล็กมาก TF ใหญ่ดูมีหวัง TF เล็กยังแพ้ ต้องดูข้อมูลเพิ่มหลัง filter สะสมสัญญาณ
+
+Build: BUILD SUCCESSFUL (ก่อนหน้า), log นี้จาก build ที่มีทุก fix วันนี้

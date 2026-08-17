@@ -10,7 +10,8 @@ data class BacktestConfig(
     val maxLeverage: Double = 10.0,       // จำกัด notional ไม่เกิน 10x พอร์ต
     val includeCosts: Boolean = true,
     val spreadPrice: Double = 0.2,        // spread ครึ่งเดียวถูกหักตอนเข้า (หน่วยราคาของ symbol)
-    val commissionPct: Double = 0.00045,  // ค่าคอมต่อข้าง 4.5 bps (อ้างอิง moss local_costs)
+    val commissionPct: Double = 0.0,      // ค่าคอมต่อข้าง — CFD/forex (เช่น XAUUSD) ต้นทุนอยู่ใน spread แล้ว จึง default 0
+                                          // (เดิม 4.5 bps จาก moss ซึ่งเป็นสเกล crypto — กับทอง ~4380 กลายเป็น ~0.3-0.6R/ไม้ บิดผล backtest หนัก)
     val maxEquityPoints: Int = 240        // downsample equity curve ให้พอดู
 )
 

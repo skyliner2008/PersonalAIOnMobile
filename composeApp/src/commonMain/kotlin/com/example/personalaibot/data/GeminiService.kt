@@ -846,44 +846,76 @@ class GeminiService(
         attempt: Int = 0
     ): String {
         if (apiKey.isBlank()) return "⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน"
-        return try {
-            val res = client.post(generateContentUrl()) {
-                contentType(ContentType.Application.Json)
-                // nested AI summaries (news/macro calendar) เคยไม่มี timeout → ค้าง 90s ทำ custom tool ช้า
-                timeout { requestTimeoutMillis = timeoutMs }
-                val prunedHistory = if (history.size > 20) history.takeLast(20) else history
-                val contents = prunedHistory.map { turn ->
-                    buildJsonObject {
-                        put("role", turn.role)
-                        put("parts", buildJsonArray { add(buildJsonObject { put("text", turn.content) }) })
+
+        // ── Fallback chain (เทียบ streaming path): หมุน key ก่อน → ค่อยสลับโมเดล → persist ค่าที่ใช้ได้จริง ──
+        // เดิม non-stream path ไม่มี fallback เลย โมเดลเดียวติด 429 ก็ error ซ้ำทุกครั้ง (เช่น evolution reflection)
+        val startModel = modelName
+        val startKey = apiKey
+        val triedModels = mutableSetOf(cleanModelName().removePrefix("models/"))
+        val triedKeys = mutableSetOf(apiKey)
+
+        fun switchKey(): Boolean {
+            val chain = apiKeysOverride ?: return false
+            val next = chain.firstOrNull { it.isNotBlank() && it !in triedKeys } ?: return false
+            triedKeys.add(next); rotateApiKey(next); return true
+        }
+        fun switchModel(): Boolean {
+            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.GEMINI_FALLBACK_MODELS
+            val next = chain.firstOrNull { it !in triedModels } ?: return false
+            logDebug("GeminiService", "Model fallback (non-stream): $modelName → $next")
+            triedModels.add(next); modelName = next; return true
+        }
+
+        var timeout = timeoutMs
+        var retriedLonger = false
+        while (true) {
+            try {
+                val res = client.post(generateContentUrl()) {
+                    contentType(ContentType.Application.Json)
+                    timeout { requestTimeoutMillis = timeout }
+                    val prunedHistory = if (history.size > 20) history.takeLast(20) else history
+                    val contents = prunedHistory.map { turn ->
+                        buildJsonObject {
+                            put("role", turn.role)
+                            put("parts", buildJsonArray { add(buildJsonObject { put("text", turn.content) }) })
+                        }
+                    } + buildJsonObject {
+                        put("role", "user")
+                        put("parts", buildJsonArray { add(buildJsonObject { put("text", prompt) }) })
                     }
-                } + buildJsonObject {
-                    put("role", "user")
-                    put("parts", buildJsonArray { add(buildJsonObject { put("text", prompt) }) })
-                }
-                setBody(buildJsonObject {
-                    put("contents", buildJsonArray { contents.forEach { add(it) } })
-                    put("systemInstruction", buildJsonObject {
-                        put("role", "system")
-                        put("parts", buildJsonArray { add(buildJsonObject { put("text", JARVIS_SYSTEM_PROMPT + "\n\n" + coreContext + "\n\n" + intentAddon) }) })
+                    setBody(buildJsonObject {
+                        put("contents", buildJsonArray { contents.forEach { add(it) } })
+                        put("systemInstruction", buildJsonObject {
+                            put("role", "system")
+                            put("parts", buildJsonArray { add(buildJsonObject { put("text", JARVIS_SYSTEM_PROMPT + "\n\n" + coreContext + "\n\n" + intentAddon) }) })
+                        })
                     })
-                })
-            }
-            if (res.status.isSuccess()) {
-                val resp: GeminiResponse = res.body()
-                extractAllTextFromResp(resp).ifBlank { "⚠️ No response" }
-            } else {
+                }
+                if (res.status.isSuccess()) {
+                    val resp: GeminiResponse = res.body()
+                    val text = extractAllTextFromResp(resp).ifBlank { "⚠️ No response" }
+                    // persist ค่าที่ใช้ได้จริง — กันรอบถัดไปกลับไปเริ่มที่ key/โมเดลที่ติดลิมิต
+                    if (modelName != startModel || apiKey != startKey) {
+                        logDebug("GeminiService", "Non-stream fallback works — persist: model=$modelName key=${com.example.personalaibot.maskApiKey(apiKey)}")
+                        onWorkingConfigChanged?.invoke(modelName, apiKey)
+                    }
+                    return text
+                }
+                val code = res.status.value
                 val errBody = com.example.personalaibot.sanitizeSensitive(res.bodyAsText())
-                logError("GeminiService", "API Error ${res.status} (model=$modelName): ${errBody.take(300)}")
-                "⚠️ Error ${res.status}"
+                logError("GeminiService", "API Error $code (model=$modelName): ${errBody.take(300)}")
+                if (code in listOf(429, 500, 503)) {
+                    if (switchKey() || switchModel()) continue
+                    return "⚠️ Error $code (ลองทุก key+โมเดลใน chain แล้วไม่สำเร็จ)"
+                }
+                return "⚠️ Error $code"
+            } catch (e: Exception) {
+                logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)
+                // retry 1 ครั้งด้วย timeout นานขึ้น (transient) แล้วค่อยหมุน key/โมเดล
+                if (!retriedLonger) { retriedLonger = true; timeout = 45_000; continue }
+                if (switchKey() || switchModel()) { retriedLonger = false; timeout = timeoutMs; continue }
+                return "⚠️ Error: ${com.example.personalaibot.sanitizeSensitive(e.message ?: "unknown").take(300)}"
             }
-        } catch (e: Exception) {
-            logError("GeminiService", "Generate response failed (attempt ${attempt + 1}, timeout=${timeoutMs}ms)", e)
-            // Retry 1 ครั้งด้วย timeout นานขึ้น — เคสจริง: calendar AI preview timeout 20s แบบ transient
-            if (attempt == 0) {
-                return generateResponse(prompt, history, intentAddon, coreContext, enableGrounding, timeoutMs = 45_000, attempt = 1)
-            }
-            "⚠️ Error: ${com.example.personalaibot.sanitizeSensitive(e.message ?: "unknown").take(300)}"
         }
     }
 

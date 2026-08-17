@@ -317,6 +317,19 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 appendLine("  ↳ ${t.strategyName} ${t.side} @ ${t.entryPrice} → ${t.exitReason} @ ${t.exitPrice} (${"%+.2f".format(t.pnlR)}R, ${"%+,.2f".format(t.pnlMoney)})")
             }
         }.trimEnd())
+        // 🔬 SMC trade forensics — dump ทุกไม้ SMC ใต้ tag JarvisVM (อยู่ใน filter ที่ผู้ใช้ capture อยู่แล้ว)
+        //    เพื่อตรวจว่า 0% win เกิดจากกลยุทธ์จริง หรือ entry/SL/TP ผิดตำแหน่ง (structure-based)
+        val smcTrades = result.trades.filter { it.kind == "SMC" }
+        if (smcTrades.isNotEmpty()) {
+            logDebug("JarvisVM", buildString {
+                appendLine("🔬 SMC trade detail [$symbol/$interval] — ${smcTrades.size} ไม้:")
+                smcTrades.forEach { t ->
+                    val slDist = kotlin.math.abs(t.entryPrice - t.sl)
+                    val tpDist = kotlin.math.abs(t.tp - t.entryPrice)
+                    appendLine("  ${t.side} entry=${t.entryPrice} | SL=${t.sl} (${"%.1f".format(slDist)}) TP=${t.tp} (${"%.1f".format(tpDist)}) RR=${"%.2f".format(tpDist / slDist)} → ${t.exitReason} @ ${t.exitPrice} (${"%+.2f".format(t.pnlR)}R)")
+                }
+            }.trimEnd())
+        }
         // push เข้า store ให้หน้าจอ Backtest (แท็บกลยุทธ์ + กราฟ) อ่านไปแสดง
         com.example.personalaibot.automation.backtest.BacktestResultStore.add(result, strategy)
         return Triple(formatBacktestResult(result) + buildRegimeSection(result, candles), result, null)

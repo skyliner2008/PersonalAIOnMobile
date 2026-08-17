@@ -13,9 +13,12 @@ import com.example.personalaibot.tools.trading.Candle
  *  - แบ่งข้อมูลเป็น N ช่วงต่อเนื่อง → ช่วงละรอบ: รัน backtest ด้วย params ปัจจุบัน → สะท้อนผล → ปรับ params
  *  - สะท้อนผลด้วย AI (Gemini) เป็นหลัก, ถ้า AI ล้มเหลวใช้กฎ heuristic (7 หลักการของ moss)
  *  - ปรับต่อรอบไม่เกิน ±10% (clampStep) และห้ามหนีค่าเริ่มต้นเกิน ±30% (clampDrift)
- *  - ห้ามนิ่งเกิน 3 รอบติด (บังคับ微调 ≥2%)
+ *  - ห้ามนิ่งเกิน 3 รอบติด (บังคับปรับเล็กน้อย ≥2%)
  */
 class BacktestEvolution(private val gemini: GeminiService?) {
+
+    /** Circuit breaker: เมื่อเจอ quota/429 ให้หยุดเรียก AI สำหรับรอบที่เหลือของ run นั้น (กันยิงซ้ำรัวๆ จนเปลือง quota) */
+    private var aiQuotaDead = false
 
     data class RoundResult(
         val round: Int,
@@ -55,6 +58,8 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         config: BacktestConfig = BacktestConfig(),
         initialOverride: TpSlParams? = null   // params ล่าสุดที่ optimize/apply ไว้ — ทำให้ evolution ต่อเนื่อง ไม่เริ่มจาก default ทุกครั้ง
     ): EvolutionResult {
+        // ไม่ reset aiQuotaDead ที่นี่ — instance ถูกสร้างใหม่ทุก task (runEvolveTask) และ evolve() ถูกเรียกต่อกันหลายกลยุทธ์
+        // ถ้า quota ตายกลาง task ต้องคงสถานะข้ามกลยุทธ์ไว้ ไม่เช่นนั้นจะกลับไปยิง 429 ซ้ำทุกกลยุทธ์
         val n = candles.size
         val segSize = n / segments
         val initial = initialOverride ?: TpSlParams.defaultsFor(kind)
@@ -97,7 +102,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             val (nextParams, note, fromAi) = reflect(kind, s + 1, params, initial, r, slExits, noChangeStreak)
             if (fromAi) usedAi = true
             val clamped = TpSlParams.clampDrift(initial, TpSlParams.clampStep(params, nextParams))
-            // นับ streak "นิ่ง" เฉพาะรอบที่มีไม้จริง — รอบ 0 ไม้ประเมินอะไรไม่ได้ ไม่ควรไปกระตุ้น微调
+            // นับ streak "นิ่ง" เฉพาะรอบที่มีไม้จริง — รอบ 0 ไม้ประเมินอะไรไม่ได้ ไม่ควรไปกระตุ้นปรับเล็กน้อย
             noChangeStreak = if (clamped == params && r.totalTrades > 0) noChangeStreak + 1 else 0
 
             rounds += RoundResult(
@@ -137,7 +142,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             return Reflection(current, "ไม่มีไม้ในช่วงนี้ ข้อมูลไม่พอประเมิน → คง params (กฎ)", false)
         }
         val g = gemini
-        if (g != null) {
+        if (g != null && !aiQuotaDead) {
             val prompt = buildString {
                 appendLine("คุณคือ quant ที่ปรับจูนกลยุทธ์เทรด '$kind' แบบ walk-forward evolution (หลักการ: ปรับทีละนิด ไม่ overreact, ห้ามเกิน ±10% ต่อรอบ, ห้ามหนีค่าเริ่มต้น ${initial.slMult}/${initial.tpMult} เกิน ±30%)")
                 appendLine("ผลรอบ $round: trades=${r.totalTrades} ชนะ=${r.wins} แพ้=${r.losses} ค้าง=${r.timeouts} SL-exits=$slExits winRate=${"%.1f".format(r.winRate * 100)}% avgR=${"%+.2f".format(r.expectancyR)} PF=${"%.2f".format(r.profitFactor)}")
@@ -151,7 +156,14 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             val parsed = parseReflectionJson(resp)
             if (parsed != null) {
                 logDebug("BacktestEvolution", "AI reflection round $round ($kind): $resp")
+                kotlinx.coroutines.delay(400) // throttle กัน burst ชน rate limit (8 กลยุทธ์ × 8 รอบ ยิงรวดเดียว)
                 return Reflection(parsed.params, parsed.note + " (AI)", true)
+            }
+            // ล้มเหลว: ถ้าเป็น quota/429 ให้ตัดวงจร — รอบที่เหลือของ run นี้ใช้กฎ heuristic หมด ไม่ยิงซ้ำ
+            val low = resp.lowercase()
+            if ("429" in resp || "quota" in low || "too many" in low || "rate" in low && "limit" in low) {
+                if (!aiQuotaDead) logDebug("BacktestEvolution", "⚠️ AI reflection quota หมด/ถูกจำกัด ($resp) — ปิด AI สำหรับ run นี้ ใช้กฎ heuristic ต่อ")
+                aiQuotaDead = true
             }
         }
         return Reflection(ruleBasedAdjust(current, r, slExits, noChangeStreak), ruleNote(r, slExits, noChangeStreak), false)
@@ -180,7 +192,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             r.timeouts * 2 > r.totalTrades && r.totalTrades > 0 -> current.copy(tpMult = current.tpMult * 0.95)
             // ชนะเยอะแต่ PF < 1 → TP ใกล้เกิน ขยาย 10%
             r.winRate >= 0.5 && r.profitFactor < 1.0 -> current.copy(tpMult = current.tpMult * 1.10)
-            // นิ่งเกิน 3 รอบ → บังคับ微调 2% รักษา "ความมีชีวิต" ของกลยุทธ์
+            // นิ่งเกิน 3 รอบ → บังคับปรับเล็กน้อย 2% รักษา "ความมีชีวิต" ของกลยุทธ์
             noChangeStreak >= 3 -> current.copy(slMult = current.slMult * 1.02)
             else -> current // โครงสร้างสุขภาพดี ไม่แก้ (หลักการ 1: อย่า overreact)
         }
@@ -193,7 +205,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             slExits * 10 >= decided * 7 -> "SL ชน $slExits/${r.totalTrades} ไม้ (≥70%) → ขยาย SL +10%"
             r.timeouts * 2 > r.totalTrades && r.totalTrades > 0 -> "ค้าง ${r.timeouts}/${r.totalTrades} ไม้ → หด TP −5%"
             r.winRate >= 0.5 && r.profitFactor < 1.0 -> "ชนะเยอะแต่ PF<1 → ขยาย TP +10%"
-            noChangeStreak >= 3 -> "นิ่ง 3 รอบติด → 微调 SL +2%"
+            noChangeStreak >= 3 -> "นิ่ง 3 รอบติด → ปรับเล็กน้อย SL +2% (กันกลยุทธ์จำนวน)"
             else -> "โครงสร้างสุขภาพดี → คง params"
         } + " (กฎ)"
     }
