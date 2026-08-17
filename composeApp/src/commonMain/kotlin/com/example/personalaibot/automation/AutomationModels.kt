@@ -247,8 +247,8 @@ object AlertFieldCatalog {
 
     val SIGNAL_ALERT = AlertToolOption(
         toolName = "trading_signal_alert",
-        label = "📡 Signal Alert (สัญญาณเทรดใหม่ 8 กลยุทธ์ ⭐)",
-        description = "ตรวจสัญญาณ BUY/SELL ที่ 'เพิ่งเกิด' ในแท่งปิดล่าสุดจาก 8 กลยุทธ์ (Momentum / Trend EMA50-200 / Reversal / Donchian / 52W High / EMA14-60 / UT Bot / 3-Bar Reversal) — พร้อม Entry/SL/TP เฉพาะกลยุทธ์ เลือก TF ด้วย suffix เช่น XAUUSD@15m",
+        label = "📡 Signal Alert (สัญญาณเทรดใหม่ 8 กลยุทธ์ + SMC ⭐)",
+        description = "ตรวจสัญญาณ BUY/SELL ที่ 'เพิ่งเกิด' ในแท่งปิดล่าสุดจาก 8 กลยุทธ์ (Momentum / Trend EMA50-200 / Reversal / Donchian / 52W High / EMA14-60 / UT Bot / 3-Bar Reversal) + SMC Engine จาก mt5-core-server (OB Bounce / CHoCH / SMS-BMS / FVG Fill / Liquidity Sweep / RSI Divergence — SL/TP ตามโครงสร้างตลาด + confluence stars) — พร้อม Entry/SL/TP เฉพาะกลยุทธ์ เลือก TF ด้วย suffix เช่น XAUUSD@15m",
         fields = listOf(
             AlertFieldOption("signal_buy", "สัญญาณ BUY ใหม่ (1=เกิด)", "ตั้ง signal_buy >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ BUY ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),
             AlertFieldOption("signal_sell", "สัญญาณ SELL ใหม่ (1=เกิด)", "ตั้ง signal_sell >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ SELL ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),

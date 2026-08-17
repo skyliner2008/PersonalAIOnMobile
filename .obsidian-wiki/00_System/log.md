@@ -1141,3 +1141,187 @@
 - Trading Intelligence: เพิ่ม Strategy Signal Provider (5 กลยุทธ์ Quantpedia) + Signal Alert Provider (8 กลยุทธ์ edge-triggered, Entry/SL/TP/RR, baseline กันเด้ง, บันทึกผล TP/SL จริง); Chart Dashboard เพิ่ม overlay Donchian + Signal Markers (SIG) + หมายเหตุ market-closed backoff
 - Alert System V2 (section 4) เขียนใหม่ทั้งชุด: Signal Alert re-arm อัตโนมัติ, lifecycle TRIGGERED ออกจาก loop + ปุ่ม 🗑/🔁, โหมดส่ง ai/direct, การ์ด 3D + footer engine, เสียง 2 engine (เครื่อง default / AI Live chain ตาม Settings), presets 14+, pipeline trace log
 - Tool Catalogue: 89 → 91 (เพิ่ม trading_strategy_signal, trading_signal_stats ใน TRADING TOOLS 26 → 28)
+
+## 2026-08-17 — แผนระบบ Backtest Strategies (ศึกษา OLD_Code แล้ว)
+
+- ศึกษา OLD_Code 2 โปรเจกต์: ai-trading-agent (backtest suite: engine/optimizer/walk_forward/monte_carlo/permutation/overfitting — port ได้ตรง) + moss-trade-bot (เอาแนวคิด evolution loop, regime classifier, local costs; backtest.py ผูก Hyperliquid ไม่ port)
+- ทรัพยากรรีใช้ในแอป: SignalMarkerProvider.compute (signals 8 กลยุทธ์), computeTpSl, fetchStats (mini-backtest 300 แท่ง), SignalAlertRecord (ผลจริง), TV fetch 5,000 แท่ง/ครั้ง, การ์ด 3D, Lightweight Charts
+- ประเด็นสำคัญ: DB ปัจจุบัน trim เหลือ ~300 แท่ง → ต้องแยกตาราง BacktestDataset + ทำ history paging ย้อนหลัง
+- แผน 4 phases: (1) Engine+ข้อมูลย้อนหลัง+tool trading_backtest (2) Optimizer+Robustness (3) AI Evolution+Regime (4) ป้อน tuned params กลับเข้า SignalAlertProvider
+- เอกสารแผนฉบับเต็ม: .obsidian-wiki/02_Components/Backtest_System_Plan.md
+
+## 2026-08-17 — Backtest System Phase 1: Engine + ข้อมูลย้อนหลัง + tool trading_backtest
+
+**แก้บั๊กแฝงที่พบระหว่างทำ (สำคัญ):** marker label "52H▲" filter เฉพาะตัวอักษรเหลือ "H" และ "3BR▲" เหลือ "BR" — ทำ 52W High กับ 3-Bar Reversal หลุดจาก stats เงียบๆ และ live alert ได้ชื่อกลยุทธ์/เหตุผล/TP-SL ผิด (ตก else branch) — เพิ่ม helper `signalKindOf()` แทน `label.filter{isLetter}` ทั้ง 5 จุดใน SignalAlertProvider
+
+**ข้อมูลย้อนหลัง:** `SmcApiService.fetchBacktestCandles(symbol, interval)` — ดึง TV websocket 5,000 แท่งคงที่ (15m≈52 วัน, 1h≈7 เดือน, 4h≈2.3 ปี, 1D≈13 ปี) แยกจาก TvCandle DB เด็ดขาด (กัน trim 300) + in-memory cache ระดับ process 10 นาที + fallback Binance 1,000 แท่ง (crypto)
+
+**BacktestEngine (ใหม่, automation/backtest/):** port จาก OLD_Code ai-trading-agent engine.py ปรับเข้าระบบ Signal — สัญญาณจาก SignalMarkerProvider.compute, SL/TP จาก computeTpSl (สูตรเดียวกับ live alert), กติกาเดียวกับ fetchStats (เข้าปิดแท่งสัญญาณ, ชนทั้งคู่ถือแพ้, ค้าง=TIMEOUT) + ถือทีละ 1 ไม้ (สัญญาณชนไม้ค้าง=skipped) + ต้นทุน spread/commission 4.5bps + money model เสี่ยง 1%/ไม้ เลเวอเรจ ≤10x → win-rate, PF, maxDD, Sharpe, expectancy R, equity curve, แยกตามกลยุทธ์
+
+**Tool trading_backtest:** symbol/interval/strategy/costs → ผล markdown (ภาพรวม + ตารางแยกกลยุทธ์ + 5 ไม้ล่าสุด) — wire: TradingToolDefinitions, TradingToolExecutor (executeBacktest + formatBacktestResult), ToolRegistry 2 จุด, persona rule #8; computeTpSl/strategyName ปรับเป็น internal
+
+**ต่างจากแผนเล็กน้อย:** การ์ด 3D/หน้าจอ Backtest + กราฟ equity curve เลื่อนไป Phase 2 (Phase 1 ใช้ markdown table ที่ render อยู่แล้ว)
+
+**Build:** assembleDebug ผ่าน (3m36s)
+
+## 2026-08-17 Backtest System Phase 2-4 (Optimizer / Evolution / Regime / Tuning DB)
+
+- Phase 2: StrategyParams.kt (TpSlParams defaults ตรง computeTpSl, grid 25 combos, clampDrift ±30%, clampStep ±10%), ParamOptimizer (score=sharpe*PF*winRate, min 5 trades), WalkForward (anchored 5 splits 70/30, markers recompute ต่อ slice กัน lookahead), MonteCarlo (shuffle 1,000 รอบ), PermutationTest (200 รอบ), OverfittingScore (weights 40/25/20/15)
+- Phase 3: RegimeClassifier (BULL/BEAR/SIDEWAYS ด้วย ADX14 + EMA50 slope) + statsByRegime ต่อท้ายผล trading_backtest; BacktestEvolution 8 ช่วง, AI reflection ผ่าน GeminiService (fallback heuristic) ; tool trading_backtest_evolve
+- Phase 4: ตาราง StrategyTuning (UNIQUE(symbol,interval,kind)) + migration 4.sqm + AutomationManager CRUD; SignalAlertProvider ใช้ tuned params เมื่อ grade != overfit; tool trading_backtest_optimize (apply=on บันทึกเฉพาะไม่ overfit)
+- แก้ compile error: nullable smart-cast ใน BacktestEvolution, break/continue ใน inline lambda (getOrElse -> getOrNull) ใน TradingToolExecutor
+- Build: assembleDebug BUILD SUCCESSFUL
+- ยังไม่ทำ: UI หน้าจอ Backtest + กราฟ equity curve (ผลลัพธ์เป็น markdown ในแชท), ทดสอบ performance จริงบนมือถือ
+
+## 2026-08-17 Port SMC Engine จาก mt5-core-server เข้าแอป (Backtest + Live Signal)
+
+- Phase A: automation/smc/ — SmcTypes, SmcUtils (ATR Wilder/swings), MarketStructure (BOS/CHoCH/SMS/BMS + IDM), FvgDetection, OrderBlocks, LiquidityZones (+confluence stars), SweepDetection (+AttackForce), SmcEngine.buildSnapshot
+- Phase B: SmcSignalDetector — 5 เงื่อนไขเข้า (OB_BOUNCE, LIQ_SWEEP single-TF, STRUCTURE_BREAK, FVG_FILL, RSI_DIVERGENCE) กรอง RRR>=1.2 + confluence>=2 ดาว; bias proxy จาก structure+SMA20/50 แทน MTF; TP จาก findNearestLevel แทน PriceMap; SmcSignals.generate เดิน bar-by-bar window 300 แท่งกัน lookahead + edge-dedupe ด้วย signal key; kind "SMC" เข้า trading_backtest (strategy=smc หรือ all) SL/TP ตามโครงสร้างตลาดของสัญญาณเอง
+- Phase C: SignalAlertProvider รวมสัญญาณ SMC เข้า job trading_signal_alert เดิม (edge ที่แท่งปิดล่าสุด, payload เพิ่ม signal_stars, strategy/reason จาก triggers) — ผู้ใช้ไม่ต้องสร้าง alert ใหม่
+- ตัดออกจากรอบนี้: PriceMap/WallRegistry (~780 บรรทัด), MAGNET/WALL_BREAK scalp, V25 playbooks PB1-5, Kelly/circuit breaker, SimpleScalpingEngine
+- อัปเดต AutomationModels label + TradingToolDefinitions (trading_backtest enum เพิ่ม smc)
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-17 แก้บั๊ก SL/TP ผิดฝั่งใน SMC backtest
+
+- พบจาก log จริง: ไม้ BUY ชน "SL" เหนือราคาเข้าแต่กำไร (SL/TP สลับฝั่งจากสัญญาณ STRUCTURE_BREAK ที่ level ข้ามฝั่งราคา)
+- แก้ 2 ชั้น: SmcSignalDetector กรองสัญญาณที่ SL/TP ผิดฝั่งทิ้งตั้งแต่ต้นทาง + BacktestEngine เช็ก directionValid ก่อนเปิดไม้ (กันพลาดทุกกลยุทธ์)
+- ผลทดสอบผู้ใช้ก่อนแก้: SMC 15m ขาดทุน (PF 0.54) แต่ 1h กำไร +14.5% (win 61.1%, PF 1.14) — SMC ทำงานดีใน BULL regime (win 70%) แพ้ใน SIDEWAYS
+- สังเกต: Live เรียก trading_backtest_optimize ซ้ำ 2 ครั้ง (09:40:27 และ 09:40:40) — ยังไม่แก้ ดูก่อนว่าเกิดจากฝั่ง Live tool-call dedupe
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-17 SMC quality gates (ทดแทน MT5 Gates ที่ไม่ได้ port)
+
+- หลังแก้บั๊ก SL/TP ผิดฝั่ง ผลจริงของ SMC เปลือยๆ ยังขาดทุน (1h: win 28.7%, PF 0.56) — ผล +14.5% รอบแรกเป็นไม้ SL ผิดฝั่งที่กำไรเทียม
+- ใส่ฟิลเตอร์ 4 ชั้นใน SmcSignalDetector: (1) minRRR 1.2→1.8 (2) SL/TP validity (3) เทรดตามทิศ structure เท่านั้น (4) Premium/Discount — reversal BUY เฉพาะ DISCOUNT / SELL เฉพาะ PREMIUM (ยกเว้น CONTINUATION)
+- SmcSignals.generate เพิ่ม cooldown 10 แท่งต่อ strategy+side (แทน duplicate guard)
+- ผู้ใช้ยืนยันความต่าง chat vs voice: ตัวเลขเหมือนกันเป๊ะ (cache hit) ต่างแค่รูปแบบนำเสนอ — ตามดีไซน์
+- Build: assembleDebug BUILD SUCCESSFUL — รอผู้ใช้ทดสอบ backtest smc เทียบ 15m/1h/4h
+
+## 2026-08-17 Backtest All-TF (interval=all)
+
+- trading_backtest รองรับ interval=all → รัน 3 TF (15m/1h/4h) ในคำสั่งเดียว + ตารางเทียบผล (ไม้/Win%/PF/Expectancy/กำไร/MaxDD) แล้วตามด้วยผลละเอียดแยกแต่ละ TF
+- ใช้ได้กับทุก strategy (all หรือเจาะจง เช่น smc) — แยก executeBacktest → runBacktestOne คืน (text, result, error)
+- อัปเดต TradingToolDefinitions interval enum เพิ่ม "all"
+- Build: assembleDebug BUILD SUCCESSFUL
+
+## 2026-08-17 แก้ Live ช้า/ socket ตายตอน backtest all-TF
+- อาการ: กด live หลายรอบไม่ READY + สั่ง `backtest smc ทอง all` ผ่านเสียงแล้วรันนาน ~6 นาที (15m 2m22s / 1h 2m13s / 4h 1m14s sequential) จน Live websocket โดน SocketTimeoutException (write) ต้อง reconnect
+- สาเหตุ: executeBacktest รันบน dispatcher เดิม (Dispatchers.IO ของ LiveToolBridge) แบบ sequential + CPU-bound ยาว ทำ OkHttp ping/write ขาดช่วง → socket โดนตัด (ระบบ reconnect + ส่ง tool response ซ้ำทำงานถูกอยู่แล้ว)
+- แก้ใน `TradingToolExecutor.kt`:
+  1. `executeBacktest` / `executeBacktestOptimize` ห่อด้วย `withContext(Dispatchers.Default)` — แยกงาน CPU หนักออกจาก IO pool ที่ Live/websocket ใช้
+  2. all-TF เปลี่ยนจาก for-loop sequential เป็น `coroutineScope { tfs.map { async { runBacktestOne } }.awaitAll() }` รัน 15m/1h/4h พร้อมกัน (ผลยังเรียงตาม TF เดิม) — คาดว่าจาก ~6 นาที เหลือราวเวลา TF ที่ช้าสุด (~2.5 นาที)
+  3. `runBacktestOne` skip การคำนวณ classic markers ทั้ง 8 กลยุทธ์เมื่อ strategy=smc (เดิมคำนวณทิ้งเปล่า) + log เวลา fetch/คำนวณต่อ TF (tag Backtest)
+- BUILD SUCCESSFUL; ยังไม่ commit (รอผู้ใช้สั่ง)
+- หมายเหตุ: อาการกด live รัวๆ แล้วไม่ READY 3 รอบแรก ยังไม่ยืนยันสาเหตุ — น่าจะโดน throttle จากการเปิด session ถี่เกิน แนะนำรอ READY ก่อนกดซ้ำ
+
+## 2026-08-17 ยืนยันผลแก้ Live+backtest (ทดสอบจริง PID 32182)
+- กด live ครั้งเดียว READY ใน 1.7 วิ (11:27:41 → 11:27:42.8) ไม่มีอาการกดรัวแล้วเงียบ
+- สั่งเสียง backtest smc ทอง all → fetch 3 TF ขนานกัน (11:28:00-02) → ส่ง tool response 11:28:18 = รวม ~31 วิ (จากเดิม ~6 นาที)
+- ไม่มี SocketTimeoutException / ไม่มี reconnect ระหว่าง tool ทำงาน → โมเดลพูดสรุปต่อได้ทันที
+- ผลลัพธ์ all-TF ครบ 3 TF ถูกต้อง (15m PF 0.49 / 1h PF 0.45 / 4h PF 0.64 — SMC ยังขาดทุน ตามที่ทราบ)
+
+## 2026-08-17 Audit ระบบ Signal/Backtest ทั้งหมด + แก้บั๊ก 3 จุด
+ตรวจ: SignalMarkerProvider, SignalAlertProvider, StrategySignalProvider, computeTpSl/parameterizedTpSl, BacktestEngine, SmcSignals/SmcSignalDetector, ParamOptimizer, WalkForward, PermutationTest, MonteCarlo, OverfittingScore, BacktestEvolution
+- สรุปความถูกต้อง: ทุกกลยุทธ์ edge-triggered, ไม่มี lookahead ในตัวหลัก (indicator ณ แท่ง i ใช้ข้อมูล ≤ i เท่านั้น), computeTpSl ตรง parameterizedTpSl เป๊ะ, SMC กัน lookahead ด้วย window 300 แท่งต่อ snapshot, live ใช้แท่ง n-2 (กันแท่งยังไม่ปิด)
+- BUG A (แก้แล้ว): BacktestEngine หัก entry commission ซ้ำ 2 รอบ (balance -= entryCommission ตอนเข้า + หักอีกใน pnl ตอนปิด) → equity curve/balance ต่ำกว่าความจริงและไม่ตรง finalBalance — ลบบรรทัดหักตอนเข้าออก (ผล backtest ทุกครั้งที่เปิด costs จะดีขึ้นเล็กน้อยและสม่ำเสมอ)
+- BUG B (แก้แล้ว): WalkForward คำนวณ OOS markers บน test slice แยก → indicator reseed (EMA200=NaN ช่วงต้น slice, ATR backward-fill) ทำสัญญาณ OOS เพี้ยน — เปลี่ยนเป็นคำนวณบน prefix (anchor 0) แล้ว filter เฉพาะโซนทดสอบ + BacktestEngine เพิ่มพารามิเตอร์ startIndex (วัดผลเฉพาะช่วง OOS แต่ ATR warm จาก prefix); BacktestEvolution ใช้ startIndex ด้วย
+- BUG C (แก้แล้ว): 52H ยิงสัญญาณมั่วช่วง ~100 แท่งแรกของชุดข้อมูล (runHigh เพิ่งเริ่มสะสม prox=1.0 ตลอด) — เพิ่ม warmup skip i<100
+- จดไว้ (ไม่แก้ เป็น design choice): Sharpe ใช้ √252 ทุก TF (ระบุว่าคร่าวๆ), W52H = high ของข้อมูลที่โหลด (ไม่ใช่ 52 สัปดาห์จริง), LIQ_SWEEP ต้องตรงทิศ structure ทำให้ sweep reversal ต้นน้ำถูกกรองทิ้ง, SMC TP=nearest level ทำ RRR จำกัด (รอ PriceMap)
+- BUILD SUCCESSFUL; ยังไม่ commit
+
+## 2026-08-17 Adaptive Optimize (เรียนรู้จากประวัติ + auto-apply)
+- ตารางใหม่ OptimizationTrial (5.sqm + JarvisDatabase.sq + DatabaseDriverFactory additive) — บันทึก params/score/delta_vs_baseline ทุกครั้งที่ลองจูน ต่อ symbol/TF/กลยุทธ์ (เก็บ 200 รายการล่าสุด)
+- AdaptiveOptimizer.kt: candidates = grid 25 + mutation รอบ params ปัจจุบัน (±10-25%) + mutation รอบ top-3 params ในประวัติ; hard bound กว้าง SL 0.3-6×/TP 0.5-10× (ไม่จำกัด ±30% เหมือน evolution เพราะทุกตัววัดจริง); เรียนรู้ direction effect (SL กว้าง/แคบ, TP ไกล/ใกล้ แล้วดี/แย่) ใช้เป็น tie-breaker + แสดง insight ในรายงาน; บันทึก baseline+top-5 กลับเข้าความจำทุกรอบ
+- executeBacktestOptimize เขียนใหม่: baseline = tuned ปัจจุบันหรือ default → adaptive run → wf/perm/mc บน params ที่ชนะ → AUTO-APPLY เมื่อ score ดีกว่าเดิม ≥2% และเกรดไม่ overfit (apply=off = dry-run); tool definition อัปเดตให้โมเดลเข้าใจพฤติกรรมใหม่
+- BUILD SUCCESSFUL; ยังไม่ commit
+
+## 2026-08-17 Mix Strategies (โหวตหลายกลยุทธ์เป็น 1 signal) — เสร็จ + build ผ่าน
+
+**MixSignalEngine.kt (ใหม่):** state-based voting — แต่ละกลยุทธ์โหวต +1/-1/0 จาก state ณ แท่งนั้น (MOM=sign ROC20, TR=EMA50/200, E=EMA14/60, UT=เหนือ/ใต้ trailing stop, REV=RSI<30/>70, DC/52H=sticky breakout state, 3BR=โหวตค้าง 5 แท่ง) — edge เมื่อ score ข้ามเกณฑ์ minVotes ครั้งแรก → marker MIX▲/MIX▼ (ไม่ lookahead, warmup 210 แท่ง); mixMarkers รับ cache=SeriesCache ได้ (กันคำนวณซ้ำตอน live)
+
+**Backtest:** trading_backtest strategy=mix + params mix_strategies ("tsmom,trend,donchian,utbot") / mix_min_votes (default=ครึ่งจำนวนกลยุทธ์ปัดขึ้น) — ใช้ได้กับ interval=all; SL/TP MIX=1.5/2.5 ATR14 (StrategyParams.defaultsFor + computeTpSl + parameterizedTpSl else-branch)
+
+**Live alert:** SignalAlertProvider.fetch อ่าน mix config (CoreMemory key mixcfg|SYMBOL|TF) → คำนวณ score ที่แท่งปิดล่าสุด + รวม edge MIX เข้า edges ปกติ; fields ใหม่ signal_mix_score / signal_mix_votes (รายละเอียดโหวตแต่ละตัว)
+
+**Tool ใหม่ trading_mix_config** (set/show/clear ต่อ symbol+TF) ลงทะเบียน ToolRegistry 2 จุด + executor dispatch + persona item 8 อัปเดต
+
+**Build:** :composeApp:assembleDebug SUCCESSFUL 2m47s
+
+## 2026-08-17 Backtest Lab — หน้าจอผล backtest แบบกราฟ (UI แยกจากแชท)
+
+**BacktestResultStore.kt (ใหม่):** singleton in-memory เก็บผล backtest 20 runs ล่าสุด (StateFlow) — TradingToolExecutor.runBacktestOne push ผลเข้าทุกครั้งที่รันสำเร็จ (รวม interval=all ทั้ง 3 TF)
+
+**BacktestScreen.kt (ใหม่):** หน้าจอ "Backtest Lab" เปิดจากไอคอนกราฟแท่ง 📊 บนแถบบน
+- chips เลือก run (symbol/TF ล่าสุด 8 รายการ)
+- แท็บ "ภาพรวม" + แท็บแยกตามกลยุทธ์ เรียงตามคะแนน avgR อัตโนมัติ (ดีสุดอยู่แท็บแรก) มี ▲/▼ คะแนนบนแท็บ
+- ภาพรวม: equity curve (Canvas เส้น+fill+เส้นทุนประ), metric cards 2 คอลัมน์ (กำไรสุทธิ/Win%/PF/Expectancy/MaxDD/Sharpe) แบบการ์ดมิติ shadow+gradient, donut pie ชนะ/แพ้/ค้าง, 8 ไม้ล่าสุด
+- แท็บกลยุทธ์: กราฟสะสม R เฉพาะกลยุทธ์ + metric cards (สัญญาณ/ไม้/Win%/avgR/PF) + pie + ไม้ล่าสุดของตัวเอง
+- chat ยังแสดงตารางสรุปเหมือนเดิม + เพิ่มบรรทัดชี้ไปหน้า Backtest Lab
+
+**ข้อจำกัด:** ผลเก็บ in-memory หายเมื่อปิดแอป (ยังไม่ persist); กราฟแท็บกลยุทธ์เป็น cumulative R ไม่ใช่ balance จริง (engine ไม่ได้ track equity แยกตามกลยุทธ์)
+
+**Build:** :composeApp:assembleDebug SUCCESSFUL (แก้ compile error 3 จุด: runningFold type param, Path.addPath คืน Unit, import toLocalDateTime)
+
+## 2026-08-17 Multi-Session LongTask + Live READY Greeting
+
+**ปัญหา 1 — backtest บล็อก AI หลายนาที ผู้ใช้ไม่รู้ว่าค้างหรือทำงานอยู่:**
+- LongTaskRunner.kt (ใหม่, commonMain): scope แยก SupervisorJob + Dispatchers.Default, launch() คืน task id ทันที, มี StateFlow running + SharedFlow completions
+- TradingToolExecutor: executeBacktest / executeBacktestOptimize / executeBacktestEvolve แปลงเป็น thin launcher — ตอบ ack ทันที ("รับคำสั่งแล้ว กำลังทำในเบื้องหลัง") งานจริงย้ายไป runBacktestTask/runOptimizeTask/runEvolveTask (คืน Pair<chatBody, speechSummary>)
+- tool descriptions อัปเดตบอกโมเดลว่าห้ามสรุปผลจาก ack (ผลจะมาทีหลังอัตโนมัติ)
+- JarvisViewModel collect completions:
+  - live เปิดอยู่ → การ์ดเต็มลงแชท (storeMessage + AlertChatBus) + sendLiveClientText ให้ live model พูดสรุปเอง
+  - live ปิดอยู่ → announceLongTaskCompletion() (expect/actual ตาม pattern wakeupAutomationService) → JarvisAutomationService ACTION_LONGTASK_ANNOUNCE → sendNotification + deliverChatAndVoice (reuse alert voice chain Live 3.1→2.5→Android TTS + การ์ดแชทพร้อม footer engine เสียง)
+
+**ปัญหา 2 — กด live แล้วไม่รู้ว่า READY หรือยัง (READY ช้าหลายวิ ผู้ใช้พูดไปก่อน AI เงียบ):**
+- reuse กลไก pendingGreetingOnReady ที่มีอยู่ (เดิมใช้เฉพาะยืนยันเปลี่ยนเสียง): startVoiceInput ตั้ง greeting "ทักผู้ใช้สั้นๆ 1 ประโยค" ทุกครั้งที่เปิด live — AI จะพูดทักเองทันทีที่ session READY ผู้ใช้รู้ว่าคุยได้แล้ว
+- เพิ่ม orchestrator.setLiveGreetingOnReadyIfAbsent() กันทับ greeting ยืนยันเปลี่ยนเสียง
+
+**Build:** :composeApp:assembleDebug SUCCESSFUL 1m30s
+
+## 2026-08-17 fix: LongTask live announce ใช้ realtimeInput แทน clientContent + ACK voice rule สั้น
+- **ปัญหา:** ทดสอบ multi-session รอบแรก — เปิด live ค้างไว้ สั่ง backtest ผ่านเสียง → backtest รันเสร็จจริง (log `📦 LongTask เสร็จ ... live=true`) แต่ไม่มีเสียงสรุปตามมา นิ่งไปเลย
+- **Root cause:** `JarvisViewModel` collector `LongTaskRunner.completions` ใช้ `orchestrator.sendLiveClientText` (clientContent) — ตามคอมเมนต์ใน `LiveGeminiService.kt` พิสูจน์แล้วว่าขณะ audio streaming clientContent เป็นแค่ context ให้ model ไม่กระตุ้นให้ตอบเอง → ต้องใช้ realtimeInput
+- **แก้ 3 จุด:**
+  1. `JarvisOrchestrator.kt` — เพิ่ม `suspend fun sendLiveRealtimeText(text) = liveService.sendRealtimeText(text)`
+  2. `JarvisViewModel.kt` — collector สาขา live on เปลี่ยนจาก sendLiveClientText → `sendLiveRealtimeText` (ส่งสรุปผลเข้า live เป็น realtime input ให้ model พูดตอบ)
+  3. `LiveToolBridge.kt` — voiceRule แปลงเป็น when 3 กรณี: system_self_review เดิม, **isLongTaskAck** (`trading_backtest`/`trading_backtest_optimize`/`trading_backtest_evolve` → "[VOICE RULE - ACK] ตอบสั้น 1-2 ประโยค ห้ามสรุปยาว" แก้อาการ ack พูดรัวยาว 8-12 ประโยค), else rule เดิม
+- **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL — รอผู้ใช้ทดสอบว่า live พูดสรุปผล backtest แล้วหรือไม่
+
+## 2026-08-17 เพิ่ม: log ผล Backtest ละเอียดลง logcat (ตรวจสอบตัวเลขได้โดยไม่ต้องเปิดแชท)
+- **ทดสอบรอบ 2 (live off) ผ่าน:** สั่ง backtest BTC แล้วปิด live → `📦 LongTask เสร็จ (live=false)` → `📣 LONGTASK_ANNOUNCE` → notification + เสียงผ่าน Live 3.1 chain + การ์ดเข้าแชท (`busEmitted=true`) — ครบทั้ง 3 ช่องทาง
+- **เพิ่มใน `TradingToolExecutor.runBacktestOne`:** หลัง engine รันเสร็จ log `═══ ผล Backtest SYMBOL/TF ═══` พร้อม: จำนวนแท่ง + ts range + source, ไม้/W/L/T, Win%, PF, Expectancy, กำไรสุทธิ%, MaxDD, Sharpe, ตารางย่อย per-strategy (สัญญาณ/เข้า/ข้าม/Win%/avgR/PF), และ 3 ไม้ล่าสุด (side/entry/exit/R)
+- ครอบคลุมทั้งโหมด TF เดียวและ `interval=all` (เพราะ all เรียก runBacktestOne ทีละ TF อยู่แล้ว)
+- **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL
+
+## 2026-08-17 fix: log ผล Backtest ไม่ขึ้นใน logcat ของผู้ใช้ — ย้ายไป tag JarvisVM
+- **สาเหตุ:** tag `Backtest` (TradingToolExecutor) และ `LongTask` (LongTaskRunner "▶ เริ่มงานพื้นหลัง") ไม่เคยปรากฏใน log ที่ผู้ใช้ส่งมาเลยตั้งแต่เช้า ทั้งที่ code path รันจริง (ผลลัพธ์ออกถูก) → capture ของผู้ใช้ filter เฉพาะบาง tag (SmcApiService/JarvisVM/LiveGemini/AutomationService ฯลฯ ขึ้นปกติ)
+- **แก้:** ใน `JarvisViewModel` completions collector หลังบรรทัด `📦 LongTask เสร็จ` เพิ่ม `logDebug("JarvisVM", "📦 ผลลัพธ์เต็ม [title]:\n<chatBody>")` — tag JarvisVM ผู้ใช้จับได้แน่, logDebug แบ่ง chunk 3500 bytes อัตโนมัติ body ยาว (เช่น 7KB) ก็ครบ
+- log เดิมใต้ tag Backtest ยังเก็บไว้ (มีประโยชน์ตอน capture แบบไม่ filter)
+- **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL
+
+## 2026-08-17 fix: ตรวจผล backtest/optimize/evolve จาก log เต็ม → แก้ 5 จุด
+- **ยืนยันระบบทำงานถูก:** ผลลัพธ์เต็มขึ้น logcat (tag JarvisVM, แบ่ง part 1/3) ครบ, ตัวเลขตารางเทียบ 3 TF ตรงกับรายละเอียดย่อย, optimize auto-apply 5 กลยุทธ์ตามเกณฑ์ถูกต้อง
+- **Fix 1 — float รก:** `TpSlParams.round2()` ปัด 2 ตำแหน่งใน clampDrift/clampStep + mutation ของ AdaptiveOptimizer (แก้ 2.4000000000000004 / 1.2100000000000002)
+- **Fix 2 — evolve ต่อเนื่องจาก optimize:** `BacktestEvolution.evolve()` รับ `initialOverride` — runEvolveTask โหลด `getStrategyTuning(symbol, interval, kind)` เป็นฐานแทนค่า default เสมอ + แสดง "(ต่อจาก tuning ล่าสุด)/(ค่า default)" ในผล (เดิม optimize apply 2.5/2.4 แล้วแต่ evolve เริ่มจาก 2.0/3.0)
+- **Fix 3 — heuristic 0 ไม้:** reflect() short-circuit เมื่อ totalTrades==0 → "ไม่มีไม้ในช่วงนี้ ข้อมูลไม่พอประเมิน → คง params" (ไม่เรียก AI กัน reflection มั่ว), guard เพิ่มใน ruleBasedAdjust/ruleNote, noChangeStreak นับเฉพาะรอบที่มีไม้จริง (เดิม 52H ได้ 0 ไม้ 4 รอบติดแต่บอก "โครงสร้างสุขภาพดี")
+- **Fix 4 — สรุปเสียง evolve ตรงข้อมูล + ทาง apply:** executeBacktestEvolve parse ชื่อกลยุทธ์ที่ 📈ดีขึ้น/📉แย่ลง จากผลจริงใส่ speech (เดิม model พูดมั่วว่า UT/Donchian ดีขึ้นทั้งที่แย่ลง ตัวที่ดีจริงคือ Trend Following) + บอกจำนวนที่บันทึกเมื่อ apply=on / ชวนสั่ง apply เมื่อมีตัวดีขึ้น + tool description ระบุชัด: ผู้ใช้สั่ง "เอาไปใช้/บันทึก" → เรียก evolve apply=on เท่านั้น ห้าม remember_fact (เดิม AI เรียก remember_fact แทน → params ไม่ถูก apply จริง)
+- **Fix 5 — SMC ขาดทุนทุก TF:** root cause หลัก = MIN_RRR ถูกเข้มจาก 1.2 (ต้นฉบับ MT5) เป็น 1.8 → selection bias เหลือเฉพาะสัญญาณ TP ไกล → win rate ต่ำ + SL structure แคบ (5-9 จุด) ทำ notional ใหญ่ commission กิน ~0.6-0.7R/ไม้ (อธิบาย pnlR ติดลบเกิน -1R เช่น -1.68R) → กลับมา MIN_RRR 1.2 ตรงต้นฉบับ (กระทบทั้ง backtest และ live SMC alert ให้ตรงกับ MT5 engine)
+- **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL — รอผู้ใช้ทดสอบ: backtest smc ทองคำ 1h (ดูว่า SMC ดีขึ้นไหม) + optimize แล้ว evolve ต่อ (ดู "(ต่อจาก tuning ล่าสุด)")
+
+## 2026-08-17 แก้บั๊ก strategy=smc + ข้อความ learning history (รอบ log 18:49)
+
+**ตรวจ log ทดสอบ 18:49–18:52 พบ:**
+1. ✅ apply=on บันทึก tuning จริง (💾 บันทึก tuning แล้ว 3 กลยุทธ์), model เรียก tool ถูก ไม่ใช้ remember_fact
+2. ✅ "(ต่อจาก tuning ล่าสุด)" ขึ้นทุกกลยุทธ์, float ใหม่สะอาด (2.7/4.4, 0.72/0.96)
+3. ⚠️ บั๊ก: `trading_backtest_optimize/evolve({strategy=smc})` ตก else → รัน all 8 classic เงียบๆ (SMC ใช้ SL/TP จาก structure ไม่ใช่ ATR mult → tune ไม่ได้อยู่แล้ว)
+4. ⚠️ ข้อความ "เรียนจากประวัติ 6 ครั้ง: ยังไม่มีประวัติพอเรียนรู้" ขัดกันเอง
+5. ⚠️ "เดิม: TP 2.4000000000000004×" — float รกจากค่า tuning เก่าใน DB (โหลดมาแสดงตรงๆ)
+
+**แก้ไข:**
+- `TradingToolExecutor.kt` runOptimizeTask + runEvolveTask: guard ก่อนดึงแท่งเทียน — strategy=smc → คืนข้อความอธิบายว่า SMC tune ไม่ได้ (structure-based SL/TP) พร้อม list 8 กลยุทธ์ที่ใช้ได้; strategy ไม่รู้จัก → ❌ แจ้งชื่อที่เลือกได้ ไม่รัน all เงียบๆ อีก
+- `TradingToolExecutor.kt` runEvolveTask: โหลด tuning baseline ผ่าน `TpSlParams.round2()` ก่อนใช้/แสดง (แก้ 2.4000000000000004)
+- `AdaptiveOptimizer.kt` insightOf(): fallback "ยังสรุปทิศทางไม่ได้ (ต้องมี trial ทั้งสองทิศ ≥2 ครั้ง/ทิศ)"; executor แสดง "ยังไม่มีประวัติการจูน" เมื่อ learnedFromTrials == 0
+- Build: `./gradlew :composeApp:assembleDebug` → BUILD SUCCESSFUL
+
+**ค้าง (รู้แล้ว ยังไม่แก้):** สัญญาณ SMC 57 vs เช้า 174 บน XAUUSD 1h ชุดเดียวกันหลังปรับ MIN_RRR 1.8→1.2 (คาดว่าสัญญาณควรเพิ่ม) — ไฟล์ uncommitted ไม่มี history เทียบ อาจมีการแก้ filter อื่นระหว่างวัน; backtest SMC 1h ล่าสุด: 42 ไม้ win 23.8% PF 0.52 — ทำกำไรเฉพาะตลาด SIDEWAYS (+0.24 avgR) แต่ขาดทุนหนักใน BULL/BEAR

@@ -587,3 +587,77 @@ SELECT * FROM SignalAlertRecord WHERE created_at >= :since ORDER BY created_at D
 
 getRecentSignalAlerts:
 SELECT * FROM SignalAlertRecord ORDER BY created_at DESC LIMIT :limit;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- StrategyTuning: params SL/TP ที่ backtest tune แล้วต่อ symbol/tf/กลยุทธ์
+-- (SignalAlertProvider ใช้แทนค่า default เมื่อมี tuning ที่ไม่ overfit)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS StrategyTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT/3BR
+    sl_mult REAL NOT NULL,
+    tp_mult REAL NOT NULL,
+    score REAL,                      -- overfitting % หรือ evolved gain
+    grade TEXT,                      -- healthy | moderate | overfit
+    source TEXT NOT NULL DEFAULT 'optimize',  -- optimize | evolve
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertStrategyTuning:
+INSERT OR REPLACE INTO StrategyTuning(symbol, interval, kind, sl_mult, tp_mult, score, grade, source, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getStrategyTuning:
+SELECT * FROM StrategyTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getStrategyTunings:
+SELECT * FROM StrategyTuning WHERE symbol = ? AND interval = ?;
+
+getAllStrategyTunings:
+SELECT * FROM StrategyTuning ORDER BY updated_at DESC;
+
+deleteStrategyTuning:
+DELETE FROM StrategyTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- OptimizationTrial: ความจำการจูน params (Adaptive Optimize learning memory)
+-- บันทึกทุกครั้งที่ลอง params → ระบบเรียนรู้ว่าปรับทิศไหนแล้วดี/แย่
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS OptimizationTrial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sl_mult REAL NOT NULL,
+    tp_mult REAL NOT NULL,
+    score REAL NOT NULL,            -- composite score ที่วัดได้จริง
+    expectancy_r REAL,
+    profit_factor REAL,
+    trades INTEGER,
+    delta_vs_baseline REAL,         -- score - baseline score (บวก = ดีกว่าค่าเดิม)
+    applied INTEGER NOT NULL DEFAULT 0,  -- 1 = params นี้ถูกเลือกใช้จริง
+    source TEXT NOT NULL DEFAULT 'adaptive',  -- grid | evolve | adaptive
+    created_at INTEGER NOT NULL
+);
+
+insertOptimizationTrial:
+INSERT INTO OptimizationTrial(symbol, interval, kind, sl_mult, tp_mult, score, expectancy_r, profit_factor, trades, delta_vs_baseline, applied, source, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getOptimizationTrials:
+SELECT * FROM OptimizationTrial
+WHERE symbol = ? AND interval = ? AND kind = ?
+ORDER BY created_at DESC LIMIT :limit;
+
+setOptimizationTrialApplied:
+UPDATE OptimizationTrial SET applied = 1 WHERE id = ?;
+
+deleteOldOptimizationTrials:
+DELETE FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? AND id NOT IN (
+    SELECT id FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? ORDER BY created_at DESC LIMIT 200
+);

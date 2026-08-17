@@ -512,6 +512,146 @@ object TradingToolDefinitions {
             )
         ),
 
+        // ── 14e. Backtest Strategies (จำลองเทรดย้อนหลัง 5,000 แท่ง) ─────────
+        FunctionDeclaration(
+            name = "trading_backtest",
+            description = """รัน backtest กลยุทธ์สัญญาณ 9 ตัว (Momentum/Trend/Reversal/Donchian/52W High/EMA14-60/UT Bot/3-Bar Reversal/SMC) + MIX (ผสมหลายกลยุทธ์โหวตเป็น 1 สัญญาณ) บนแท่งเทียนย้อนหลัง 5,000 แท่ง (15m≈52 วัน, 1h≈7 เดือน, 4h≈2.3 ปี, 1D≈13 ปี)
+                |SMC = engine จาก mt5-core-server (OB Bounce/CHoCH/SMS-BMS/FVG Fill/Liquidity Sweep/RSI Divergence) SL/TP ตามโครงสร้างตลาด กรอง RRR≥1.2 และ confluence≥2★
+                |MIX = state-based voting: เลือกกลยุทธ์ที่จะผสมผ่าน mix_strategies แล้วออกสัญญาณเมื่อคะแนนโหวตรวมข้ามเกณฑ์ mix_min_votes เช่น "backtest mix ทองคำ 1h" หรือ "backtest mix ด้วย tsmom+trend+utbot"
+                |จำลอง bar-by-bar: เข้าที่ราคาปิดแท่งสัญญาณ, SL/TP สูตรเดียวกับ signal alert, ถือทีละ 1 ไม้, คิด spread+commission, เสี่ยง 1% ของพอร์ตต่อไม้
+                |ให้ผล: win-rate, profit factor, max drawdown, Sharpe, expectancy R, กำไรสุทธิ แยกตามกลยุทธ์
+                |ใช้เมื่อผู้ใช้ถาม: "backtest กลยุทธ์", "ทดสอบกลยุทธ์ย้อนหลัง", "กลยุทธ์ไหนทำกำไรได้จริง", "ลองเทรดย้อนหลัง", "backtest smc", "backtest mix ผสมกลยุทธ์"
+                |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง (ไม่บล็อกการสนทนา) — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เองอัตโนมัติ ห้ามบอกผู้ใช้ว่า "เสร็จแล้ว" หรือสรุปผลจาก tool result นี้ ให้บอกแค่ว่ากำลังดำเนินการ
+                |ต่างจาก trading_signal_stats ตรงที่จำลองพอร์ตเงินจริง (equity curve, drawdown, ต้นทุน) ไม่ใช่แค่ win-rate""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h) — all = รันครบ 3 TF (15m/1h/4h) พร้อมตารางเทียบผล",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "all")
+                    ),
+                    "strategy" to ParameterProperty(
+                        type = "STRING",
+                        description = "กลยุทธ์เฉพาะตัว (default all = ทั้ง 9) — mix = ผสมหลายกลยุทธ์โหวตเป็น 1 สัญญาณ (ใช้ร่วมกับ mix_strategies)",
+                        enum = listOf("all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "utbot", "threebar", "smc", "mix")
+                    ),
+                    "mix_strategies" to ParameterProperty(
+                        type = "STRING",
+                        description = "เฉพาะ strategy=mix — รายชื่อกลยุทธ์ที่จะโหวต คั่นด้วย comma เช่น \"tsmom,trend,donchian,utbot\" (เลือกจาก tsmom,trend,reversal,donchian,w52high,ema1460,utbot,threebar; ต้อง ≥2 ตัว; default = tsmom,trend,ema1460,utbot)"
+                    ),
+                    "mix_min_votes" to ParameterProperty(
+                        type = "STRING",
+                        description = "เฉพาะ strategy=mix — เกณฑ์คะแนนโหวตขั้นต่ำที่จะออกสัญญาณ (เช่น \"3\"; default = ครึ่งของจำนวนกลยุทธ์ปัดขึ้น)"
+                    ),
+                    "costs" to ParameterProperty(
+                        type = "STRING",
+                        description = "คิดต้นทุน spread+commission (default on)",
+                        enum = listOf("on", "off")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14f. Backtest Optimize (ADAPTIVE: เรียนรู้จากประวัติ + auto-apply) ──
+        FunctionDeclaration(
+            name = "trading_backtest_optimize",
+            description = """หา params SL/TP ที่ดีที่สุดของกลยุทธ์สัญญาณแบบ ADAPTIVE: grid 25 combos + mutation รอบ params ปัจจุบันและรอบ params ที่เคยดีในประวัติ (ขยายได้ถึง SL 0.3-6×, TP 0.5-10×) + เรียนรู้จากประวัติการจูนว่าปรับทิศไหนแล้วดี/แย่ (OptimizationTrial memory) + พิสูจน์ด้วย walk-forward, permutation test, Monte Carlo → คะแนน overfitting + เกรด
+                |AUTO-APPLY อัตโนมัติ: ถ้า params ใหม่ดีกว่าค่าเดิม ≥2% และเกรดไม่ overfit → บันทึกใช้จริงทันที (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป); apply=off = dry-run ดูผลอย่างเดียว
+                |ใช้เมื่อผู้ใช้ถาม: "หา params ที่ดีที่สุด", "optimize กลยุทธ์", "จูน SL/TP", "กลยุทธ์นี้ overfit ไหม", "params ไหนเชื่อได้", "adaptive optimize"
+                |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เอง ห้ามสรุปผลจาก tool result นี้
+                |อาจใช้เวลา 30 วิ-2 นาที (strategy=all นานสุด)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    ),
+                    "strategy" to ParameterProperty(
+                        type = "STRING",
+                        description = "กลยุทธ์เฉพาะตัว (default all = ทั้ง 8 — แนะนำเลือกเฉพาะตัวถ้าต้องการเร็ว)",
+                        enum = listOf("all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "utbot", "threebar")
+                    ),
+                    "apply" to ParameterProperty(
+                        type = "STRING",
+                        description = "auto = auto-apply เมื่อ params ใหม่ดีกว่าและไม่ overfit (default), off = dry-run ดูผลอย่างเดียว",
+                        enum = listOf("auto", "off")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14g. Backtest Evolve (AI สะท้อนผลปรับ params ทีละนิดเป็นช่วงๆ) ──
+        FunctionDeclaration(
+            name = "trading_backtest_evolve",
+            description = """จำลอง "วิวัฒนาการกลยุทธ์": แบ่งข้อมูลย้อนหลังเป็น 8 ช่วง → รัน backtest ทีละช่วง → AI สะท้อนผลแล้วปรับ SL/TP ทีละนิด (≤10%/รอบ, หนีค่าเริ่มต้นไม่เกิน ±30%) → เทียบผล params วิวัฒน์ vs params เดิม
+                |ใช้เมื่อผู้ใช้ถาม: "ลอง evolve กลยุทธ์", "ให้ AI ปรับจูนกลยุทธ์เอง", "วิวัฒนาการกลยุทธ์", "ปรับ params ตามสภาพตลาด"
+                |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เอง ห้ามสรุปผลจาก tool result นี้
+                |apply=on = บันทึก params สุดท้ายเข้าระบบจริง (เฉพาะเมื่อผลวิวัฒน์ดีกว่าเดิม)
+                |⭐ เมื่อผู้ใช้สั่ง "บันทึก params" / "เอาผล evolution ไปใช้" / "apply ผลที่วิวัฒน์" → เรียก tool นี้อีกครั้งพร้อม apply=on เท่านั้น (ห้ามใช้ remember_fact แทน เพราะ remember_fact ไม่ได้ apply params เข้าระบบจริง)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    ),
+                    "strategy" to ParameterProperty(
+                        type = "STRING",
+                        description = "กลยุทธ์เฉพาะตัว (default all = ทั้ง 8)",
+                        enum = listOf("all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "utbot", "threebar")
+                    ),
+                    "apply" to ParameterProperty(
+                        type = "STRING",
+                        description = "บันทึก params สุดท้ายเข้าระบบจริงถ้าดีกว่าเดิม (default off)",
+                        enum = listOf("on", "off")
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
+        // ── 14h. Mix Strategy config (ตั้งค่าโหวตผสมกลยุทธ์สำหรับ live alert) ──
+        FunctionDeclaration(
+            name = "trading_mix_config",
+            description = """ตั้ง/ดู/ลบ Mix strategy config ต่อ symbol+timeframe — ใช้กับ live signal alert: เลือกกลยุทธ์ ≥2 ตัวมาโหวตรวมกัน (state-based) ออกสัญญาณเมื่อคะแนนโหวตข้ามเกณฑ์ min_votes
+                |ใช้เมื่อผู้ใช้ถาม: "ผสมกลยุทธ์", "ตั้ง mix strategy", "mix signal", "ใช้ tsmom+trend+utbot ร่วมกัน", "ดู mix config"
+                |action=set ต้องส่ง strategies เช่น "tsmom,trend,donchian,utbot" (min_votes optional, default = ครึ่งจำนวนกลยุทธ์ปัดขึ้น); action=show ดูค่าปัจจุบัน; action=clear ลบ""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT"),
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                    ),
+                    "action" to ParameterProperty(
+                        type = "STRING",
+                        description = "set / show / clear (default show)",
+                        enum = listOf("set", "show", "clear")
+                    ),
+                    "strategies" to ParameterProperty(
+                        type = "STRING",
+                        description = "เฉพาะ action=set — กลยุทธ์คั่น comma เช่น \"tsmom,trend,donchian,utbot\" (เลือกจาก tsmom,trend,reversal,donchian,w52high,ema1460,utbot,threebar; ≥2 ตัว)"
+                    ),
+                    "min_votes" to ParameterProperty(
+                        type = "STRING",
+                        description = "เฉพาะ action=set — เกณฑ์คะแนนโหวตขั้นต่ำ เช่น \"3\" (default = ครึ่งจำนวนกลยุทธ์ปัดขึ้น)"
+                    )
+                ),
+                required = listOf("symbol")
+            )
+        ),
+
         // ── 15. Modern Technical Suite ─────────────────────────────────────
         
         FunctionDeclaration(

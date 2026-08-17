@@ -10,8 +10,10 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * SignalAlertProvider — ตรวจ "สัญญาณที่เพิ่งเกิด" ในแท่งปิดล่าสุด จากทั้ง 8 กลยุทธ์
- * (MOM / TR / REV / DC / 52H / E14-60 / UT Bot / 3BR) สำหรับ background job `trading_signal_alert`
+ * SignalAlertProvider — ตรวจ "สัญญาณที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก 8 กลยุทธ์คลาสสิก
+ * (MOM / TR / REV / DC / 52H / E14-60 / UT Bot / 3BR) + SMC Engine (port จาก mt5-core-server:
+ * OB Bounce / CHoCH / SMS-BMS / FVG Fill / Liquidity Sweep / RSI Divergence)
+ * สำหรับ background job `trading_signal_alert`
  *
  * จุดต่างจาก SignalMarkerProvider (ที่คำนวณย้อนหลังทั้งชุดเพื่อวาดกราฟ):
  *  - สนใจเฉพาะ edge ที่ "แท่งปิดล่าสุด" (n-2 — แท่งสุดท้ายอาจยังไม่ปิด)
@@ -27,6 +29,16 @@ import kotlin.math.sqrt
  *  - signal_strategy / signal_side / signal_reason / signal_context : ข้อความ payload
  *  - signal_entry / signal_sl / signal_tp / signal_rr : ตัวเลขของสัญญาณหลัก
  */
+/**
+ * แปลง marker label → kind กลยุทธ์มาตรฐาน
+ * ("MOM▲"→MOM, "TR▼"→TR, "REV▲"→REV, "DC▲"→DC, "52H▲"→52H, "E14/60▲"→E, "UT▼"→UT, "3BR▲"→3BR)
+ * ห้ามใช้ label.filter{isLetter} — "52H" จะเหลือ "H" และ "3BR" เหลือ "BR" ทำ lookup พังเงียบๆ
+ */
+internal fun signalKindOf(label: String): String {
+    val base = label.trimEnd('▲', '▼')
+    return if (base.startsWith("E")) "E" else base
+}
+
 class SignalAlertProvider(private val smcApi: SmcApiService) {
 
     private val markerProvider = SignalMarkerProvider(smcApi)
@@ -41,7 +53,30 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         val sigIdx = n - 2 // แท่งปิดล่าสุด (แท่ง n-1 อาจกำลังวิ่ง)
         val sigTime = candles[sigIdx].timestamp
 
-        val edges = markerProvider.compute(candles).filter { it.time == sigTime }
+        val edges = markerProvider.compute(candles).filter { it.time == sigTime }.toMutableList()
+
+        // ── SMC (MT5 Engine) — ตรวจสัญญาณใหม่จากโครงสร้างตลาด/OB/FVG/Sweep/RSI divergence ──
+        val smcNew = runCatching {
+            com.example.personalaibot.automation.smc.SmcSignals.newSignalsAt(candles, sigIdx, symbol, tf)
+        }.getOrElse { emptyList() }
+
+        // ── MIX voting — ถ้าผู้ใช้ตั้ง mix config ไว้: โหวตรวม state ของกลยุทธ์ที่เลือก ──
+        val mixCfg = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager().getMixConfig(symbol, tf)
+        }.getOrNull()
+        val mixKinds = mixCfg?.let { MixSignalEngine.parseKinds(it.first) } ?: emptyList()
+        var mixScore = 0
+        var mixVoteDetail = ""
+        if (mixCfg != null && mixKinds.size >= 2) {
+            val cache = MixSignalEngine.SeriesCache(candles)
+            mixScore = MixSignalEngine.scoreAt(cache, mixKinds, sigIdx)
+            mixVoteDetail = MixSignalEngine.votesAt(cache, mixKinds, sigIdx)
+                .entries.joinToString(", ") { (k, v) -> "$k=${if (v > 0) "+1" else v.toString()}" }
+            val mixEdges = MixSignalEngine.mixMarkers(candles, mixKinds, mixCfg.second, cache)
+                .filter { it.time == sigTime }
+            edges.addAll(mixEdges)
+            logDebug("SignalAlert", "$symbol/$tf MIX score=$mixScore/${mixCfg.second} [$mixVoteDetail] edges=${mixEdges.size}")
+        }
 
         val closes = candles.map { it.close }
         val close = closes[sigIdx]
@@ -64,30 +99,60 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         fun fmt(v: Double) = if (abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
         val context = "trend=$trend | RSI=${"%.1f".format(rsi)} | vsBB=${if (close > bbBasis + 2 * bbSd) "เหนือUpper" else if (close < bbBasis - 2 * bbSd) "ใต้Lower" else if (close > bbBasis) "โซนบน" else "โซนล่าง"} | ATR14=${fmt(atr14)} | DC20[${fmt(dcL)}-${fmt(dcU)}]"
 
-        if (edges.isEmpty()) {
+        if (edges.isEmpty() && smcNew.isEmpty()) {
             return mapOf(
                 "signal_buy" to "0",
                 "signal_sell" to "0",
                 "signal_buy_id" to "0",
                 "signal_sell_id" to "0",
                 "signal_event" to "NONE",
+                "signal_mix_score" to mixScore.toString(),
+                "signal_mix_votes" to mixVoteDetail,
                 "close" to fmt(close),
                 "signal_context" to context
             )
         }
 
-        // ── มีสัญญาณใหม่: รวมทุก edge ของแท่งนี้ (ปกติ 1-2 ตัว) ──
-        val sides = edges.map { it.side }.distinct()
+        // ── มีสัญญาณใหม่: รวมทุก edge ของแท่งนี้ (คลาสสิก + SMC) ──
+        val sides = (edges.map { it.side } + smcNew.map { it.side }).distinct()
         val side = sides.first() // สัญญาณหลัก (ถ้ามีหลายฝั่งพร้อมกัน — หายาก — ใช้ตัวแรก)
-        val primary = edges.first { it.side == side }
-        val kind = primary.label.filter { it.isLetter() } // MOM/TR/REV/DC/52H/E/UT/3BR
+        val primaryClassic = edges.firstOrNull { it.side == side }
+        val primarySmc = smcNew.firstOrNull { it.side == side }
 
-        val (sl, tp) = computeTpSl(kind, side, candles, sigIdx, atr14, atr6)
+        val kind: String
+        val sl: Double
+        val tp: Double
+        if (primaryClassic != null) {
+            kind = signalKindOf(primaryClassic.label) // MOM/TR/REV/DC/52H/E/UT/3BR
+
+            // ใช้ tuned params จาก backtest (StrategyTuning) ถ้ามีและไม่ overfit — ไม่งั้นใช้สูตร default
+            val tuning = runCatching {
+                com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                    .getStrategyTuning(symbol, tf, kind)
+            }.getOrNull()?.takeIf { it.grade != "overfit" }
+            val pair = if (tuning != null) {
+                logDebug("SignalAlert", "$symbol/$tf/$kind ใช้ tuned params sl=${tuning.sl_mult} tp=${tuning.tp_mult} (${tuning.source}, grade=${tuning.grade})")
+                com.example.personalaibot.automation.backtest.parameterizedTpSl(
+                    kind, side, candles, sigIdx, atr14, atr6,
+                    com.example.personalaibot.automation.backtest.TpSlParams(tuning.sl_mult, tuning.tp_mult)
+                )
+            } else {
+                computeTpSl(kind, side, candles, sigIdx, atr14, atr6)
+            }
+            sl = pair.first; tp = pair.second
+        } else {
+            // สัญญาณ SMC (MT5 Engine) — SL/TP มาจากโครงสร้างตลาดของตัวเอง (ไม่ใช่ ATR multiple)
+            kind = "SMC"
+            sl = primarySmc!!.sl
+            tp = primarySmc.tp
+        }
         val risk = abs(close - sl)
         val rr = if (risk > 0) abs(tp - close) / risk else 0.0
 
-        val strategies = edges.joinToString(" + ") { strategyName(it.label.filter { c -> c.isLetter() }) }
-        val reasons = edges.joinToString(" ; ") { reasonFor(it.label.filter { c -> c.isLetter() }, it.side) }
+        val strategies = (edges.map { strategyName(signalKindOf(it.label)) } +
+            smcNew.map { smcStrategyName(it.strategy) }).joinToString(" + ")
+        val reasons = (edges.map { reasonFor(signalKindOf(it.label), it.side) } +
+            smcNew.flatMap { it.triggers }).joinToString(" ; ")
 
         logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)}")
 
@@ -105,6 +170,9 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "signal_rr" to "%.2f".format(rr),
             "signal_atr" to fmt(atr14),
             "signal_reason" to reasons,
+            "signal_stars" to (primarySmc?.confluenceStars?.toString() ?: "0"),
+            "signal_mix_score" to mixScore.toString(),
+            "signal_mix_votes" to mixVoteDetail,
             "signal_context" to context,
             "signal_bar_time" to sigTime.toString(),
             "close" to fmt(close)
@@ -113,7 +181,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
 
     // ─── TP/SL เฉพาะกลยุทธ์ (ออกแบบตามพฤติกรรมของแต่ละตัว) ─────────────────
 
-    private fun computeTpSl(
+    internal fun computeTpSl(
         kind: String, side: String, candles: List<Candle>, i: Int, atr14: Double, atr6: Double
     ): Pair<Double, Double> {
         val entry = candles[i].close
@@ -145,11 +213,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             }
             // 52W High — momentum continuation
             "52H" -> levels(1.5 * atr14, 2.0 * atr14)
+            // Mix Voting — สัญญาณผสมหลายกลยุทธ์ (ต้องโหวตผ่านเกณฑ์) ให้ห้องหายใจกว้างหน่อย
+            "MIX" -> levels(1.5 * atr14, 2.5 * atr14)
             else -> levels(1.5 * atr14, 2.0 * atr14)
         }
     }
 
-    private fun strategyName(kind: String): String = when (kind) {
+    internal fun strategyName(kind: String): String = when (kind) {
         "MOM" -> "Time-Series Momentum"
         "TR" -> "Trend Following (EMA50/200)"
         "REV" -> "Short-Term Reversal"
@@ -158,7 +228,19 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         "E" -> "EMA 14/60 Cross"
         "UT" -> "UT Bot"
         "3BR" -> "3-Bar Reversal"
+        "SMC" -> "SMC (MT5 Engine)"
+        "MIX" -> "Mix Voting (ผสมกลยุทธ์)"
         else -> kind
+    }
+
+    /** ชื่อแสดงผลของกลยุทธ์ย่อยฝั่ง SMC (port จาก mt5-core-server SignalDetector) */
+    internal fun smcStrategyName(strategy: String): String = when (strategy) {
+        "SMC_FVG_REVERSAL" -> "SMC Reversal (OB Bounce/CHoCH)"
+        "SMC_FVG_CONTINUATION" -> "SMC Continuation (SMS/BMS)"
+        "SMC_FVG_SCALP" -> "SMC FVG Fill Scalp"
+        "SMC_RSI_DIVERGENCE" -> "SMC RSI Divergence"
+        "SCALPING" -> "SMC Liquidity Sweep"
+        else -> strategy
     }
 
     private fun reasonFor(kind: String, side: String): String {
@@ -172,6 +254,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "E" -> if (up) "EMA14 ตัดขึ้นเหนือ EMA60 พร้อมแท่งยืนยัน" else "EMA14 ตัดลงใต้ EMA60 พร้อมแท่งยืนยัน"
             "UT" -> if (up) "ราคาปิดเหนือ UT Bot trailing stop (ATR6×2) — flip เป็นขาขึ้น" else "ราคาปิดใต้ UT Bot trailing stop (ATR6×2) — flip เป็นขาลง"
             "3BR" -> if (up) "รูปแบบ 3-Bar Reversal ขาขึ้น (แท่ง 3 กลืนกิน high แท่งแรก)" else "รูปแบบ 3-Bar Reversal ขาลง (แท่ง 3 กลืนกิน low แท่งแรก)"
+            "MIX" -> if (up) "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งขึ้น (confluence หลายระบบ)" else "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งลง (confluence หลายระบบ)"
             else -> "สัญญาณ $kind $side"
         }
     }
@@ -214,12 +297,12 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         }
 
         val markers = markerProvider.compute(candles, maxPerKind = Int.MAX_VALUE)
-            .filter { it.label.filter { c -> c.isLetter() } in kindFilter }
+            .filter { signalKindOf(it.label) in kindFilter }
         if (markers.isEmpty()) return "📭 ไม่พบสัญญาณย้อนหลังของกลยุทธ์ที่เลือกใน $symbol $tf"
 
         val statsMap = LinkedHashMap<String, KindStats>()
         for (m in markers) {
-            val kind = m.label.filter { it.isLetter() }
+            val kind = signalKindOf(m.label)
             val i = timeToIdx[m.time] ?: continue
             if (i >= n - 1) continue // แท่งสุดท้ายไม่มีอนาคตให้จำลอง
             val st = statsMap.getOrPut(kind) { KindStats(kind, strategyName(kind)) }

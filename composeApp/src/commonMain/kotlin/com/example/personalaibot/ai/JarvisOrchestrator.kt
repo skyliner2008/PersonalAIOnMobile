@@ -600,9 +600,21 @@ class JarvisOrchestrator(
     /** ส่งข้อความแทรกเข้า Live session (trigger turn ใหม่ เช่นหลังเปลี่ยนเสียง/เปิดกล้อง) */
     suspend fun sendLiveClientText(text: String) = liveService.sendClientText(text)
 
+    /**
+     * ส่งข้อความผ่าน realtimeInput — model จะตอบเองทันที (เหมือน user พูดเข้ามา)
+     * ⚠️ ห้ามใช้ sendClientText สำหรับเหตุการณ์ที่ต้องการให้ model พูดเอง —
+     * clientContent ขณะ audio streaming เป็นแค่ context (พิสูจน์แล้วจากเคส voice-change greeting 2026-08-09)
+     */
+    suspend fun sendLiveRealtimeText(text: String) = liveService.sendRealtimeText(text)
+
     /** ตั้งข้อความให้ AI พูดทักอัตโนมัติทันทีที่ Live session READY ครั้งถัดไป */
     fun setLiveGreetingOnReady(text: String?) {
         liveService.pendingGreetingOnReady = text
+    }
+
+    /** ตั้ง greeting เฉพาะเมื่อยังไม่มีของเดิมค้างอยู่ (กันทับ greeting สำคัญ เช่นยืนยันเปลี่ยนเสียง) */
+    fun setLiveGreetingOnReadyIfAbsent(text: String) {
+        if (liveService.pendingGreetingOnReady == null) liveService.pendingGreetingOnReady = text
     }
 
     /**

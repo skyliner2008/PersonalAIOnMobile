@@ -145,6 +145,23 @@ private fun ensureNewTablesExist(driver: SqlDriver) {
             payload_json TEXT NOT NULL,
             synced_at INTEGER NOT NULL
         )""",
+        // Optimization trials (Adaptive Optimize learning memory)
+        """CREATE TABLE IF NOT EXISTS OptimizationTrial (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            sl_mult REAL NOT NULL,
+            tp_mult REAL NOT NULL,
+            score REAL NOT NULL,
+            expectancy_r REAL,
+            profit_factor REAL,
+            trades INTEGER,
+            delta_vs_baseline REAL,
+            applied INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'adaptive',
+            created_at INTEGER NOT NULL
+        )""",
         // Migration: add unique index for KnowledgeNode.name (idempotent)
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_node_name ON KnowledgeNode(name)",
         "CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts ON TvCandle(symbol, interval, ts)",

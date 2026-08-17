@@ -827,6 +827,41 @@ class JarvisViewModel(
                 _messages.value = _messages.value + Message(push.role, push.content, metadata = push.metadata)
             }
         }
+        // รับผลงานพื้นหลัง (backtest/optimize/evolve จาก LongTaskRunner) เมื่อเสร็จ:
+        //  - live เปิดอยู่ → การ์ดลงแชท + ส่งเข้า live session ให้ AI พูดสรุปเอง
+        //  - live ปิดอยู่ → ส่งต่อให้ automation service ประกาศ (notification + เสียง + การ์ดแชท)
+        viewModelScope.launch {
+            com.example.personalaibot.automation.backtest.LongTaskRunner.completions.collect { c ->
+                logDebug("JarvisVM", "📦 LongTask เสร็จ: ${c.title} (ok=${c.ok}, live=${_isListening.value})")
+                // log ผลลัพธ์เต็มใต้ tag JarvisVM (tag ที่ logcat ของผู้ใช้จับอยู่แล้ว)
+                // — tag "Backtest"/"LongTask" ไม่ขึ้นใน capture ของผู้ใช้ (capture filter บาง tag)
+                // logDebug แบ่ง chunk 3500 bytes ให้อัตโนมัติ body ยาวก็ครบ
+                if (c.ok) logDebug("JarvisVM", "📦 ผลลัพธ์เต็ม [${c.title}]:\n${c.chatBody}")
+                if (_isListening.value) {
+                    // การ์ดรายละเอียดลงแชทก่อน แล้วให้ live model พูดสรุป
+                    runCatching {
+                        memoryManager.storeMessage("assistant", c.chatBody, metadata = c.chatMeta)
+                        com.example.personalaibot.memory.AlertChatBus.tryEmit("assistant", c.chatBody, c.chatMeta)
+                    }
+                    runCatching {
+                        // realtimeInput — model ตอบเองได้ขณะ stream audio (clientContent จะเงียบ — พิสูจน์แล้ว)
+                        orchestrator.sendLiveRealtimeText(
+                            "[SYSTEM] งานพื้นหลังเสร็จแล้ว: ${c.title}\nสรุปผล: ${c.speech}\n" +
+                                "โปรดพูดแจ้งผู้ใช้แบบสนทนา 2-4 ประโยคว่างานเสร็จแล้วและผลเป็นอย่างไร " +
+                                "(มีการ์ดรายละเอียดลงในแชทแล้ว ไม่ต้องอ่านตาราง/ตัวเลขยาวๆ)"
+                        )
+                    }.onFailure { logError("JarvisVM", "ส่งผลเข้า live ไม่สำเร็จ: ${it.message}", it) }
+                } else {
+                    com.example.personalaibot.automation.announceLongTaskCompletion(
+                        title = "✅ ${c.title}",
+                        cardBody = c.chatBody,
+                        metaJson = c.chatMeta,
+                        shortSpeech = c.speech,
+                        fullSpeech = c.speech
+                    )
+                }
+            }
+        }
         // โหลด Agent/User Identity กลับจาก Core Memory — เดิม loadFromCoreMemory ไม่มี caller
         // ทำให้เปิดแอปใหม่แล้ว identity กลับเป็นค่า default ("ผู้ใช้") ทุกครั้ง
         runCatching {
@@ -1376,6 +1411,14 @@ class JarvisViewModel(
         _voiceError.value = null
         _isMuted.value = false // Start unmuted
         logDebug("JARVIS_VM", "Starting Live Voice Input")
+
+        // ทักทายยืนยันความพร้อม: ผู้ใช้จะได้รู้ทันทีว่า session READY แล้วคุยได้
+        // (ก่อนหน้านี้ READY ใช้เวลาหลายวินาที ผู้ใช้พูดไปก่อนแล้ว AI เงียบเพราะยังไม่พร้อม)
+        // ไม่ทับ greeting ที่ระบบอื่นตั้งไว้ก่อน (เช่น ยืนยันเปลี่ยนเสียง)
+        orchestrator.setLiveGreetingOnReadyIfAbsent(
+            "[SYSTEM] Live session เพิ่งพร้อมใช้งาน โปรดพูดทักผู้ใช้สั้นๆ 1 ประโยคเท่านั้น " +
+                "(เช่น 'สวัสดีครับ พร้อมคุยแล้วครับ' หรือทักตามบุคลิกของคุณ) ไม่ต้องทำงานอื่นต่อ"
+        )
 
         liveSessionJob?.cancel()
         liveSessionJob = viewModelScope.launch(Dispatchers.IO) {

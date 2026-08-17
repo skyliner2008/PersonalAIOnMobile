@@ -134,6 +134,7 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
 
         // 5) 52-Weeks High proximity — EDGE แบบ state-change เหมือนกัน
         //    (เข้าโซน ≥98% ครั้งแรกของรอบ / หลุด ≤90% ครั้งแรกของรอบ) + แยกสี BUY/SELL
+        //    warmup: ข้าม 100 แท่งแรก — runHigh เพิ่งเริ่มสะสม สัญญาณช่วงต้นชุดข้อมูลไม่มีความหมาย
         run {
             val marks = mutableListOf<SignalMarker>()
             val sides = IntArray(n)
@@ -141,7 +142,7 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             for (i in 0 until n) {
                 runHigh = max(runHigh, candles[i].high)
                 val prox = closes[i] / runHigh
-                sides[i] = if (prox >= StrategySignalProvider.W52_PROX_BUY) 1 else if (prox <= StrategySignalProvider.W52_PROX_SELL) -1 else 0
+                sides[i] = if (i < 100) 0 else if (prox >= StrategySignalProvider.W52_PROX_BUY) 1 else if (prox <= StrategySignalProvider.W52_PROX_SELL) -1 else 0
             }
             for (i in 1 until n) {
                 val side = sides[i]

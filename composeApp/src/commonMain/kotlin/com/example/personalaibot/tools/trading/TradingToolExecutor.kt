@@ -21,6 +21,11 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 import kotlinx.datetime.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 import com.example.personalaibot.data.GeminiService
 import com.example.personalaibot.logDebug
@@ -93,6 +98,10 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "trading_smc_flow"               -> executeSmcFlow(args)
             "trading_strategy_signal"        -> executeStrategySignal(args)
             "trading_signal_stats"           -> executeSignalStats(args)
+            "trading_backtest"               -> executeBacktest(args)
+            "trading_backtest_optimize"      -> executeBacktestOptimize(args)
+            "trading_backtest_evolve"        -> executeBacktestEvolve(args)
+            "trading_mix_config"             -> executeMixConfig(args)
             "trading_fundamental_analysis"   -> executeFundamentalAnalysis(args)
             "trading_fear_greed"             -> executeFearGreed(args)
             "trading_crypto_overview"        -> executeCryptoOverview(args)
@@ -137,6 +146,591 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val strategy = (args["strategy"] ?: "all").trim().lowercase()
         return runCatching { signalAlertProvider.fetchStats("$symbol@$interval", strategy) }
             .getOrElse { "❌ Signal Stats error: ${it.message}" }
+    }
+
+    /**
+     * trading_backtest — จำลองเทรดย้อนหลัง 5,000 แท่ง (BacktestEngine: equity curve, drawdown, ต้นทุน)
+     * สัญญาณจาก SignalMarkerProvider + SL/TP สูตรเดียวกับ signal alert (computeTpSl)
+     * interval=all → รันครบ 3 TF (15m/1h/4h) ในคำสั่งเดียว + ตารางเทียบผล
+     *
+     * 2026-08-17 — MULTI-SESSION: งานหนักรันใน LongTaskRunner (session แยก) ไม่บล็อก turn ของ AI
+     * tool ตอบ ack ทันที → ผู้ใช้คุยต่อ/วางสาย live ได้ → เสร็จแล้วระบบแจ้งผลเอง (แชท+เสียง+Backtest Lab)
+     */
+    private fun executeBacktest(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val strategy = (args["strategy"] ?: "all").trim().lowercase()
+        val costsOn = (args["costs"] ?: "on").trim().lowercase() != "off"
+        // mix: ผู้ใช้เลือกกลยุทธ์ที่จะโหวตเอง (เช่น "tsmom,trend,donchian,utbot")
+        // mix_min_votes default = ครึ่งของจำนวนกลยุทธ์ปัดขึ้น
+        val mixStrategies = args["mix_strategies"]?.trim()
+        val mixKinds = if (strategy == "mix") {
+            val ks = mixStrategies?.let { com.example.personalaibot.automation.MixSignalEngine.parseKinds(it) }
+                ?: listOf("MOM", "TR", "E", "UT") // default mix = โมเมนตัม + เทรนด์ 2 ชั้น + UT
+            if (ks.size < 2) return "❌ mix ต้องเลือกอย่างน้อย 2 กลยุทธ์ เช่น mix_strategies=\"tsmom,trend,donchian,utbot\""
+            ks
+        } else emptyList()
+        val mixMinVotes = args["mix_min_votes"]?.trim()?.toIntOrNull()
+            ?: ((mixKinds.size + 1) / 2)
+
+        val tfLabel = if (interval == "all") "all TF (15m/1h/4h)" else interval
+        val label = "Backtest $symbol $tfLabel [$strategy]"
+        com.example.personalaibot.automation.backtest.LongTaskRunner.launch("backtest", label) {
+            runBacktestTask(symbol, interval, strategy, costsOn, mixKinds, mixMinVotes)
+        }
+        return "⏳ รับคำสั่งแล้ว — กำลังรัน **$label** ในเบื้องหลัง (session แยก ไม่บล็อกการสนทนา) " +
+            "เมื่อเสร็จระบบจะสรุปผลให้อัตโนมัติ (แชท + เสียง + กราฟในหน้า Backtest Lab) — " +
+            "ตอบผู้ใช้สั้นๆ ว่ากำลังดำเนินการอยู่ แล้วคุยเรื่องอื่นต่อได้ตามปกติ"
+    }
+
+    /** ตัวงาน backtest จริง (รันใน LongTaskRunner) — คืน (ข้อความผลลัพธ์เต็ม, สรุปสั้นสำหรับพูด) */
+    private suspend fun runBacktestTask(
+        symbol: String, interval: String, strategy: String, costsOn: Boolean,
+        mixKinds: List<String>, mixMinVotes: Int
+    ): Pair<String, String> = withContext(Dispatchers.Default) {
+        if (interval == "all") {
+            // รัน 3 TF พร้อมกัน (parallel) — เดิม sequential ใช้ ~6 นาทีจน Live websocket โดนตัด
+            // ผลลัพธ์คงลำดับ 15m/1h/4h ตาม tfs (map คงลำดับอยู่แล้ว)
+            val tfs = listOf("15m", "1h", "4h")
+            val outcomes: List<Triple<String, com.example.personalaibot.automation.backtest.BacktestResult?, String?>> =
+                coroutineScope {
+                    tfs.map { tf -> async { runBacktestOne(symbol, tf, strategy, costsOn, mixKinds, mixMinVotes) } }.awaitAll()
+                }
+            val parts = mutableListOf<String>()
+            val summary = mutableListOf<Triple<String, com.example.personalaibot.automation.backtest.BacktestResult?, String?>>()
+            outcomes.forEachIndexed { i, outcome ->
+                summary += Triple(tfs[i], outcome.second, outcome.third)
+                parts += "══════════ TF ${tfs[i]} ══════════\n${outcome.first}"
+            }
+            val text = buildString {
+                appendLine("📈 **Backtest All-TF — $symbol** (strategy=$strategy, ต้นทุน: ${if (costsOn) "เปิด" else "ปิด"})")
+                appendLine()
+                appendLine("**เทียบผล 3 Timeframes**")
+                appendLine("| TF | ไม้ | Win% | PF | Expectancy | กำไรสุทธิ | MaxDD |")
+                appendLine("|---|---|---|---|---|---|---|")
+                for ((tf, r, err) in summary) {
+                    if (r == null) appendLine("| $tf | — | — | — | — | ${err ?: "ไม่มีสัญญาณ"} | — |")
+                    else appendLine("| $tf | ${r.totalTrades} | ${"%.1f".format(r.winRate * 100)} | ${"%.2f".format(r.profitFactor)} | ${"%+.2f".format(r.expectancyR)}R | ${"%+.1f".format(r.totalReturnPct)}% | −${"%.1f".format(r.maxDrawdownPct)}% |")
+                }
+                appendLine()
+                appendLine("---")
+                parts.forEach { appendLine(); appendLine(it) }
+            }.trim()
+            // สรุปเสียง: ทีละ TF สั้นๆ
+            val speech = "Backtest $symbol ครบ 3 timeframe เสร็จแล้วครับ: " + summary.joinToString(" / ") { (tf, r, err) ->
+                if (r == null) "$tf ${err ?: "ไม่มีสัญญาณ"}"
+                else "$tf profit factor ${"%.2f".format(r.profitFactor)}, ${if (r.totalReturnPct >= 0) "กำไร" else "ขาดทุน"} ${"%.0f".format(kotlin.math.abs(r.totalReturnPct))} เปอร์เซ็นต์"
+            } + " — รายละเอียดอยู่ในแชทและหน้า Backtest Lab ครับ"
+            return@withContext text to speech
+        }
+
+        val (text, result, err) = runBacktestOne(symbol, interval, strategy, costsOn, mixKinds, mixMinVotes)
+        val speech = if (result == null) "Backtest $symbol $interval ไม่สำเร็จครับ: ${err ?: "ไม่ทราบสาเหตุ"}"
+        else "Backtest $symbol $interval เสร็จแล้วครับ: ${result.totalTrades} ไม้, win rate ${"%.0f".format(result.winRate * 100)} เปอร์เซ็นต์, profit factor ${"%.2f".format(result.profitFactor)}, ${if (result.totalReturnPct >= 0) "กำไร" else "ขาดทุน"}สุทธิ ${"%.0f".format(kotlin.math.abs(result.totalReturnPct))} เปอร์เซ็นต์ — รายละเอียดอยู่ในแชทและหน้า Backtest Lab ครับ"
+        return@withContext text to speech
+    }
+
+    /** รัน backtest 1 TF — คืน (ข้อความผลลัพธ์, BacktestResult?, error?) */
+    private suspend fun runBacktestOne(
+        symbol: String, interval: String, strategy: String, costsOn: Boolean,
+        mixKinds: List<String> = emptyList(), mixMinVotes: Int = 0
+    ): Triple<String, com.example.personalaibot.automation.backtest.BacktestResult?, String?> {
+        val t0 = System.currentTimeMillis()
+        val smc = SmcApiService(client)
+        val fetched = runCatching { smc.fetchBacktestCandles(symbol, interval) }
+            .getOrElse { return Triple("❌ ดึงแท่งเทียนย้อนหลังไม่ได้: ${it.message}", null, "ดึงข้อมูลไม่ได้") }
+        if (fetched.candles.size < 300) {
+            return Triple("❌ แท่งเทียนย้อนหลังไม่พอสำหรับ backtest (${fetched.candles.size} < 300 แท่ง)", null, "แท่งไม่พอ")
+        }
+        logDebug("Backtest", "▶ $symbol/$interval fetch OK ${fetched.candles.size} แท่ง (${System.currentTimeMillis() - t0}ms) — เริ่มคำนวณสัญญาณ")
+
+        val kindFilter = when (strategy) {
+            "tsmom" -> setOf("MOM"); "trend" -> setOf("TR"); "reversal" -> setOf("REV")
+            "donchian" -> setOf("DC"); "w52high" -> setOf("52H"); "ema1460", "ema14_60" -> setOf("E")
+            "utbot", "ut" -> setOf("UT"); "threebar", "3br" -> setOf("3BR")
+            "smc" -> setOf("SMC")
+            "mix" -> setOf("MIX")
+            else -> setOf("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR", "SMC")
+        }
+
+        val candles = fetched.candles
+        // คำนวณเฉพาะกลุ่มที่เลือกจริง — กรณี strategy=smc/mix ไม่ต้องเสียเวลาสแกนกลยุทธ์ classic ทั้ง 8 ตัว
+        val hasClassic = kindFilter.any { it != "SMC" && it != "MIX" }
+        val classicMarkers = if (hasClassic) {
+            com.example.personalaibot.automation.SignalMarkerProvider(smc)
+                .compute(candles, Int.MAX_VALUE)
+        } else emptyList()
+
+        // ── MIX (โหวตหลายกลยุทธ์): state-based voting → edge เมื่อ score ข้ามเกณฑ์
+        val mixMarkers = if ("MIX" in kindFilter) {
+            com.example.personalaibot.automation.MixSignalEngine.mixMarkers(candles, mixKinds, mixMinVotes)
+        } else emptyList()
+
+        // ── SMC (MT5 Engine): เดินหน้าทีละแท่ง สร้าง snapshot จาก window 300 แท่ง (กัน lookahead)
+        //    SL/TP ของสัญญาณมาจากโครงสร้างตลาด ไม่ใช่ ATR multiple — map แยกไว้ให้ engine ใช้ตรงๆ
+        val smcBarSignals = if ("SMC" in kindFilter) {
+            com.example.personalaibot.automation.smc.SmcSignals.generate(candles, symbol, interval)
+        } else emptyList()
+        val smcSlTpByTime = HashMap<Long, Pair<Double, Double>>(smcBarSignals.size)
+        val smcMarkers = smcBarSignals.map { bs ->
+            smcSlTpByTime[bs.time] = bs.signal.sl to bs.signal.tp
+            com.example.personalaibot.automation.SignalMarkerProvider.SignalMarker(
+                bs.time, bs.signal.side,
+                "SMC${if (bs.signal.side == "BUY") "▲" else "▼"}",
+                if (bs.signal.side == "BUY") "#26A69A" else "#EF5350"
+            )
+        }
+        val markers = classicMarkers + smcMarkers + mixMarkers
+        if (markers.isEmpty()) {
+            if (strategy == "mix") {
+                return Triple("📭 Mix voting (${mixKinds.joinToString("+")}, เกณฑ์ $mixMinVotes เสียง) ไม่มี edge ที่ score ข้ามเกณฑ์ใน $symbol $interval — ลองลด mix_min_votes", null, "ไม่มีสัญญาณ")
+            }
+            return Triple("📭 ไม่พบสัญญาณย้อนหลังของกลยุทธ์ที่เลือกใน $symbol $interval", null, "ไม่มีสัญญาณ")
+        }
+
+        val engine = com.example.personalaibot.automation.backtest.BacktestEngine()
+        val result = runCatching {
+            engine.run(
+                symbol = symbol, interval = interval, source = fetched.source,
+                candles = candles, markers = markers, kindFilter = kindFilter,
+                kindOf = { label -> com.example.personalaibot.automation.signalKindOf(label) },
+                strategyName = { kind -> signalAlertProvider.strategyName(kind) },
+                tpSl = { k, s, c, i, a14, a6 ->
+                    if (k == "SMC") smcSlTpByTime[c[i].timestamp] ?: signalAlertProvider.computeTpSl(k, s, c, i, a14, a6)
+                    else signalAlertProvider.computeTpSl(k, s, c, i, a14, a6)
+                },
+                config = com.example.personalaibot.automation.backtest.BacktestConfig(includeCosts = costsOn)
+            )
+        }.getOrElse { return Triple("❌ Backtest error: ${it.message}", null, it.message) }
+
+        logDebug("Backtest", "✅ $symbol/$interval เสร็จ — ${result.totalTrades} ไม้ ใช้เวลารวม ${System.currentTimeMillis() - t0}ms")
+        // บันทึกผลลัพธ์ละเอียดลง logcat ให้ตรวจสอบความถูกต้องของตัวเลขได้ (ไม่ต้องเปิดแชท)
+        logDebug("Backtest", buildString {
+            appendLine("═══ ผล Backtest $symbol/$interval (strategy=$strategy) ═══")
+            appendLine("ข้อมูล: ${result.bars} แท่ง ts ${result.fromTs}→${result.toTs} | source=${result.source} | ต้นทุน=${if (costsOn) "on" else "off"}")
+            appendLine("ไม้=${result.totalTrades} (ข้าม ${result.skippedSignals}) | W/L/T=${result.wins}/${result.losses}/${result.timeouts}")
+            appendLine("Win%=${"%.1f".format(result.winRate * 100)} PF=${"%.2f".format(result.profitFactor)} Exp=${"%+.2f".format(result.expectancyR)}R สุทธิ=${"%+.1f".format(result.totalReturnPct)}% MaxDD=-${"%.1f".format(result.maxDrawdownPct)}% Sharpe=${"%.2f".format(result.sharpe)}")
+            result.perStrategy.forEach { s ->
+                appendLine("  ▸ ${s.name}: สัญญาณ=${s.signals} เข้า=${s.taken} ข้าม=${s.skipped} W/L/T=${s.wins}/${s.losses}/${s.timeouts} Win%=${"%.0f".format(s.winRate * 100)} avgR=${"%+.2f".format(s.avgR)} PF=${"%.2f".format(s.profitFactor)}")
+            }
+            result.trades.takeLast(3).forEach { t ->
+                appendLine("  ↳ ${t.strategyName} ${t.side} @ ${t.entryPrice} → ${t.exitReason} @ ${t.exitPrice} (${"%+.2f".format(t.pnlR)}R, ${"%+,.2f".format(t.pnlMoney)})")
+            }
+        }.trimEnd())
+        // push เข้า store ให้หน้าจอ Backtest (แท็บกลยุทธ์ + กราฟ) อ่านไปแสดง
+        com.example.personalaibot.automation.backtest.BacktestResultStore.add(result, strategy)
+        return Triple(formatBacktestResult(result) + buildRegimeSection(result, candles), result, null)
+    }
+
+    private fun formatBacktestResult(r: com.example.personalaibot.automation.backtest.BacktestResult): String {
+        fun fmt(v: Double) = if (kotlin.math.abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
+        fun fmtTime(ms: Long): String {
+            val l = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+                .toLocalDateTime(kotlinx.datetime.TimeZone.UTC)
+            return "%02d/%02d/%02d %02d:%02d".format(l.dayOfMonth, l.monthNumber, l.year % 100, l.hour, l.minute)
+        }
+        fun pct(v: Double) = "%.1f%%".format(v)
+
+        return buildString {
+            appendLine("📈 **Backtest — ${r.symbol} ${r.interval}** (${r.bars} แท่ง)")
+            appendLine("ข้อมูล: ${fmtTime(r.fromTs)} → ${fmtTime(r.toTs)} UTC จาก ${r.source} | ต้นทุน: ${if (r.config.includeCosts) "เปิด (spread ${r.config.spreadPrice}, commission ${r.config.commissionPct * 100}%/ข้าง)" else "ปิด"}")
+            appendLine("เงื่อนไข: ทุน $${"%,.0f".format(r.config.initialBalance)} เสี่ยง ${r.config.riskPerTradePct * 100}%/ไม้ เลเวอเรจ ≤${r.config.maxLeverage.toInt()}x ถือทีละ 1 ไม้ เข้าที่ปิดแท่งสัญญาณ")
+            appendLine()
+            appendLine("**ภาพรวม**")
+            appendLine("| ตัวชี้วัด | ค่า |")
+            appendLine("|---|---|")
+            appendLine("| ไม้ทั้งหมด | ${r.totalTrades} (ข้าม ${r.skippedSignals} สัญญาณเพราะมีไม้ค้าง) |")
+            appendLine("| ชนะ / แพ้ / ค้าง | ${r.wins} / ${r.losses} / ${r.timeouts} |")
+            appendLine("| Win-rate | ${pct(r.winRate * 100)} |")
+            appendLine("| Profit Factor | ${"%.2f".format(r.profitFactor)} |")
+            appendLine("| Expectancy | ${"%+.2f".format(r.expectancyR)}R/ไม้ |")
+            appendLine("| กำไรสุทธิ | ${"%+,.2f".format(r.finalBalance - r.config.initialBalance)} (${"%+.1f".format(r.totalReturnPct)}%) |")
+            appendLine("| Max Drawdown | −${pct(r.maxDrawdownPct)} |")
+            appendLine("| Sharpe (คร่าวๆ) | ${"%.2f".format(r.sharpe)} |")
+            appendLine()
+            if (r.perStrategy.isNotEmpty()) {
+                appendLine("**แยกตามกลยุทธ์**")
+                appendLine("| กลยุทธ์ | สัญญาณ | ไม้ | ชนะ | แพ้ | ค้าง | Win% | avgR | PF |")
+                appendLine("|---|---|---|---|---|---|---|---|---|")
+                r.perStrategy.forEach { s ->
+                    appendLine("| ${s.name} | ${s.signals} | ${s.taken} | ${s.wins} | ${s.losses} | ${s.timeouts} | ${pct(s.winRate * 100)} | ${"%+.2f".format(s.avgR)} | ${"%.2f".format(s.profitFactor)} |")
+                }
+                appendLine()
+            }
+            if (r.trades.isNotEmpty()) {
+                appendLine("**${minOf(5, r.trades.size)} ไม้ล่าสุด**")
+                r.trades.takeLast(5).reversed().forEach { t ->
+                    val icon = if (t.side == "BUY") "🟢" else "🔴"
+                    val out = when (t.exitReason) {
+                        "TP" -> "✅ TP"; "SL" -> "❌ SL"; else -> "⏱ ค้าง"
+                    }
+                    appendLine("$icon **${t.side}** @ ${fmt(t.entryPrice)} → $out @ ${fmt(t.exitPrice)} (${"%+.2f".format(t.pnlR)}R, ${"%+,.2f".format(t.pnlMoney)}) ・ ${t.strategyName} ・ ${fmtTime(t.entryTime)}")
+                }
+                appendLine()
+            }
+            appendLine("⚠️ ผล backtest จากข้อมูลย้อนหลัง ไม่การันตีอนาคต — ใช้ `trading_backtest_optimize` เพื่อตรวจ overfitting (walk-forward/permutation/Monte Carlo) ก่อนเชื่อผลลัพธ์")
+            appendLine("📲 ดูแบบกราฟ (equity curve + แท็บแยกกลยุทธ์) ได้ที่หน้า **Backtest Lab** — ไอคอนกราฟแท่ง 📊 บนแถบด้านบน")
+        }.trim()
+    }
+
+    /** สถิติแยกตามสภาพตลาด (BULL/BEAR/SIDEWAYS) — ดูว่ากลยุทธ์เกิด regime ไหน */
+    private fun buildRegimeSection(
+        r: com.example.personalaibot.automation.backtest.BacktestResult,
+        candles: List<Candle>
+    ): String {
+        if (r.trades.size < 5) return ""
+        val regimes = com.example.personalaibot.automation.backtest.RegimeClassifier.classify(candles)
+        val stats = com.example.personalaibot.automation.backtest.RegimeClassifier.statsByRegime(r.trades, candles, regimes)
+        if (stats.isEmpty()) return ""
+        return buildString {
+            appendLine()
+            appendLine("**สถิติตามสภาพตลาด (Regime)**")
+            appendLine("| Regime | ไม้ | Win% | avgR | รวมR |")
+            appendLine("|---|---|---|---|---|")
+            stats.forEach { s ->
+                val icon = when (s.regime) {
+                    "BULL" -> "🐂"; "BEAR" -> "🐻"; else -> "🦀"
+                }
+                appendLine("| $icon ${s.regime} | ${s.trades} | ${"%.0f%%".format(s.winRate * 100)} | ${"%+.2f".format(s.avgR)} | ${"%+.2f".format(s.totalR)} |")
+            }
+        }
+    }
+
+    /**
+     * trading_mix_config — ตั้ง/ดู/ลบ mix config ต่อ symbol+TF (ใช้กับ live signal alert)
+     * action: set (ต้องส่ง strategies, min_votes optional) / show / clear
+     */
+    private fun executeMixConfig(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val action = (args["action"] ?: "show").trim().lowercase()
+        val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }
+            .getOrElse { return "❌ เข้าถึงฐานข้อมูลไม่ได้: ${it.message}" }
+
+        return when (action) {
+            "set" -> {
+                val kindsCsv = args["strategies"]?.trim()
+                    ?: return "❌ ต้องระบุ strategies เช่น \"tsmom,trend,donchian,utbot\""
+                val kinds = com.example.personalaibot.automation.MixSignalEngine.parseKinds(kindsCsv)
+                if (kinds.size < 2) return "❌ ต้องเลือกอย่างน้อย 2 กลยุทธ์ (เลือกได้จาก tsmom,trend,reversal,donchian,w52high,ema1460,utbot,threebar)"
+                val minVotes = args["min_votes"]?.trim()?.toIntOrNull() ?: ((kinds.size + 1) / 2)
+                if (minVotes < 2 || minVotes > kinds.size) return "❌ min_votes ต้องอยู่ระหว่าง 2 ถึง ${kinds.size} (จำนวนกลยุทธ์ที่เลือก)"
+                mgr.setMixConfig(symbol, interval, kinds.joinToString(","), minVotes)
+                "✅ ตั้ง Mix config $symbol/$interval แล้ว\n" +
+                    "กลยุทธ์: ${kinds.joinToString(" + ")} ・ เกณฑ์โหวต: ≥$minVotes/${kinds.size} เสียง\n" +
+                    "สัญญาณ MIX จะโหวตรวม state ของทุกกลยุทธ์ แล้วแจ้งเตือนเมื่อคะแนนข้ามเกณฑ์"
+            }
+            "clear" -> {
+                mgr.setMixConfig(symbol, interval, "", 0)
+                "🗑 ลบ Mix config ของ $symbol/$interval แล้ว — สัญญาณ mix จะไม่ถูกคำนวณใน alert อีก"
+            }
+            else -> {
+                val cfg = mgr.getMixConfig(symbol, interval)
+                if (cfg == null) {
+                    "ℹ️ $symbol/$interval ยังไม่มี Mix config — ตั้งด้วย action=set เช่น strategies=\"tsmom,trend,donchian,utbot\""
+                } else {
+                    "📋 Mix config $symbol/$interval: กลยุทธ์ ${cfg.first} ・ เกณฑ์โหวต ≥${cfg.second} เสียง"
+                }
+            }
+        }
+    }
+
+    /**
+     * trading_backtest_optimize — ADAPTIVE: grid 25 combos + mutation รอบ params ปัจจุบัน/ประวัติ
+     * + walk-forward 5 splits + permutation 200 รอบ + Monte Carlo 1,000 รอบ → overfitting score + เกรด
+     * มีความจำ (OptimizationTrial): เรียนรู้ว่าปรับทิศไหนแล้วดี/แย่ จากทุกรอบที่เคยจูน
+     * AUTO-APPLY: ถ้า params ใหม่ดีกว่าค่าเดิม (score สูงกว่า ≥2%) และไม่ overfit → บันทึกใช้จริงทันที
+     * (apply=off = dry-run ดูผลอย่างเดียวไม่บันทึก)
+     */
+    private fun executeBacktestOptimize(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val strategy = (args["strategy"] ?: "all").trim().lowercase()
+        val dryRun = (args["apply"] ?: "auto").trim().lowercase() == "off"
+        val label = "Adaptive Optimize $symbol $interval [$strategy]${if (dryRun) " (dry-run)" else ""}"
+        com.example.personalaibot.automation.backtest.LongTaskRunner.launch("optimize", label) {
+            val text = runOptimizeTask(symbol, interval, strategy, dryRun)
+            // สรุปเสียงจากผล: จำนวนกลยุทธ์ที่ auto-apply + เกรดรวม
+            val applied = Regex("AUTO-APPLY แล้ว (\\d+) กลยุทธ์").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val overfitCount = Regex("🔴 overfit").findAll(text).count()
+            val speech = when {
+                text.startsWith("❌") -> "Optimize $symbol ไม่สำเร็จครับ"
+                applied > 0 -> "Adaptive optimize $symbol $interval เสร็จแล้วครับ ปรับค่าให้อัตโนมัติ $applied กลยุทธ์" +
+                    (if (overfitCount > 0) " มี $overfitCount กลยุทธ์ที่ overfit ระวังไว้ครับ" else "") + " รายละเอียดอยู่ในแชทครับ"
+                else -> "Adaptive optimize $symbol $interval เสร็จแล้วครับ ยังไม่มีค่าใหม่ที่ดีกว่าค่าเดิม ระบบคง params เดิมไว้ รายละเอียดอยู่ในแชทครับ"
+            }
+            text to speech
+        }
+        return "⏳ รับคำสั่งแล้ว — กำลังรัน **$label** ในเบื้องหลัง (session แยก อาจใช้เวลา 1-3 นาที) " +
+            "เมื่อเสร็จระบบจะสรุปผลให้อัตโนมัติ (แชท + เสียง) — ตอบผู้ใช้สั้นๆ ว่ากำลังดำเนินการอยู่ แล้วคุยเรื่องอื่นต่อได้ตามปกติ"
+    }
+
+    /** ตัวงาน optimize จริง (รันใน LongTaskRunner) */
+    private suspend fun runOptimizeTask(symbol: String, interval: String, strategy: String, dryRun: Boolean): String = withContext(Dispatchers.Default) {
+
+        // SMC ใช้ SL/TP จากโครงสร้างตลาด (structure-based) ไม่ใช่ ATR multiplier — tune ด้วย optimize ไม่ได้
+        val s = strategy.trim().lowercase()
+        val known = setOf("", "all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "ema14_60", "utbot", "ut", "threebar", "3br")
+        if (s == "smc") {
+            return@withContext "ℹ️ SMC ใช้ SL/TP จากโครงสร้างตลาด (swing high/low) ไม่ได้ใช้ ATR multiplier จึง tune ด้วย optimize ไม่ได้ — ใช้ได้เฉพาะ 8 กลยุทธ์ classic: tsmom, trend, reversal, donchian, w52high, ema1460, utbot, threebar"
+        }
+        if (s !in known) {
+            return@withContext "❌ ไม่รู้จักกลยุทธ์ '$strategy' — เลือกได้: tsmom, trend, reversal, donchian, w52high, ema1460, utbot, threebar หรือ all"
+        }
+
+        val smc = SmcApiService(client)
+        val fetched = runCatching { smc.fetchBacktestCandles(symbol, interval) }
+            .getOrElse { return@withContext "❌ ดึงแท่งเทียนย้อนหลังไม่ได้: ${it.message}" }
+        if (fetched.candles.size < 500) {
+            return@withContext "❌ แท่งเทียนไม่พอสำหรับ optimize (${fetched.candles.size} < 500) — ลอง TF ใหญ่ขึ้น"
+        }
+        val candles = fetched.candles
+        val markerProvider = com.example.personalaibot.automation.SignalMarkerProvider(smc)
+        val markers = markerProvider.compute(candles, Int.MAX_VALUE)
+
+        val kinds = when (strategy) {
+            "tsmom" -> listOf("MOM"); "trend" -> listOf("TR"); "reversal" -> listOf("REV")
+            "donchian" -> listOf("DC"); "w52high" -> listOf("52H"); "ema1460", "ema14_60" -> listOf("E")
+            "utbot", "ut" -> listOf("UT"); "threebar", "3br" -> listOf("3BR")
+            else -> listOf("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR")
+        }
+
+        val engine = com.example.personalaibot.automation.backtest.BacktestEngine()
+        val kindOf = { label: String -> com.example.personalaibot.automation.signalKindOf(label) }
+        val nameOf = { k: String -> signalAlertProvider.strategyName(k) }
+        val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
+
+        val sb = StringBuilder()
+        sb.appendLine("🧬 **Adaptive Optimize — $symbol $interval** (${candles.size} แท่ง, ${fetched.source})")
+        sb.appendLine("grid + mutation รอบค่าปัจจุบัน/ประวัติ → walk-forward 5 splits → permutation → Monte Carlo | 🧠 เรียนรู้จากประวัติการจูน + auto-apply เมื่อดีกว่า${if (dryRun) " (dry-run: ไม่บันทึก)" else ""}")
+        sb.appendLine()
+
+        var applied = 0
+        for (kind in kinds) {
+            val name = nameOf(kind)
+            val ranked = com.example.personalaibot.automation.backtest.ParamOptimizer.gridSearch(
+                kind, candles, markers, engine, kindOf, nameOf
+            )
+            val gridBest = ranked.firstOrNull { it.score > -999.0 }
+
+            // baseline = tuned params ที่ใช้อยู่ปัจจุบัน (ถ้ามีและไม่ overfit) ไม่งั้น default
+            val currentTuning = mgr?.getStrategyTuning(symbol, interval, kind)?.takeIf { it.grade != "overfit" }
+            val baselineParams = currentTuning?.let {
+                com.example.personalaibot.automation.backtest.TpSlParams(it.sl_mult, it.tp_mult)
+            } ?: com.example.personalaibot.automation.backtest.TpSlParams.defaultsFor(kind)
+
+            // ── Adaptive run: วัดจริงทุก candidate + บันทึกเข้าความจำ ──
+            val adaptive = com.example.personalaibot.automation.backtest.AdaptiveOptimizer.run(
+                kind, symbol, interval, candles, markers, engine, kindOf, nameOf, baselineParams
+            )
+            val bestParams = when {
+                adaptive.bestScore > -999.0 -> adaptive.bestParams
+                gridBest != null -> gridBest.params
+                else -> {
+                    sb.appendLine("### $name\nไม่มี combo ที่ไม้พอ (≥5) — ข้าม\n")
+                    continue
+                }
+            }
+
+            val wf = com.example.personalaibot.automation.backtest.WalkForward.run(
+                kind, candles, markerProvider, engine, kindOf, nameOf
+            )
+            val bestFull = runCatching {
+                engine.run(
+                    symbol = symbol, interval = interval, source = fetched.source,
+                    candles = candles, markers = markers, kindFilter = setOf(kind),
+                    kindOf = kindOf, strategyName = nameOf,
+                    tpSl = { k, s, c, i, a14, a6 ->
+                        com.example.personalaibot.automation.backtest.parameterizedTpSl(
+                            k, s, c, i, a14, a6, bestParams
+                        )
+                    }
+                )
+            }.getOrNull()
+            val mc = com.example.personalaibot.automation.backtest.MonteCarlo.run(
+                bestFull?.trades?.map { it.pnlMoney } ?: emptyList()
+            )
+            val perm = com.example.personalaibot.automation.backtest.PermutationTest.run(
+                kind, candles, markers, engine, kindOf, nameOf, bestParams
+            )
+            val overfit = com.example.personalaibot.automation.backtest.OverfittingScore.compute(wf, perm, mc)
+
+            val gradeTh = when (overfit.grade) {
+                "healthy" -> "✅ สุขภาพดี"; "moderate" -> "🟡 ปานกลาง"; "overfit" -> "🔴 overfit"; else -> "❓"
+            }
+            // AUTO-APPLY: ดีกว่าค่าเดิม + ไม่ overfit → บันทึกใช้จริง (ยกเว้น dry-run)
+            val saved = !dryRun && adaptive.improved && overfit.grade != "overfit" && mgr != null
+            if (saved) {
+                mgr!!.saveStrategyTuning(
+                    symbol, interval, kind, bestParams.slMult, bestParams.tpMult,
+                    score = overfit.overfittingPct, grade = overfit.grade, source = "adaptive"
+                )
+                applied++
+            }
+
+            sb.appendLine("### $name ($kind)")
+            sb.appendLine("- **เดิม**: SL ${baselineParams.slMult}× / TP ${baselineParams.tpMult}× (score ${"%.3f".format(adaptive.baselineScore)}) → **ใหม่**: SL ${bestParams.slMult}× / TP ${bestParams.tpMult}× (score ${"%.3f".format(adaptive.bestScore)}) ${if (adaptive.improved) "📈 ดีขึ้น" else "⏸ ไม่ดีกว่า — คงค่าเดิม"}")
+            sb.appendLine("- **ผล params ใหม่**: ${adaptive.bestTrades} ไม้, win ${"%.0f%%".format(adaptive.bestWinRate * 100)}, PF ${"%.2f".format(adaptive.bestProfitFactor)}, Sharpe ${"%.2f".format(adaptive.bestSharpe)}, avg ${"%+.2f".format(adaptive.bestExpectancyR)}R (ลอง ${adaptive.candidatesTried} candidates)")
+            sb.appendLine(if (adaptive.learnedFromTrials > 0) "- 🧠 **ประวัติการจูน ${adaptive.learnedFromTrials} ครั้ง**: ${adaptive.directionInsight}" else "- 🧠 ยังไม่มีประวัติการจูน — ระบบจะเริ่มจำจากรอบนี้เป็นต้นไป")
+            if (wf.nSplits > 0) {
+                sb.appendLine("- **Walk-forward** ${wf.nSplits} splits: IS Sharpe ${"%.2f".format(wf.inSampleAvgSharpe)} → OOS ${"%.2f".format(wf.oosAvgSharpe)} (ratio ${"%.2f".format(wf.overfittingRatio)})${if (wf.likelyOverfit) " ⚠️ น่าสงสัย overfit" else ""}, param stability CV ${"%.2f".format(wf.paramStabilityCv)}")
+            }
+            if (perm.nPermutations > 0) {
+                sb.appendLine("- **Permutation**: p=${"%.3f".format(perm.pValue)} ${if (perm.isSignificant) "✅ มี edge เหนือความบังเอิญ" else "❌ ไม่ต่างจากสุ่ม"}")
+            }
+            if (mc.nSimulations > 0) {
+                sb.appendLine("- **Monte Carlo**: P(พอร์ตพัง) ${"%.1f".format(mc.probabilityOfRuin * 100)}%, P(กำไร) ${"%.1f".format(mc.probabilityOfProfit * 100)}%, p95 DD ${"%.1f".format(mc.p95MaxDrawdown * 100)}%")
+            }
+            sb.appendLine("- 🎯 **Overfitting ${"%.0f".format(overfit.overfittingPct)}% → $gradeTh**${if (saved) " — 💾 AUTO-APPLY แล้ว (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป)" else if (!dryRun && adaptive.improved) " — ไม่บันทึก (เกรดไม่ผ่าน)" else ""}")
+            sb.appendLine()
+        }
+
+        if (!dryRun) {
+            sb.appendLine(if (applied > 0) "💾 AUTO-APPLY แล้ว $applied กลยุทธ์ — signal alert ของ $symbol $interval จะใช้ SL/TP ที่จูนแล้วตั้งแต่สัญญาณถัดไป"
+            else "⏸ ไม่มีกลยุทธ์ไหนดีกว่าค่าเดิมพอจะเปลี่ยน — ระบบคง params เดิม (ประวัติการลองถูกบันทึกเพื่อเรียนรู้ต่อ)")
+        } else {
+            sb.appendLine("ℹ️ dry-run — ยังไม่บันทึก (ลบ apply=off ออกเพื่อให้ระบบ auto-apply เมื่อ params ใหม่ดีกว่า)")
+        }
+        sb.toString().trim()
+    }
+
+    /**
+     * trading_backtest_evolve — AI สะท้อนผลปรับ params ทีละนิดเป็นช่วงๆ (moss evolution)
+     * apply=on บันทึก params สุดท้ายถ้าผลวิวัฒน์ดีกว่า params เดิม
+     */
+    private fun executeBacktestEvolve(args: Map<String, String>): String {
+        val symbol = (args["symbol"] ?: "XAUUSD").trim().uppercase()
+        val interval = (args["interval"] ?: "1h").trim().lowercase()
+        val strategy = (args["strategy"] ?: "all").trim().lowercase()
+        val applyOn = (args["apply"] ?: "off").trim().lowercase() == "on"
+        val label = "Backtest Evolution $symbol $interval [$strategy]"
+        com.example.personalaibot.automation.backtest.LongTaskRunner.launch("evolve", label) {
+            val text = runEvolveTask(symbol, interval, strategy, applyOn)
+            // ดึงชื่อกลยุทธ์จริงจากผลลัพธ์ (กัน model พูดมั่วว่าตัวไหนดีขึ้น/แย่ลง)
+            val sectionRx = Regex("### (.+?) \\([A-Z0-9]+\\)\\nparams:[^\\n]*?(📈 ดีขึ้น|📉 แย่ลง|➖ เท่าเดิม)")
+            val improved = mutableListOf<String>()
+            val worsened = mutableListOf<String>()
+            sectionRx.findAll(text).forEach { m ->
+                when (m.groupValues[2]) {
+                    "📈 ดีขึ้น" -> improved += m.groupValues[1]
+                    "📉 แย่ลง" -> worsened += m.groupValues[1]
+                }
+            }
+            val savedCount = Regex("💾 บันทึก params สุดท้ายเข้าระบบแล้ว").findAll(text).count()
+            val speech = when {
+                text.startsWith("❌") -> "Evolution $symbol ไม่สำเร็จครับ"
+                else -> buildString {
+                    append("Backtest evolution $symbol $interval เสร็จแล้วครับ ")
+                    if (improved.isNotEmpty()) append("กลยุทธ์ที่วิวัฒน์แล้วดีขึ้นคือ ${improved.joinToString(" และ ")} ")
+                    if (worsened.isNotEmpty()) append("ส่วนที่แย่ลงคือ ${worsened.joinToString(" และ ")} ")
+                    if (improved.isEmpty() && worsened.isEmpty()) append("ผลแทบไม่ต่างจาก params เดิมทุกกลยุทธ์ ")
+                    append(
+                        when {
+                            applyOn -> "บันทึก params ที่ดีขึ้นเข้าระบบแล้ว $savedCount กลยุทธ์ครับ"
+                            improved.isNotEmpty() -> "ถ้าต้องการให้ระบบใช้ params ที่ดีขึ้นจริง สั่งผมว่า apply ผล evolution ได้เลยครับ"
+                            else -> "ยังไม่มี params ใหม่ที่คุ้มจะบันทึกครับ"
+                        }
+                    )
+                    append(" รายละเอียดอยู่ในแชทครับ")
+                }
+            }
+            text to speech
+        }
+        return "⏳ รับคำสั่งแล้ว — กำลังรัน **$label** ในเบื้องหลัง (session แยก อาจใช้เวลาหลายนาที) " +
+            "เมื่อเสร็จระบบจะสรุปผลให้อัตโนมัติ (แชท + เสียง) — ตอบผู้ใช้สั้นๆ ว่ากำลังดำเนินการอยู่ แล้วคุยเรื่องอื่นต่อได้ตามปกติ"
+    }
+
+    /** ตัวงาน evolve จริง (รันใน LongTaskRunner) */
+    private suspend fun runEvolveTask(symbol: String, interval: String, strategy: String, applyOn: Boolean): String {
+
+        // SMC ใช้ SL/TP จากโครงสร้างตลาด (structure-based) ไม่ใช่ ATR multiplier — tune ด้วย evolve ไม่ได้
+        val s = strategy.trim().lowercase()
+        val known = setOf("", "all", "tsmom", "trend", "reversal", "donchian", "w52high", "ema1460", "ema14_60", "utbot", "ut", "threebar", "3br")
+        if (s == "smc") {
+            return "ℹ️ SMC ใช้ SL/TP จากโครงสร้างตลาด (swing high/low) ไม่ได้ใช้ ATR multiplier จึง tune ด้วย evolution ไม่ได้ — ใช้ได้เฉพาะ 8 กลยุทธ์ classic: tsmom, trend, reversal, donchian, w52high, ema1460, utbot, threebar"
+        }
+        if (s !in known) {
+            return "❌ ไม่รู้จักกลยุทธ์ '$strategy' — เลือกได้: tsmom, trend, reversal, donchian, w52high, ema1460, utbot, threebar หรือ all"
+        }
+
+        val smc = SmcApiService(client)
+        val fetched = runCatching { smc.fetchBacktestCandles(symbol, interval) }
+            .getOrElse { return "❌ ดึงแท่งเทียนย้อนหลังไม่ได้: ${it.message}" }
+        if (fetched.candles.size < 800) {
+            return "❌ แท่งเทียนไม่พอสำหรับ evolution (${fetched.candles.size} < 800) — ลอง TF ใหญ่ขึ้น"
+        }
+        val candles = fetched.candles
+        val markers = com.example.personalaibot.automation.SignalMarkerProvider(smc)
+            .compute(candles, Int.MAX_VALUE)
+
+        val kinds = when (strategy) {
+            "tsmom" -> listOf("MOM"); "trend" -> listOf("TR"); "reversal" -> listOf("REV")
+            "donchian" -> listOf("DC"); "w52high" -> listOf("52H"); "ema1460", "ema14_60" -> listOf("E")
+            "utbot", "ut" -> listOf("UT"); "threebar", "3br" -> listOf("3BR")
+            else -> listOf("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR")
+        }
+
+        val engine = com.example.personalaibot.automation.backtest.BacktestEngine()
+        val kindOf = { label: String -> com.example.personalaibot.automation.signalKindOf(label) }
+        val nameOf = { k: String -> signalAlertProvider.strategyName(k) }
+        val evo = com.example.personalaibot.automation.backtest.BacktestEvolution(geminiService)
+        val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
+
+        val sb = StringBuilder()
+        sb.appendLine("🧬 **Backtest Evolution — $symbol $interval** (${candles.size} แท่ง, 8 ช่วง)")
+        sb.appendLine("AI สะท้อนผลทีละช่วง ปรับ ≤10%/รอบ หนีค่าเริ่มต้นไม่เกิน ±30%")
+        sb.appendLine()
+
+        var applied = 0
+        for (kind in kinds) {
+            val name = nameOf(kind)
+            // ต่อเนื่องจาก optimize: ถ้าเคย tuning/auto-apply ไว้ ใช้ params นั้นเป็นฐานวิวัฒน์ แทนค่า default
+            val tuned = mgr?.getStrategyTuning(symbol, interval, kind)
+            val baseParams = tuned?.let {
+                com.example.personalaibot.automation.backtest.TpSlParams(
+                    com.example.personalaibot.automation.backtest.TpSlParams.round2(it.sl_mult),
+                    com.example.personalaibot.automation.backtest.TpSlParams.round2(it.tp_mult)
+                )
+            }
+            val result = runCatching {
+                evo.evolve(kind, candles, markers, engine, kindOf, nameOf, initialOverride = baseParams)
+            }.getOrNull()
+            if (result == null) {
+                sb.appendLine("### $name\n❌ evolution ล้มเหลว\n")
+                continue
+            }
+            if (result.rounds.isEmpty()) {
+                sb.appendLine("### $name\nไม่มีรอบที่รันได้ — ข้าม\n")
+                continue
+            }
+
+            val gain = result.evolvedTotalR - result.baselineTotalR
+            val saved = applyOn && gain > 0 && mgr != null
+            if (saved) {
+                mgr!!.saveStrategyTuning(
+                    symbol, interval, kind, result.finalParams.slMult, result.finalParams.tpMult,
+                    score = gain, grade = "evolved", source = "evolve"
+                )
+                applied++
+            }
+
+            sb.appendLine("### $name ($kind)")
+            sb.appendLine("params: ${result.initialParams.slMult}/${result.initialParams.tpMult}${if (baseParams != null) " (ต่อจาก tuning ล่าสุด)" else " (ค่า default)"} → **${result.finalParams.slMult}/${result.finalParams.tpMult}** | รวมR เดิม ${"%+.2f".format(result.baselineTotalR)} → วิวัฒน์ **${"%+.2f".format(result.evolvedTotalR)}** (${if (gain > 0) "📈 ดีขึ้น" else if (gain < 0) "📉 แย่ลง" else "➖ เท่าเดิม"} ${"%+.2f".format(gain)}R)${if (result.usedAiReflection) " | 🤖 ใช้ AI reflection" else " | 📏 ใช้กฎ heuristic"}")
+            sb.appendLine("| รอบ | params | ไม้ | Win% | avgR | สะท้อนผล |")
+            sb.appendLine("|---|---|---|---|---|---|")
+            result.rounds.forEach { rd ->
+                sb.appendLine("| ${rd.round} | ${rd.params.slMult}/${rd.params.tpMult} | ${rd.trades} | ${"%.0f%%".format(rd.winRate * 100)} | ${"%+.2f".format(rd.avgR)} | ${rd.reflection.take(60)} |")
+            }
+            if (saved) sb.appendLine("💾 บันทึก params สุดท้ายเข้าระบบแล้ว")
+            sb.appendLine()
+        }
+
+        if (applyOn) {
+            sb.appendLine(if (applied > 0) "💾 บันทึก tuning แล้ว $applied กลยุทธ์" else "ไม่มีกลยุทธ์ไหนดีกว่าเดิม — ยังใช้ params เดิม")
+        } else {
+            sb.appendLine("ℹ️ ยังไม่ได้บันทึก — รันด้วย apply=on เพื่อให้ระบบใช้ params ที่วิวัฒน์แล้ว (เฉพาะตัวที่ดีกว่าเดิม)")
+        }
+        return sb.toString().trim()
     }
 
     /**

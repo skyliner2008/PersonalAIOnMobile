@@ -89,6 +89,14 @@ class JarvisAutomationService : Service() {
         const val ACTION_ALERT_REPEAT = "com.example.personalaibot.action.ALERT_REPEAT"
         const val EXTRA_JOB_ID = "job_id"
         const val EXTRA_NOTIFICATION_ID = "notification_id"
+
+        /** one-shot announce ผลงานพื้นหลัง (backtest/optimize เสร็จ) — notification + เสียง + การ์ดแชท */
+        const val ACTION_LONGTASK_ANNOUNCE = "com.example.personalaibot.action.LONGTASK_ANNOUNCE"
+        const val EXTRA_ANNOUNCE_TITLE = "announce_title"
+        const val EXTRA_ANNOUNCE_BODY = "announce_body"
+        const val EXTRA_ANNOUNCE_META = "announce_meta"
+        const val EXTRA_ANNOUNCE_SHORT = "announce_short"
+        const val EXTRA_ANNOUNCE_FULL = "announce_full"
     }
 
     private lateinit var database: JarvisDatabase
@@ -1141,6 +1149,29 @@ class JarvisAutomationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // one-shot announce (ผลงานพื้นหลังเสร็จ เช่น backtest) — ไม่ต้องเข้า loop เฝ้าตลาด
+        if (intent?.action == ACTION_LONGTASK_ANNOUNCE) {
+            val title = intent.getStringExtra(EXTRA_ANNOUNCE_TITLE) ?: "งานพื้นหลังเสร็จแล้ว"
+            val body = intent.getStringExtra(EXTRA_ANNOUNCE_BODY) ?: ""
+            val meta = intent.getStringExtra(EXTRA_ANNOUNCE_META) ?: """{"type":"long_task"}"""
+            val short = intent.getStringExtra(EXTRA_ANNOUNCE_SHORT) ?: title
+            val full = intent.getStringExtra(EXTRA_ANNOUNCE_FULL) ?: short
+            logDebug("AutomationService", "📣 LONGTASK_ANNOUNCE: $title (body=${body.length} chars)")
+            scope.launch {
+                runCatching {
+                    sendNotification(title, short, 9000 + (System.currentTimeMillis() % 1000).toInt())
+                    deliverChatAndVoice(
+                        cardBody = body,
+                        metaFor = { voice -> if (voice != null) meta.dropLast(1) + ",\"voice\":\"$voice\"}" else meta },
+                        shortSpeech = short,
+                        fullSpeech = full
+                    )
+                }.onFailure { logError("AutomationService", "announce failed: ${it.message}", it) }
+                // ไม่มีงานเฝ้าตลาด → ปิดตัวเองหลังประกาศเสร็จ (ถ้ามี job อยู่ loop ปกติจัดการเอง)
+            }
+            // ยังต้อง startForeground ตามกฎ Android ถ้าถูก start แบบ foreground service — ไหลต่อไปด้านล่าง
+        }
+
         // Re-deliveries are normal (START_STICKY). Only build+attach the
         // foreground notification once per Service instance — calling
         // startForeground() repeatedly on a service the platform has put in

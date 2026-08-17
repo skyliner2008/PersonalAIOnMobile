@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -54,6 +55,7 @@ import com.example.personalaibot.ui.components.ErrorBanner
 import com.example.personalaibot.ui.components.MessageBubble
 import com.example.personalaibot.ui.components.TypingIndicator
 import com.example.personalaibot.ui.screen.AutomationScreen
+import com.example.personalaibot.ui.screen.BacktestScreen
 import com.example.personalaibot.ui.screen.ChatInputBar
 import com.example.personalaibot.ui.screen.LiveModePanel
 import com.example.personalaibot.ui.screen.SettingsDialog
@@ -98,8 +100,12 @@ fun App(
     var showToolList by remember { mutableStateOf(false) }
     var showAutomation by remember { mutableStateOf(false) }
     var showTradingTerminal by remember { mutableStateOf(false) }
+    var showBacktest by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var chartSettingsSignal by remember { mutableLongStateOf(0L) }
+    val backtestRuns by com.example.personalaibot.automation.backtest.BacktestResultStore.runs.collectAsStateWithLifecycle()
+
+    // มีผล backtest ใหม่เข้ามาระหว่างเปิดหน้าอื่นอยู่ → ไม่เด้ง แต่ถ้าผู้ใช้เปิดหน้า Backtest ไว้จะเห็นอัปเดตเอง (StateFlow)
 
     val showChart by viewModel.showChart.collectAsStateWithLifecycle()
     val chartSymbol by viewModel.chartSymbol.collectAsStateWithLifecycle()
@@ -152,6 +158,7 @@ fun App(
         showToolList -> "Tool List"
         showAutomation -> "Cron Jobs"
         showTradingTerminal -> "MT5 Terminal"
+        showBacktest -> "Backtest Lab"
         showSettings -> "Settings"
         showChart -> "TradingView"
         else -> null
@@ -166,6 +173,7 @@ fun App(
                 showTradingTerminal = false
                 viewModel.closeTradingTerminal()
             }
+            showBacktest -> showBacktest = false
             showSettings -> showSettings = false
             showChart -> viewModel.closeChart()
         }
@@ -232,6 +240,9 @@ fun App(
                                 }
                                 IconButton(onClick = { showAutomation = true }) {
                                     Icon(Icons.Default.NotificationsActive, "Cron Jobs", tint = JarvisTheme.Cyan)
+                                }
+                                IconButton(onClick = { showBacktest = true }) {
+                                    Icon(Icons.Default.BarChart, "Backtest Lab", tint = JarvisTheme.Cyan)
                                 }
                                 IconButton(onClick = {
                                     showTradingTerminal = true
@@ -340,6 +351,10 @@ fun App(
                                 viewModel.createScheduledTask(name, prompt, type, runAt, hhmm)
                             }
                         )
+                    }
+
+                    showBacktest -> {
+                        BacktestScreen(runs = backtestRuns)
                     }
 
                     showTradingTerminal -> {

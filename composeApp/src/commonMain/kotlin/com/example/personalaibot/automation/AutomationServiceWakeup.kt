@@ -8,3 +8,13 @@ package com.example.personalaibot.automation
  * (Android เท่านั้น — platform อื่นเป็น no-op)
  */
 expect fun wakeupAutomationService()
+
+/**
+ * สั่ง automation service ให้ "ประกาศผลงานพื้นหลังที่เสร็จแล้ว" แบบ one-shot —
+ * notification + พูดสรุปผ่าน alert voice chain (Live → fallback) + การ์ดเข้าแชท
+ * ใช้ตอนผู้ใช้ไม่ได้เปิด live ค้างไว้ (ถ้า live เปิดอยู่ VM จะส่งเข้า session แทน)
+ * (Android เท่านั้น — platform อื่นเป็น no-op)
+ */
+expect fun announceLongTaskCompletion(
+    title: String, cardBody: String, metaJson: String, shortSpeech: String, fullSpeech: String
+)

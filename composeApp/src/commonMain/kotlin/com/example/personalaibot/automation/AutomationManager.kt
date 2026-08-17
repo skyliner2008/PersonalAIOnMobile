@@ -242,4 +242,94 @@ class AutomationManager(private val database: JarvisDatabase) {
     fun getSignalAlertsSince(sinceMs: Long): List<com.example.personalaibot.db.SignalAlertRecord> =
         try { database.jarvisDatabaseQueries.getSignalAlertsSince(sinceMs).executeAsList() }
         catch (_: Exception) { emptyList() }
+
+    // ─── StrategyTuning (params จาก backtest optimizer/evolution) ───
+
+    fun saveStrategyTuning(
+        symbol: String, interval: String, kind: String,
+        slMult: Double, tpMult: Double, score: Double?, grade: String?, source: String
+    ) {
+        try {
+            database.jarvisDatabaseQueries.upsertStrategyTuning(
+                symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
+                sl_mult = slMult, tp_mult = tpMult, score = score, grade = grade, source = source,
+                updated_at = Clock.System.now().toEpochMilliseconds()
+            )
+            logDebug("AutomationManager", "Tuning saved: $symbol/$interval/$kind sl=$slMult tp=$tpMult ($grade, $source)")
+        } catch (e: Exception) {
+            logError("AutomationManager", "saveStrategyTuning failed: ${e.message}", e)
+        }
+    }
+
+    fun getStrategyTuning(symbol: String, interval: String, kind: String): com.example.personalaibot.db.StrategyTuning? =
+        try {
+            database.jarvisDatabaseQueries
+                .getStrategyTuning(symbol.uppercase(), interval.lowercase(), kind)
+                .executeAsOneOrNull()
+        } catch (_: Exception) { null }
+
+    fun getAllStrategyTunings(): List<com.example.personalaibot.db.StrategyTuning> =
+        try { database.jarvisDatabaseQueries.getAllStrategyTunings().executeAsList() }
+        catch (_: Exception) { emptyList() }
+
+    // ─── OptimizationTrial (Adaptive Optimize learning memory) ───
+
+    fun saveOptimizationTrial(
+        symbol: String, interval: String, kind: String,
+        slMult: Double, tpMult: Double, score: Double,
+        expectancyR: Double?, profitFactor: Double?, trades: Int?,
+        deltaVsBaseline: Double?, applied: Boolean, source: String
+    ) {
+        try {
+            database.jarvisDatabaseQueries.insertOptimizationTrial(
+                symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
+                sl_mult = slMult, tp_mult = tpMult, score = score,
+                expectancy_r = expectancyR, profit_factor = profitFactor,
+                trades = trades?.toLong(), delta_vs_baseline = deltaVsBaseline,
+                applied = if (applied) 1 else 0, source = source,
+                created_at = Clock.System.now().toEpochMilliseconds()
+            )
+        } catch (e: Exception) {
+            logError("AutomationManager", "saveOptimizationTrial failed: ${e.message}", e)
+        }
+    }
+
+    fun getOptimizationTrials(symbol: String, interval: String, kind: String, limit: Int = 100): List<com.example.personalaibot.db.OptimizationTrial> =
+        try {
+            database.jarvisDatabaseQueries
+                .getOptimizationTrials(symbol.uppercase(), interval.lowercase(), kind, limit.toLong())
+                .executeAsList()
+        } catch (_: Exception) { emptyList() }
+
+    /** เก็บกำไรความจำ — เหลือเฉพาะ 200 รายการล่าสุดต่อ symbol/interval/kind */
+    fun pruneOptimizationTrials(symbol: String, interval: String, kind: String) {
+        try {
+            val s = symbol.uppercase(); val i = interval.lowercase()
+            database.jarvisDatabaseQueries.deleteOldOptimizationTrials(s, i, kind, s, i, kind)
+        } catch (_: Exception) { }
+    }
+
+    // ─── Mix Strategy config (เก็บใน CoreMemory key mixcfg|SYMBOL|TF = "tsmom,trend,dc|3") ───
+
+    fun setMixConfig(symbol: String, interval: String, kindsCsv: String, minVotes: Int) {
+        try {
+            database.jarvisDatabaseQueries.upsertCoreMemory(
+                "mixcfg|${symbol.uppercase()}|${interval.lowercase()}",
+                "$kindsCsv|$minVotes",
+                Clock.System.now().toEpochMilliseconds()
+            )
+        } catch (e: Exception) {
+            logError("AutomationManager", "setMixConfig failed: ${e.message}", e)
+        }
+    }
+
+    /** คืน (kindsCsv, minVotes) หรือ null ถ้ายังไม่ตั้งค่า */
+    fun getMixConfig(symbol: String, interval: String): Pair<String, Int>? =
+        try {
+            val v = database.jarvisDatabaseQueries
+                .getCoreMemoryByKey("mixcfg|${symbol.uppercase()}|${interval.lowercase()}")
+                .executeAsOneOrNull() ?: return null
+            val parts = v.split("|")
+            if (parts.size == 2) parts[0] to (parts[1].toIntOrNull() ?: 3) else null
+        } catch (_: Exception) { null }
 }

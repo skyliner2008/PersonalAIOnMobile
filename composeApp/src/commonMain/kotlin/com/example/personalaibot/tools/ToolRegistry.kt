@@ -39,7 +39,11 @@ object ToolRegistry {
         "trading_smc_structure",
         "trading_smc_flow",
         "trading_strategy_signal",
-        "trading_signal_stats"
+        "trading_signal_stats",
+        "trading_backtest",
+        "trading_backtest_optimize",
+        "trading_backtest_evolve",
+        "trading_mix_config"
     )
 
     val mt5OnlyTradingFunctionNames = setOf(
@@ -334,7 +338,11 @@ object ToolRegistry {
         "trading_elliot_modern_analysis",
         "trading_smc_flow",
         "trading_strategy_signal",
-        "trading_signal_stats"
+        "trading_signal_stats",
+        "trading_backtest",
+        "trading_backtest_optimize",
+        "trading_backtest_evolve",
+        "trading_mix_config"
     )
 
     private val tvOnlyTradingToolNames = setOf(

@@ -1,0 +1,14 @@
+-- Migration v4 → v5: ตาราง StrategyTuning (params SL/TP ที่ tune จาก backtest ต่อ symbol/tf/กลยุทธ์)
+CREATE TABLE IF NOT EXISTS StrategyTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sl_mult REAL NOT NULL,
+    tp_mult REAL NOT NULL,
+    score REAL,
+    grade TEXT,
+    source TEXT NOT NULL DEFAULT 'optimize',
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);

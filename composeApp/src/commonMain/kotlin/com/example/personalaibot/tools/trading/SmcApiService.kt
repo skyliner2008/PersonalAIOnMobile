@@ -141,6 +141,12 @@ class SmcApiService(private val client: HttpClient) {
         // อยู่ระดับ process (companion) เพราะ SmcApiService มีหลาย instance (service/UI/tester/trading tools)
         private val tvNoNewDataStreak = mutableMapOf<String, Int>()
         private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
+
+        // Backtest dataset cache (ระดับ process — SmcApiService มีหลาย instance):
+        // ชุดแท่งเทียนย้อนหลัง 5,000 แท่งต่อ sym|interval เก็บไว้ 10 นาที กันดึงซ้ำตอนรัน backtest ต่อเนื่อง
+        const val BACKTEST_BARS = 5000
+        private const val BACKTEST_CACHE_TTL_MS = 10 * 60 * 1000L
+        private val backtestCandleCache = mutableMapOf<String, Pair<Long, CandleFetchResult>>()
     }
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
@@ -405,6 +411,50 @@ class SmcApiService(private val client: HttpClient) {
         base.sortedBy { it.timestamp }.forEach { merged[it.timestamp] = it }
         incoming.sortedBy { it.timestamp }.forEach { merged[it.timestamp] = it }
         return merged.values.sortedBy { it.timestamp }
+    }
+
+    /**
+     * ดึงแท่งเทียนย้อนหลังชุดใหญ่สำหรับ Backtest (คงที่ BACKTEST_BARS = 5,000 แท่ง — เพียงพอต่อการจำลอง)
+     * แยกจาก fetchCandlesWithSource โดยเด็ดขาด: ไม่แตะ TvCandle DB (กันโดน trim 300 แท่ง) ไม่มี backoff —
+     * ใช้ in-memory cache ระดับ process 10 นาทีแทน
+     * ความลึกโดยประมาณ: 15m ≈ 52 วัน, 1h ≈ 7 เดือน, 4h ≈ 2.3 ปี, 1D ≈ 13 ปี
+     */
+    suspend fun fetchBacktestCandles(symbol: String, interval: String): CandleFetchResult {
+        val sym = normalizeSymbol(symbol)
+        val key = "$sym|${interval.lowercase()}"
+        backtestCandleCache[key]?.let { (cachedAt, cached) ->
+            if (Clock.System.now().toEpochMilliseconds() - cachedAt < BACKTEST_CACHE_TTL_MS && cached.candles.isNotEmpty()) {
+                logDebug("SmcApiService", "Backtest cache hit $key: ${cached.candles.size} แท่ง (${cached.source})")
+                return cached
+            }
+        }
+
+        val resolution = tvResolution(interval)
+        for ((tvSymbol, source) in tvSymbolsFor(sym)) {
+            val candles = fetchTvCandlesViaWebSocket(tvSymbol, resolution, BACKTEST_BARS)
+            if (candles.size >= 300) {
+                val result = CandleFetchResult(candles.sortedBy { it.timestamp }, source)
+                backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
+                val first = candles.first().timestamp
+                val last = candles.last().timestamp
+                logDebug("SmcApiService", "Backtest candles $key: ${candles.size} แท่ง ($first → $last) จาก $source")
+                return result
+            }
+        }
+
+        // fallback: Binance (crypto เท่านั้น — สูงสุด 1,000 แท่ง)
+        if (isPossibleBinanceSymbol(sym)) {
+            val candles = runCatching { fetchCandlesFromBinance(sym, interval.lowercase(), 1000) }.getOrElse { emptyList() }
+            if (candles.isNotEmpty()) {
+                val result = CandleFetchResult(candles.sortedBy { it.timestamp }, "BINANCE")
+                backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
+                logDebug("SmcApiService", "Backtest candles $key: ${candles.size} แท่ง (fallback BINANCE)")
+                return result
+            }
+        }
+
+        logDebug("SmcApiService", "Backtest candles $key: ดึงไม่ได้จากทุก source")
+        return CandleFetchResult(emptyList(), "NONE")
     }
 
     private suspend fun fetchCandlesFromTradingView(symbol: String, interval: String, limit: Int): CandleFetchResult {
