@@ -661,3 +661,73 @@ deleteOldOptimizationTrials:
 DELETE FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? AND id NOT IN (
     SELECT id FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? ORDER BY created_at DESC LIMIT 200
 );
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- StrategyHealth: ผล backtest ล่าสุดต่อ symbol/tf/กลยุทธ์ (Per-TF Strategy Gate)
+-- SignalAlertProvider เช็กก่อนยิง alert — กลยุทธ์ที่ PF < 1.0 ใน TF นั้นจะถูกบล็อก
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS StrategyHealth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT/3BR/SMC/MIX
+    profit_factor REAL NOT NULL,
+    avg_r REAL NOT NULL,
+    win_rate REAL NOT NULL,
+    trades INTEGER NOT NULL,
+    bars INTEGER NOT NULL,           -- จำนวนแท่งที่ backtest (บอกความสด/ความน่าเชื่อถือของตัวเลข)
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertStrategyHealth:
+INSERT OR REPLACE INTO StrategyHealth(symbol, interval, kind, profit_factor, avg_r, win_rate, trades, bars, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getStrategyHealth:
+SELECT * FROM StrategyHealth WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getStrategyHealths:
+SELECT * FROM StrategyHealth WHERE symbol = ? AND interval = ?;
+
+deleteStrategyHealth:
+DELETE FROM StrategyHealth WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- EntryTuning: params "จุดเข้า" ที่จูนแล้วต่อ symbol/tf/กลยุทธ์ (optimize scope=entry/both)
+-- SignalMarkerProvider/StrategySignalProvider ใช้แทนค่า default เมื่อมี tuning ที่ไม่ overfit
+-- params_json รูปแบบ "k=v;k=v" เฉพาะ field ที่ kind นั้นใช้ (ดู EntryParams.serialize)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS EntryTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT (3BR ไม่มี params)
+    params_json TEXT NOT NULL,       -- เช่น "dcPeriod=30" หรือ "utKey=2.5;utAtrPeriod=10"
+    score REAL,                      -- composite score ของ params นี้ (Sharpe×PF×WinRate)
+    expectancy_r REAL,               -- expectancy (R) บนข้อมูลเต็ม ณ ตอนจูน
+    profit_factor REAL,
+    trades INTEGER,
+    grade TEXT,                      -- healthy | moderate | overfit (null = ยังไม่ validate)
+    source TEXT NOT NULL DEFAULT 'entry-optimize',
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertEntryTuning:
+INSERT OR REPLACE INTO EntryTuning(symbol, interval, kind, params_json, score, expectancy_r, profit_factor, trades, grade, source, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getEntryTuning:
+SELECT * FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getEntryTunings:
+SELECT * FROM EntryTuning WHERE symbol = ? AND interval = ?;
+
+getAllEntryTunings:
+SELECT * FROM EntryTuning ORDER BY updated_at DESC;
+
+deleteEntryTuning:
+DELETE FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;

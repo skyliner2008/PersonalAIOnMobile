@@ -36,6 +36,15 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         val reflection: String   // เหตุผลจาก AI/กฎ ที่ใช้ปรับรอบถัดไป
     )
 
+    /** หนึ่งการปรับ params → ผลที่ตามมา (บันทึกลง OptimizationTrial เพื่อเป็นความจำข้ามรอบ/ข้ามรัน) */
+    data class ReflectionTrial(
+        val round: Int,
+        val fromSl: Double, val fromTp: Double,
+        val toSl: Double, val toTp: Double,
+        val totalR: Double, val avgR: Double, val profitFactor: Double,
+        val trades: Int, val deltaVsBaseline: Double, val note: String
+    )
+
     data class EvolutionResult(
         val kind: String,
         val segments: Int,
@@ -44,7 +53,8 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         val rounds: List<RoundResult>,
         val baselineTotalR: Double,   // ผลรวมถ้าใช้ params เดิมตลอด
         val evolvedTotalR: Double,    // ผลรวมของ params ที่วิวัฒน์
-        val usedAiReflection: Boolean
+        val usedAiReflection: Boolean,
+        val trials: List<ReflectionTrial> = emptyList()  // ความจำการปรับแต่งของ run นี้
     )
 
     suspend fun evolve(
@@ -56,7 +66,8 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         strategyName: (String) -> String,
         segments: Int = 8,
         config: BacktestConfig = BacktestConfig(),
-        initialOverride: TpSlParams? = null   // params ล่าสุดที่ optimize/apply ไว้ — ทำให้ evolution ต่อเนื่อง ไม่เริ่มจาก default ทุกครั้ง
+        initialOverride: TpSlParams? = null,   // params ล่าสุดที่ optimize/apply ไว้ — ทำให้ evolution ต่อเนื่อง ไม่เริ่มจาก default ทุกครั้ง
+        memoryLines: List<String> = emptyList() // ประวัติการปรับย้อนหลัง (OptimizationTrial) — ให้ AI เรียนรู้จากผลการปรับตัวเอง
     ): EvolutionResult {
         // ไม่ reset aiQuotaDead ที่นี่ — instance ถูกสร้างใหม่ทุก task (runEvolveTask) และ evolve() ถูกเรียกต่อกันหลายกลยุทธ์
         // ถ้า quota ตายกลาง task ต้องคงสถานะข้ามกลยุทธ์ไว้ ไม่เช่นนั้นจะกลับไปยิง 429 ซ้ำทุกกลยุทธ์
@@ -69,6 +80,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         var noChangeStreak = 0
         var baselineTotalR = 0.0
         var evolvedTotalR = 0.0
+        val trials = mutableListOf<ReflectionTrial>()
 
         for (s in 0 until segments) {
             val start = s * segSize
@@ -99,11 +111,25 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             val slExits = r.trades.count { it.exitReason == "SL" }
 
             // ── สะท้อนผล → params รอบถัดไป ──
-            val (nextParams, note, fromAi) = reflect(kind, s + 1, params, initial, r, slExits, noChangeStreak)
+            val (nextParams, note, fromAi) = reflect(kind, s + 1, params, initial, r, slExits, noChangeStreak, memoryLines)
             if (fromAi) usedAi = true
-            val clamped = TpSlParams.clampDrift(initial, TpSlParams.clampStep(params, nextParams))
+            // RR floor: ห้ามผลลัพธ์สุดท้ายมี RR ต่ำกว่า 1.2 (กันเข็มทิศเสีย "ขยาย SL + หด TP" ที่ทำ evolved แพ้ระบบ 8/8 — forensics 2026-08-18)
+            val clamped = TpSlParams.enforceRrFloor(kind, TpSlParams.clampDrift(initial, TpSlParams.clampStep(params, nextParams)))
             // นับ streak "นิ่ง" เฉพาะรอบที่มีไม้จริง — รอบ 0 ไม้ประเมินอะไรไม่ได้ ไม่ควรไปกระตุ้นปรับเล็กน้อย
             noChangeStreak = if (clamped == params && r.totalTrades > 0) noChangeStreak + 1 else 0
+
+            // บันทึก trial (การปรับ → ผลที่ตามมา) — caller persist ลง OptimizationTrial เป็นความจำข้ามรัน
+            val roundR = r.trades.sumOf { it.pnlR }
+            val baseR = baseline?.trades?.sumOf { it.pnlR }
+            trials += ReflectionTrial(
+                round = s + 1,
+                fromSl = params.slMult, fromTp = params.tpMult,
+                toSl = clamped.slMult, toTp = clamped.tpMult,
+                totalR = roundR, avgR = r.expectancyR, profitFactor = r.profitFactor,
+                trades = r.totalTrades,
+                deltaVsBaseline = if (baseR != null) roundR - baseR else 0.0,
+                note = note
+            )
 
             rounds += RoundResult(
                 round = s + 1,
@@ -112,7 +138,7 @@ class BacktestEvolution(private val gemini: GeminiService?) {
                 trades = r.totalTrades,
                 wins = r.wins, losses = r.losses, timeouts = r.timeouts,
                 winRate = r.winRate, avgR = r.expectancyR,
-                totalR = r.trades.sumOf { it.pnlR },
+                totalR = roundR,
                 profitFactor = r.profitFactor,
                 slExits = slExits,
                 reflection = note
@@ -125,7 +151,8 @@ class BacktestEvolution(private val gemini: GeminiService?) {
             initialParams = initial, finalParams = params,
             rounds = rounds,
             baselineTotalR = baselineTotalR, evolvedTotalR = evolvedTotalR,
-            usedAiReflection = usedAi
+            usedAiReflection = usedAi,
+            trials = trials
         )
     }
 
@@ -135,28 +162,47 @@ class BacktestEvolution(private val gemini: GeminiService?) {
 
     private suspend fun reflect(
         kind: String, round: Int, current: TpSlParams, initial: TpSlParams,
-        r: BacktestResult, slExits: Int, noChangeStreak: Int
+        r: BacktestResult, slExits: Int, noChangeStreak: Int,
+        memoryLines: List<String> = emptyList()
     ): Reflection {
-        // รอบที่ไม่มีไม้เลย ประเมินอะไรไม่ได้ — คง params และไม่เรียก AI (กัน reflection มั่ว เช่น "สุขภาพดี" ทั้งที่ 0 ไม้)
-        if (r.totalTrades == 0) {
-            return Reflection(current, "ไม่มีไม้ในช่วงนี้ ข้อมูลไม่พอประเมิน → คง params (กฎ)", false)
+        // รอบที่ไม้น้อยเกิน ประเมินอะไรไม่ได้ (สถิติระดับ 1-4 ไม้คือ noise — การปรับตาม noise = เดินสุ่ม)
+        // เดิมกันแค่ 0 ไม้ → AI ถูกบังคับตอบบนสถิติที่ไม่มีนัยสำคัญทุกรอบ (forensics 2026-08-18)
+        if (r.totalTrades < 5) {
+            return Reflection(current, "ไม้น้อยเกิน (${r.totalTrades} < 5) — noise ประเมินไม่ได้ → คง params (กฎ)", false)
         }
         val g = gemini
         if (g != null && !aiQuotaDead) {
+            val curRr = if (current.slMult > 0) current.tpMult / current.slMult else 0.0
             val prompt = buildString {
-                appendLine("คุณคือ quant ที่ปรับจูนกลยุทธ์เทรด '$kind' แบบ walk-forward evolution (หลักการ: ปรับทีละนิด ไม่ overreact, ห้ามเกิน ±10% ต่อรอบ, ห้ามหนีค่าเริ่มต้น ${initial.slMult}/${initial.tpMult} เกิน ±30%)")
+                appendLine("คุณคือ quant ที่ปรับจูนกลยุทธ์เทรด '$kind' แบบ walk-forward evolution")
+                appendLine("กฎเหล็ก:")
+                appendLine("1) ปรับทีละนิด ≤±10% ต่อรอบ ห้ามหนีค่าเริ่มต้น ${initial.slMult}/${initial.tpMult} เกิน ±30%")
+                appendLine("2) ห้ามทำ RR (tp_mult/sl_mult) ต่ำกว่า 1.2 เด็ดขาด — winrate โดยทั่วไป ~40% ถ้า RR < 1.2 ระบบแพ้โดยโครงสร้าง แม้ winrate จะสูงขึ้น")
+                appendLine("3) ถ้า winRate สูงแต่ PF ต่ำ = RR ต่ำเกินไป → ห้ามลด TP ต่อ ให้ขยาย TP หรือหด SL แทน")
+                appendLine("4) SL-exits เยอะไม่ได้แปลว่า SL แคบเสมอไป — ถ้ารอบก่อนเพิ่งขยาย SL แล้วผลไม่ดีขึ้น ห้ามขยายซ้ำ ให้ลองหด SL หรือคงค่า")
                 appendLine("ผลรอบ $round: trades=${r.totalTrades} ชนะ=${r.wins} แพ้=${r.losses} ค้าง=${r.timeouts} SL-exits=$slExits winRate=${"%.1f".format(r.winRate * 100)}% avgR=${"%+.2f".format(r.expectancyR)} PF=${"%.2f".format(r.profitFactor)}")
-                appendLine("params ปัจจุบัน: sl_mult=${current.slMult}, tp_mult=${current.tpMult}")
-                appendLine("ตีความ: SL เยอะ = SL แคบเกิน; ค้าง(TIMEOUT) เยอะ = TP ไกลเกิน; ชนะเยอะแต่ PF ต่ำ = TP ใกล้เกิน")
+                appendLine("params ปัจจุบัน: sl_mult=${current.slMult}, tp_mult=${current.tpMult} (RR ปัจจุบัน=${"%.2f".format(curRr)})")
+                if (memoryLines.isNotEmpty()) {
+                    appendLine("ประวัติการปรับล่าสุดและผลที่ตามมา (เรียนรู้จากตรงนี้ — ทิศที่เคยปรับแล้วแย่ลง ห้ามทำซ้ำ):")
+                    memoryLines.forEach { appendLine("- $it") }
+                }
                 appendLine("ตอบเป็น JSON บรรทัดเดียวเท่านั้น ห้ามมีข้อความอื่น: {\"sl_mult\": <ตัวเลข>, \"tp_mult\": <ตัวเลข>, \"note\": \"<เหตุผลสั้นๆ ภาษาไทย>\"}")
             }
             val resp = runCatching {
                 g.generateResponse(prompt, timeoutMs = 25_000)
             }.getOrNull().orEmpty()
             val parsed = parseReflectionJson(resp)
+            // throttle ทุกครั้งหลังเรียก AI (ทั้งสำเร็จ/ล้มเหลว) — free tier จำกัด 15 RPM/key (≈4s/request)
+            // เดิม delay เฉพาะตอนสำเร็จและแค่ 400ms → burst ชนลิมิตทุก key ภายในไม่กี่วินาที (log 2026-08-18)
+            kotlinx.coroutines.delay(2_000)
             if (parsed != null) {
+                // ปฏิเสธคำแนะนำที่ทำ RR ต่ำกว่า 1.2 (AI มักเบี่ยงไปขยาย SL/หด TP ทุกรอบ — forensics 2026-08-18)
+                val newRr = parsed.params.tpMult / parsed.params.slMult
+                if (newRr < 1.2 && curRr >= 1.2) {
+                    logDebug("BacktestEvolution", "❌ ปฏิเสธ AI reflection round $round ($kind): RR ใหม่ ${"%.2f".format(newRr)} < 1.2 — คง params เดิม")
+                    return Reflection(current, "AI เสนอ RR ${"%.2f".format(newRr)} ต่ำกว่าพื้น 1.2 → ปฏิเสธ คง params (กฎ RR)", false)
+                }
                 logDebug("BacktestEvolution", "AI reflection round $round ($kind): $resp")
-                kotlinx.coroutines.delay(400) // throttle กัน burst ชน rate limit (8 กลยุทธ์ × 8 รอบ ยิงรวดเดียว)
                 return Reflection(parsed.params, parsed.note + " (AI)", true)
             }
             // ล้มเหลว: ถ้าเป็น quota/429 ให้ตัดวงจร — รอบที่เหลือของ run นี้ใช้กฎ heuristic หมด ไม่ยิงซ้ำ

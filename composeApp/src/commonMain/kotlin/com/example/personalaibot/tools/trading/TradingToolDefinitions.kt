@@ -558,11 +558,12 @@ object TradingToolDefinitions {
         // ── 14f. Backtest Optimize (ADAPTIVE: เรียนรู้จากประวัติ + auto-apply) ──
         FunctionDeclaration(
             name = "trading_backtest_optimize",
-            description = """หา params SL/TP ที่ดีที่สุดของกลยุทธ์สัญญาณแบบ ADAPTIVE: grid 25 combos + mutation รอบ params ปัจจุบันและรอบ params ที่เคยดีในประวัติ (ขยายได้ถึง SL 0.3-6×, TP 0.5-10×) + เรียนรู้จากประวัติการจูนว่าปรับทิศไหนแล้วดี/แย่ (OptimizationTrial memory) + พิสูจน์ด้วย walk-forward, permutation test, Monte Carlo → คะแนน overfitting + เกรด
-                |AUTO-APPLY อัตโนมัติ: ถ้า params ใหม่ดีกว่าค่าเดิม ≥2% และเกรดไม่ overfit → บันทึกใช้จริงทันที (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป); apply=off = dry-run ดูผลอย่างเดียว
-                |ใช้เมื่อผู้ใช้ถาม: "หา params ที่ดีที่สุด", "optimize กลยุทธ์", "จูน SL/TP", "กลยุทธ์นี้ overfit ไหม", "params ไหนเชื่อได้", "adaptive optimize"
+            description = """หา params ที่ดีที่สุดของกลยุทธ์สัญญาณแบบ ADAPTIVE 2 scope: (1) sltp = จูน SL/TP: grid 25 combos + mutation รอบ params ปัจจุบันและรอบ params ที่เคยดีในประวัติ (ขยายได้ถึง SL 0.3-6×, TP 0.5-10×) (2) entry = จูน params จุดเข้าของกลยุทธ์ (ROC lookback, EMA fast/slow, RSI threshold, Donchian period, W52 proximity, UT Bot key/ATR) — edge ของกลยุทธ์อยู่ที่จุดเข้า (3) both = จูนจุดเข้าก่อนแล้วจูน SL/TP ต่อบนจุดเข้าใหม่
+                |ทุก scope: เรียนรู้จากประวัติการจูน (OptimizationTrial memory) + พิสูจน์ด้วย walk-forward, permutation test, Monte Carlo → คะแนน overfitting + เกรด
+                |AUTO-APPLY อัตโนมัติ: ถ้า params ใหม่ดีกว่าค่าเดิมและไม่ overfit → บันทึกใช้จริงทันที (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป); apply=off = dry-run ดูผลอย่างเดียว
+                |ใช้เมื่อผู้ใช้ถาม: "หา params ที่ดีที่สุด", "optimize กลยุทธ์", "จูน SL/TP", "จูนจุดเข้า", "จูน entry params", "กลยุทธ์นี้ overfit ไหม", "adaptive optimize"
                 |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เอง ห้ามสรุปผลจาก tool result นี้
-                |อาจใช้เวลา 30 วิ-2 นาที (strategy=all นานสุด)""".trimMargin(),
+                |อาจใช้เวลา 30 วิ-2 นาที (strategy=all หรือ scope=both นานสุด)""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
@@ -581,6 +582,11 @@ object TradingToolDefinitions {
                         type = "STRING",
                         description = "auto = auto-apply เมื่อ params ใหม่ดีกว่าและไม่ overfit (default), off = dry-run ดูผลอย่างเดียว",
                         enum = listOf("auto", "off")
+                    ),
+                    "scope" to ParameterProperty(
+                        type = "STRING",
+                        description = "sltp = จูน SL/TP (default) | entry = จูน params จุดเข้า (lookback/period/threshold) | both = จูนจุดเข้าก่อนแล้วจูน SL/TP ต่อบนจุดเข้าใหม่ (ลึกสุด)",
+                        enum = listOf("sltp", "entry", "both")
                     )
                 ),
                 required = listOf("symbol")

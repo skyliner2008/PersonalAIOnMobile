@@ -29,7 +29,9 @@ object ModelConfig {
         "gemini-3.1-flash-lite", // RPD 500, TPM 130K
         "gemini-3-flash",        // RPD 20, TPM 150K
         "gemini-2.5-flash-lite", // RPD 20, TPM 250K
-        "gemini-3.5-flash"       // RPD 20, TPM 250K
+        "gemini-3.5-flash",      // RPD 20, TPM 250K
+        "gemini-3.6-flash",      // สำรองเพิ่มตาม list โมเดลที่ผู้ใช้ยืนยันใช้ได้ (2026-08-18)
+        "gemini-3.7-flash"       // สำรองลำดับสุดท้าย
     )
 
     /**

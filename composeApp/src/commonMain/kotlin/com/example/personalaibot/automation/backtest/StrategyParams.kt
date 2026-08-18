@@ -47,6 +47,18 @@ data class TpSlParams(val slMult: Double, val tpMult: Double) {
             fun c(a: Double, b: Double) = round2(b.coerceIn(a * (1 - maxStep), a * (1 + maxStep)))
             return TpSlParams(c(prev.slMult, next.slMult), c(prev.tpMult, next.tpMult))
         }
+
+        /**
+         * RR floor — ห้ามผลลัพธ์สุดท้ายมี RR (tpMult/slMult) ต่ำกว่า minRr สำหรับกลยุทธ์ ATR-multiple
+         * (MOM/TR/E/DC/52H/UT/MIX: RR = tp/sl โดยตรง; 3BR: RR = tpMult เพราะ TP = tpMult × risk;
+         *  REV ยกเว้น — TP คือ BB basis ไม่ได้ผูก mult โดยตรง)
+         * เหตุ: reflection เดิมเบี่ยงไป "ขยาย SL + หด TP" ทุกรอบจน RR < 1 → แพ้โดยโครงสร้าง 8/8 กลยุทธ์ (2026-08-18)
+         */
+        fun enforceRrFloor(kind: String, p: TpSlParams, minRr: Double = 1.2): TpSlParams = when (kind) {
+            "REV" -> p
+            "3BR" -> if (p.tpMult < minRr) p.copy(tpMult = minRr) else p
+            else -> if (p.slMult > 0 && p.tpMult / p.slMult < minRr) p.copy(tpMult = round2(p.slMult * minRr)) else p
+        }
     }
 }
 

@@ -1,0 +1,17 @@
+-- Migration v7 → v8: ตาราง EntryTuning (params จุดเข้าที่จูนแล้วต่อ symbol/tf/กลยุทธ์)
+-- optimize scope=entry/both จูน entry params → live alert ใช้ค่าที่จูนแทนค่า default
+CREATE TABLE IF NOT EXISTS EntryTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    score REAL,
+    expectancy_r REAL,
+    profit_factor REAL,
+    trades INTEGER,
+    grade TEXT,
+    source TEXT NOT NULL DEFAULT 'entry-optimize',
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);

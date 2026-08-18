@@ -1397,3 +1397,111 @@ Build: BUILD SUCCESSFUL
 **สถานะ SMC ล่าสุด:** 15m 0% (3 ไม้), 1h 0% (3 ไม้), 4h 50% (+0.26R, PF 1.44) — sample เล็กมาก TF ใหญ่ดูมีหวัง TF เล็กยังแพ้ ต้องดูข้อมูลเพิ่มหลัง filter สะสมสัญญาณ
 
 Build: BUILD SUCCESSFUL (ก่อนหน้า), log นี้จาก build ที่มีทุก fix วันนี้
+
+## 2026-08-18 บั๊กใหญ่: optimize/evolve interval=all เซฟ tuning ใต้ key "all" — live ไม่เคยใช้จริง
+
+**พบจาก log 00:53:** "AUTO-APPLY แล้ว 7 กลยุทธ์ — signal alert ของ XAUUSD **all**" → interval=all ไม่ขยายเป็น 3 TF เหมือน backtest แต่ถูกส่งตรงๆ เป็น interval "all": จูนบนข้อมูลชุดเดียว (fetchBacktestCandles fallback TF ใด TF หนึ่ง) แล้วเซฟ tuning ใต้ getStrategyTuning(symbol, "all", kind) — live alert lookup ด้วย 15m/1h/4h เลยไม่เคยอ่านเจอ = **จูนมาทั้งหมดไม่มีผลกับ live แม้แต่ครั้งเดียว** ทั้งที่ log บอก AUTO-APPLY แล้ว
+
+**แก้ไข — TradingToolExecutor.kt:**
+- executeBacktestOptimize + executeBacktestEvolve: interval=all ขยายเป็น listOf("15m","1h","4h") รันทีละ TF รวมผล (เทียบ executeBacktest เดิม) — tuning เซฟใต้ TF จริง live ใช้ได้ทันที
+- สรุปเสียงรวมจำนวน applied ข้าม TF และบอก "all TF (15m/1h/4h)"
+
+**บริบทคำถามผู้ใช้ "กลยุทธ์อื่นคะแนนยังไม่ดี":** ผลล่าสุด (หลัง commission fix) แสดง pattern ชัด — ไม่มีกลยุทธ์ไหนดีทุก TF: EMA14/60 เด่น 15m (PF 4.60), 52W เด่น 15m (5.02) แต่ 1h แย่ (0.41), 3BR เด่น 1h (3.24), Trend เด่น 4h (2.72), UT Bot แย่ทุก TF — แนวทางถัดไป: per-TF strategy selection / mix voting แยก TF มากกว่าบังคับทุกกลยุทธ์ทุก TF
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 Per-TF Strategy Gate (บล็อก alert ของกลยุทธ์ที่แพ้ใน TF นั้น)
+
+**สาเหตุ:** ข้อมูลพิสูจน์ว่าไม่มีกลยุทธ์ไหนดีทุก TF (EMA14/60 เด่น 15m แต่ 1h ธรรมดา, 3BR เด่น 1h แต่ 15m แพ้, UT Bot แพ้ทุก TF) → ยิง alert เฉพาะคู่กลยุทธ์×TF ที่ผ่านเกณฑ์
+
+**สถาปัตยกรรม:**
+1. ตารางใหม่ `StrategyHealth` (migration 6.sqm): symbol/interval/kind → PF, avgR, winRate, trades, bars, updated_at (UNIQUE ต่อคู่)
+2. `AutomationManager`: saveStrategyHealth / getStrategyHealths / isStrategyGated(minPf=1.0, minTrades=5)
+3. `TradingToolExecutor.runBacktestOne`: หลัง backtest เสร็จ → เซฟ health ของทุกกลยุทธ์ที่รันลง DB อัตโนมัติ
+4. `SignalAlertProvider.fetch`: ก่อนยิง alert — กรอง edges (classic/MIX) และ smcNew ด้วย isStrategyGated; โดนบล็อก → log "⛔ Gate บล็อก ..." + ส่ง signal_gated กลับใน payload
+
+**กติกา:** บล็อกเมื่อมีข้อมูล backtest และไม้ ≥5 และ PF < 1.0 เท่านั้น — กลยุทธ์ที่ยังไม่เคย backtest = ผ่าน (ไม่บล็อกมั่ว)
+**หมายเหตุ:** gate เริ่มมีผลหลังรัน backtest ครั้งแรกบน build นี้ (seed health ลง DB); tuning เก่าที่เซฟใต้ interval "all" (บั๊กก่อนหน้า) ยังค้างใน DB แต่ไม่ถูกอ่าน ไม่กระทบ
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 ตรวจ log 01:38 (build มี gate) + ย้าย log gate ไป JarvisVM
+
+**ผลรอบนี้:**
+- ทุก task จบ ok=true: backtest all ×2, optimize tsmom 1h (ไม่มีค่าดีกว่า คงเดิม), evolve all 1h, evolve threebar apply=on (บันทึก)
+- 429 หลุด 5 ครั้งแต่ key rotation รับต่อได้
+- ⚠️ ยืนยันการทำงานของ gate จาก log ไม่ได้ — "💾 StrategyHealth saved" อยู่ใต้ tag Backtest และ "⛔ Gate บล็อก" ใต้ tag SignalAlert ซึ่งไม่อยู่ใน filter ที่ผู้ใช้ capture → ย้ายทั้ง 2 ไป tag JarvisVM แล้ว (build ผ่าน)
+- สังเกต: evolve all 1h รอบนี้ MOM/TR แย่ลง — ผู้ใช้สั่ง "บันทึกค่า" model เลือก apply เฉพาะ threebar (กลยุทธ์เดียวที่ดีขึ้น) ถือว่าถูกต้อง
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 แก้ 429 ซ้ำทุก task — Key Health Registry + 404 fallback + เพิ่มโมเดล 3.6/3.7
+
+**สาเหตุที่ผู้ใช้เห็น 429 เป็นโมเดลเดิมทุกครั้ง (ไม่ใช่บั๊ก fallback):** persist ทำงานถูกแล้ว (log: "Non-stream fallback works — persist" + "JarvisVM: Persist working fallback config" ทุกครั้ง) แต่ evolve ยิง reflection ~64 calls/TF ทำ key ที่เพิ่ง persist ติดลิมิตอีก → task ถัดไปเริ่มด้วย key ที่ตายแล้ว → 429 รอบแรกเสมอ → หมุน key → persist วนลูป และโมเดลไม่เคยสลับเพราะ key rotation (3 keys โควต้าแยกกัน) สำเร็จก่อนเสมอ
+
+**แก้ไข — GeminiService.kt:**
+1. companion object `keyDeadUntilMs` (แชร์ข้ามทุก instance/task) — key ที่ติด 429 ถูก mark พัก: per-minute quota = 90s, per-day (parse "per_day" จาก error body) = 12 ชม.
+2. ทั้ง streaming (generateResponseWithTools) และ non-stream (generateResponse): ก่อนยิง request แรก ถ้า key เริ่มต้นยังอยู่ในช่วงพัก → ข้ามไป key ที่มีชีวิตทันที (persist เดิมยังทำงาน อัปเดต settings ตาม)
+3. trySwitchFallbackKey/switchKey: เลือก key ที่ไม่ติด cooldown ก่อน เผื่อตายหมดค่อยกลับมาลอง key ที่พักอยู่
+4. เพิ่ม 404 → fallback: เดิม 404 (โมเดลไม่มีจริง) return error ทันทีไม่ลองโมเดลอื่น (เคส gemini-3.1-pro) — ตอนนี้ 404 สลับโมเดลถัดไปโดยไม่เผา key rotation (modelNotFound flag)
+5. log error body 300 → 700 chars เพื่อเห็นชนิดโควต้า (per-minute vs per-day) ใน logcat
+
+**ModelConfig.kt:** เพิ่ม gemini-3.6-flash, gemini-3.7-flash ท้าย chain ตาม list โมเดลที่ผู้ใช้ยืนยันใช้ได้ (chain เดิม 6 ตัว → 8 ตัว); ถ้า id ไม่ตรงจริง 404 fallback ใหม่จะข้ามให้อัตโนมัติ
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 รีวิวความถูกต้องทุก strategy (เทียบต้นฉบับ)
+
+**สรุปการตรวจ (code review เทียบ mt5-core-server + OLD_Code):**
+- SignalMarkerProvider.compute (8 กลยุทธ์): ทุกตัว point-in-time (ใช้ข้อมูล ≤ แท่ง i เท่านั้น) + edge-triggered — ไม่มี lookahead: TSMOM(ROC20 flip)✓, Trend(EMA50/200 cross)✓, REV(RSI14+BB20 edge)✓, DC(Donchian20 ไม่รวมแท่งปัจจุบัน)✓, 52H(running high, warmup 100 แท่ง)✓, E(EMA14/60)✓, UT(trailing stop สูตรตรง Pine ต้นฉบับ key=2×ATR6)✓, 3BR(pattern 3 แท่ง)✓
+- BacktestEngine: SL ก่อน TP เมื่อชนทั้งคู่ (conservative)✓, เข้าที่ close แท่งสัญญาณ (ตรง fetchStats)✓, 1 ไม้ต่อครั้ง✓, commission หักครั้งเดียวตอนปิด (fix ไปแล้ว)✓, backtest ใช้ compute(maxPerKind=Int.MAX_VALUE) ไม่ถูก cap 12 จุด✓
+- SmcSignalDetector เทียบ SignalDetector.ts (964 บรรทัด): minRRR=1.2✓ minConfluenceStars=2✓ obProximity=0.15%✓ SL=ob.bottom−tolerance×2✓ FVG fill 50%/SL=size×0.5✓ RSI Wilder✓ — adaptation ที่ต่างจากต้นฉบับถูกบันทึกไว้ใน comment ครบ (bias proxy แทน MTF, findNearestLevel แทน PriceMap, filter 5 ชั้นเพิ่ม)
+- SmcSignals.newSignalsAt: window subList(0..idx+1) ต่อแท่ง — กัน lookahead✓
+
+**สถิติล่าสุด (XAUUSD 5000 แท่ง, ต้นทุน on) — ยืนยัน pattern per-TF:**
+- 15m: EMA14/60 PF 4.60, 52W 5.02 ดี / UT 0.95, TR 0.72, 3BR 0.57, SMC 0.00 แพ้
+- 1h: 3BR 3.24, DC 1.80, TR 1.60 ดี / UT 0.61, REV 0.52, 52W 0.41, SMC 0.00 แพ้
+- 4h: TR 2.72, MOM 1.65, SMC 1.44 ดี / 52W 0.65, UT 0.86 แพ้
+→ Per-TF Strategy Gate (seed "💾 StrategyHealth saved: 9 kinds" ยืนยันใน log แล้วทั้ง 3 TF) ครอบคลุมเคสนี้พอดี — กลยุทธ์ที่แพ้ใน TF นั้นถูกบล็อกจาก live alert อัตโนมัติ
+- SMC 15m/1h ยัง 0/3 ไม้ (filter SL≥0.75×ATR ตัดสัญญาณติดจมูกไปแล้ว 17/20 แต่ที่เหลือยังโดนกวาด) — sample เล็กมาก (2-3 ไม้/TF) สรุปไม่ได้ 100% ต้องสะสมข้อมูล; 4h เริ่มนิ่ง (PF 1.44)
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 แก้ 429 รอบ 2 (แก้ที่ root cause จริง): รอตาม hint "Please retry in Xs" แทนการหมุน key
+
+**ค้นพบสำคัญจาก log 02:49 (build มี Key Health แล้ว):** error body เต็มเผยว่า 429 คือ **per-minute limit 15 RPM ต่อ key สำหรับ gemini-3.5-flash-lite** ("Quota exceeded ... limit: 15 ... Please retry in 2-54s") — โควต้ารีเซ็ตในไม่กี่วินาที ไม่ใช่รายวัน การหมุน key จึงไม่ช่วยระยะยาว: evolve ยิง reflection เร็วเกิน (interval ~2-4s = ~15-25 RPM) ทำ key ตายทีละตัวจนครบ (ElLY→VEj8→qgCA→ULGY) แล้ววนซ้ำ และ cooldown 90s แบบเดิมพัก key นานเกินจริง (key ฟื้นใน ~4s)
+
+**แก้ไข:**
+1. GeminiService (ทั้ง streaming + non-stream): 429 ที่มี hint "Please retry in Xs" (≤60s) → **delay ตาม hint แล้วลอง key/โมเดลเดิมซ้ำ** (สูงสุด 3 ครั้ง/การเรียก) ก่อนค่อยหมุน key — ทำตามที่ API แนะนำตรงๆ ไม่เผา key อื่น
+2. markKeyDead: per-minute พักตาม hint+1s (ไม่ใช่ 90s ตายตัว), ไม่มี hint = 30s, per-day = 12 ชม.
+3. BacktestEvolution: throttle reflection 400ms → 2000ms และย้ายมา delay ทุกครั้งหลังเรียก AI (เดิม delay เฉพาะตอนสำเร็จ) → interval รวม ~4-6s/req ใกล้เพดาน 15 RPM
+4. parseRetryAfterMs รองรับทั้ง "Please retry in Xs" และ RetryInfo.retryDelay
+
+**ผลที่คาด:** evolve จะช้าลงเล็กน้อยแต่แทบไม่เห็น 429 ใน log อีก และไม่วนเปลี่ยน key/โมเดลโดยไม่จำเป็น
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 แก้ Evolution ไม่เรียนรู้ (forensics: evolved แพ้ baseline 8/8 กลยุทธ์แบบเป็นระบบ)
+
+**หลักฐานจาก log 03:10 (evolve XAUUSD 1h):** ทุกกลยุทธ์ evolved แย่กว่า baseline (MOM -4.78R, REV -13.19R, DC -18.06R, 3BR -14.67R ฯลฯ) — AI reflection ทุกรอบแนะนำเหมือนเดิม "ขยาย SL + ลด TP" เพราะ prompt เดิมเขียนนำทางเดียว ("SL เยอะ = SL แคบเกิน / ค้างเยอะ = TP ไกลเกิน") → RR พังต่ำกว่า 1 (เช่น MOM 2.0/3.0→3.8/3.23 = RR 0.85) → แพ้โดยโครงสร้าง ไม่มีหน่วยความจำข้ามรอบ/ข้ามรัน สถิติต่อรอบ 2-10 ไม้ = noise และเกณฑ์ apply เดิม (gain>0 บน adaptive path) เสี่ยงเซฟค่าฟลุ๊ค
+
+**แก้ไข 3 ข้อ:**
+1. **Apply gate บนข้อมูลเต็ม** (TradingToolExecutor.runEvolveTask): finalParams ต้อง full-backtest 5000 แท่งแล้วชนะ initial ทั้ง expectancyR และ PF≥1.0 และไม้≥10 ถึงเซฟ — แสดงบรรทัด "🔎 ผลเต็ม N แท่ง: เดิม PF/avgR → ใหม่ PF/avgR → APPLY/ไม่ apply" ทุกกลยุทธ์
+2. **Reflection Memory**: ใช้ตาราง OptimizationTrial ที่มีอยู่ — evolve บันทึก trial ทุกรอบ (source=evolve) และดึง 5 รายการล่าสุดใส่ prompt ("ทิศที่เคยปรับแล้วแย่ลง ห้ามทำซ้ำ")
+3. **แก้เข็มทิศ RR** (BacktestEvolution + StrategyParams): prompt ใหม่มีกฎเหล็ก 4 ข้อ (ห้าม RR<1.2, winRate สูงแต่ PF ต่ำ = RR ต่ำเกินห้ามลด TP, ห้ามขยาย SL ซ้ำถ้ารอบก่อนไม่ดีขึ้น) + ปฏิเสธคำแนะนำ AI ที่ RR<1.2 ระดับโค้ด + `TpSlParams.enforceRrFloor` clamp ผลลัพธ์สุดท้าย (REV ยกเว้นเพราะ TP=BB basis, 3BR floor ที่ tpMult) + min-trades gate 0→5 ไม้/รอบ (น้อยกว่านี้ = noise คง params ไม่เรียก AI)
+
+Build: BUILD SUCCESSFUL
+
+## 2026-08-18 Entry Params Tuning (ข้อ 4 — จูนจุดเข้าได้แล้ว ไม่ใช่แค่ SL/TP)
+
+**ปัญหาเดิม:** edge ของกลยุทธ์อยู่ที่ "จุดเข้า" แต่ optimize/evolve จูนได้แค่ SL/TP — params จุดเข้า (ROC 20, EMA 50/200, RSI 30/70, Donchian 20, W52 0.98/0.90, EMA 14/60, UT key=2.0 ATR6) เป็น hard-code
+
+**สิ่งที่ทำ:**
+1. **`EntryParams.kt` (ใหม่)** — data class รวม params จุดเข้าทุก kind + `gridFor(kind)` grid เล็ก 4-12 combos (MOM lookback 10-40, TR 5 คู่ EMA, REV RSI threshold 9 ชุด, DC period 10-55, 52H proximity 9 ชุด, E 4 คู่, UT key×ATR 12 ชุด) + serialize/deserialize "k=v;k=v"; default ทุก field = ค่าคงที่เดิมเป๊ะ → พฤติกรรมเดิมไม่เปลี่ยน; 3BR เป็น pattern ล้วนไม่มีอะไรจูน
+2. **`SignalMarkerProvider.compute`** รับ `entryParams: Map<String, EntryParams>` แทนค่าคงที่ทุก kind (ค่า default = ค่าเดิม call site เก่าไม่พัง)
+3. **DB 7.sqm** — ตาราง `EntryTuning(symbol, interval, kind, params_json, score, expectancy_r, profit_factor, trades, grade, source, updated_at)` + queries + wrapper `AutomationManager.saveEntryTuning/getEntryTuning/getTunedEntryParams` (โหลดเป็น Map<kind, EntryParams> ข้าม grade=overfit)
+4. **Optimize เพิ่ม `scope`**: `sltp` (default เดิม) | `entry` (จูนจุดเข้าอย่างเดียว โดย SL/TP คงค่าปัจจุบัน) | `both` (จูนจุดเข้าก่อน แล้วจูน SL/TP ต่อบนจุดเข้าใหม่ — recompute markers + WalkForward รับ entryParams ด้วย); apply gate เดียวกับ evolve fix: วัดบนข้อมูลเต็ม + expectancy ดีกว่า + PF≥1.0 + ไม้≥10 ถึงเซฟ; tool definition เพิ่ม arg scope
+5. **Live ใช้ค่าจูนทุกจุด**: SignalAlertProvider.fetch (signal alert จริง), history stats, StrategySignalProvider.fetch (5 กลยุทธ์ classic ใช้ tuned params), runBacktestTask/runEvolveTask/optimize baseline, chart markers (SignalMarkerProvider.fetch) — ทุกจุดโหลด EntryTuning ก่อน compute → backtest วัดบนจุดเข้าเดียวกับ live เสมอ
+6. **ข้อจำกัดที่ทราบ:** MixSignalEngine (MIX voting) ยังใช้ค่าคงที่เดิม (series cache ของตัวเอง) — entry tuning ยังไม่มีผลกับ MIX; SMC structure-based ไม่เกี่ยว
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รอผู้ใช้ทดสอบ)

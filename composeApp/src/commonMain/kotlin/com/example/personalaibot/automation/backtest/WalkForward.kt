@@ -41,7 +41,8 @@ object WalkForward {
         strategyName: (String) -> String,
         nSplits: Int = 5,
         trainPct: Double = 0.7,
-        config: BacktestConfig = BacktestConfig()
+        config: BacktestConfig = BacktestConfig(),
+        entryParams: Map<String, EntryParams> = emptyMap()
     ): WalkForwardResult {
         val total = candles.size
         if (total < 500) {
@@ -65,9 +66,9 @@ object WalkForward {
 
             // markers คำนวณบน prefix ที่ anchor ที่ 0 เสมอ — indicator (EMA200/ATR) warm ด้วยประวัติเต็ม
             // เดิมคำนวณ test markers บน slice แยก → indicator reseed ที่ขอบ slice ทำสัญญาณช่วงต้น OOS เพี้ยน
-            val trainMarkers = markerProvider.compute(trainCandles, Int.MAX_VALUE)
+            val trainMarkers = markerProvider.compute(trainCandles, Int.MAX_VALUE, entryParams)
             val testStartTs = candles[testStart].timestamp
-            val testMarkers = markerProvider.compute(prefixCandles, Int.MAX_VALUE)
+            val testMarkers = markerProvider.compute(prefixCandles, Int.MAX_VALUE, entryParams)
                 .filter { it.time >= testStartTs }
 
             val ranked = ParamOptimizer.gridSearch(

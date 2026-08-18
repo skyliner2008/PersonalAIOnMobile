@@ -53,10 +53,18 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         val sigIdx = n - 2 // แท่งปิดล่าสุด (แท่ง n-1 อาจกำลังวิ่ง)
         val sigTime = candles[sigIdx].timestamp
 
-        val edges = markerProvider.compute(candles).filter { it.time == sigTime }.toMutableList()
+        // entry params ที่จูนแล้ว (EntryTuning) — ใช้แทนค่า default ของทุก kind ที่มี tuning
+        val tunedEntry = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, tf)
+        }.getOrElse { emptyMap() }
+        if (tunedEntry.isNotEmpty()) {
+            logDebug("SignalAlert", "$symbol/$tf ใช้ tuned entry params: ${tunedEntry.keys.joinToString(",")}")
+        }
+        val edges = markerProvider.compute(candles, entryParams = tunedEntry).filter { it.time == sigTime }.toMutableList()
 
         // ── SMC (MT5 Engine) — ตรวจสัญญาณใหม่จากโครงสร้างตลาด/OB/FVG/Sweep/RSI divergence ──
-        val smcNew = runCatching {
+        var smcNew = runCatching {
             com.example.personalaibot.automation.smc.SmcSignals.newSignalsAt(candles, sigIdx, symbol, tf)
         }.getOrElse { emptyList() }
 
@@ -76,6 +84,25 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 .filter { it.time == sigTime }
             edges.addAll(mixEdges)
             logDebug("SignalAlert", "$symbol/$tf MIX score=$mixScore/${mixCfg.second} [$mixVoteDetail] edges=${mixEdges.size}")
+        }
+
+        // ── Per-TF Strategy Gate ──
+        // บล็อกสัญญาณของกลยุทธ์ที่ backtest ล่าสุดใน TF นี้แพ้ (PF < 1.0, ไม้ ≥5)
+        // เพราะข้อมูลพิสูจน์แล้วว่าไม่มีกลยุทธ์ไหนดีทุก TF — ยิงเฉพาะคู่กลยุทธ์×TF ที่ผ่าน
+        var gatedKinds = emptyList<String>()
+        val gateMgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
+        if (gateMgr != null && (edges.isNotEmpty() || smcNew.isNotEmpty())) {
+            edges.removeAll { e ->
+                val k = signalKindOf(e.label)
+                if (gateMgr.isStrategyGated(symbol, tf, k)) { gatedKinds = gatedKinds + k; true } else false
+            }
+            if (smcNew.isNotEmpty() && gateMgr.isStrategyGated(symbol, tf, "SMC")) {
+                gatedKinds = gatedKinds + "SMC"
+                smcNew = emptyList()
+            }
+            if (gatedKinds.isNotEmpty()) {
+                logDebug("JarvisVM", "⛔ Gate บล็อก $symbol/$tf: ${gatedKinds.joinToString(",")} (backtest ล่าสุด PF<1) — ไม่ยิง alert")
+            }
         }
 
         val closes = candles.map { it.close }
@@ -108,6 +135,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 "signal_event" to "NONE",
                 "signal_mix_score" to mixScore.toString(),
                 "signal_mix_votes" to mixVoteDetail,
+                "signal_gated" to gatedKinds.joinToString(","),
                 "close" to fmt(close),
                 "signal_context" to context
             )
@@ -296,7 +324,11 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             else -> setOf("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR")
         }
 
-        val markers = markerProvider.compute(candles, maxPerKind = Int.MAX_VALUE)
+        val tunedEntry = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, tf)
+        }.getOrElse { emptyMap() }
+        val markers = markerProvider.compute(candles, maxPerKind = Int.MAX_VALUE, entryParams = tunedEntry)
             .filter { signalKindOf(it.label) in kindFilter }
         if (markers.isEmpty()) return "📭 ไม่พบสัญญาณย้อนหลังของกลยุทธ์ที่เลือกใน $symbol $tf"
 

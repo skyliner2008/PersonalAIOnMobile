@@ -1,0 +1,15 @@
+-- Migration v6 → v7: ตาราง StrategyHealth (Per-TF Strategy Gate)
+-- เก็บผล backtest ล่าสุดต่อ symbol/tf/กลยุทธ์ → บล็อก alert ของกลยุทธ์ที่ PF < 1.0 ใน TF นั้น
+CREATE TABLE IF NOT EXISTS StrategyHealth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    profit_factor REAL NOT NULL,
+    avg_r REAL NOT NULL,
+    win_rate REAL NOT NULL,
+    trades INTEGER NOT NULL,
+    bars INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);

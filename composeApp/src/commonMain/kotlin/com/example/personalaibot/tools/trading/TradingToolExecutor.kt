@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 
 import com.example.personalaibot.data.GeminiService
 import com.example.personalaibot.logDebug
+import com.example.personalaibot.automation.backtest.EntryParams
 
 /**
  * TradingToolExecutor — รับ trading tool calls และ format ผลลัพธ์เป็น text
@@ -254,11 +255,16 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         }
 
         val candles = fetched.candles
+        // entry params ที่จูนแล้ว (EntryTuning) — backtest ต้องวัดบนจุดเข้าเดียวกับที่ live ใช้จริง
+        val tunedEntry = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, interval)
+        }.getOrElse { emptyMap() }
         // คำนวณเฉพาะกลุ่มที่เลือกจริง — กรณี strategy=smc/mix ไม่ต้องเสียเวลาสแกนกลยุทธ์ classic ทั้ง 8 ตัว
         val hasClassic = kindFilter.any { it != "SMC" && it != "MIX" }
         val classicMarkers = if (hasClassic) {
             com.example.personalaibot.automation.SignalMarkerProvider(smc)
-                .compute(candles, Int.MAX_VALUE)
+                .compute(candles, Int.MAX_VALUE, tunedEntry)
         } else emptyList()
 
         // ── MIX (โหวตหลายกลยุทธ์): state-based voting → edge เมื่อ score ข้ามเกณฑ์
@@ -332,6 +338,13 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         }
         // push เข้า store ให้หน้าจอ Backtest (แท็บกลยุทธ์ + กราฟ) อ่านไปแสดง
         com.example.personalaibot.automation.backtest.BacktestResultStore.add(result, strategy)
+        // บันทึกสุขภาพกลยุทธ์ลง DB (Per-TF Strategy Gate) — live alert เช็กตารางนี้ก่อนยิงทุกครั้ง
+        runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()?.let { m ->
+            result.perStrategy.forEach { s ->
+                m.saveStrategyHealth(symbol, interval, s.kind, s.profitFactor, s.avgR, s.winRate, s.taken, result.bars)
+            }
+            logDebug("JarvisVM", "💾 StrategyHealth saved: ${result.perStrategy.size} kinds ($symbol/$interval)")
+        }
         return Triple(formatBacktestResult(result) + buildRegimeSection(result, candles), result, null)
     }
 
@@ -460,17 +473,24 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val interval = (args["interval"] ?: "1h").trim().lowercase()
         val strategy = (args["strategy"] ?: "all").trim().lowercase()
         val dryRun = (args["apply"] ?: "auto").trim().lowercase() == "off"
-        val label = "Adaptive Optimize $symbol $interval [$strategy]${if (dryRun) " (dry-run)" else ""}"
+        // scope: sltp = จูน SL/TP (default) | entry = จูน params จุดเข้า | both = จูนจุดเข้าก่อนแล้วจูน SL/TP ต่อ
+        val scope = (args["scope"] ?: "sltp").trim().lowercase()
+            .let { if (it in setOf("sltp", "entry", "both")) it else "sltp" }
+        // interval=all ต้องขยายเป็น 3 TF จริง — เดิมส่ง "all" เป็น interval ตรงๆ ทำ tuning ถูกเซฟใต้ key "all"
+        // ซึ่ง live alert (lookup ด้วย 15m/1h/4h) ไม่เคยอ่านเจอ = จูนแล้วไม่มีผลจริง (พบจาก log 2026-08-18 00:53)
+        val tfs = if (interval == "all") listOf("15m", "1h", "4h") else listOf(interval)
+        val tfLabel = if (interval == "all") "all TF (15m/1h/4h)" else interval
+        val label = "Adaptive Optimize $symbol $tfLabel [$strategy/$scope]${if (dryRun) " (dry-run)" else ""}"
         com.example.personalaibot.automation.backtest.LongTaskRunner.launch("optimize", label) {
-            val text = runOptimizeTask(symbol, interval, strategy, dryRun)
+            val text = tfs.map { tf -> runOptimizeTask(symbol, tf, strategy, dryRun, scope) }.joinToString("\n\n")
             // สรุปเสียงจากผล: จำนวนกลยุทธ์ที่ auto-apply + เกรดรวม
-            val applied = Regex("AUTO-APPLY แล้ว (\\d+) กลยุทธ์").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val applied = Regex("AUTO-APPLY แล้ว (\\d+) รายการ").findAll(text).sumOf { it.groupValues[1].toIntOrNull() ?: 0 }
             val overfitCount = Regex("🔴 overfit").findAll(text).count()
             val speech = when {
                 text.startsWith("❌") -> "Optimize $symbol ไม่สำเร็จครับ"
-                applied > 0 -> "Adaptive optimize $symbol $interval เสร็จแล้วครับ ปรับค่าให้อัตโนมัติ $applied กลยุทธ์" +
+                applied > 0 -> "Adaptive optimize $symbol $tfLabel เสร็จแล้วครับ ปรับค่าให้อัตโนมัติรวม $applied กลยุทธ์" +
                     (if (overfitCount > 0) " มี $overfitCount กลยุทธ์ที่ overfit ระวังไว้ครับ" else "") + " รายละเอียดอยู่ในแชทครับ"
-                else -> "Adaptive optimize $symbol $interval เสร็จแล้วครับ ยังไม่มีค่าใหม่ที่ดีกว่าค่าเดิม ระบบคง params เดิมไว้ รายละเอียดอยู่ในแชทครับ"
+                else -> "Adaptive optimize $symbol $tfLabel เสร็จแล้วครับ ยังไม่มีค่าใหม่ที่ดีกว่าค่าเดิม ระบบคง params เดิมไว้ รายละเอียดอยู่ในแชทครับ"
             }
             text to speech
         }
@@ -478,8 +498,8 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             "เมื่อเสร็จระบบจะสรุปผลให้อัตโนมัติ (แชท + เสียง) — ตอบผู้ใช้สั้นๆ ว่ากำลังดำเนินการอยู่ แล้วคุยเรื่องอื่นต่อได้ตามปกติ"
     }
 
-    /** ตัวงาน optimize จริง (รันใน LongTaskRunner) */
-    private suspend fun runOptimizeTask(symbol: String, interval: String, strategy: String, dryRun: Boolean): String = withContext(Dispatchers.Default) {
+    /** ตัวงาน optimize จริง (รันใน LongTaskRunner) — scope: sltp=จูน SL/TP (default) | entry=จูน params จุดเข้า | both=จุดเข้าก่อนแล้ว SL/TP */
+    private suspend fun runOptimizeTask(symbol: String, interval: String, strategy: String, dryRun: Boolean, scope: String = "sltp"): String = withContext(Dispatchers.Default) {
 
         // SMC ใช้ SL/TP จากโครงสร้างตลาด (structure-based) ไม่ใช่ ATR multiplier — tune ด้วย optimize ไม่ได้
         val s = strategy.trim().lowercase()
@@ -499,7 +519,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         }
         val candles = fetched.candles
         val markerProvider = com.example.personalaibot.automation.SignalMarkerProvider(smc)
-        val markers = markerProvider.compute(candles, Int.MAX_VALUE)
+        // entry params ที่จูนไว้แล้ว (EntryTuning) เป็น baseline — SL/TP tuning ต้องวัดบนจุดเข้าเดียวกับที่ live ใช้จริง
+        val tunedEntryBaseline = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, interval)
+        }.getOrElse { emptyMap() }
+        val markers = markerProvider.compute(candles, Int.MAX_VALUE, tunedEntryBaseline)
 
         val kinds = when (strategy) {
             "tsmom" -> listOf("MOM"); "trend" -> listOf("TR"); "reversal" -> listOf("REV")
@@ -514,27 +539,102 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
 
         val sb = StringBuilder()
-        sb.appendLine("🧬 **Adaptive Optimize — $symbol $interval** (${candles.size} แท่ง, ${fetched.source})")
-        sb.appendLine("grid + mutation รอบค่าปัจจุบัน/ประวัติ → walk-forward 5 splits → permutation → Monte Carlo | 🧠 เรียนรู้จากประวัติการจูน + auto-apply เมื่อดีกว่า${if (dryRun) " (dry-run: ไม่บันทึก)" else ""}")
+        sb.appendLine("🧬 **Adaptive Optimize — $symbol $interval** (${candles.size} แท่ง, ${fetched.source}) [scope=$scope]")
+        sb.appendLine("${if (scope != "sltp") "entry grid (จุดเข้า) → " else ""}grid + mutation รอบค่าปัจจุบัน/ประวัติ → walk-forward 5 splits → permutation → Monte Carlo | 🧠 เรียนรู้จากประวัติการจูน + auto-apply เมื่อดีกว่า${if (dryRun) " (dry-run: ไม่บันทึก)" else ""}")
         sb.appendLine()
 
         var applied = 0
         for (kind in kinds) {
             val name = nameOf(kind)
-            val ranked = com.example.personalaibot.automation.backtest.ParamOptimizer.gridSearch(
-                kind, candles, markers, engine, kindOf, nameOf
-            )
-            val gridBest = ranked.firstOrNull { it.score > -999.0 }
 
-            // baseline = tuned params ที่ใช้อยู่ปัจจุบัน (ถ้ามีและไม่ overfit) ไม่งั้น default
+            // baseline SL/TP = tuned params ที่ใช้อยู่ปัจจุบัน (ถ้ามีและไม่ overfit) ไม่งั้น default
             val currentTuning = mgr?.getStrategyTuning(symbol, interval, kind)?.takeIf { it.grade != "overfit" }
             val baselineParams = currentTuning?.let {
                 com.example.personalaibot.automation.backtest.TpSlParams(it.sl_mult, it.tp_mult)
             } ?: com.example.personalaibot.automation.backtest.TpSlParams.defaultsFor(kind)
 
+            // ── Entry params tuning (scope entry|both): จูน "จุดเข้า" โดย SL/TP คงค่าปัจจุบัน ──
+            // edge ของกลยุทธ์อยู่ที่จุดเข้า — grid search lookback/period/threshold ของ kind นั้น
+            var activeEntry: EntryParams? = null  // null = default
+            var entryReport: String? = null
+            if (scope != "sltp") {
+                if (kind !in EntryParams.TUNABLE_KINDS) {
+                    entryReport = "- 🎯 **Entry**: กลยุทธ์นี้เป็น pattern ล้วน ไม่มี params จุดเข้าให้จูน — ข้าม"
+                } else {
+                    val savedEntry = mgr?.getEntryTuning(symbol, interval, kind)?.takeIf { it.grade != "overfit" }
+                    val baselineEntry = savedEntry?.let { EntryParams.deserialize(kind, it.params_json) }
+                        ?: EntryParams.defaultsFor(kind)
+
+                    fun runEntry(ep: EntryParams): com.example.personalaibot.automation.backtest.BacktestResult? {
+                        val m = markerProvider.compute(candles, Int.MAX_VALUE, mapOf(kind to ep))
+                        return runCatching {
+                            engine.run(
+                                symbol = "", interval = "", source = "",
+                                candles = candles, markers = m, kindFilter = setOf(kind),
+                                kindOf = kindOf, strategyName = nameOf,
+                                tpSl = { k, s, c, i, a14, a6 ->
+                                    com.example.personalaibot.automation.backtest.parameterizedTpSl(k, s, c, i, a14, a6, baselineParams)
+                                }
+                            )
+                        }.getOrNull()
+                    }
+
+                    val baseRun = runEntry(baselineEntry)
+                    var bestEntry = baselineEntry
+                    var bestRun = baseRun
+                    var bestScore = baseRun?.let { com.example.personalaibot.automation.backtest.ParamOptimizer.score(it) } ?: -999.0
+                    var tried = 0
+                    for (cand in EntryParams.gridFor(kind)) {
+                        if (cand == baselineEntry) continue
+                        val r = runEntry(cand) ?: continue
+                        tried++
+                        val sc = com.example.personalaibot.automation.backtest.ParamOptimizer.score(r)
+                        if (sc > bestScore) { bestScore = sc; bestEntry = cand; bestRun = r }
+                    }
+
+                    // apply gate เดียวกับ evolve fix: วัดบนข้อมูลเต็ม + expectancy ดีกว่า + PF≥1.0 + ไม้≥10
+                    val entryImproved = bestEntry != baselineEntry && bestRun != null && baseRun != null &&
+                        bestRun!!.expectancyR > baseRun.expectancyR &&
+                        bestRun.profitFactor >= 1.0 && bestRun.totalTrades >= 10
+                    val entrySaved = !dryRun && entryImproved && mgr != null
+                    if (entrySaved) {
+                        mgr!!.saveEntryTuning(
+                            symbol, interval, kind, EntryParams.serialize(kind, bestEntry),
+                            score = bestScore, expectancyR = bestRun!!.expectancyR,
+                            profitFactor = bestRun.profitFactor, trades = bestRun.totalTrades,
+                            grade = null, source = "entry-optimize"
+                        )
+                        applied++
+                    }
+                    // ค่าที่เคยจูนไว้ (savedEntry) ยังใช้ต่อใน scope=both แม้รอบนี้ไม่เจอค่าที่ดีกว่า
+                    activeEntry = when {
+                        entryImproved -> bestEntry
+                        baselineEntry != EntryParams.defaultsFor(kind) -> baselineEntry
+                        else -> null
+                    }
+                    entryReport = "- 🎯 **Entry**: เดิม `${EntryParams.describe(kind, baselineEntry)}` (avg ${"%+.2f".format(baseRun?.expectancyR ?: 0.0)}R) → ใหม่ `${EntryParams.describe(kind, bestEntry)}` (avg ${"%+.2f".format(bestRun?.expectancyR ?: 0.0)}R, PF ${"%.2f".format(bestRun?.profitFactor ?: 0.0)}, ${bestRun?.totalTrades ?: 0} ไม้, ลอง $tried combos) ${if (entryImproved) "📈 ดีขึ้น" else "⏸ ไม่ดีกว่า — คงค่าเดิม"}${if (entrySaved) " — 💾 APPLY แล้ว (signal alert ใช้ params จุดเข้าใหม่ตั้งแต่สัญญาณถัดไป)" else ""}"
+                }
+                if (scope == "entry") {
+                    sb.appendLine("### $name ($kind)")
+                    sb.appendLine(entryReport)
+                    sb.appendLine()
+                    continue
+                }
+            }
+
+            // markers ของ kind นี้ — scope=both ที่จูนจุดเข้าได้ ต้อง recompute ด้วย entry params ใหม่ก่อนจูน SL/TP ต่อ
+            val entryOverride = activeEntry?.let { mapOf(kind to it) } ?: emptyMap()
+            val kindMarkers = if (entryOverride.isEmpty()) markers
+                else markerProvider.compute(candles, Int.MAX_VALUE, entryOverride)
+
+            val ranked = com.example.personalaibot.automation.backtest.ParamOptimizer.gridSearch(
+                kind, candles, kindMarkers, engine, kindOf, nameOf
+            )
+            val gridBest = ranked.firstOrNull { it.score > -999.0 }
+
             // ── Adaptive run: วัดจริงทุก candidate + บันทึกเข้าความจำ ──
             val adaptive = com.example.personalaibot.automation.backtest.AdaptiveOptimizer.run(
-                kind, symbol, interval, candles, markers, engine, kindOf, nameOf, baselineParams
+                kind, symbol, interval, candles, kindMarkers, engine, kindOf, nameOf, baselineParams
             )
             val bestParams = when {
                 adaptive.bestScore > -999.0 -> adaptive.bestParams
@@ -546,12 +646,13 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             }
 
             val wf = com.example.personalaibot.automation.backtest.WalkForward.run(
-                kind, candles, markerProvider, engine, kindOf, nameOf
+                kind, candles, markerProvider, engine, kindOf, nameOf,
+                entryParams = entryOverride
             )
             val bestFull = runCatching {
                 engine.run(
                     symbol = symbol, interval = interval, source = fetched.source,
-                    candles = candles, markers = markers, kindFilter = setOf(kind),
+                    candles = candles, markers = kindMarkers, kindFilter = setOf(kind),
                     kindOf = kindOf, strategyName = nameOf,
                     tpSl = { k, s, c, i, a14, a6 ->
                         com.example.personalaibot.automation.backtest.parameterizedTpSl(
@@ -564,7 +665,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 bestFull?.trades?.map { it.pnlMoney } ?: emptyList()
             )
             val perm = com.example.personalaibot.automation.backtest.PermutationTest.run(
-                kind, candles, markers, engine, kindOf, nameOf, bestParams
+                kind, candles, kindMarkers, engine, kindOf, nameOf, bestParams
             )
             val overfit = com.example.personalaibot.automation.backtest.OverfittingScore.compute(wf, perm, mc)
 
@@ -582,6 +683,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             }
 
             sb.appendLine("### $name ($kind)")
+            if (entryReport != null) sb.appendLine(entryReport)
             sb.appendLine("- **เดิม**: SL ${baselineParams.slMult}× / TP ${baselineParams.tpMult}× (score ${"%.3f".format(adaptive.baselineScore)}) → **ใหม่**: SL ${bestParams.slMult}× / TP ${bestParams.tpMult}× (score ${"%.3f".format(adaptive.bestScore)}) ${if (adaptive.improved) "📈 ดีขึ้น" else "⏸ ไม่ดีกว่า — คงค่าเดิม"}")
             sb.appendLine("- **ผล params ใหม่**: ${adaptive.bestTrades} ไม้, win ${"%.0f%%".format(adaptive.bestWinRate * 100)}, PF ${"%.2f".format(adaptive.bestProfitFactor)}, Sharpe ${"%.2f".format(adaptive.bestSharpe)}, avg ${"%+.2f".format(adaptive.bestExpectancyR)}R (ลอง ${adaptive.candidatesTried} candidates)")
             sb.appendLine(if (adaptive.learnedFromTrials > 0) "- 🧠 **ประวัติการจูน ${adaptive.learnedFromTrials} ครั้ง**: ${adaptive.directionInsight}" else "- 🧠 ยังไม่มีประวัติการจูน — ระบบจะเริ่มจำจากรอบนี้เป็นต้นไป")
@@ -599,7 +701,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         }
 
         if (!dryRun) {
-            sb.appendLine(if (applied > 0) "💾 AUTO-APPLY แล้ว $applied กลยุทธ์ — signal alert ของ $symbol $interval จะใช้ SL/TP ที่จูนแล้วตั้งแต่สัญญาณถัดไป"
+            sb.appendLine(if (applied > 0) "💾 AUTO-APPLY แล้ว $applied รายการ — signal alert ของ $symbol $interval จะใช้ params ที่จูนแล้วตั้งแต่สัญญาณถัดไป"
             else "⏸ ไม่มีกลยุทธ์ไหนดีกว่าค่าเดิมพอจะเปลี่ยน — ระบบคง params เดิม (ประวัติการลองถูกบันทึกเพื่อเรียนรู้ต่อ)")
         } else {
             sb.appendLine("ℹ️ dry-run — ยังไม่บันทึก (ลบ apply=off ออกเพื่อให้ระบบ auto-apply เมื่อ params ใหม่ดีกว่า)")
@@ -616,9 +718,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val interval = (args["interval"] ?: "1h").trim().lowercase()
         val strategy = (args["strategy"] ?: "all").trim().lowercase()
         val applyOn = (args["apply"] ?: "off").trim().lowercase() == "on"
-        val label = "Backtest Evolution $symbol $interval [$strategy]"
+        // interval=all ขยายเป็น 3 TF จริง (เหตุผลเดียวกับ optimize — กัน tuning ถูกเซฟใต้ key "all" ที่ live ไม่อ่าน)
+        val tfs = if (interval == "all") listOf("15m", "1h", "4h") else listOf(interval)
+        val tfLabel = if (interval == "all") "all TF (15m/1h/4h)" else interval
+        val label = "Backtest Evolution $symbol $tfLabel [$strategy]"
         com.example.personalaibot.automation.backtest.LongTaskRunner.launch("evolve", label) {
-            val text = runEvolveTask(symbol, interval, strategy, applyOn)
+            val text = tfs.map { tf -> runEvolveTask(symbol, tf, strategy, applyOn) }.joinToString("\n\n")
             // ดึงชื่อกลยุทธ์จริงจากผลลัพธ์ (กัน model พูดมั่วว่าตัวไหนดีขึ้น/แย่ลง)
             val sectionRx = Regex("### (.+?) \\([A-Z0-9]+\\)\\nparams:[^\\n]*?(📈 ดีขึ้น|📉 แย่ลง|➖ เท่าเดิม)")
             val improved = mutableListOf<String>()
@@ -633,7 +738,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val speech = when {
                 text.startsWith("❌") -> "Evolution $symbol ไม่สำเร็จครับ"
                 else -> buildString {
-                    append("Backtest evolution $symbol $interval เสร็จแล้วครับ ")
+                    append("Backtest evolution $symbol $tfLabel เสร็จแล้วครับ ")
                     if (improved.isNotEmpty()) append("กลยุทธ์ที่วิวัฒน์แล้วดีขึ้นคือ ${improved.joinToString(" และ ")} ")
                     if (worsened.isNotEmpty()) append("ส่วนที่แย่ลงคือ ${worsened.joinToString(" และ ")} ")
                     if (improved.isEmpty() && worsened.isEmpty()) append("ผลแทบไม่ต่างจาก params เดิมทุกกลยุทธ์ ")
@@ -673,8 +778,13 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             return "❌ แท่งเทียนไม่พอสำหรับ evolution (${fetched.candles.size} < 800) — ลอง TF ใหญ่ขึ้น"
         }
         val candles = fetched.candles
+        // entry params ที่จูนแล้ว (EntryTuning) — evolve ต้องวัดบนจุดเข้าเดียวกับที่ live ใช้จริง
+        val tunedEntry = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, interval)
+        }.getOrElse { emptyMap() }
         val markers = com.example.personalaibot.automation.SignalMarkerProvider(smc)
-            .compute(candles, Int.MAX_VALUE)
+            .compute(candles, Int.MAX_VALUE, tunedEntry)
 
         val kinds = when (strategy) {
             "tsmom" -> listOf("MOM"); "trend" -> listOf("TR"); "reversal" -> listOf("REV")
@@ -705,8 +815,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                     com.example.personalaibot.automation.backtest.TpSlParams.round2(it.tp_mult)
                 )
             }
+            // ── Reflection Memory: ประวัติการปรับ 5 ครั้งล่าสุด + ผลที่ตามมา → ใส่ prompt ให้ AI เรียนรู้จากความผิดพลาดตัวเอง
+            val memoryLines = mgr?.getOptimizationTrials(symbol, interval, kind, 5)?.map { t ->
+                "sl/tp ${t.sl_mult}/${t.tp_mult} → ไม้=${t.trades ?: "-"} avgR=${t.expectancy_r?.let { "%+.2f".format(it) } ?: "-"} PF=${t.profit_factor?.let { "%.2f".format(it) } ?: "-"} (${(t.delta_vs_baseline ?: 0.0).let { if (it >= 0) "ดีกว่า" else "แย่กว่า" }}ค่าก่อนหน้า ${"%+.2f".format(t.delta_vs_baseline ?: 0.0)}R, ${t.source})"
+            } ?: emptyList()
             val result = runCatching {
-                evo.evolve(kind, candles, markers, engine, kindOf, nameOf, initialOverride = baseParams)
+                evo.evolve(kind, candles, markers, engine, kindOf, nameOf, initialOverride = baseParams, memoryLines = memoryLines)
             }.getOrNull()
             if (result == null) {
                 sb.appendLine("### $name\n❌ evolution ล้มเหลว\n")
@@ -717,18 +831,53 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 continue
             }
 
-            val gain = result.evolvedTotalR - result.baselineTotalR
-            val saved = applyOn && gain > 0 && mgr != null
+            // ── บันทึก trials ของ run นี้ลงความจำ (OptimizationTrial, source=evolve) ──
+            result.trials.forEach { t ->
+                mgr?.saveOptimizationTrial(
+                    symbol, interval, kind,
+                    slMult = t.toSl, tpMult = t.toTp, score = t.totalR,
+                    expectancyR = t.avgR, profitFactor = t.profitFactor, trades = t.trades,
+                    deltaVsBaseline = t.deltaVsBaseline, applied = false, source = "evolve"
+                )
+            }
+            mgr?.pruneOptimizationTrials(symbol, interval, kind)
+
+            // ── FIX: Apply gate วัดบนข้อมูลเต็มทั้งชุด ไม่ใช่ผลรวม walk-forward ที่ noise ครอบงำ ──
+            // เดิม: saved = gain > 0 (เปรียบเทียบเส้นทาง adaptive บน 8 segments ที่รอบละ 2-10 ไม้ → ฟลุ๊คเซฟค่าแย่)
+            // ใหม่: finalParams ต้องรัน full backtest แล้วชนะ initial ทั้ง expectancy และ PF≥1 และไม้ ≥ 10
+            fun fullRun(p: com.example.personalaibot.automation.backtest.TpSlParams) = runCatching {
+                engine.run(
+                    symbol = symbol, interval = interval, source = "",
+                    candles = candles, markers = markers, kindFilter = setOf(kind),
+                    kindOf = kindOf, strategyName = nameOf,
+                    tpSl = { k, sd, c, i, a14, a6 ->
+                        com.example.personalaibot.automation.backtest.parameterizedTpSl(k, sd, c, i, a14, a6, p)
+                    }
+                )
+            }.getOrNull()
+            val fullInit = fullRun(result.initialParams)
+            val fullFinal = fullRun(result.finalParams)
+            val fullOk = fullInit != null && fullFinal != null
+            val fullBetter = fullOk &&
+                fullFinal!!.expectancyR > fullInit!!.expectancyR &&
+                fullFinal.profitFactor >= 1.0 &&
+                fullFinal.totalTrades >= 10
+            val saved = applyOn && mgr != null && fullBetter
             if (saved) {
                 mgr!!.saveStrategyTuning(
                     symbol, interval, kind, result.finalParams.slMult, result.finalParams.tpMult,
-                    score = gain, grade = "evolved", source = "evolve"
+                    score = (fullFinal!!.expectancyR - fullInit!!.expectancyR), grade = "evolved", source = "evolve"
                 )
                 applied++
             }
 
+            val gain = result.evolvedTotalR - result.baselineTotalR
             sb.appendLine("### $name ($kind)")
             sb.appendLine("params: ${result.initialParams.slMult}/${result.initialParams.tpMult}${if (baseParams != null) " (ต่อจาก tuning ล่าสุด)" else " (ค่า default)"} → **${result.finalParams.slMult}/${result.finalParams.tpMult}** | รวมR เดิม ${"%+.2f".format(result.baselineTotalR)} → วิวัฒน์ **${"%+.2f".format(result.evolvedTotalR)}** (${if (gain > 0) "📈 ดีขึ้น" else if (gain < 0) "📉 แย่ลง" else "➖ เท่าเดิม"} ${"%+.2f".format(gain)}R)${if (result.usedAiReflection) " | 🤖 ใช้ AI reflection" else " | 📏 ใช้กฎ heuristic"}")
+            // แสดงผล validation บนข้อมูลเต็มเสมอ — ผู้ใช้จะได้เห็นว่า apply หรือไม่เพราะอะไร
+            if (fullOk) {
+                sb.appendLine("🔎 ผลเต็ม ${candles.size} แท่ง: เดิม PF ${"%.2f".format(fullInit!!.profitFactor)} avgR ${"%+.2f".format(fullInit.expectancyR)} → ใหม่ PF ${"%.2f".format(fullFinal!!.profitFactor)} avgR ${"%+.2f".format(fullFinal.expectancyR)} ไม้ ${fullFinal.totalTrades} → ${if (saved) "💾 APPLY" else if (!fullBetter) "⛔ ไม่ apply (ใหม่ไม่ชนะบนข้อมูลเต็ม)" else "🚫 dry-run"}")
+            }
             sb.appendLine("| รอบ | params | ไม้ | Win% | avgR | สะท้อนผล |")
             sb.appendLine("|---|---|---|---|---|---|")
             result.rounds.forEach { rd ->

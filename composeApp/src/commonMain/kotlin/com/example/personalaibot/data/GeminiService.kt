@@ -16,6 +16,8 @@ import io.ktor.http.*
 import io.ktor.utils.io.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
@@ -154,6 +156,55 @@ class GeminiService(
     private val showToolRequestInChat = false
     private val showToolResultInChat = false
     // Tool set constants moved to ToolRegistry for cross-provider reuse
+
+    companion object {
+        /**
+         * Key health registry แชร์ข้ามทุก GeminiService instance (ทุก task / ทุก thread)
+         * key → epoch ms ที่คาดว่าโควต้าจะรีเซ็ต — กัน task ใหม่หรืองานคู่ขนานชน key ที่เพิ่งติด 429 ซ้ำ
+         * (ก่อนหน้านี้ทุก task เริ่มด้วย key เดิมที่ตายไปแล้ว → เจอ 429 รอบแรกทุกครั้ง)
+         */
+        private val keyDeadUntilMs = mutableMapOf<String, Long>()
+        private val keyHealthMutex = Mutex()
+        /** per-minute quota ไม่มี hint → พักสั้น 30s; per-day quota → พักยาว (กันชนลิมิตรายวันซ้ำๆ) */
+        private const val KEY_COOLDOWN_MINUTE_MS = 30_000L
+        private const val KEY_COOLDOWN_DAILY_MS = 12 * 3_600_000L
+
+        private fun nowMs(): Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+
+        /**
+         * parse "Please retry in X.XXs" / RetryInfo.retryDelay จาก 429 body — คืน millis หรือ null
+         * free-tier per-minute limit (เช่น 15 RPM) รีเซ็ตเร็ว API บอกเวลามาเอง → ควร "รอ" ไม่ใช่ "หมุน key"
+         */
+        fun parseRetryAfterMs(errBody: String): Long? {
+            val m = Regex("""Please retry in ([\d.]+)s""").find(errBody)
+                ?: Regex(""""retryDelay"\s*:\s*"([\d.]+)s"""").find(errBody)
+                ?: return null
+            val sec = m.groupValues[1].toDoubleOrNull() ?: return null
+            return (sec * 1000).toLong()
+        }
+
+        /** บันทึก key ที่ติด 429 — พักตาม hint ของ API ถ้ามี (per-minute รีเซ็ตเร็ว), daily พักยาว */
+        suspend fun markKeyDead(key: String, errBody: String) {
+            if (key.isBlank()) return
+            val daily = errBody.contains("per_day", ignoreCase = true) || errBody.contains("PerDay")
+            val hintMs = parseRetryAfterMs(errBody)
+            val cooldown = when {
+                daily -> KEY_COOLDOWN_DAILY_MS
+                hintMs != null -> hintMs + 1_000 // per-minute: พักตามที่ API แนะนำพอดี ไม่ต้องพักยาวเกิน
+                else -> KEY_COOLDOWN_MINUTE_MS
+            }
+            keyHealthMutex.withLock { keyDeadUntilMs[key] = nowMs() + cooldown }
+            logDebug("GeminiService", "Key health: ${com.example.personalaibot.maskApiKey(key)} พัก ${cooldown / 1000}s (${if (daily) "daily" else "per-minute"} quota)")
+        }
+
+        /** key นี้ยังอยู่ในช่วงพักหรือไม่ (เก็บกวาดรายการหมดอายุไปด้วย) */
+        suspend fun isKeyDead(key: String): Boolean = keyHealthMutex.withLock {
+            val now = nowMs()
+            val it = keyDeadUntilMs.entries.iterator()
+            while (it.hasNext()) { if (it.next().value <= now) it.remove() }
+            (keyDeadUntilMs[key] ?: 0L) > now
+        }
+    }
 
     /**
      * Fallback chain ที่ user ตั้งเองใน Settings (null = ใช้ default ของ ModelConfig)
@@ -435,9 +486,26 @@ class GeminiService(
         // ลอง key ถัดไปก่อน (โมเดลเดิม) ก่อนจะสลับโมเดล — key แต่ละอันมีโควต้าแยกกัน
         val triedKeys = mutableSetOf(apiKey)
 
-        fun trySwitchFallbackKey(): String? {
+        // key เริ่มต้นอาจเพิ่งติด 429 จาก task ก่อน (key health registry แชร์ข้าม instance)
+        // → ข้ามไป key ที่ยังมีชีวิตก่อนยิง request แรก กันเจอ 429 รอบแรกทุกครั้ง
+        apiKeysOverride?.let { chain ->
+            if (isKeyDead(apiKey)) {
+                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it) }?.let { alt ->
+                    triedKeys.add(alt); rotateApiKey(alt)
+                }
+            }
+        }
+
+        // 429 per-minute: API บอกเวลารีเซ็ตมาเอง ("Please retry in Xs") — รอแล้วลอง key/โมเดลเดิมซ้ำ
+        // ถูกกว่าหมุน key (key อื่นชนลิมิตเดียวกันเมื่อมี burst) — จำกัด 3 ครั้ง/การเรียก กันวนไม่รู้จบ
+        var waited429 = 0
+        var quotaWaitMs: Long? = null
+
+        suspend fun trySwitchFallbackKey(): String? {
             val chain = apiKeysOverride ?: return null
-            val next = chain.firstOrNull { it.isNotBlank() && it !in triedKeys } ?: return null
+            val untried = chain.filter { it.isNotBlank() && it !in triedKeys }
+            // ข้าม key ที่เพิ่งติด 429 (ยังอยู่ในช่วง cooldown) ก่อน — เผื่อตายหมดค่อยกลับมาลอง
+            val next = untried.firstOrNull { !isKeyDead(it) } ?: untried.firstOrNull() ?: return null
             triedKeys.add(next)
             rotateApiKey(next)
             return next
@@ -501,6 +569,7 @@ class GeminiService(
                 var emittedAnyText = false // Round 2+ stream ตรง ไม่ผ่าน buffer — ใช้ flag นี้กัน log "Empty response" หลอก
                 var lastFinishReason: String? = null
                 var modelFailed = false
+                var modelNotFound = false // 404 = โมเดลไม่มีจริง — หมุน key ไม่ช่วย ให้ข้ามไปสลับโมเดลเลย
 
                 try {
                     client.preparePost(streamGenerateContentUrl()) {
@@ -510,10 +579,17 @@ class GeminiService(
                     }.execute { httpResponse ->
                         if (!httpResponse.status.isSuccess()) {
                             val err = httpResponse.bodyAsText()
-                            logError("GeminiService", "API Error ${httpResponse.status.value} (model=$modelName): ${com.example.personalaibot.sanitizeSensitive(err.take(500))}")
+                            logError("GeminiService", "API Error ${httpResponse.status.value} (model=$modelName): ${com.example.personalaibot.sanitizeSensitive(err.take(700))}")
                             if (httpResponse.status.value in listOf(429, 500, 503)) {
                                 // ลิมิต/เซิร์ฟเวอร์ล้ม — ให้สลับโมเดลสำรองแล้วลองใหม่
+                                if (httpResponse.status.value == 429) {
+                                    markKeyDead(apiKey, err)
+                                    quotaWaitMs = parseRetryAfterMs(err) // API บอกเวลารีเซ็ตมาเอง — ให้รอแทนการหมุน key
+                                }
                                 modelFailed = true
+                            } else if (httpResponse.status.value == 404) {
+                                // โมเดลไม่มีจริง/ใช้ generateContent ไม่ได้ — หมุน key ไม่ช่วย ข้ามไปสลับโมเดลเลย
+                                modelFailed = true; modelNotFound = true
                             } else {
                                 emit("⚠️ API Error ${httpResponse.status.value}: ${err.take(300)}")
                             }
@@ -602,12 +678,27 @@ class GeminiService(
 
                 // ─── Fallback อัตโนมัติ เมื่อหลักติดลิมิต/ล่ม/ตอบว่าง ──────
                 if (modelFailed) {
-                    // 1) ลอง API key ถัดไปก่อน (โมเดลเดิม — key ใหม่ = โควต้าใหม่)
-                    val nextKey = trySwitchFallbackKey()
-                    if (nextKey != null) {
-                        emit("\n🔄 key เดิมติดลิมิต — สลับไปใช้ key ถัดไป (${com.example.personalaibot.maskApiKey(nextKey)}) อัตโนมัติ\n")
+                    // 0) 429 per-minute ที่ API บอกเวลารีเซ็ต → รอตาม hint แล้วลอง key/โมเดลเดิมซ้ำ
+                    //    (ไม่เผา key อื่น — key ทุกตัวชนลิมิต 15 RPM เดียวกันเมื่อมี burst)
+                    val waitMs = quotaWaitMs
+                    quotaWaitMs = null
+                    if (waitMs != null && waitMs <= 60_000 && waited429 < 3) {
+                        waited429++
+                        logDebug("GeminiService", "429 per-minute — รอ ${waitMs}ms ตาม hint ของ API แล้วลองใหม่ (key/โมเดลเดิม, ครั้งที่ $waited429)")
+                        kotlinx.coroutines.delay(waitMs + 500)
                         continue
                     }
+                    // 1) ลอง API key ถัดไปก่อน (โมเดลเดิม — key ใหม่ = โควต้าใหม่)
+                    //    ยกเว้น 404 (โมเดลไม่มีจริง) — หมุน key ไม่ช่วย ข้ามไปสลับโมเดลเลย
+                    if (!modelNotFound) {
+                        val nextKey = trySwitchFallbackKey()
+                        if (nextKey != null) {
+                            waited429 = 0
+                            emit("\n🔄 key เดิมติดลิมิต — สลับไปใช้ key ถัดไป (${com.example.personalaibot.maskApiKey(nextKey)}) อัตโนมัติ\n")
+                            continue
+                        }
+                    }
+                    modelNotFound = false
                     // 2) key หมดแล้ว → สลับโมเดลสำรอง
                     val next = trySwitchFallbackModel()
                     if (next != null) {
@@ -854,9 +945,20 @@ class GeminiService(
         val triedModels = mutableSetOf(cleanModelName().removePrefix("models/"))
         val triedKeys = mutableSetOf(apiKey)
 
-        fun switchKey(): Boolean {
+        // key เริ่มต้นอาจเพิ่งติด 429 จาก task ก่อน (key health registry แชร์ข้าม instance)
+        // → ข้ามไป key ที่ยังมีชีวิตก่อนยิง request แรก กันเจอ 429 รอบแรกทุกครั้ง
+        apiKeysOverride?.let { chain ->
+            if (isKeyDead(apiKey)) {
+                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it) }?.let { alt ->
+                    triedKeys.add(alt); rotateApiKey(alt)
+                }
+            }
+        }
+
+        suspend fun switchKey(): Boolean {
             val chain = apiKeysOverride ?: return false
-            val next = chain.firstOrNull { it.isNotBlank() && it !in triedKeys } ?: return false
+            val untried = chain.filter { it.isNotBlank() && it !in triedKeys }
+            val next = untried.firstOrNull { !isKeyDead(it) } ?: untried.firstOrNull() ?: return false
             triedKeys.add(next); rotateApiKey(next); return true
         }
         fun switchModel(): Boolean {
@@ -868,6 +970,7 @@ class GeminiService(
 
         var timeout = timeoutMs
         var retriedLonger = false
+        var waited429 = 0 // จำนวนครั้งที่ "รอตาม hint ของ API" ในรอบนี้ (กันวนไม่รู้จบ)
         while (true) {
             try {
                 val res = client.post(generateContentUrl()) {
@@ -903,11 +1006,25 @@ class GeminiService(
                 }
                 val code = res.status.value
                 val errBody = com.example.personalaibot.sanitizeSensitive(res.bodyAsText())
-                logError("GeminiService", "API Error $code (model=$modelName): ${errBody.take(300)}")
+                logError("GeminiService", "API Error $code (model=$modelName): ${errBody.take(700)}")
                 if (code in listOf(429, 500, 503)) {
-                    if (switchKey() || switchModel()) continue
+                    if (code == 429) {
+                        markKeyDead(apiKey, errBody)
+                        // ลิมิตรายนาที (เช่น 15 RPM) — API บอกเวลารีเซ็ตมาเอง: รอตามนั้นแล้วลอง key/โมเดลเดิมซ้ำ
+                        // ถูกกว่าและเร็วกว่าหมุน key (key อื่นก็ชนลิมิตเดียวกันเมื่อมี burst)
+                        val hint = parseRetryAfterMs(errBody)
+                        if (hint != null && hint <= 60_000 && waited429 < 3) {
+                            waited429++
+                            logDebug("GeminiService", "429 per-minute — รอ ${hint}ms ตาม hint ของ API แล้วลองใหม่ (key/โมเดลเดิม, ครั้งที่ $waited429)")
+                            kotlinx.coroutines.delay(hint + 500)
+                            continue
+                        }
+                    }
+                    if (switchKey() || switchModel()) { waited429 = 0; continue }
                     return "⚠️ Error $code (ลองทุก key+โมเดลใน chain แล้วไม่สำเร็จ)"
                 }
+                // 404 = โมเดลไม่มีจริง/ใช้ method นี้ไม่ได้ — หมุน key ไม่ช่วย ข้ามไปโมเดลถัดไปเลย
+                if (code == 404 && switchModel()) continue
                 return "⚠️ Error $code"
             } catch (e: Exception) {
                 logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)

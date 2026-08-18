@@ -1,6 +1,7 @@
 package com.example.personalaibot.automation
 
 import com.example.personalaibot.logDebug
+import com.example.personalaibot.automation.backtest.EntryParams
 import com.example.personalaibot.tools.trading.Candle
 import com.example.personalaibot.tools.trading.SmcApiService
 import kotlin.math.abs
@@ -56,20 +57,31 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
         val n = candles.size
         val last = candles.last()
 
+        // entry params ที่จูนแล้ว (EntryTuning) — ใช้แทนค่า default ของกลยุทธ์ที่มี tuning
+        val tuned = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, tf)
+        }.getOrElse { emptyMap() }
+        val epMOM = tuned["MOM"] ?: EntryParams()
+        val epTR = tuned["TR"] ?: EntryParams()
+        val epREV = tuned["REV"] ?: EntryParams()
+        val epDC = tuned["DC"] ?: EntryParams()
+        val ep52H = tuned["52H"] ?: EntryParams()
+
         // ── 1) Time-Series Momentum ──
-        val roc = (last.close - closes[n - 1 - TSMOM_LOOKBACK]) / closes[n - 1 - TSMOM_LOOKBACK] * 100.0
+        val roc = (last.close - closes[n - 1 - epMOM.momLookback]) / closes[n - 1 - epMOM.momLookback] * 100.0
         val tsmomSignal = when {
             roc > 0 -> "BUY"
             roc < 0 -> "SELL"
             else -> "NONE"
         }
 
-        // ── 2) Trend Following (EMA50/200 + price vs EMA200) ──
-        val ema50 = ema(closes, 50).last()
-        val ema200 = ema(closes, 200).last()
+        // ── 2) Trend Following (EMA fast/slow + price vs EMA slow) ──
+        val emaFast = ema(closes, epTR.trFast).last()
+        val emaSlow = ema(closes, epTR.trSlow).last()
         val trendState = when {
-            last.close > ema200 && ema50 > ema200 -> "UPTREND"
-            last.close < ema200 && ema50 < ema200 -> "DOWNTREND"
+            last.close > emaSlow && emaFast > emaSlow -> "UPTREND"
+            last.close < emaSlow && emaFast < emaSlow -> "DOWNTREND"
             else -> "RANGE"
         }
         val trendSignal = when (trendState) {
@@ -79,16 +91,16 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
         }
 
         // ── 3) Short-Term Reversal (RSI + Bollinger) ──
-        val rsiNow = rsi(closes, RSI_PERIOD)
-        val (bbUpper, bbBasis, bbLower) = bollinger(closes, BB_PERIOD, BB_MULT)
+        val rsiNow = rsi(closes, epREV.revRsiPeriod)
+        val (bbUpper, bbBasis, bbLower) = bollinger(closes, epREV.revBbPeriod, epREV.revBbMult)
         val reversalSignal = when {
-            rsiNow != null && rsiNow < 30 && last.close <= bbLower -> "BUY"
-            rsiNow != null && rsiNow > 70 && last.close >= bbUpper -> "SELL"
+            rsiNow != null && rsiNow < epREV.revRsiLow && last.close <= bbLower -> "BUY"
+            rsiNow != null && rsiNow > epREV.revRsiHigh && last.close >= bbUpper -> "SELL"
             else -> "NONE"
         }
 
-        // ── 4) Donchian Breakout (20 แท่ง ไม่รวมแท่งปัจจุบัน) ──
-        val look = candles.subList(n - 1 - DONCHIAN_PERIOD, n - 1)
+        // ── 4) Donchian Breakout (ไม่รวมแท่งปัจจุบัน) ──
+        val look = candles.subList(n - 1 - epDC.dcPeriod, n - 1)
         val dUpper = look.maxOf { it.high }
         val dLower = look.minOf { it.low }
         val dMid = (dUpper + dLower) / 2.0
@@ -102,8 +114,8 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
         val periodHigh = candles.maxOf { it.high }
         val proximity = last.close / periodHigh
         val w52Signal = when {
-            proximity >= W52_PROX_BUY -> "BUY"
-            proximity <= W52_PROX_SELL -> "SELL"
+            proximity >= ep52H.w52ProxBuy -> "BUY"
+            proximity <= ep52H.w52ProxSell -> "SELL"
             else -> "NONE"
         }
 
@@ -129,12 +141,12 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
             // tsmom
             put("tsmom_signal", tsmomSignal)
             put("tsmom_roc_pct", fmt(roc))
-            put("tsmom_lookback", TSMOM_LOOKBACK.toString())
+            put("tsmom_lookback", epMOM.momLookback.toString())
             // trend
             put("trend_signal", trendSignal)
             put("trend_state", trendState)
-            put("trend_ema50", fmt(ema50))
-            put("trend_ema200", fmt(ema200))
+            put("trend_ema50", fmt(emaFast))
+            put("trend_ema200", fmt(emaSlow))
             // reversal
             put("reversal_signal", reversalSignal)
             put("reversal_rsi", rsiNow?.let { fmt(it) } ?: "N/A")

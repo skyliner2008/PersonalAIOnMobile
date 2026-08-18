@@ -41,24 +41,45 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
         val (symbol, tf) = IndicatorAlertProvider.splitSymbolAndTf(rawSymbol)
         val candles = runCatching { smcApi.fetchCandlesWithSource(symbol, tf, 300).candles }
             .getOrElse { return emptyList() }
-        val sorted = compute(candles)
+        // entry params ที่จูนแล้ว — marker บนกราฟต้องตรงกับจุดเข้าที่ live alert ใช้จริง
+        val tunedEntry = runCatching {
+            com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
+                .getTunedEntryParams(symbol, tf)
+        }.getOrElse { emptyMap() }
+        val sorted = compute(candles, entryParams = tunedEntry)
         logDebug("SignalMarkers", "$symbol/$tf markers=${sorted.size}")
         return sorted
     }
 
-    /** คำนวณ markers จากแท่งเทียนที่มีอยู่แล้ว (ใช้ร่วมกับ SignalAlertProvider — ไม่ต้องดึงซ้ำ) */
-    fun compute(candles: List<Candle>, maxPerKind: Int = MAX_MARKERS_PER_KIND): List<SignalMarker> {
+    /**
+     * คำนวณ markers จากแท่งเทียนที่มีอยู่แล้ว (ใช้ร่วมกับ SignalAlertProvider — ไม่ต้องดึงซ้ำ)
+     * entryParams: params จุดเข้าที่จูนแล้วต่อ kind (จาก EntryTuning / grid search) — ว่าง = ใช้ default เดิมทุก kind
+     */
+    fun compute(
+        candles: List<Candle>,
+        maxPerKind: Int = MAX_MARKERS_PER_KIND,
+        entryParams: Map<String, com.example.personalaibot.automation.backtest.EntryParams> = emptyMap()
+    ): List<SignalMarker> {
         if (candles.size < 60) return emptyList()
 
         val closes = candles.map { it.close }
         val n = candles.size
         val out = mutableListOf<SignalMarker>()
 
+        // params จุดเข้าต่อ kind (default = ค่าคงที่เดิมทุกตัว)
+        val epMOM = entryParams["MOM"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val epTR = entryParams["TR"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val epREV = entryParams["REV"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val epDC = entryParams["DC"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val ep52H = entryParams["52H"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val epE = entryParams["E"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+        val epUT = entryParams["UT"] ?: com.example.personalaibot.automation.backtest.EntryParams()
+
         // ══ Strategy Library ══
 
-        // 1) Time-Series Momentum (ROC 20 flip ข้าม 0)
+        // 1) Time-Series Momentum (ROC flip ข้าม 0)
         run {
-            val lb = StrategySignalProvider.TSMOM_LOOKBACK
+            val lb = epMOM.momLookback
             var prevSign = 0
             val marks = mutableListOf<SignalMarker>()
             for (i in lb until n) {
@@ -72,13 +93,13 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             out += marks.takeLast(maxPerKind)
         }
 
-        // 2) Trend Following (EMA50/200 cross)
+        // 2) Trend Following (EMA fast/slow cross)
         run {
-            val e50 = ema(closes, 50)
-            val e200 = ema(closes, 200)
+            val eFast = ema(closes, epTR.trFast)
+            val eSlow = ema(closes, epTR.trSlow)
             val marks = mutableListOf<SignalMarker>()
-            for (i in 201 until n) {
-                val a = e50[i]; val b = e200[i]; val pa = e50[i - 1]; val pb = e200[i - 1]
+            for (i in epTR.trSlow + 1 until n) {
+                val a = eFast[i]; val b = eSlow[i]; val pa = eFast[i - 1]; val pb = eSlow[i - 1]
                 if (a.isNaN() || b.isNaN() || pa.isNaN() || pb.isNaN()) continue
                 if (pa <= pb && a > b) marks += SignalMarker(candles[i].timestamp, "BUY", "TR▲", BUY_COLOR)
                 else if (pa >= pb && a < b) marks += SignalMarker(candles[i].timestamp, "SELL", "TR▼", SELL_COLOR)
@@ -89,22 +110,22 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
         // 3) Short-Term Reversal (RSI สุดโต่ง + แตะ BB) — EDGE-TRIGGERED:
         //    นับเฉพาะแท่งแรกที่ "เข้าเงื่อนไข" (แท่งก่อนไม่เข้า) ไม่ใช่ทุกแท่งที่ค้างอยู่ในเงื่อนไข
         run {
-            val period = StrategySignalProvider.RSI_PERIOD
+            val period = epREV.revRsiPeriod
             val rsiSeries = rsiSeries(closes, period)
             val marks = mutableListOf<SignalMarker>()
             fun bbBand(idx: Int): Pair<Double, Double> {
-                val window = closes.subList(idx - StrategySignalProvider.BB_PERIOD + 1, idx + 1)
+                val window = closes.subList(idx - epREV.revBbPeriod + 1, idx + 1)
                 val mean = window.average()
                 val sd = sqrt(window.sumOf { (it - mean).pow(2) } / window.size)
-                return (mean + StrategySignalProvider.BB_MULT * sd) to (mean - StrategySignalProvider.BB_MULT * sd)
+                return (mean + epREV.revBbMult * sd) to (mean - epREV.revBbMult * sd)
             }
-            for (i in 26 until n) {
+            for (i in epREV.revBbPeriod + 6 until n) {
                 val (upper, lower) = bbBand(i)
                 val (pUpper, pLower) = bbBand(i - 1)
-                val bullNow = rsiSeries[i] < 30 && closes[i] <= lower
-                val bullPrev = rsiSeries[i - 1] < 30 && closes[i - 1] <= pLower
-                val bearNow = rsiSeries[i] > 70 && closes[i] >= upper
-                val bearPrev = rsiSeries[i - 1] > 70 && closes[i - 1] >= pUpper
+                val bullNow = rsiSeries[i] < epREV.revRsiLow && closes[i] <= lower
+                val bullPrev = rsiSeries[i - 1] < epREV.revRsiLow && closes[i - 1] <= pLower
+                val bearNow = rsiSeries[i] > epREV.revRsiHigh && closes[i] >= upper
+                val bearPrev = rsiSeries[i - 1] > epREV.revRsiHigh && closes[i - 1] >= pUpper
                 if (bullNow && !bullPrev) marks += SignalMarker(candles[i].timestamp, "BUY", "REV▲", "#66BB6A")
                 else if (bearNow && !bearPrev) marks += SignalMarker(candles[i].timestamp, "SELL", "REV▼", "#E57373")
             }
@@ -115,7 +136,7 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
         //    mark แท่งแรกที่เข้าสถานะ breakout (ก่อนหน้าไม่ได้ breakout ฝั่งนั้น)
         //    เดิมใช้ lastSide → breakout ฝั่งเดิมซ้ำ (ราคากลับเข้าช่องแล้วทะลุใหม่) ไม่ถูก mark เลย
         run {
-            val p = StrategySignalProvider.DONCHIAN_PERIOD
+            val p = epDC.dcPeriod
             val marks = mutableListOf<SignalMarker>()
             val sides = IntArray(n)
             for (i in p + 1 until n) {
@@ -142,7 +163,7 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             for (i in 0 until n) {
                 runHigh = max(runHigh, candles[i].high)
                 val prox = closes[i] / runHigh
-                sides[i] = if (i < 100) 0 else if (prox >= StrategySignalProvider.W52_PROX_BUY) 1 else if (prox <= StrategySignalProvider.W52_PROX_SELL) -1 else 0
+                sides[i] = if (i < 100) 0 else if (prox >= ep52H.w52ProxBuy) 1 else if (prox <= ep52H.w52ProxSell) -1 else 0
             }
             for (i in 1 until n) {
                 val side = sides[i]
@@ -155,12 +176,12 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
 
         // ══ SMC Flow System ══
 
-        // 6) EMA 14/60 cross
+        // 6) EMA fast/slow cross (default 14/60)
         run {
-            val ef = ema(closes, 14)
-            val es = ema(closes, 60)
+            val ef = ema(closes, epE.eFast)
+            val es = ema(closes, epE.eSlow)
             val marks = mutableListOf<SignalMarker>()
-            for (i in 61 until n) {
+            for (i in epE.eSlow + 1 until n) {
                 val a = ef[i]; val b = es[i]; val pa = ef[i - 1]; val pb = es[i - 1]
                 if (a.isNaN() || b.isNaN() || pa.isNaN() || pb.isNaN()) continue
                 if (pa <= pb && a > b) marks += SignalMarker(candles[i].timestamp, "BUY", "E▲", "#FFD54F")
@@ -169,14 +190,14 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             out += marks.takeLast(maxPerKind)
         }
 
-        // 7) UT Bot (key=2.0, ATR6) flip
+        // 7) UT Bot (key × ATR) flip
         run {
-            val atrS = atrSeries(candles, 6)
+            val atrS = atrSeries(candles, epUT.utAtrPeriod)
             val stop = DoubleArray(n)
             for (i in 0 until n) {
                 val src = closes[i]
                 val srcPrev = closes[max(0, i - 1)]
-                val nLoss = 2.0 * atrS[i]
+                val nLoss = epUT.utKey * atrS[i]
                 stop[i] = when {
                     src > stop[max(0, i - 1)] && srcPrev > stop[max(0, i - 1)] -> max(stop[max(0, i - 1)], src - nLoss)
                     src < stop[max(0, i - 1)] && srcPrev < stop[max(0, i - 1)] -> min(stop[max(0, i - 1)], src + nLoss)

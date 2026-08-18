@@ -272,6 +272,50 @@ class AutomationManager(private val database: JarvisDatabase) {
         try { database.jarvisDatabaseQueries.getAllStrategyTunings().executeAsList() }
         catch (_: Exception) { emptyList() }
 
+    // ─── EntryTuning (params จุดเข้าจาก optimize scope=entry/both) ───
+
+    fun saveEntryTuning(
+        symbol: String, interval: String, kind: String, paramsJson: String,
+        score: Double?, expectancyR: Double?, profitFactor: Double?, trades: Int?,
+        grade: String?, source: String
+    ) {
+        try {
+            database.jarvisDatabaseQueries.upsertEntryTuning(
+                symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
+                params_json = paramsJson, score = score, expectancy_r = expectancyR,
+                profit_factor = profitFactor, trades = trades?.toLong(), grade = grade, source = source,
+                updated_at = Clock.System.now().toEpochMilliseconds()
+            )
+            logDebug("AutomationManager", "EntryTuning saved: $symbol/$interval/$kind $paramsJson ($grade, $source)")
+        } catch (e: Exception) {
+            logError("AutomationManager", "saveEntryTuning failed: ${e.message}", e)
+        }
+    }
+
+    fun getEntryTuning(symbol: String, interval: String, kind: String): com.example.personalaibot.db.EntryTuning? =
+        try {
+            database.jarvisDatabaseQueries
+                .getEntryTuning(symbol.uppercase(), interval.lowercase(), kind)
+                .executeAsOneOrNull()
+        } catch (_: Exception) { null }
+
+    fun getEntryTunings(symbol: String, interval: String): List<com.example.personalaibot.db.EntryTuning> =
+        try {
+            database.jarvisDatabaseQueries
+                .getEntryTunings(symbol.uppercase(), interval.lowercase())
+                .executeAsList()
+        } catch (_: Exception) { emptyList() }
+
+    /** โหลด entry params ที่จูนแล้วทั้งหมดของ symbol/tf → Map<kind, EntryParams> (ข้าม grade=overfit และ parse ไม่ได้) */
+    fun getTunedEntryParams(symbol: String, interval: String): Map<String, com.example.personalaibot.automation.backtest.EntryParams> =
+        getEntryTunings(symbol, interval)
+            .filter { it.grade != "overfit" }
+            .mapNotNull { t ->
+                com.example.personalaibot.automation.backtest.EntryParams.deserialize(t.kind, t.params_json)
+                    ?.let { t.kind to it }
+            }
+            .toMap()
+
     // ─── OptimizationTrial (Adaptive Optimize learning memory) ───
 
     fun saveOptimizationTrial(
@@ -307,6 +351,45 @@ class AutomationManager(private val database: JarvisDatabase) {
             val s = symbol.uppercase(); val i = interval.lowercase()
             database.jarvisDatabaseQueries.deleteOldOptimizationTrials(s, i, kind, s, i, kind)
         } catch (_: Exception) { }
+    }
+
+    // ─── StrategyHealth (Per-TF Strategy Gate — ผล backtest ล่าสุดต่อ symbol/tf/กลยุทธ์) ───
+
+    fun saveStrategyHealth(
+        symbol: String, interval: String, kind: String,
+        profitFactor: Double, avgR: Double, winRate: Double, trades: Int, bars: Int
+    ) {
+        try {
+            database.jarvisDatabaseQueries.upsertStrategyHealth(
+                symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
+                profit_factor = profitFactor, avg_r = avgR, win_rate = winRate,
+                trades = trades.toLong(), bars = bars.toLong(),
+                updated_at = Clock.System.now().toEpochMilliseconds()
+            )
+        } catch (e: Exception) {
+            logError("AutomationManager", "saveStrategyHealth failed: ${e.message}", e)
+        }
+    }
+
+    fun getStrategyHealths(symbol: String, interval: String): List<com.example.personalaibot.db.StrategyHealth> =
+        try {
+            database.jarvisDatabaseQueries
+                .getStrategyHealths(symbol.uppercase(), interval.lowercase())
+                .executeAsList()
+        } catch (_: Exception) { emptyList() }
+
+    /**
+     * Per-TF Strategy Gate: true = บล็อก (ห้ามยิง alert)
+     * บล็อกเมื่อมีข้อมูล backtest ล่าสุด และไม้พอประเมิน (≥ minTrades) และ PF < minPf
+     * ไม่มีข้อมูล = ผ่าน (อย่าบล็อกกลยุทธ์ที่ยังไม่เคย backtest)
+     */
+    fun isStrategyGated(symbol: String, interval: String, kind: String, minPf: Double = 1.0, minTrades: Int = 5): Boolean {
+        val h = try {
+            database.jarvisDatabaseQueries
+                .getStrategyHealth(symbol.uppercase(), interval.lowercase(), kind)
+                .executeAsOneOrNull()
+        } catch (_: Exception) { null } ?: return false
+        return h.trades >= minTrades && h.profit_factor < minPf
     }
 
     // ─── Mix Strategy config (เก็บใน CoreMemory key mixcfg|SYMBOL|TF = "tsmom,trend,dc|3") ───
