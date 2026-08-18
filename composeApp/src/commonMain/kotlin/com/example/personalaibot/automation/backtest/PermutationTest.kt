@@ -39,7 +39,7 @@ object PermutationTest {
             return PermutationResult(0.0, 0.0, 0.0, 1.0, false, 0)
         }
 
-        fun runWith(marks: List<SignalMarkerProvider.SignalMarker>): Double {
+        fun runWith(marks: List<SignalMarkerProvider.SignalMarker>): Double? {
             val r = runCatching {
                 engine.run(
                     symbol = "", interval = "", source = "",
@@ -48,11 +48,11 @@ object PermutationTest {
                     tpSl = { k, s, c, i, a14, a6 -> parameterizedTpSl(k, s, c, i, a14, a6, params) },
                     config = config
                 )
-            }.getOrNull() ?: return 0.0
+            }.getOrNull() ?: return null
             return r.sharpe
         }
 
-        val realSharpe = runWith(markers)
+        val realSharpe = runWith(markers) ?: return PermutationResult(0.0, 0.0, 0.0, 1.0, false, 0)
         val rng = Random(seed)
         val sides = kindMarkers.map { it.side }
         val count = kindMarkers.size
@@ -74,12 +74,17 @@ object PermutationTest {
                     color = "#000000"
                 )
             }
-            val s = runWith(fakeMarkers)
+            // run ที่พัง (null) ต้องไม่นับเข้า null distribution — เดิมแทนด้วย 0.0 ทำ distribution เบี้ยวลง
+            // → realSharpe ชนะง่ายเกินจริง (p-value ต่ำเกินควร)
+            val s = runWith(fakeMarkers) ?: return@repeat
             shuffledSharpes += s
             if (s >= realSharpe) beatCount++
         }
+        if (shuffledSharpes.isEmpty()) return PermutationResult(realSharpe, 0.0, 0.0, 1.0, false, 0)
 
-        val p = beatCount.toDouble() / nPermutations
+        // p-value แบบ +1 correction (มาตรฐาน permutation test) — กัน p=0.000 ที่เป็นไปไม่ได้ทางสถิติ
+        val trials = shuffledSharpes.size
+        val p = (beatCount + 1).toDouble() / (trials + 1)
         val mean = shuffledSharpes.average()
         val variance = shuffledSharpes.sumOf { (it - mean) * (it - mean) } / shuffledSharpes.size
         return PermutationResult(
@@ -88,7 +93,7 @@ object PermutationTest {
             shuffledStd = kotlin.math.sqrt(variance),
             pValue = p,
             isSignificant = p < 0.05,
-            nPermutations = nPermutations
+            nPermutations = trials
         )
     }
 }

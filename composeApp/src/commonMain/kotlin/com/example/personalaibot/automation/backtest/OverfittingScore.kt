@@ -33,8 +33,11 @@ object OverfittingScore {
         val skipped = mutableListOf<String>()
 
         // Walk-forward: ratio 1.0 = ไม่ overfit → score = (1 - ratio) × 100
-        if (wf != null && wf.nSplits > 0 && wf.inSampleAvgSharpe > 0) {
-            components["walk_forward"] = clamp((1.0 - wf.overfittingRatio) * 100)
+        // IS Sharpe ≤ 0 = ไม่มี edge ตั้งแต่ in-sample — เดิม "ข้าม" ทำกลยุทธ์ขาดทุนได้เกรด healthy
+        // แล้วผ่าน gate auto-apply ได้ (เช่น REV IS=-0.13 ได้ overfit 16% healthy — ผิด) → ให้คะแนนแย่สุดแทน
+        if (wf != null && wf.nSplits > 0) {
+            components["walk_forward"] =
+                if (wf.inSampleAvgSharpe > 0) clamp((1.0 - wf.overfittingRatio) * 100) else 100.0
             components["param_stability"] = clamp(wf.paramStabilityCv * 100)
         } else {
             skipped += "walk_forward"; skipped += "param_stability"

@@ -3,6 +3,8 @@ package com.example.personalaibot.automation.backtest
 import com.example.personalaibot.automation.SignalMarkerProvider
 import com.example.personalaibot.tools.trading.Candle
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -85,8 +87,10 @@ class BacktestEngine {
                 val isLast = bar == n - 1
                 if (hitSl || hitTp || isLast) {
                     val exitPrice = when {
-                        hitSl -> t.sl
-                        hitTp -> t.tp
+                        // gap ทะลุ SL: แท่งเปิดเลย SL ไปแล้ว → ได้ราคาที่แย่กว่า SL (ของจริง SL ไม่ได้การันตีราคา)
+                        // เดิมออกที่ SL เป๊ะทุกครั้ง = ประเมินผลดีเกินจริงในช่วงข่าว/ตลาดเปิด
+                        hitSl -> if (t.isBuy) min(t.sl, row.open) else max(t.sl, row.open)
+                        hitTp -> t.tp // TP = limit order ได้ราคา TP เสมอ
                         else -> row.close
                     }
                     val reason = when {
@@ -168,7 +172,15 @@ class BacktestEngine {
             if (dd > maxDd) maxDd = dd
         }
 
-        // Sharpe แบบง่าย (per-bar returns × √252 — สูตรเดียวกับ engine.py ต้นฉบับ)
+        // Sharpe แบบ per-bar annualized — คำนวณ bars/ปี จากระยะห่างแท่งจริง (data-driven)
+        // เดิม × √252 ตายตัว (สมมติ daily) → เปรียบเทียบข้าม TF ไม่ได้เลย (15m/1h/4h ได้สเกลเดียวกันหมด)
+        // วิธีนี้ถูกทุก TF และทุกตลาด (ทองปิดเสาร์อาทิตย์ barMs เฉลี่ยยาวขึ้น → bars/ปีน้อยลงเองตามจริง)
+        val yearMs = 365.0 * 24 * 3600 * 1000
+        val barsPerYear = if (candles.size > 1) {
+            val spanMs = (candles.last().timestamp - candles.first().timestamp).toDouble()
+            val barMs = if (spanMs > 0) spanMs / (candles.size - 1) else 0.0
+            if (barMs > 0) yearMs / barMs else 252.0
+        } else 252.0
         val returns = ArrayList<Double>(equity.size - 1)
         for (i in 1 until equity.size) {
             val prev = equity[i - 1]
@@ -178,7 +190,7 @@ class BacktestEngine {
             val mean = returns.average()
             val variance = returns.sumOf { (it - mean) * (it - mean) } / (returns.size - 1)
             val std = sqrt(variance)
-            if (std > 0) mean / std * sqrt(252.0) else 0.0
+            if (std > 0) mean / std * sqrt(barsPerYear) else 0.0
         } else 0.0
 
         // แยกตามกลยุทธ์

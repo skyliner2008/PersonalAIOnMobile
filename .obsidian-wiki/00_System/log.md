@@ -1505,3 +1505,81 @@ Build: BUILD SUCCESSFUL
 6. **ข้อจำกัดที่ทราบ:** MixSignalEngine (MIX voting) ยังใช้ค่าคงที่เดิม (series cache ของตัวเอง) — entry tuning ยังไม่มีผลกับ MIX; SMC structure-based ไม่เกี่ยว
 
 **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รอผู้ใช้ทดสอบ)
+
+## 2026-08-18 Review ระบบ signal/backtest/optimize/evolve — แก้ 6 จุด
+
+ตรวจทุกไฟล์หลัก (BacktestEngine, ParamOptimizer, AdaptiveOptimizer, WalkForward, MonteCarlo, PermutationTest, OverfittingScore, BacktestEvolution, StrategyParams, SignalAlertProvider, SignalMarkerProvider, AutomationManager) — พบและแก้:
+
+1. **BacktestEngine — gap-through-SL**: เดิมออกที่ราคา SL เป๊ะทุกครั้ง แม้แท่งเปิดกระโดดเลย SL → ประเมินดีเกินจริงในช่วงข่าว/ตลาดเปิด; แก้เป็น SL exit = min(SL, open) สำหรับ BUY / max(SL, open) สำหรับ SELL (TP ยัง fill ที่ TP เพราะเป็น limit order)
+2. **BacktestEngine — Sharpe annualization**: เดิม × √252 ตายตัว (สมมติ daily) → เทียบข้าม TF ไม่ได้; แก้เป็นคำนวณ bars/ปี จากระยะห่างแท่งจริง (data-driven, ทองปิดเสาร์อาทิตย์ปรับเองอัตโนมัติ) — ⚠️ score ใน OptimizationTrial เก่าอยู่คนละสเกล แต่ direction learning ใช้ delta ภายในรันเดียวกันจึงยังใช้ได้
+3. **PermutationTest — null distribution เบี้ยว**: run ที่พังถูกแทนด้วย 0.0 ใน null distribution → realSharpe ชนะง่ายเกินจริง; แก้ตัด run พังทิ้ง + p-value ใช้ +1 correction ((beat+1)/(n+1)) กัน p=0.000 ที่เป็นไปไม่ได้ทางสถิติ
+4. **OverfittingScore — walk_forward หายเมื่อ IS Sharpe ≤ 0**: เดิมข้าม component ทำกลยุทธ์ขาดทุน in-sample ได้เกรด healthy (เช่น REV IS=-0.13 ได้ 16% healthy); แก้ IS≤0 → walk_forward=100 (แย่สุด)
+5. **AdaptiveOptimizer — improved threshold พังเมื่อ baseline ติดลบ**: ×1.02 ของเลขติดลบทำ threshold ต่ำลง → ค่าแย่กว่านิดเดียวผ่านเกณฑ์; แก้เป็น additive margin max(2%|baseline|, 0.005) + ไม่บันทึก baseline trial ที่ score=-999 (ขยะในความจำ)
+6. **Optimize AUTO-APPLY gate หลวม**: เดิมขอแค่ improved + ไม่ overfit → params ของกลยุทธ์ PF<1 ก็ถูก apply ได้; เพิ่ม PF≥1.0 และไม้≥10 (เกณฑ์เดียวกับ evolve/entry gate)
+7. **reasonFor/strategyName ตายตัว**: ข้อความเหตุผล alert hard-code "ROC 20 แท่ง", "EMA50/200" ฯลฯ → ผิดเมื่อ entry ถูกจูน; แก้ reasonFor รับ EntryParams แล้วแสดงค่าจริงที่ใช้, strategyName ของ TR/E เป็นแบบไม่ผูกตัวเลข
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รอทดสอบ)
+
+## 2026-08-18 แก้ Live ช้า / พูดแล้ว AI ไม่ได้ยิน (pre-READY audio buffer)
+
+**อาการจาก log 2026-08-18 11:19–11:23:** ผู้ใช้กด Live → ไมค์เปิดทันที (MIC_STARTED) แต่ gemini-3.1-flash-live-preview ใช้เวลา READY 7–15 วินาที → เสียงที่พูดช่วงนั้นหายหมด AI จึงเงียบ ผู้ใช้กด stop ซ้ำหลายรอบ; พอสลับไป gemini-2.5-flash-native-audio-preview-12-2025 READY เร็ว 1–2 วิ อาการหาย
+
+**Root cause:** `LiveGeminiService.sendIfReady()` ทิ้ง audio chunk เงียบๆ เมื่อ `!isSetupComplete` (ไม่มี log ไม่มี buffer) + `connectionState` ไม่เคยถูกเอาไปแสดงใน UI → ผู้ใช้ไม่รู้ว่ายังไม่ READY
+
+**สิ่งที่แก้:**
+1. **Pre-READY audio buffer** (LiveGeminiService) — `sendAudioChunk` ช่วงยังไม่ READY เก็บเข้า ring buffer 250 chunk (~5 วิ @16kHz/20ms) ด้วย Mutex แทนการทิ้ง; ตอน `setupComplete` flush ทั้งหมดเข้า session ทันที + log `🎤 Flushing N pre-READY audio chunks (dropped oldest=M)`; ล้าง buffer ใน finally ตอน session จบ กันเสียงเก่าไหลไป session ถัดไป
+2. **สถานะในแชท** (JarvisViewModel.startVoiceInput) — ถ้า 2.5 วิแล้วยังไม่ Connected แสดงข้อความ "⏳ กำลังเชื่อมต่อ Live session… เมื่อ AI ทักกลับมาแปลว่าพร้อมแล้ว (เสียงที่พูดระหว่างนี้ถูกเก็บไว้ให้อัตโนมัติ)" เป็นกล่อง static; เพิ่ม `JarvisOrchestrator.liveConnectionState` pass-through จาก `LiveGeminiService.connectionState`
+
+**ข้อจำกัดที่ทราบ:** ความช้า 7–15 วิของ 3.1-flash-live-preview มาจากฝั่ง server แก้จากแอปไม่ได้ — ถ้าต้องการ READY เร็วให้ใช้ 2.5 native audio เป็นค่าเริ่มต้น; buffer จำกัด 5 วินาที พูดยาวกว่านั้นก่อน READY จะตัดหัวทิ้ง (เก็บท้ายสุด); เคส model ตอบเป็น text อังกฤษแทนเสียง (พบใน 2.5 native) มี fallback `onTurnWithoutAudio` อยู่แล้ว
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รวมกับ review fixes 6 จุดก่อนหน้า รอผู้ใช้ทดสอบ)
+
+## 2026-08-18 แก้ Live เสียงผู้ใช้ถึง server ช้า 48 วิ (mic send queue)
+
+**อาการจาก log 11:49–11:50:** session READY ไปแล้ว (turn ก่อนจบ 11:49:31) แต่ transcript ผู้ใช้โผล่ 11:50:19 — ห่าง 48 วิ ทั้งที่ผู้ใช้พูดหลัง 11:49:31 ทันที; buffer fix รอบแรกทำงานถูก ("Flushing 113 pre-READY audio chunks" ที่ 11:47:18) จึงไม่ใช่ปัญหา connect ช้า
+
+**Root cause:** mic callback ทุก chunk (~50/วิ) ทำ `viewModelScope.launch(Dispatchers.IO)` ใหม่ทุกครั้ง → coroutine สะสมเป็นพันเมื่อ send ไม่ทัน (websocket ช้า/IO pool แชร์กับ backtest/TV fetch) → เสียงเข้าคิวใน memory ไหลไป server ช้าลงเรื่อยๆ จนตกค้างสูงสุด 48 วิ
+
+**สิ่งที่แก้ (JarvisViewModel.startVoiceInput/stopVoiceInput):**
+1. เปลี่ยนเป็น `Channel<String>(capacity=50)` (~1 วิ) + sender coroutine ตัวเดียววน `for (chunk in channel)` — ส่งตามลำดับ ไม่มี coroutine pile-up
+2. คิวเต็ม (`trySend` fail) → `tryReceive()` ทิ้งเสียงเก่าสุดแล้วใส่ตัวล่าสุด — จำกัด latency ไม่เกิน ~1 วิ เสียงที่ server ได้รับเป็นเสียงปัจจุบันเสมอ
+3. เพิ่ม heartbeat log `🎤 Mic streaming alive (frame #N, droppedOld=M)` ทุก 250 เฟรม (~5 วิ) — ตรวจจาก log ได้ว่าไมค์ส่งจริงและมี drop ไหม
+4. stopVoiceInput ปิด channel ก่อน cancel job
+
+**ยืนยันแล้วจาก log รอบก่อน:** pre-READY buffer ทำงานถูกต้อง (113 chunks flush ครบ dropped=0, READY เร็ว 4.6 วิในรอบนั้น), greeting ทักทายทำงาน, 2 โมเดลอาการเดียวกันเพราะเป็นปัญหา client-side send queue ไม่ใช่โมเดล
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รวมกับ fixes ก่อนหน้า รอผู้ใช้ทดสอบ)
+
+## 2026-08-18 แก้ Live session ตายเงียบจาก GoAway → AI ไม่รายงานผลงานพื้นหลัง (เครื่อง B)
+
+**อาการจาก log เครื่อง B 12:01–12:18:** สั่ง `trading_backtest_evolve all TF` 12:03:38 → รัน 162 AI reflection rounds นาน 11.5 นาที → LongTask เสร็จ 12:15:18 การ์ดลงแชทครบ + log แสดง "⬆ Sent realtime text" แต่ AI เงียบ ไม่พูดรายงานผล
+
+**Root cause:** บรรทัด 12:11:48 `Session closed: VIOLATED_POLICY — client failed to close the connection after receiving a GoAway signal` — Live API จำกัดอายุ session (~10-15 นาที) ส่ง GoAway แล้วปิด; โค้ดเดิมหลัง websocket ปิดปกติจะ `break` ทันที (reconnect เฉพาะตอน exception) → session ตายตั้งแต่ 12:11 แต่ `_isListening` ยัง true → ตอนงานเสร็จ 12:15 `sendRealtimeText` เข้า `sendIfReady` ที่ return เงียบๆ (session=null) แต่ log "⬆ Sent" พิมพ์อยู่นอก sendIfReady จึงดูเหมือนส่งสำเร็จ → ผลหายไปเฉยๆ
+
+**สิ่งที่แก้ (LiveGeminiService + JarvisViewModel):**
+1. **Auto-reconnect เมื่อ server ปิด session** — เพิ่ม flag `userRequestedDisconnect` (set ใน disconnect() เท่านั้น) + `sessionWasReady`; หลัง websocket ปิดถ้าไม่ใช่ผู้ใช้กดหยุด → วน reconnect อัตโนมัติ; session ที่เคย READY แล้วถูก server ตัด (timeout ไม่ใช่ config พัง) จะ reset retry counter (attempt=1) ไม่เสีย quota 3 ครั้ง; reconnect สำเร็จจะมี greeting แจ้ง "เชื่อมต่อใหม่แล้ว" ให้ผู้ใช้รู้
+2. **sendIfReady return Boolean + skip log** — เดิม return เงียบๆ ตอน session ไม่พร้อม ตอนนี้ log `⚠️ send skipped — session ไม่พร้อม` ทุกครั้ง (audio chunk ไม่ผ่านจุดนี้แล้วเพราะมี buffer/channel คั่น ไม่สแปม)
+3. **log "⬆ Sent realtime text" ย้ายเข้าเส้นทางส่งสำเร็จจริง** — sendRealtimeText return Boolean ด้วย
+4. **Fallback ประกาศผล LongTask** (JarvisViewModel completions collector) — ถ้า live เปิดอยู่แต่ส่งเข้า session ไม่สำเร็จ → fallback ไป `announceLongTaskCompletion` (notification + เสียง + การ์ดแชท) ผลงานไม่มีทางหายเงียบๆ อีก
+
+**หมายเหตุ:** evolve all TF ใช้เวลา ~11.5 นาที (162 รอบ × ~4 วิ) — เป็นพฤติกรรมปกติของ all×all ไม่ใช่ค้าง; ระหว่างนั้นคุยต่อได้ตามปกติ
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รวม fixes ทั้งวัน รอผู้ใช้ทดสอบ)
+
+## 2026-08-18 Review ความถูกต้อง backtest/optimize/evolve จาก log เครื่อง B (12:01-12:18) — แก้ gate 3 ชั้น
+
+**สิ่งที่ตรวจพบจาก log จริง:**
+1. **Backtest pipeline ถูกต้อง** — ผล 3 TF สม่ำเสมอ (15m PF 1.05 / 1h PF 0.96 / 4h PF 1.13), per-strategy ตารางครบ, SMC ไม้น้อยตามจริง
+2. **⚠️ พบช่องโหว่ใหญ่: AUTO-APPLY หลวม** — 15m มี 4 กลยุทธ์ที่ **OOS Sharpe ติดลบ** (DC -1.58, E -1.40, 3BR -3.70, UT -0.70) แต่ถูก apply เข้า signal alert จริง เพราะ gate เดิมเช็กแค่ improved + grade≠overfit + PF≥1.0 + ไม้≥10 (grade "ปานกลาง" หลุดผ่าน); บางตัว permutation p≥0.08 (❌ ไม่ต่างจากสุ่ม) ก็ยัง apply
+3. **Entry tuning ไม่มี OOS validation เลย** — grid เลือกจากข้อมูลเต็ม (in-sample) แล้ว apply ทันที ถึง SL/TP stage จะมี walk-forward แต่ entry ถูกเซฟไปก่อนแล้ว
+4. **Evolve apply gate** มีแค่ full-data expectancy/PF/ไม้ — in-sample ล้วนเช่นกัน
+5. Evolve ทำงานครบ 162 รอบ/11.5 นาที ปกติ (apply=off ไม่เซฟตามดีไซน์); reflection แกว่ง ±10% ไม่ converging — ข้อจำกัดที่รู้กัน
+
+**สิ่งที่แก้ (TradingToolExecutor.kt — build ผ่าน):**
+1. **SL/TP auto-apply เพิ่ม hard blocks**: OOS Sharpe ≤ 0 → บล็อกเด็ดขาด; permutation p ≥ 0.10 → บล็อก; ข้อความรายงานแสดงเหตุบล็อกชัด ("🚫 บล็อก: OOS Sharpe -1.58 ≤ 0")
+2. **Entry tuning เพิ่ม holdout 30% ท้าย**: หลัง grid เลือก entry ใหม่ ให้รันเทียบ baseline บน 30% ท้ายของข้อมูล (ผ่าน startIndex ของ BacktestEngine — indicator warm จาก prefix) — ถ้า tail expectancy แพ้ค่าเดิมหรือ PF<1 (และมีไม้≥5) → บล็อกไม่ apply และไม่ใช้ใน SL/TP stage ต่อด้วย
+3. **Evolve apply เพิ่ม holdout 30% ท้าย** เช่นเดียวกัน — finalParams ต้องชนะ initial ทั้งข้อมูลเต็มและช่วงท้าย รายงาน 🔎 แสดงผล holdout เมื่อถูกบล็อก
+
+**⚠️ สิ่งที่ผู้ใช้ต้องรู้:** params ที่ถูก apply ไปแล้วจากรอบ 12:03 (เช่น DC/E/UT/3BR 15m ที่ OOS ติดลบ) ยังค้างใน DB ของเครื่อง B — ควรรัน optimize ใหม่หลังอัปเดต APK นี้ (gate ใหม่จะคัดทิ้ง) หรือรีเซ็ต tuning ของ 15m
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit)

@@ -13,6 +13,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // ═══════════════════════════════════════════════════════════════════
 // v1beta BidiGenerateContent Wire Format (camelCase per API reference)
@@ -280,6 +282,11 @@ class LiveGeminiService(
     private var webSocketSession: DefaultWebSocketSession? = null
     private var isSetupComplete = false
 
+    /** true เมื่อผู้ใช้กดหยุดเอง — แยกจาก server-initiated close (GoAway/session timeout) ที่ต้อง reconnect */
+    private var userRequestedDisconnect = false
+    /** session รอบปัจจุบันเคย READY แล้วหรือไม่ — ใช้ reset retry counter เมื่อ server ปิด session ที่เคยใช้งานได้ */
+    private var sessionWasReady = false
+
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
@@ -329,6 +336,15 @@ class LiveGeminiService(
     /** เรียกเมื่อ turn จบโดยไม่มีเสียงออกเลย (model ตอบเป็น text ล้วน) — ใช้เป็น TTS fallback ไม่ให้เงียบเฉย */
     var onTurnWithoutAudio: ((String) -> Unit)? = null
 
+    // ── Pre-READY audio buffer ──────────────────────────────────────
+    // ไมค์เริ่มส่งเสียงทันทีที่ผู้ใช้กด Live แต่บางโมเดล (เช่น 3.1-flash-live-preview)
+    // ใช้เวลา setup 7–15 วิ — เดิม sendIfReady() ทิ้ง chunk เงียบๆ → ผู้ใช้พูดแล้ว AI ไม่ได้ยิน
+    // เก็บ chunk ไว้ใน ring buffer แล้ว flush ทันทีที่ setupComplete
+    private val preReadyAudioBuffer = ArrayDeque<String>()
+    private val preReadyMutex = kotlinx.coroutines.sync.Mutex()
+    private val maxPreReadyChunks = 250 // ~5 วินาที (chunk ~20ms @16kHz)
+    private var droppedPreReadyChunks = 0
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
     // ย้ายไปรวมศูนย์ที่ JarvisPersona (2026-07-29)
@@ -353,9 +369,11 @@ class LiveGeminiService(
 
         val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey"
 
+        userRequestedDisconnect = false
         var attempt = 0
         while (attempt <= maxRetries) {
             isSetupComplete = false
+            sessionWasReady = false
 
             if (attempt == 0) {
                 _connectionState.value = ConnectionState.Connecting
@@ -419,7 +437,19 @@ class LiveGeminiService(
                     val reason = closeReason.await()
                     logDebug("LiveGemini", "Session closed: ${reason?.knownReason} — ${reason?.message}")
                 }
-                break
+                if (userRequestedDisconnect) break
+                // Server-initiated close (GoAway / session duration limit ~10-15 นาทีของ Live API)
+                // เดิม break ทิ้ง → session ตายเงียบ ผู้ใช้ยังเปิด Live แต่ทุกข้อความส่งไม่ถึง
+                // (เคสจริง 2026-08-18: evolve เสร็จ 12:15 แต่ session ถูก server ปิด 12:11 → AI ไม่รายงานผล)
+                attempt = if (sessionWasReady) 1 else attempt + 1 // เคย READY แล้ว = server timeout ไม่ใช่ config พัง → ไม่เสีย retry quota
+                if (attempt > maxRetries) {
+                    _connectionState.value = ConnectionState.Error("Server closed session repeatedly — giving up")
+                    break
+                }
+                logDebug("LiveGemini", "🔁 Server closed session (GoAway/timeout) — auto-reconnecting (attempt $attempt/$maxRetries)")
+                if (pendingGreetingOnReady == null) {
+                    pendingGreetingOnReady = "[SYSTEM] Live session เพิ่งขาดและเชื่อมต่อใหม่สำเร็จแล้ว โปรดพูดแจ้งผู้ใช้สั้นๆ 1 ประโยค (เช่น 'เชื่อมต่อใหม่แล้วค่ะ พร้อมคุยต่อครับ') ไม่ต้องทำงานอื่นต่อ"
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
@@ -442,6 +472,9 @@ class LiveGeminiService(
                 pendingModelTurnText = null
                 pendingModelTextParts = null
                 audioBytesThisTurn = 0
+                // ล้างเสียงค้างก่อน READY ทิ้ง — session นี้จบแล้ว ไม่ควรไป flush ใน session ถัดไป
+                preReadyMutex.withLock { preReadyAudioBuffer.clear() }
+                droppedPreReadyChunks = 0
 
                 webSocketSession = null
                 isSetupComplete = false
@@ -464,7 +497,19 @@ class LiveGeminiService(
             msg.setupComplete?.let {
                 logDebug("LiveGemini", "✅ Live session READY")
                 isSetupComplete = true
+                sessionWasReady = true
                 _connectionState.value = ConnectionState.Connected
+                // Flush เสียงที่ผู้ใช้พูดระหว่างรอ READY (ไมค์เปิดก่อน session พร้อม)
+                val bufferedChunks = preReadyMutex.withLock {
+                    val chunks = preReadyAudioBuffer.toList()
+                    preReadyAudioBuffer.clear()
+                    chunks
+                }
+                if (bufferedChunks.isNotEmpty() || droppedPreReadyChunks > 0) {
+                    logDebug("LiveGemini", "🎤 Flushing ${bufferedChunks.size} pre-READY audio chunks (dropped oldest=$droppedPreReadyChunks)")
+                    bufferedChunks.forEach { chunk -> sendAudioChunk(chunk) }
+                }
+                droppedPreReadyChunks = 0
                 // ถ้ามี greeting ค้างไว้ (เช่นหลังเปลี่ยนเสียง) ส่งทันทีที่ READY เพื่อให้ model พูดทักก่อน
                 pendingGreetingOnReady?.let { greeting ->
                     pendingGreetingOnReady = null
@@ -602,6 +647,17 @@ class LiveGeminiService(
     }
 
     suspend fun sendAudioChunk(pcmBase64: String) {
+        // ยังไม่ READY — เก็บเข้า ring buffer แทนที่จะทิ้งเงียบๆ (flush ตอน setupComplete)
+        if (!isSetupComplete) {
+            preReadyMutex.withLock {
+                if (preReadyAudioBuffer.size >= maxPreReadyChunks) {
+                    preReadyAudioBuffer.removeFirst()
+                    droppedPreReadyChunks++
+                }
+                preReadyAudioBuffer.addLast(pcmBase64)
+            }
+            return
+        }
         sendIfReady {
             val msg = LiveRealtimeInputMessage(
                 realtimeInput = LiveRealtimeInputData(
@@ -661,14 +717,16 @@ class LiveGeminiService(
      * ส่ง text ผ่าน realtimeInput — ถูกปฏิบัติเหมือน user "พูด" เข้ามาจริง (trigger generation ได้)
      * ต่างจาก clientContent ที่ขณะ audio streaming ทำหน้าที่เป็นแค่ context (model ไม่ตอบเอง — พิสูจน์แล้วจากเคส voice-change greeting 2026-08-09)
      */
-    suspend fun sendRealtimeText(text: String) {
-        sendIfReady {
+    suspend fun sendRealtimeText(text: String): Boolean {
+        val sent = sendIfReady {
             val msg = LiveRealtimeInputMessage(
                 realtimeInput = LiveRealtimeInputData(text = text)
             )
             json.encodeToString(msg)
         }
-        logDebug("LiveGemini", "⬆ Sent realtime text: ${text.take(80)}")
+        // log เฉพาะเมื่อส่งเข้า websocket จริง — เดิม log เสมอทำให้ดูเหมือนส่งสำเร็จทั้งที่ session ตาย (เคส GoAway 2026-08-18)
+        if (sent) logDebug("LiveGemini", "⬆ Sent realtime text: ${text.take(80)}")
+        return sent
     }
 
     suspend fun sendNativeToolResponse(callId: String, toolName: String, result: String) {
@@ -687,6 +745,7 @@ class LiveGeminiService(
     }
 
     suspend fun disconnect() {
+        userRequestedDisconnect = true
         try { webSocketSession?.close() } catch (_: Exception) {}
         webSocketSession = null
         isSetupComplete = false
@@ -694,15 +753,21 @@ class LiveGeminiService(
         logDebug("LiveGemini", "Session disconnected")
     }
 
-    private suspend fun sendIfReady(buildJson: () -> String) {
+    /** @return true ถ้าส่งเข้า websocket จริง — false ถ้า session ไม่พร้อม (caller ต้องไม่ log ว่าส่งแล้ว) */
+    private suspend fun sendIfReady(buildJson: () -> String): Boolean {
         val session = webSocketSession
-        if (session == null || !session.isActive || !isSetupComplete) return
+        if (session == null || !session.isActive || !isSetupComplete) {
+            logDebug("LiveGemini", "⚠️ send skipped — session ไม่พร้อม (hasSession=${session != null}, active=${session?.isActive == true}, ready=$isSetupComplete)")
+            return false
+        }
         try {
             val jsonStr = buildJson()
             // logDebug("LiveGemini", "⬆ SENDING: $jsonStr")
             session.send(Frame.Text(jsonStr))
+            return true
         } catch (e: Exception) {
             logError("LiveGemini", "Send failed", e)
+            return false
         }
     }
 

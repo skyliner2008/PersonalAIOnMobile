@@ -596,7 +596,27 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                     val entryImproved = bestEntry != baselineEntry && bestRun != null && baseRun != null &&
                         bestRun!!.expectancyR > baseRun.expectancyR &&
                         bestRun.profitFactor >= 1.0 && bestRun.totalTrades >= 10
-                    val entrySaved = !dryRun && entryImproved && mgr != null
+                    // Holdout 30% ท้าย (2026-08-18): grid เลือกจากข้อมูลเต็ม = in-sample ล้วน
+                    // → เช็กซ้ำว่า entry ใหม่ยังไม่แพ้ค่าเดิมในช่วงท้ายก่อน apply จริง
+                    // (เคสจริง: entry apply ไปหลายตัวโดยไม่มี OOS validation เลย)
+                    val tailStart = (candles.size * 0.7).toInt()
+                    fun runEntryTail(ep: EntryParams) = runCatching {
+                        engine.run(
+                            symbol = "", interval = "", source = "",
+                            candles = candles, markers = markerProvider.compute(candles, Int.MAX_VALUE, mapOf(kind to ep)),
+                            kindFilter = setOf(kind), kindOf = kindOf, strategyName = nameOf,
+                            tpSl = { k, s, c, i, a14, a6 ->
+                                com.example.personalaibot.automation.backtest.parameterizedTpSl(k, s, c, i, a14, a6, baselineParams)
+                            },
+                            startIndex = tailStart
+                        )
+                    }.getOrNull()
+                    val baseTail = if (entryImproved && !dryRun) runEntryTail(baselineEntry) else null
+                    val bestTail = if (entryImproved && !dryRun) runEntryTail(bestEntry) else null
+                    val tailEvidence = bestTail != null && baseTail != null && bestTail.totalTrades >= 5
+                    val entryBlocked = entryImproved && tailEvidence &&
+                        (bestTail!!.expectancyR < baseTail!!.expectancyR || bestTail.profitFactor < 1.0)
+                    val entrySaved = !dryRun && entryImproved && !entryBlocked && mgr != null
                     if (entrySaved) {
                         mgr!!.saveEntryTuning(
                             symbol, interval, kind, EntryParams.serialize(kind, bestEntry),
@@ -608,11 +628,11 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                     }
                     // ค่าที่เคยจูนไว้ (savedEntry) ยังใช้ต่อใน scope=both แม้รอบนี้ไม่เจอค่าที่ดีกว่า
                     activeEntry = when {
-                        entryImproved -> bestEntry
+                        entryImproved && !entryBlocked -> bestEntry
                         baselineEntry != EntryParams.defaultsFor(kind) -> baselineEntry
                         else -> null
                     }
-                    entryReport = "- 🎯 **Entry**: เดิม `${EntryParams.describe(kind, baselineEntry)}` (avg ${"%+.2f".format(baseRun?.expectancyR ?: 0.0)}R) → ใหม่ `${EntryParams.describe(kind, bestEntry)}` (avg ${"%+.2f".format(bestRun?.expectancyR ?: 0.0)}R, PF ${"%.2f".format(bestRun?.profitFactor ?: 0.0)}, ${bestRun?.totalTrades ?: 0} ไม้, ลอง $tried combos) ${if (entryImproved) "📈 ดีขึ้น" else "⏸ ไม่ดีกว่า — คงค่าเดิม"}${if (entrySaved) " — 💾 APPLY แล้ว (signal alert ใช้ params จุดเข้าใหม่ตั้งแต่สัญญาณถัดไป)" else ""}"
+                    entryReport = "- 🎯 **Entry**: เดิม `${EntryParams.describe(kind, baselineEntry)}` (avg ${"%+.2f".format(baseRun?.expectancyR ?: 0.0)}R) → ใหม่ `${EntryParams.describe(kind, bestEntry)}` (avg ${"%+.2f".format(bestRun?.expectancyR ?: 0.0)}R, PF ${"%.2f".format(bestRun?.profitFactor ?: 0.0)}, ${bestRun?.totalTrades ?: 0} ไม้, ลอง $tried combos) ${if (entryImproved) "📈 ดีขึ้น" else "⏸ ไม่ดีกว่า — คงค่าเดิม"}${if (entryBlocked) " — 🚫 บล็อก: holdout 30% ท้าย แพ้ค่าเดิม/PF<1 (avg ${"%+.2f".format(bestTail?.expectancyR ?: 0.0)}R vs เดิม ${"%+.2f".format(baseTail?.expectancyR ?: 0.0)}R)" else if (entrySaved) " — 💾 APPLY แล้ว (signal alert ใช้ params จุดเข้าใหม่ตั้งแต่สัญญาณถัดไป)" else ""}"
                 }
                 if (scope == "entry") {
                     sb.appendLine("### $name ($kind)")
@@ -672,8 +692,17 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val gradeTh = when (overfit.grade) {
                 "healthy" -> "✅ สุขภาพดี"; "moderate" -> "🟡 ปานกลาง"; "overfit" -> "🔴 overfit"; else -> "❓"
             }
-            // AUTO-APPLY: ดีกว่าค่าเดิม + ไม่ overfit → บันทึกใช้จริง (ยกเว้น dry-run)
-            val saved = !dryRun && adaptive.improved && overfit.grade != "overfit" && mgr != null
+            // AUTO-APPLY: ดีกว่าค่าเดิม + ไม่ overfit + มี edge จริงบนข้อมูลเต็ม (PF≥1.0, ไม้≥10 — เกณฑ์เดียวกับ evolve/entry gate)
+            // เดิมขาด PF/ไม้ → params ของกลยุทธ์ที่ PF<1 (ขาดทุนโดยรวม) ก็ถูก apply ได้ถ้า score ดีขึ้น
+            // Hard blocks เพิ่ม 2026-08-18 (เคสจริง: 15m มี 4 กลยุทธ์ OOS Sharpe ติดลบ/permutation fail แต่ถูก apply):
+            //  - OOS Sharpe ≤ 0 → params แพ้ out-of-sample ห้ามใช้จริงเด็ดขาด
+            //  - permutation p ≥ 0.10 → ไม่มี edge เหนือความสุ่ม ห้ามใช้จริง
+            val blockReasons = buildList {
+                if (wf.nSplits > 0 && wf.oosAvgSharpe <= 0) add("OOS Sharpe ${"%.2f".format(wf.oosAvgSharpe)} ≤ 0")
+                if (perm.nPermutations > 0 && perm.pValue >= 0.10) add("permutation p=${"%.3f".format(perm.pValue)} ไม่มี edge")
+            }
+            val saved = !dryRun && adaptive.improved && overfit.grade != "overfit" &&
+                adaptive.bestProfitFactor >= 1.0 && adaptive.bestTrades >= 10 && blockReasons.isEmpty() && mgr != null
             if (saved) {
                 mgr!!.saveStrategyTuning(
                     symbol, interval, kind, bestParams.slMult, bestParams.tpMult,
@@ -696,7 +725,8 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             if (mc.nSimulations > 0) {
                 sb.appendLine("- **Monte Carlo**: P(พอร์ตพัง) ${"%.1f".format(mc.probabilityOfRuin * 100)}%, P(กำไร) ${"%.1f".format(mc.probabilityOfProfit * 100)}%, p95 DD ${"%.1f".format(mc.p95MaxDrawdown * 100)}%")
             }
-            sb.appendLine("- 🎯 **Overfitting ${"%.0f".format(overfit.overfittingPct)}% → $gradeTh**${if (saved) " — 💾 AUTO-APPLY แล้ว (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป)" else if (!dryRun && adaptive.improved) " — ไม่บันทึก (เกรดไม่ผ่าน)" else ""}")
+            val blockSuffix = if (blockReasons.isNotEmpty()) " — 🚫 บล็อก: ${blockReasons.joinToString(", ")}" else ""
+            sb.appendLine("- 🎯 **Overfitting ${"%.0f".format(overfit.overfittingPct)}% → $gradeTh**${if (saved) " — 💾 AUTO-APPLY แล้ว (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป)" else if (!dryRun && adaptive.improved) " — ไม่บันทึก (เกรด/PF/จำนวนไม้ไม่ผ่านเกณฑ์)$blockSuffix" else "$blockSuffix"}")
             sb.appendLine()
         }
 
@@ -862,7 +892,26 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                 fullFinal!!.expectancyR > fullInit!!.expectancyR &&
                 fullFinal.profitFactor >= 1.0 &&
                 fullFinal.totalTrades >= 10
-            val saved = applyOn && mgr != null && fullBetter
+            // Holdout 30% ท้าย (2026-08-18): fullRun เป็น in-sample (evolve เลือก params จากข้อมูลชุดเดียวกัน)
+            // → เช็กซ้ำว่า params สุดท้ายยังไม่แพ้ค่าเดิมในช่วงท้ายก่อน apply จริง
+            val tailStart = (candles.size * 0.7).toInt()
+            fun tailRun(p: com.example.personalaibot.automation.backtest.TpSlParams) = runCatching {
+                engine.run(
+                    symbol = symbol, interval = interval, source = "",
+                    candles = candles, markers = markers, kindFilter = setOf(kind),
+                    kindOf = kindOf, strategyName = nameOf,
+                    tpSl = { k, sd, c, i, a14, a6 ->
+                        com.example.personalaibot.automation.backtest.parameterizedTpSl(k, sd, c, i, a14, a6, p)
+                    },
+                    startIndex = tailStart
+                )
+            }.getOrNull()
+            val tailInit = if (fullBetter && applyOn) tailRun(result.initialParams) else null
+            val tailFinal = if (fullBetter && applyOn) tailRun(result.finalParams) else null
+            val tailEvidence = tailInit != null && tailFinal != null && tailFinal.totalTrades >= 5
+            val tailBlocked = applyOn && fullBetter && tailEvidence &&
+                (tailFinal!!.expectancyR < tailInit!!.expectancyR || tailFinal.profitFactor < 1.0)
+            val saved = applyOn && mgr != null && fullBetter && !tailBlocked
             if (saved) {
                 mgr!!.saveStrategyTuning(
                     symbol, interval, kind, result.finalParams.slMult, result.finalParams.tpMult,
@@ -876,7 +925,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             sb.appendLine("params: ${result.initialParams.slMult}/${result.initialParams.tpMult}${if (baseParams != null) " (ต่อจาก tuning ล่าสุด)" else " (ค่า default)"} → **${result.finalParams.slMult}/${result.finalParams.tpMult}** | รวมR เดิม ${"%+.2f".format(result.baselineTotalR)} → วิวัฒน์ **${"%+.2f".format(result.evolvedTotalR)}** (${if (gain > 0) "📈 ดีขึ้น" else if (gain < 0) "📉 แย่ลง" else "➖ เท่าเดิม"} ${"%+.2f".format(gain)}R)${if (result.usedAiReflection) " | 🤖 ใช้ AI reflection" else " | 📏 ใช้กฎ heuristic"}")
             // แสดงผล validation บนข้อมูลเต็มเสมอ — ผู้ใช้จะได้เห็นว่า apply หรือไม่เพราะอะไร
             if (fullOk) {
-                sb.appendLine("🔎 ผลเต็ม ${candles.size} แท่ง: เดิม PF ${"%.2f".format(fullInit!!.profitFactor)} avgR ${"%+.2f".format(fullInit.expectancyR)} → ใหม่ PF ${"%.2f".format(fullFinal!!.profitFactor)} avgR ${"%+.2f".format(fullFinal.expectancyR)} ไม้ ${fullFinal.totalTrades} → ${if (saved) "💾 APPLY" else if (!fullBetter) "⛔ ไม่ apply (ใหม่ไม่ชนะบนข้อมูลเต็ม)" else "🚫 dry-run"}")
+                sb.appendLine("🔎 ผลเต็ม ${candles.size} แท่ง: เดิม PF ${"%.2f".format(fullInit!!.profitFactor)} avgR ${"%+.2f".format(fullInit.expectancyR)} → ใหม่ PF ${"%.2f".format(fullFinal!!.profitFactor)} avgR ${"%+.2f".format(fullFinal.expectancyR)} ไม้ ${fullFinal.totalTrades} → ${if (saved) "💾 APPLY" else if (tailBlocked) "🚫 ไม่ apply (holdout 30% ท้าย: ใหม่ avgR ${"%+.2f".format(tailFinal?.expectancyR ?: 0.0)} vs เดิม ${"%+.2f".format(tailInit?.expectancyR ?: 0.0)})" else if (!fullBetter) "⛔ ไม่ apply (ใหม่ไม่ชนะบนข้อมูลเต็ม)" else "🚫 dry-run"}")
             }
             sb.appendLine("| รอบ | params | ไม้ | Win% | avgR | สะท้อนผล |")
             sb.appendLine("|---|---|---|---|---|---|")

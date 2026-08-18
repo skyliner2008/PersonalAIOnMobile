@@ -843,14 +843,28 @@ class JarvisViewModel(
                         memoryManager.storeMessage("assistant", c.chatBody, metadata = c.chatMeta)
                         com.example.personalaibot.memory.AlertChatBus.tryEmit("assistant", c.chatBody, c.chatMeta)
                     }
-                    runCatching {
+                    val sentToLive = runCatching {
                         // realtimeInput — model ตอบเองได้ขณะ stream audio (clientContent จะเงียบ — พิสูจน์แล้ว)
                         orchestrator.sendLiveRealtimeText(
                             "[SYSTEM] งานพื้นหลังเสร็จแล้ว: ${c.title}\nสรุปผล: ${c.speech}\n" +
                                 "โปรดพูดแจ้งผู้ใช้แบบสนทนา 2-4 ประโยคว่างานเสร็จแล้วและผลเป็นอย่างไร " +
                                 "(มีการ์ดรายละเอียดลงในแชทแล้ว ไม่ต้องอ่านตาราง/ตัวเลขยาวๆ)"
                         )
-                    }.onFailure { logError("JarvisVM", "ส่งผลเข้า live ไม่สำเร็จ: ${it.message}", it) }
+                    }.getOrElse {
+                        logError("JarvisVM", "ส่งผลเข้า live ไม่สำเร็จ: ${it.message}", it)
+                        false
+                    }
+                    if (!sentToLive) {
+                        // live เปิดค้างแต่ session ตาย/กำลัง reconnect (เช่นโดน GoAway) — กันผลหายเงียบๆ
+                        logDebug("JarvisVM", "📦 live session ไม่พร้อม — fallback ประกาศผลผ่าน notification/เสียงแทน")
+                        com.example.personalaibot.automation.announceLongTaskCompletion(
+                            title = "✅ ${c.title}",
+                            cardBody = c.chatBody,
+                            metaJson = c.chatMeta,
+                            shortSpeech = c.speech,
+                            fullSpeech = c.speech
+                        )
+                    }
                 } else {
                     com.example.personalaibot.automation.announceLongTaskCompletion(
                         title = "✅ ${c.title}",
@@ -1405,6 +1419,9 @@ class JarvisViewModel(
 
     private var liveSessionJob: kotlinx.coroutines.Job? = null
 
+    /** คิวเสียงไมค์แบบ bounded — กัน launch-per-chunk สะสมจนเสียงส่งช้า (เคยวัดได้เสียงตกค้าง 48 วิ 2026-08-18) */
+    private var liveMicChannel: kotlinx.coroutines.channels.Channel<String>? = null
+
     fun startVoiceInput() {
         if (_isListening.value) return
         _isListening.value = true
@@ -1435,6 +1452,21 @@ class JarvisViewModel(
                 launch {
                     logDebug("JARVIS_VM", "Connecting Live session (with memory context)...")
                     orchestrator.startLiveVoiceSessionWithMemory(coreContext, historySnapshot)
+                }
+
+                // 3b. ถ้า READY ช้ากว่า 2.5 วิ (เช่น gemini-3.1-flash-live-preview ใช้ 7–15 วิ)
+                // แจ้งสถานะในแชทให้ผู้ใช้รู้ว่ายังเชื่อมต่อไม่เสร็จ — เสียงที่พูดช่วงนี้ถูก buffer ไว้แล้ว ไม่หาย
+                launch {
+                    kotlinx.coroutines.delay(2500)
+                    if (orchestrator.liveConnectionState.value !is com.example.personalaibot.data.ConnectionState.Connected && _isListening.value) {
+                        withContext(Dispatchers.Main) {
+                            _messages.value = _messages.value + Message(
+                                "model",
+                                "⏳ กำลังเชื่อมต่อ Live session… เมื่อ AI ทักกลับมาแปลว่าพร้อมแล้ว (เสียงที่พูดระหว่างนี้ถูกเก็บไว้ให้อัตโนมัติ)",
+                                isStatic = true
+                            )
+                        }
+                    }
                 }
 
                 // 4. Collect audio output -> speaker
@@ -1470,18 +1502,30 @@ class JarvisViewModel(
                 }
 
                 // 6. Start mic recording -> stream to Live model
+                // ใช้ Channel bounded + sender ตัวเดียว แทน launch-per-chunk —
+                // เดิมทุก chunk (~50/วิ) spawn coroutine ใหม่ ถ้า send ช้ากว่าจะสะสมเป็นพัน
+                // เสียงถึง server ช้าไปเรื่อยๆ (เคยวัดได้ 48 วิ) → ตอนนี้คิวเต็มให้ทิ้งตัวเก่าสุด เหลือล่าสุดเสมอ
                 logDebug("JARVIS_VM", "Microphone starting...")
+                val micChannel = kotlinx.coroutines.channels.Channel<String>(capacity = 50) // ~1 วินาที
+                liveMicChannel = micChannel
+                launch(Dispatchers.IO) {
+                    for (chunk in micChannel) {
+                        orchestrator.sendLiveAudioChunk(chunk)
+                    }
+                }
                 var frameCount = 0
+                var droppedOld = 0
                 pcmAudioEngine.startRecording { bytes ->
                     if (!_isMuted.value) {
                         frameCount++
-                        // SILENCED: Heavy log
-                        // if (frameCount % 50 == 0) {
-                        //    logDebug("JARVIS_VM", "🎤 Transmitting audio chunk #$frameCount (${bytes.size} bytes)")
-                        // }
+                        if (frameCount % 250 == 0) {
+                            logDebug("JARVIS_VM", "🎤 Mic streaming alive (frame #$frameCount, droppedOld=$droppedOld)")
+                        }
                         val base64 = bytes.encodeBase64()
-                        viewModelScope.launch(Dispatchers.IO) {
-                            orchestrator.sendLiveAudioChunk(base64)
+                        if (micChannel.trySend(base64).isFailure) {
+                            micChannel.tryReceive() // คิวเต็ม = ส่งไม่ทัน → ทิ้งเสียงเก่าสุด เก็บเสียงล่าสุด
+                            droppedOld++
+                            micChannel.trySend(base64)
                         }
                     }
                 }
@@ -1499,6 +1543,8 @@ class JarvisViewModel(
         _isListening.value = false
         _isMuted.value = false
         pcmAudioEngine.stopRecording()
+        liveMicChannel?.close()
+        liveMicChannel = null
         liveSessionJob?.cancel()
         liveSessionJob = null
         viewModelScope.launch(Dispatchers.IO) {

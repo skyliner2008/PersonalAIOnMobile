@@ -597,6 +597,9 @@ class JarvisOrchestrator(
     suspend fun sendLiveAudioChunk(base64Pcm: String) =
         liveService.sendAudioChunk(base64Pcm)
 
+    /** สถานะการเชื่อมต่อ Live session — ใช้แสดง "กำลังเชื่อมต่อ…" ในแชทกันเคส 3.1 READY ช้า 7–15 วิ */
+    val liveConnectionState: StateFlow<com.example.personalaibot.data.ConnectionState> = liveService.connectionState
+
     /** ส่งข้อความแทรกเข้า Live session (trigger turn ใหม่ เช่นหลังเปลี่ยนเสียง/เปิดกล้อง) */
     suspend fun sendLiveClientText(text: String) = liveService.sendClientText(text)
 

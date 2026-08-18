@@ -179,7 +179,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
 
         val strategies = (edges.map { strategyName(signalKindOf(it.label)) } +
             smcNew.map { smcStrategyName(it.strategy) }).joinToString(" + ")
-        val reasons = (edges.map { reasonFor(signalKindOf(it.label), it.side) } +
+        val reasons = (edges.map { reasonFor(signalKindOf(it.label), it.side, tunedEntry[signalKindOf(it.label)]) } +
             smcNew.flatMap { it.triggers }).joinToString(" ; ")
 
         logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)}")
@@ -249,11 +249,11 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
 
     internal fun strategyName(kind: String): String = when (kind) {
         "MOM" -> "Time-Series Momentum"
-        "TR" -> "Trend Following (EMA50/200)"
+        "TR" -> "Trend Following (EMA Cross)"
         "REV" -> "Short-Term Reversal"
         "DC" -> "Donchian Breakout"
         "52H" -> "52W High Proximity"
-        "E" -> "EMA 14/60 Cross"
+        "E" -> "EMA Cross (fast/slow)"
         "UT" -> "UT Bot"
         "3BR" -> "3-Bar Reversal"
         "SMC" -> "SMC (MT5 Engine)"
@@ -271,16 +271,16 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         else -> strategy
     }
 
-    private fun reasonFor(kind: String, side: String): String {
+    private fun reasonFor(kind: String, side: String, ep: com.example.personalaibot.automation.backtest.EntryParams? = null): String {
         val up = side == "BUY"
         return when (kind) {
-            "MOM" -> if (up) "ROC 20 แท่งพลิกจากลบเป็นบวก (โมเมนตัมเปลี่ยนขึ้น)" else "ROC 20 แท่งพลิกจากบวกเป็นลบ (โมเมนตัมเปลี่ยนลง)"
-            "TR" -> if (up) "EMA50 ตัดขึ้นเหนือ EMA200 (Golden Cross)" else "EMA50 ตัดลงใต้ EMA200 (Death Cross)"
-            "REV" -> if (up) "RSI ต่ำกว่า 30 + ราคาแตะ Bollinger Lower (ขายมากเกิน คาดเด้ง)" else "RSI สูงกว่า 70 + ราคาแตะ Bollinger Upper (ซื้อมากเกิน คาดย่อ)"
-            "DC" -> if (up) "ราคาปิดทะลุ High 20 แท่ง (breakout ขึ้น)" else "ราคาปิดหลุด Low 20 แท่ง (breakout ลง)"
-            "52H" -> if (up) "ราคาเข้าใกล้จุดสูงสุดสะสม (≥98% — momentum แรงต่อเนื่อง)" else "ราคาหลุด 90% จากจุดสูงสุดสะสม (โมเมนตัมเสีย)"
-            "E" -> if (up) "EMA14 ตัดขึ้นเหนือ EMA60 พร้อมแท่งยืนยัน" else "EMA14 ตัดลงใต้ EMA60 พร้อมแท่งยืนยัน"
-            "UT" -> if (up) "ราคาปิดเหนือ UT Bot trailing stop (ATR6×2) — flip เป็นขาขึ้น" else "ราคาปิดใต้ UT Bot trailing stop (ATR6×2) — flip เป็นขาลง"
+            "MOM" -> if (up) "ROC ${ep?.momLookback ?: 20} แท่งพลิกจากลบเป็นบวก (โมเมนตัมเปลี่ยนขึ้น)" else "ROC ${ep?.momLookback ?: 20} แท่งพลิกจากบวกเป็นลบ (โมเมนตัมเปลี่ยนลง)"
+            "TR" -> if (up) "EMA${ep?.trFast ?: 50} ตัดขึ้นเหนือ EMA${ep?.trSlow ?: 200} (Golden Cross)" else "EMA${ep?.trFast ?: 50} ตัดลงใต้ EMA${ep?.trSlow ?: 200} (Death Cross)"
+            "REV" -> if (up) "RSI ต่ำกว่า ${(ep?.revRsiLow ?: 30.0).toInt()} + ราคาแตะ Bollinger Lower (ขายมากเกิน คาดเด้ง)" else "RSI สูงกว่า ${(ep?.revRsiHigh ?: 70.0).toInt()} + ราคาแตะ Bollinger Upper (ซื้อมากเกิน คาดย่อ)"
+            "DC" -> if (up) "ราคาปิดทะลุ High ${ep?.dcPeriod ?: 20} แท่ง (breakout ขึ้น)" else "ราคาปิดหลุด Low ${ep?.dcPeriod ?: 20} แท่ง (breakout ลง)"
+            "52H" -> if (up) "ราคาเข้าใกล้จุดสูงสุดสะสม (≥${((ep?.w52ProxBuy ?: 0.98) * 100).toInt()}% — momentum แรงต่อเนื่อง)" else "ราคาหลุด ${((ep?.w52ProxSell ?: 0.90) * 100).toInt()}% จากจุดสูงสุดสะสม (โมเมนตัมเสีย)"
+            "E" -> if (up) "EMA${ep?.eFast ?: 14} ตัดขึ้นเหนือ EMA${ep?.eSlow ?: 60} พร้อมแท่งยืนยัน" else "EMA${ep?.eFast ?: 14} ตัดลงใต้ EMA${ep?.eSlow ?: 60} พร้อมแท่งยืนยัน"
+            "UT" -> if (up) "ราคาปิดเหนือ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาขึ้น" else "ราคาปิดใต้ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาลง"
             "3BR" -> if (up) "รูปแบบ 3-Bar Reversal ขาขึ้น (แท่ง 3 กลืนกิน high แท่งแรก)" else "รูปแบบ 3-Bar Reversal ขาลง (แท่ง 3 กลืนกิน low แท่งแรก)"
             "MIX" -> if (up) "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งขึ้น (confluence หลายระบบ)" else "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งลง (confluence หลายระบบ)"
             else -> "สัญญาณ $kind $side"

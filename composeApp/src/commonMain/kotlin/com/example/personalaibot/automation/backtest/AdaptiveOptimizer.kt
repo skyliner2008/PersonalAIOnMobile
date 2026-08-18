@@ -141,12 +141,15 @@ object AdaptiveOptimizer {
         val best = evaluated.filter { it.score > -999.0 }.maxByOrNull { it.adj }
 
         // ── 4) บันทึกกลับเข้าความจำ (baseline + top-5 ที่วัดได้) ──
+        // ไม่บันทึก trial ที่ score=-999 (ไม้ไม่พอ/วัดไม่ได้) — ขยะในความจำทำ direction learning เพี้ยน
         if (mgr != null) {
-            mgr.saveOptimizationTrial(
-                symbol, interval, kind, baselineParams.slMult, baselineParams.tpMult,
-                baselineScore, baselineRes?.expectancyR, baselineRes?.profitFactor,
-                baselineRes?.totalTrades, 0.0, applied = false, source = "baseline"
-            )
+            if (baselineScore > -999.0) {
+                mgr.saveOptimizationTrial(
+                    symbol, interval, kind, baselineParams.slMult, baselineParams.tpMult,
+                    baselineScore, baselineRes?.expectancyR, baselineRes?.profitFactor,
+                    baselineRes?.totalTrades, 0.0, applied = false, source = "baseline"
+                )
+            }
             evaluated.filter { it.score > -999.0 }.sortedByDescending { it.score }.take(5).forEach { c ->
                 mgr.saveOptimizationTrial(
                     symbol, interval, kind, c.p.slMult, c.p.tpMult, c.score,
@@ -167,7 +170,10 @@ object AdaptiveOptimizer {
             bestTrades = br?.totalTrades ?: 0, bestWinRate = br?.winRate ?: 0.0,
             bestProfitFactor = br?.profitFactor ?: 0.0, bestSharpe = br?.sharpe ?: 0.0,
             bestExpectancyR = br?.expectancyR ?: 0.0, bestMaxDdPct = br?.maxDrawdownPct ?: 0.0,
-            improved = best != null && baselineScore > -999.0 && best.score > baselineScore * 1.02 && abs(best.score - baselineScore) > 1e-9,
+            // improved: ใช้ additive margin แทน ×1.02 — เดิม baseline ติดลบ (เช่น -0.05) จะ × 1.02 = -0.051
+            // ทำ threshold "ต่ำลง" → ค่าแย่กว่าเดิมนิดหน่อยกลับผ่านเกณฑ์ improved ได้
+            improved = best != null && baselineScore > -999.0 &&
+                best.score > baselineScore + maxOf(0.02 * abs(baselineScore), 0.005),
             candidatesTried = evaluated.size,
             directionInsight = insightOf(),
             learnedFromTrials = learnedN
