@@ -600,15 +600,16 @@ object TradingToolDefinitions {
                 |ใช้เมื่อผู้ใช้ถาม: "ลอง evolve กลยุทธ์", "ให้ AI ปรับจูนกลยุทธ์เอง", "วิวัฒนาการกลยุทธ์", "ปรับ params ตามสภาพตลาด"
                 |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เอง ห้ามสรุปผลจาก tool result นี้
                 |apply=on = บันทึก params สุดท้ายเข้าระบบจริง (เฉพาะเมื่อผลวิวัฒน์ดีกว่าเดิม)
-                |⭐ เมื่อผู้ใช้สั่ง "บันทึก params" / "เอาผล evolution ไปใช้" / "apply ผลที่วิวัฒน์" → เรียก tool นี้อีกครั้งพร้อม apply=on เท่านั้น (ห้ามใช้ remember_fact แทน เพราะ remember_fact ไม่ได้ apply params เข้าระบบจริง)""".trimMargin(),
+                |🚫 ห้ามตั้ง apply=on อัตโนมัติหลังงาน evolve เสร็จ และห้ามเรียกซ้ำเพื่อ apply จากผลของ tool เอง — ใช้ apply=on เฉพาะเมื่อผู้ใช้สั่ง "บันทึก params" / "เอาผล evolution ไปใช้" / "apply ผลที่วิวัฒน์" อย่างชัดเจนเท่านั้น
+                |⭐ ถ้าผู้ใช้ยังไม่ได้สั่งบันทึก ให้ใช้ apply=off และรอคำสั่งใหม่ (ห้ามใช้ remember_fact แทน เพราะ remember_fact ไม่ได้ apply params เข้าระบบจริง)""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe (default 1h)",
-                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+                        description = "Timeframe (default 1h). ใช้ all เพียงครั้งเดียวเมื่อต้องการวิวัฒน์ครบ 15m/1h/4h — ห้ามเรียก tool แยกทีละ TF สำหรับคำสั่งเดียวกัน",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "all")
                     ),
                     "strategy" to ParameterProperty(
                         type = "STRING",

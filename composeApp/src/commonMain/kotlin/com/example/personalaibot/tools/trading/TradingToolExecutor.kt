@@ -39,6 +39,15 @@ import com.example.personalaibot.automation.backtest.EntryParams
  */
 class TradingToolExecutor(private val client: HttpClient, private val geminiService: GeminiService) {
 
+    companion object {
+        /**
+         * เกณฑ์ "คุ้ม" ขั้นต่ำของ evolve apply gate: expectancy ต้องดีกว่าเดิมอย่างน้อยเท่านี้ (หน่วย R)
+         * ค่า +0.01R~+0.04R บนไม้ ~100 ตัวอยู่ในระดับ noise สถิติ — ผู้ใช้ตัดสินหลายรอบว่าไม่คุ้มเซฟ
+         * 0.05R = ถ้าเสี่ยงไม้ละ 1% ของพอร์ต gain นี้คือ +0.05% ต่อไม้ ซึ่งเริ่มมีนัยทางปฏิบัติ
+         */
+        private const val MIN_EVOLVE_GAIN_R = 0.05
+    }
+
     private val api = TradingApiService(client)
     private val smcExecutor = SmcToolExecutor(client)
     private val advancedEngine = AdvancedTradingEngine(SmcApiService(client))
@@ -231,6 +240,35 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         return@withContext text to speech
     }
 
+    /**
+     * Dataset fingerprint สำหรับพิสูจน์ reproducibility (Evolution Audit 2026-08-20):
+     * สองรันที่ใช้ข้อมูลชุดเดียวกันต้องได้ tag เดียวกันเป๊ะ — ถ้า tag ต่างกัน แปลว่า
+     * dataset ขยับ (cache 2 ชม. หมดอายุแล้ว refetch หน้าต่างใหม่) → ผลสองรันนั้น
+     * เทียบกันตรงๆ ไม่ได้ ไม่ใช่เพราะ strategy/params เปลี่ยน
+     */
+    private fun datasetTag(candles: List<com.example.personalaibot.tools.trading.Candle>): String {
+        if (candles.isEmpty()) return "DS#empty"
+        var h = -3750763034362895579L  // FNV-1a 64 offset basis (วนครบตาม Long overflow)
+        fun mix(v: Long) { h = (h xor v) * 1099511628211L }
+        mix(candles.size.toLong())
+        // sample กระจายทั่วทั้งชุด — เร็ว แต่จับความต่างได้ทั้งหน้าต่างเวลาและราคา
+        val step = (candles.size / 64).coerceAtLeast(1)
+        var i = 0
+        while (i < candles.size) {
+            val c = candles[i]
+            mix(c.timestamp)
+            mix((c.close * 100).toLong())
+            i += step
+        }
+        val hex = h.toULong().toString(16).takeLast(8)
+        fun f(ms: Long): String {
+            val l = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+                .toLocalDateTime(kotlinx.datetime.TimeZone.UTC)
+            return "%02d/%02d %02d:%02d".format(l.dayOfMonth, l.monthNumber, l.hour, l.minute)
+        }
+        return "DS#$hex · ${candles.size} แท่ง · ${f(candles.first().timestamp)} → ${f(candles.last().timestamp)} UTC"
+    }
+
     /** รัน backtest 1 TF — คืน (ข้อความผลลัพธ์, BacktestResult?, error?) */
     private suspend fun runBacktestOne(
         symbol: String, interval: String, strategy: String, costsOn: Boolean,
@@ -313,7 +351,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         // บันทึกผลลัพธ์ละเอียดลง logcat ให้ตรวจสอบความถูกต้องของตัวเลขได้ (ไม่ต้องเปิดแชท)
         logDebug("Backtest", buildString {
             appendLine("═══ ผล Backtest $symbol/$interval (strategy=$strategy) ═══")
-            appendLine("ข้อมูล: ${result.bars} แท่ง ts ${result.fromTs}→${result.toTs} | source=${result.source} | ต้นทุน=${if (costsOn) "on" else "off"}")
+            appendLine("ข้อมูล: ${result.bars} แท่ง ts ${result.fromTs}→${result.toTs} | source=${result.source} | ต้นทุน=${if (costsOn) "on" else "off"} | ${datasetTag(candles)}")
             appendLine("ไม้=${result.totalTrades} (ข้าม ${result.skippedSignals}) | W/L/T=${result.wins}/${result.losses}/${result.timeouts}")
             appendLine("Win%=${"%.1f".format(result.winRate * 100)} PF=${"%.2f".format(result.profitFactor)} Exp=${"%+.2f".format(result.expectancyR)}R สุทธิ=${"%+.1f".format(result.totalReturnPct)}% MaxDD=-${"%.1f".format(result.maxDrawdownPct)}% Sharpe=${"%.2f".format(result.sharpe)}")
             result.perStrategy.forEach { s ->
@@ -345,10 +383,10 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             }
             logDebug("JarvisVM", "💾 StrategyHealth saved: ${result.perStrategy.size} kinds ($symbol/$interval)")
         }
-        return Triple(formatBacktestResult(result) + buildRegimeSection(result, candles), result, null)
+        return Triple(formatBacktestResult(result, datasetTag(candles)) + buildRegimeSection(result, candles), result, null)
     }
 
-    private fun formatBacktestResult(r: com.example.personalaibot.automation.backtest.BacktestResult): String {
+    private fun formatBacktestResult(r: com.example.personalaibot.automation.backtest.BacktestResult, dataset: String = ""): String {
         fun fmt(v: Double) = if (kotlin.math.abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
         fun fmtTime(ms: Long): String {
             val l = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
@@ -360,6 +398,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         return buildString {
             appendLine("📈 **Backtest — ${r.symbol} ${r.interval}** (${r.bars} แท่ง)")
             appendLine("ข้อมูล: ${fmtTime(r.fromTs)} → ${fmtTime(r.toTs)} UTC จาก ${r.source} | ต้นทุน: ${if (r.config.includeCosts) "เปิด (spread ${r.config.spreadPrice}, commission ${r.config.commissionPct * 100}%/ข้าง)" else "ปิด"}")
+            if (dataset.isNotEmpty()) appendLine("🧷 dataset: `$dataset` — รันอื่นที่ tag ตรงกันนี้ใช้ข้อมูลชุดเดียวกันเป๊ะ (เทียบผลได้ตรง)")
             appendLine("เงื่อนไข: ทุน $${"%,.0f".format(r.config.initialBalance)} เสี่ยง ${r.config.riskPerTradePct * 100}%/ไม้ เลเวอเรจ ≤${r.config.maxLeverage.toInt()}x ถือทีละ 1 ไม้ เข้าที่ปิดแท่งสัญญาณ")
             appendLine()
             appendLine("**ภาพรวม**")
@@ -540,6 +579,7 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
 
         val sb = StringBuilder()
         sb.appendLine("🧬 **Adaptive Optimize — $symbol $interval** (${candles.size} แท่ง, ${fetched.source}) [scope=$scope]")
+        sb.appendLine("🧷 dataset: `${datasetTag(candles)}`")
         sb.appendLine("${if (scope != "sltp") "entry grid (จุดเข้า) → " else ""}grid + mutation รอบค่าปัจจุบัน/ประวัติ → walk-forward 5 splits → permutation → Monte Carlo | 🧠 เรียนรู้จากประวัติการจูน + auto-apply เมื่อดีกว่า${if (dryRun) " (dry-run: ไม่บันทึก)" else ""}")
         sb.appendLine()
 
@@ -618,13 +658,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                         (bestTail!!.expectancyR < baseTail!!.expectancyR || bestTail.profitFactor < 1.0)
                     val entrySaved = !dryRun && entryImproved && !entryBlocked && mgr != null
                     if (entrySaved) {
-                        mgr!!.saveEntryTuning(
+                        if (mgr!!.saveEntryTuning(
                             symbol, interval, kind, EntryParams.serialize(kind, bestEntry),
                             score = bestScore, expectancyR = bestRun!!.expectancyR,
                             profitFactor = bestRun.profitFactor, trades = bestRun.totalTrades,
                             grade = null, source = "entry-optimize"
-                        )
-                        applied++
+                        )) applied++
                     }
                     // ค่าที่เคยจูนไว้ (savedEntry) ยังใช้ต่อใน scope=both แม้รอบนี้ไม่เจอค่าที่ดีกว่า
                     activeEntry = when {
@@ -704,11 +743,10 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val saved = !dryRun && adaptive.improved && overfit.grade != "overfit" &&
                 adaptive.bestProfitFactor >= 1.0 && adaptive.bestTrades >= 10 && blockReasons.isEmpty() && mgr != null
             if (saved) {
-                mgr!!.saveStrategyTuning(
+                if (mgr!!.saveStrategyTuning(
                     symbol, interval, kind, bestParams.slMult, bestParams.tpMult,
                     score = overfit.overfittingPct, grade = overfit.grade, source = "adaptive"
-                )
-                applied++
+                )) applied++
             }
 
             sb.appendLine("### $name ($kind)")
@@ -826,11 +864,12 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
         val engine = com.example.personalaibot.automation.backtest.BacktestEngine()
         val kindOf = { label: String -> com.example.personalaibot.automation.signalKindOf(label) }
         val nameOf = { k: String -> signalAlertProvider.strategyName(k) }
-        val evo = com.example.personalaibot.automation.backtest.BacktestEvolution(geminiService)
+        val evo = com.example.personalaibot.automation.backtest.BacktestEvolution()
         val mgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
 
         val sb = StringBuilder()
         sb.appendLine("🧬 **Backtest Evolution — $symbol $interval** (${candles.size} แท่ง, 8 ช่วง)")
+        sb.appendLine("🧷 dataset: `${datasetTag(candles)}` — เทียบกับรันอื่นได้ก็ต่อเมื่อ tag ตรงกัน")
         sb.appendLine("AI สะท้อนผลทีละช่วง ปรับ ≤10%/รอบ หนีค่าเริ่มต้นไม่เกิน ±30%")
         sb.appendLine()
 
@@ -867,14 +906,18 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                     symbol, interval, kind,
                     slMult = t.toSl, tpMult = t.toTp, score = t.totalR,
                     expectancyR = t.avgR, profitFactor = t.profitFactor, trades = t.trades,
-                    deltaVsBaseline = t.deltaVsBaseline, applied = false, source = "evolve"
+                    // causal delta (เทียบ params รอบก่อนบน segment เดียวกัน) มีให้ใช้ตั้งแต่ 2026-08-19
+                    // — ถ้าไม่มี (รอบแรก) ค่อย fallback เป็น delta เทียบ initial แบบเดิม
+                    deltaVsBaseline = t.deltaVsPrev ?: t.deltaVsBaseline, applied = false, source = "evolve"
                 )
             }
             mgr?.pruneOptimizationTrials(symbol, interval, kind)
 
             // ── FIX: Apply gate วัดบนข้อมูลเต็มทั้งชุด ไม่ใช่ผลรวม walk-forward ที่ noise ครอบงำ ──
             // เดิม: saved = gain > 0 (เปรียบเทียบเส้นทาง adaptive บน 8 segments ที่รอบละ 2-10 ไม้ → ฟลุ๊คเซฟค่าแย่)
-            // ใหม่: finalParams ต้องรัน full backtest แล้วชนะ initial ทั้ง expectancy และ PF≥1 และไม้ ≥ 10
+            // ใหม่: finalParams ต้องรัน full backtest แล้วชนะ initial แบบ "คุ้ม" — expectancy ต้องดีกว่า
+            // แบบมีนัยสำคัญ (≥ +0.05R) ไม่ใช่แค่ +0.01R ที่อยู่ในระดับ noise สถิติของไม้ ~100 ตัว
+            // (ผู้ใช้ตัดสินเองหลายรอบว่า "ดีขึ้นนิดเดียว ไม่คุ้มเซฟ" → เข้ารหัสดุลยพินิจนั้นลง gate เลย)
             fun fullRun(p: com.example.personalaibot.automation.backtest.TpSlParams) = runCatching {
                 engine.run(
                     symbol = symbol, interval = interval, source = "",
@@ -888,12 +931,16 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
             val fullInit = fullRun(result.initialParams)
             val fullFinal = fullRun(result.finalParams)
             val fullOk = fullInit != null && fullFinal != null
-            val fullBetter = fullOk &&
-                fullFinal!!.expectancyR > fullInit!!.expectancyR &&
-                fullFinal.profitFactor >= 1.0 &&
-                fullFinal.totalTrades >= 10
-            // Holdout 30% ท้าย (2026-08-18): fullRun เป็น in-sample (evolve เลือก params จากข้อมูลชุดเดียวกัน)
-            // → เช็กซ้ำว่า params สุดท้ายยังไม่แพ้ค่าเดิมในช่วงท้ายก่อน apply จริง
+            // แยกเงื่อนไขทีละข้อ เพื่อบอกเหตุผลที่บล็อกได้ตรง (เดิมรวมเป็น "ไม่ชนะ"
+            // ทั้งที่ expectancy/PF ดีขึ้นแต่โดน DD บล็อก — ผู้ใช้อ่านแล้วเข้าใจผิด)
+            val condExpectancy = fullOk && fullFinal!!.expectancyR >= fullInit!!.expectancyR + MIN_EVOLVE_GAIN_R
+            val condPf = fullOk && fullFinal!!.profitFactor >= 1.0
+            val condTrades = fullOk && fullFinal!!.totalTrades >= 10
+            // ไม่แลก expectancy ที่ดีขึ้นกับ drawdown ที่แย่ลงอย่างมีนัยสำคัญ
+            val condDd = fullOk && fullFinal!!.maxDrawdownPct <= fullInit!!.maxDrawdownPct + 1.0
+            val fullBetter = condExpectancy && condPf && condTrades && condDd
+            // Holdout 30% ท้าย: แยก validation ออกจากข้อมูลที่ใช้ evolve ให้ชัดเจน
+            // และใช้เกณฑ์ "ดีกว่าเดิม" จริง ไม่ใช่แค่ "ไม่แย่ลง" ก่อนบันทึก params
             val tailStart = (candles.size * 0.7).toInt()
             fun tailRun(p: com.example.personalaibot.automation.backtest.TpSlParams) = runCatching {
                 engine.run(
@@ -906,26 +953,41 @@ class TradingToolExecutor(private val client: HttpClient, private val geminiServ
                     startIndex = tailStart
                 )
             }.getOrNull()
-            val tailInit = if (fullBetter && applyOn) tailRun(result.initialParams) else null
-            val tailFinal = if (fullBetter && applyOn) tailRun(result.finalParams) else null
-            val tailEvidence = tailInit != null && tailFinal != null && tailFinal.totalTrades >= 5
-            val tailBlocked = applyOn && fullBetter && tailEvidence &&
-                (tailFinal!!.expectancyR < tailInit!!.expectancyR || tailFinal.profitFactor < 1.0)
-            val saved = applyOn && mgr != null && fullBetter && !tailBlocked
+            val tailInit = if (fullBetter) tailRun(result.initialParams) else null
+            val tailFinal = if (fullBetter) tailRun(result.finalParams) else null
+            val tailEvidence = tailInit != null && tailFinal != null &&
+                tailInit.totalTrades >= 10 && tailFinal.totalTrades >= 10
+            val tailBetter = tailEvidence &&
+                tailFinal!!.expectancyR >= tailInit!!.expectancyR &&
+                tailFinal.profitFactor >= tailInit.profitFactor &&
+                tailFinal.maxDrawdownPct <= tailInit.maxDrawdownPct + 1.0
+            val tailBlocked = fullBetter && !tailBetter
+            val saved = applyOn && mgr != null && fullBetter && tailBetter
             if (saved) {
-                mgr!!.saveStrategyTuning(
+                if (mgr!!.saveStrategyTuning(
                     symbol, interval, kind, result.finalParams.slMult, result.finalParams.tpMult,
                     score = (fullFinal!!.expectancyR - fullInit!!.expectancyR), grade = "evolved", source = "evolve"
-                )
-                applied++
+                )) applied++
             }
 
             val gain = result.evolvedTotalR - result.baselineTotalR
             sb.appendLine("### $name ($kind)")
-            sb.appendLine("params: ${result.initialParams.slMult}/${result.initialParams.tpMult}${if (baseParams != null) " (ต่อจาก tuning ล่าสุด)" else " (ค่า default)"} → **${result.finalParams.slMult}/${result.finalParams.tpMult}** | รวมR เดิม ${"%+.2f".format(result.baselineTotalR)} → วิวัฒน์ **${"%+.2f".format(result.evolvedTotalR)}** (${if (gain > 0) "📈 ดีขึ้น" else if (gain < 0) "📉 แย่ลง" else "➖ เท่าเดิม"} ${"%+.2f".format(gain)}R)${if (result.usedAiReflection) " | 🤖 ใช้ AI reflection" else " | 📏 ใช้กฎ heuristic"}")
+            sb.appendLine("params: ${result.initialParams.slMult}/${result.initialParams.tpMult}${if (baseParams != null) " (ต่อจาก tuning ล่าสุด)" else " (ค่า default)"} → **${result.finalParams.slMult}/${result.finalParams.tpMult}** | adaptive walk-forward R เดิม ${"%+.2f".format(result.baselineTotalR)} → วิวัฒน์ **${"%+.2f".format(result.evolvedTotalR)}** (${if (gain > 0) "📈" else if (gain < 0) "📉" else "➖"} ${"%+.2f".format(gain)}R — ใช้เป็นหลักฐานประกอบเท่านั้น; การตัดสิน apply ใช้ full + holdout validation)${if (result.usedAiReflection) " | 🤖 ใช้ AI reflection" else " | 📏 ใช้กฎ heuristic"})")
             // แสดงผล validation บนข้อมูลเต็มเสมอ — ผู้ใช้จะได้เห็นว่า apply หรือไม่เพราะอะไร
             if (fullOk) {
-                sb.appendLine("🔎 ผลเต็ม ${candles.size} แท่ง: เดิม PF ${"%.2f".format(fullInit!!.profitFactor)} avgR ${"%+.2f".format(fullInit.expectancyR)} → ใหม่ PF ${"%.2f".format(fullFinal!!.profitFactor)} avgR ${"%+.2f".format(fullFinal.expectancyR)} ไม้ ${fullFinal.totalTrades} → ${if (saved) "💾 APPLY" else if (tailBlocked) "🚫 ไม่ apply (holdout 30% ท้าย: ใหม่ avgR ${"%+.2f".format(tailFinal?.expectancyR ?: 0.0)} vs เดิม ${"%+.2f".format(tailInit?.expectancyR ?: 0.0)})" else if (!fullBetter) "⛔ ไม่ apply (ใหม่ไม่ชนะบนข้อมูลเต็ม)" else "🚫 dry-run"}")
+                // เหตุผลที่บล็อกแบบแยกข้อ — กันข้อความ "ไม่ชนะ" กว้างเกินจนเข้าใจผิด
+                val blockParts = mutableListOf<String>()
+                if (!condExpectancy) blockParts += "expectancy ดีขึ้นไม่ถึงเกณฑ์คุ้ม (${"%+.2f".format(fullFinal!!.expectancyR - fullInit!!.expectancyR)}R < +${"%.2f".format(MIN_EVOLVE_GAIN_R)}R)"
+                if (!condPf) blockParts += "PF ${"%.2f".format(fullFinal!!.profitFactor)} < 1.0"
+                if (!condTrades) blockParts += "ไม้น้อยเกิน (${fullFinal!!.totalTrades} < 10)"
+                if (!condDd) blockParts += "MaxDD แย่ลงเกิน +1% (${"%.1f".format(fullInit!!.maxDrawdownPct)}% → ${"%.1f".format(fullFinal!!.maxDrawdownPct)}%)"
+                // holdout: ถ้าไม้ไม่พอ (<10) ต้องบอกตรงๆ — เดิมพิมพ์ avgR +0.00 PF 0.00 ซึ่งดูเหมือนบั๊ก
+                val tailNote = if (!tailEvidence) {
+                    "holdout 30% มีไม้ไม่พอประเมิน (เดิม ${tailInit?.totalTrades ?: 0} ไม้ / ใหม่ ${tailFinal?.totalTrades ?: 0} ไม้ ต้องการ ≥10) → ไม่เสี่ยงเซฟ"
+                } else {
+                    "holdout 30% ไม่ยืนยัน: ใหม่ avgR ${"%+.2f".format(tailFinal?.expectancyR ?: 0.0)} PF ${"%.2f".format(tailFinal?.profitFactor ?: 0.0)} DD ${"%.1f".format(tailFinal?.maxDrawdownPct ?: 0.0)}% vs เดิม avgR ${"%+.2f".format(tailInit?.expectancyR ?: 0.0)} PF ${"%.2f".format(tailInit?.profitFactor ?: 0.0)} DD ${"%.1f".format(tailInit?.maxDrawdownPct ?: 0.0)}%"
+                }
+                sb.appendLine("🔎 ผลเต็ม ${candles.size} แท่ง: เดิม PF ${"%.2f".format(fullInit!!.profitFactor)} avgR ${"%+.2f".format(fullInit.expectancyR)} DD ${"%.1f".format(fullInit.maxDrawdownPct)}% → ใหม่ PF ${"%.2f".format(fullFinal!!.profitFactor)} avgR ${"%+.2f".format(fullFinal.expectancyR)} DD ${"%.1f".format(fullFinal.maxDrawdownPct)}% ไม้ ${fullFinal.totalTrades} → ${if (saved) "💾 APPLY" else if (tailBlocked) "🚫 ไม่ apply ($tailNote)" else if (!fullBetter) "⛔ ไม่ apply — ${blockParts.joinToString("; ")}" else "🚫 dry-run"}")
             }
             sb.appendLine("| รอบ | params | ไม้ | Win% | avgR | สะท้อนผล |")
             sb.appendLine("|---|---|---|---|---|---|")

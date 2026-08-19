@@ -248,16 +248,18 @@ class AutomationManager(private val database: JarvisDatabase) {
     fun saveStrategyTuning(
         symbol: String, interval: String, kind: String,
         slMult: Double, tpMult: Double, score: Double?, grade: String?, source: String
-    ) {
-        try {
+    ): Boolean {
+        return try {
             database.jarvisDatabaseQueries.upsertStrategyTuning(
                 symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
                 sl_mult = slMult, tp_mult = tpMult, score = score, grade = grade, source = source,
                 updated_at = Clock.System.now().toEpochMilliseconds()
             )
             logDebug("AutomationManager", "Tuning saved: $symbol/$interval/$kind sl=$slMult tp=$tpMult ($grade, $source)")
+            true
         } catch (e: Exception) {
             logError("AutomationManager", "saveStrategyTuning failed: ${e.message}", e)
+            false
         }
     }
 
@@ -278,8 +280,8 @@ class AutomationManager(private val database: JarvisDatabase) {
         symbol: String, interval: String, kind: String, paramsJson: String,
         score: Double?, expectancyR: Double?, profitFactor: Double?, trades: Int?,
         grade: String?, source: String
-    ) {
-        try {
+    ): Boolean {
+        return try {
             database.jarvisDatabaseQueries.upsertEntryTuning(
                 symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
                 params_json = paramsJson, score = score, expectancy_r = expectancyR,
@@ -287,8 +289,10 @@ class AutomationManager(private val database: JarvisDatabase) {
                 updated_at = Clock.System.now().toEpochMilliseconds()
             )
             logDebug("AutomationManager", "EntryTuning saved: $symbol/$interval/$kind $paramsJson ($grade, $source)")
+            true
         } catch (e: Exception) {
             logError("AutomationManager", "saveEntryTuning failed: ${e.message}", e)
+            false
         }
     }
 
@@ -378,19 +382,37 @@ class AutomationManager(private val database: JarvisDatabase) {
                 .executeAsList()
         } catch (_: Exception) { emptyList() }
 
+    /** ระดับสุขภาพกลยุทธ์จาก backtest ล่าสุด (2026-08-19 — ยกระดับจาก PF-only boolean) */
+    enum class StrategyGateLevel { UNKNOWN, BLOCK, WEAK, NORMAL, STRONG }
+
     /**
-     * Per-TF Strategy Gate: true = บล็อก (ห้ามยิง alert)
-     * บล็อกเมื่อมีข้อมูล backtest ล่าสุด และไม้พอประเมิน (≥ minTrades) และ PF < minPf
-     * ไม่มีข้อมูล = ผ่าน (อย่าบล็อกกลยุทธ์ที่ยังไม่เคย backtest)
+     * Tiered Strategy Gate — ประเมินหลายมิติจาก StrategyHealth (PF, avgR, winRate, trades)
+     *   UNKNOWN → ข้อมูลไม่พอ (ยังไม่เคย backtest / ไม้น้อย) — ผ่าน
+     *   BLOCK   → แพ้ระบบชัดเจน (PF < 1.0 หรือ expectancy ≤ 0) — ห้ามยิง alert
+     *   WEAK    → ผ่านแบบหวุดหวิด (PF < 1.25 หรือ avgR < 0.1R หรือ winRate < 35%) — ยิงได้แต่ติดป้ายเตือน
+     *   STRONG  → แข็งแรง (PF ≥ 1.8, avgR ≥ 0.25R, winRate ≥ 40%, ไม้ ≥ 20)
+     *   NORMAL  → อยู่ระหว่างกลาง
      */
-    fun isStrategyGated(symbol: String, interval: String, kind: String, minPf: Double = 1.0, minTrades: Int = 5): Boolean {
+    fun strategyGateLevel(symbol: String, interval: String, kind: String, minTrades: Int = 5): StrategyGateLevel {
         val h = try {
             database.jarvisDatabaseQueries
                 .getStrategyHealth(symbol.uppercase(), interval.lowercase(), kind)
                 .executeAsOneOrNull()
-        } catch (_: Exception) { null } ?: return false
-        return h.trades >= minTrades && h.profit_factor < minPf
+        } catch (_: Exception) { null } ?: return StrategyGateLevel.UNKNOWN
+        if (h.trades < minTrades) return StrategyGateLevel.UNKNOWN
+        if (h.profit_factor < 1.0 || h.avg_r <= 0) return StrategyGateLevel.BLOCK
+        if (h.profit_factor >= 1.8 && h.avg_r >= 0.25 && h.win_rate >= 0.40 && h.trades >= 20) return StrategyGateLevel.STRONG
+        if (h.profit_factor < 1.25 || h.avg_r < 0.1 || h.win_rate < 0.35) return StrategyGateLevel.WEAK
+        return StrategyGateLevel.NORMAL
     }
+
+    /**
+     * Per-TF Strategy Gate: true = บล็อก (ห้ามยิง alert)
+     * บล็อกเฉพาะระดับ BLOCK (แพ้ระบบชัดเจน) — WEAK ยังยิงได้แต่ caller ควรติดป้ายเตือน
+     * ไม่มีข้อมูล = ผ่าน (อย่าบล็อกกลยุทธ์ที่ยังไม่เคย backtest)
+     */
+    fun isStrategyGated(symbol: String, interval: String, kind: String, minPf: Double = 1.0, minTrades: Int = 5): Boolean =
+        strategyGateLevel(symbol, interval, kind, minTrades) == StrategyGateLevel.BLOCK
 
     // ─── Mix Strategy config (เก็บใน CoreMemory key mixcfg|SYMBOL|TF = "tsmom,trend,dc|3") ───
 

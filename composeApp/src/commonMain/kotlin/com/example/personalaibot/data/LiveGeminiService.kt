@@ -41,7 +41,34 @@ data class LiveSetup(
     // — ถ้าไม่ส่ง แชทใน Live mode จะไม่มีข้อความและไม่มีอะไรเก็บลง DB
     @SerialName("output_audio_transcription") val outputAudioTranscription: JsonObject? = null,
     @SerialName("input_audio_transcription") val inputAudioTranscription: JsonObject? = null,
+    @SerialName("realtime_input_config") val realtimeInputConfig: LiveRealtimeInputConfig? = null,
+    @SerialName("session_resumption") val sessionResumption: LiveSessionResumptionConfig? = null,
+    @SerialName("context_window_compression") val contextWindowCompression: LiveContextWindowCompressionConfig? = null,
     val tools: List<GeminiTool>? = null
+)
+
+@Serializable
+data class LiveRealtimeInputConfig(
+    @SerialName("automatic_activity_detection") val automaticActivityDetection: LiveAutomaticActivityDetection? = null
+)
+
+@Serializable
+data class LiveAutomaticActivityDetection(
+    val disabled: Boolean = false,
+    @SerialName("start_of_speech_sensitivity") val startOfSpeechSensitivity: String? = null,
+    @SerialName("end_of_speech_sensitivity") val endOfSpeechSensitivity: String? = null,
+    @SerialName("prefix_padding_ms") val prefixPaddingMs: Int? = null,
+    @SerialName("silence_duration_ms") val silenceDurationMs: Int? = null
+)
+
+@Serializable
+data class LiveSessionResumptionConfig(
+    val handle: String? = null
+)
+
+@Serializable
+data class LiveContextWindowCompressionConfig(
+    val slidingWindow: JsonObject = JsonObject(emptyMap())
 )
 
 @Serializable
@@ -143,7 +170,20 @@ data class LiveServerMessage(
     @SerialName("serverContent") val serverContent: LiveServerContent? = null,
     @SerialName("setupComplete") val setupComplete: JsonObject? = null,
     @SerialName("toolCall") val toolCall: LiveToolCallWrapper? = null,
+    @SerialName("goAway") val goAway: LiveGoAway? = null,
+    @SerialName("sessionResumptionUpdate") val sessionResumptionUpdate: LiveSessionResumptionUpdate? = null,
     val error: LiveError? = null
+)
+
+@Serializable
+data class LiveGoAway(
+    @SerialName("timeLeft") val timeLeft: JsonElement? = null
+)
+
+@Serializable
+data class LiveSessionResumptionUpdate(
+    val newHandle: String? = null,
+    val resumable: Boolean? = null
 )
 
 @Serializable
@@ -279,6 +319,23 @@ class LiveGeminiService(
     private val maxRetries: Int = 3,
     private val baseRetryDelayMs: Long = 1000L
 ) {
+
+    // Small protocol guard: the server's setupComplete frame can race with the MIC sender.
+    // Do not send the first realtime PCM frame in the same scheduling slice as setupComplete.
+    // Dropping a few hundred ms is preferable to sending an out-of-phase frame that can close
+    // the Live session with NOT_CONSISTENT / INVALID_ARGUMENT.
+    private var realtimeInputReadyAtMs: Long = 0L
+    private val realtimeInputReadyGraceMs: Long = 250L
+    // Live-specific credential/model rotation. The normal GeminiService fallback chain
+    // is request/response based and cannot be reused directly for a persistent WebSocket.
+    private var liveApiKeys: List<String> = listOf(apiKey).filter { it.isNotBlank() }
+    private var liveModelChain: List<String> = listOf(
+        liveModelName,
+        "gemini-2.5-flash-native-audio-preview-12-2025"
+    ).map { it.removePrefix("models/") }.distinct()
+    private var liveKeyIndex: Int = 0
+    private var liveModelIndex: Int = 0
+    private val triedLiveCredentials = mutableSetOf<String>()
     private var webSocketSession: DefaultWebSocketSession? = null
     private var isSetupComplete = false
 
@@ -330,6 +387,10 @@ class LiveGeminiService(
     // นับ bytes เสียงต่อ turn — ใช้ตรวจ turn ที่ model ตอบเป็น text ล้วน (ไม่มีเสียง)
     private var audioBytesThisTurn: Int = 0
 
+    // VAD/user barge-in cancels the current generation. Never send its partial text to TTS.
+    // Otherwise the cancelled TTS can overlap with the next Live generation.
+    private var turnWasInterrupted: Boolean = false
+
     /** เรียกเมื่อ server แจ้ง generation ถูกขัดจังหวะ (VAD/user barge-in) — ฝั่ง playback ต้อง flush คิวเสียงค้างทันที (ตาม Live API guide) */
     var onInterrupted: (() -> Unit)? = null
 
@@ -342,8 +403,13 @@ class LiveGeminiService(
     // เก็บ chunk ไว้ใน ring buffer แล้ว flush ทันทีที่ setupComplete
     private val preReadyAudioBuffer = ArrayDeque<String>()
     private val preReadyMutex = kotlinx.coroutines.sync.Mutex()
-    private val maxPreReadyChunks = 250 // ~5 วินาที (chunk ~20ms @16kHz)
+    private val maxPreReadyChunks = 400 // ~8–16 วินาที ขึ้นกับ AudioRecord buffer size/device
     private var droppedPreReadyChunks = 0
+
+    // Live API session resumption: keeps the conversation alive across periodic WebSocket resets.
+    private var sessionResumptionHandle: String? = null
+    private var goAwayReceived = false
+    private var connectionStartedAtMs: Long = 0L
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
@@ -358,6 +424,67 @@ class LiveGeminiService(
         apiKey = newApiKey
         liveModelName = newModelName.removePrefix("models/")
         selectedVoiceName = voiceName
+        if (liveApiKeys.isEmpty() || !liveApiKeys.contains(newApiKey)) {
+            liveApiKeys = listOf(newApiKey).filter { it.isNotBlank() } + liveApiKeys.filter { it != newApiKey }
+        }
+        if (liveModelChain.isEmpty() || !liveModelChain.contains(liveModelName)) {
+            liveModelChain = listOf(liveModelName) + liveModelChain.filter { it != liveModelName }
+        }
+        liveKeyIndex = liveApiKeys.indexOf(newApiKey).coerceAtLeast(0)
+        liveModelIndex = liveModelChain.indexOf(liveModelName).coerceAtLeast(0)
+    }
+
+    /** Configure the complete Gemini key pool used by Live quota rotation. */
+    fun updateLiveApiKeys(keys: List<String>) {
+        val normalized = keys.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (normalized.isEmpty()) return
+        liveApiKeys = normalized
+        liveKeyIndex = normalized.indexOf(apiKey).takeIf { it >= 0 } ?: 0
+        apiKey = liveApiKeys[liveKeyIndex]
+    }
+
+    /** Configure only models that are actually Live-capable. */
+    fun updateLiveModelChain(models: List<String>) {
+        val normalized = models.map { it.trim().removePrefix("models/") }
+            .filter { it.isNotBlank() }.distinct()
+        if (normalized.isEmpty()) return
+        liveModelChain = normalized
+        liveModelIndex = normalized.indexOf(liveModelName).takeIf { it >= 0 } ?: 0
+        liveModelName = liveModelChain[liveModelIndex]
+    }
+
+    /**
+     * Move to the next credential/model exactly once per quota failure.
+     * A rotated key starts a fresh WebSocket; session-resumption handles are tied to
+     * the previous session and must not be replayed across a different credential.
+     */
+    private fun rotateLiveCredentialOnQuota(): Boolean {
+        val total = liveApiKeys.size * liveModelChain.size
+        if (total <= 1) return false
+
+        // Mark the credential/model that just failed before searching for another pair.
+        triedLiveCredentials += "${liveKeyIndex}:$liveModelIndex"
+
+        repeat(total) {
+            liveKeyIndex = (liveKeyIndex + 1) % liveApiKeys.size
+            if (liveKeyIndex == 0) {
+                liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+            }
+            val candidate = "${liveKeyIndex}:$liveModelIndex"
+            if (candidate !in triedLiveCredentials) {
+                apiKey = liveApiKeys[liveKeyIndex]
+                liveModelName = liveModelChain[liveModelIndex]
+                // A resumption handle belongs to the old credential/session. Start fresh.
+                sessionResumptionHandle = null
+                logDebug(
+                    "LiveGemini",
+                    "🔄 Live quota → rotate credential ${liveKeyIndex + 1}/${liveApiKeys.size} + model=$liveModelName"
+                )
+                return true
+            }
+        }
+        logError("LiveGemini", "🛑 Live quota exhausted across all configured key/model combinations")
+        return false
     }
 
     suspend fun connectAndListen(tools: GeminiTool? = null, historyContext: String = "", coreContext: String = "") {
@@ -370,10 +497,15 @@ class LiveGeminiService(
         val url = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey"
 
         userRequestedDisconnect = false
+        triedLiveCredentials.clear()
+        // Start a fresh retry budget for this user-initiated Live session.
+        liveKeyIndex = liveApiKeys.indexOf(apiKey).takeIf { it >= 0 } ?: 0
+        liveModelIndex = liveModelChain.indexOf(liveModelName).takeIf { it >= 0 } ?: 0
         var attempt = 0
         while (attempt <= maxRetries) {
             isSetupComplete = false
             sessionWasReady = false
+            goAwayReceived = false
 
             if (attempt == 0) {
                 _connectionState.value = ConnectionState.Connecting
@@ -387,7 +519,9 @@ class LiveGeminiService(
             }
 
             logDebug("LiveGemini", "Connecting to Live API with model: $liveModelName (attempt ${attempt + 1})")
+            connectionStartedAtMs = System.currentTimeMillis()
 
+            var terminalCloseReason: String? = null
             try {
                 client.webSocket(url) {
                     webSocketSession = this
@@ -399,6 +533,25 @@ class LiveGeminiService(
                             model = fullModel,
                             outputAudioTranscription = JsonObject(emptyMap()),
                             inputAudioTranscription = JsonObject(emptyMap()),
+                            realtimeInputConfig = LiveRealtimeInputConfig(
+                                automaticActivityDetection = LiveAutomaticActivityDetection(
+                                    disabled = false,
+                                    startOfSpeechSensitivity = "START_SENSITIVITY_HIGH",
+                                    endOfSpeechSensitivity = "END_SENSITIVITY_HIGH",
+                                    prefixPaddingMs = 80,
+                                    silenceDurationMs = 500
+                                )
+                            ),
+                            // Resume the same Live conversation only after a reconnect.
+                            // The first connection uses an empty config to avoid protocol ambiguity.
+                            sessionResumption = sessionResumptionHandle
+                                ?.takeIf { attempt > 0 && it.isNotBlank() }
+                                ?.let { LiveSessionResumptionConfig(handle = it) },
+                            // Keep compression disabled until a valid non-empty configuration is supplied.
+                            contextWindowCompression = null,
+                            // TEMPORARILY disabled for Gemini 3.1 Live stability.
+                            // Repeated NOT_CONSISTENT closes were observed immediately after READY.
+                            // Resume/compression will be reintroduced only after isolated validation.
                             systemInstruction = LiveSystemInstruction(
                                 parts = listOf(
                                     LivePart(text = LIVE_SYSTEM_PROMPT),
@@ -432,12 +585,53 @@ class LiveGeminiService(
                         }
                         // logDebug("LiveGemini", "⬇ RAW FRAME: $text")
                         handleServerFrame(text)
+                        if (goAwayReceived) {
+                            // Google explicitly expects the client to close after GoAway; waiting for
+                            // the server aborts the socket and produces VIOLATED_POLICY in practice.
+                            logDebug("LiveGemini", "🛑 GoAway received — closing current WebSocket cleanly for session resumption")
+                            close(CloseReason(CloseReason.Codes.NORMAL, "GoAway handled; reconnect with session resumption"))
+                            break
+                        }
                     }
 
                     val reason = closeReason.await()
-                    logDebug("LiveGemini", "Session closed: ${reason?.knownReason} — ${reason?.message}")
+                    val reasonText = "${reason?.knownReason} — ${reason?.message}"
+                    logDebug("LiveGemini", "Session closed: $reasonText")
+                    val normalizedReason = reasonText.lowercase()
+                    val isTerminalApiError =
+                        normalizedReason.contains("not_consistent") ||
+                        normalizedReason.contains("invalid argument") ||
+                        normalizedReason.contains("invalid_argument") ||
+                        normalizedReason.contains("exceeded your current quota") ||
+                        normalizedReason.contains("quota exceeded") ||
+                        (normalizedReason.contains("quota") && normalizedReason.contains("internal_error"))
+                    val isQuotaError =
+                        normalizedReason.contains("exceeded your current quota") ||
+                        normalizedReason.contains("quota exceeded") ||
+                        (normalizedReason.contains("quota") && normalizedReason.contains("internal_error"))
+                    if (isTerminalApiError && !isQuotaError) {
+                        terminalCloseReason = reasonText
+                    } else if (isQuotaError) {
+                        terminalCloseReason = reasonText
+                    }
                 }
                 if (userRequestedDisconnect) break
+                if (terminalCloseReason != null) {
+                    val normalizedTerminal = terminalCloseReason!!.lowercase()
+                    val quotaError =
+                        normalizedTerminal.contains("exceeded your current quota") ||
+                        normalizedTerminal.contains("quota exceeded") ||
+                        (normalizedTerminal.contains("quota") && normalizedTerminal.contains("internal_error"))
+                    if (quotaError && rotateLiveCredentialOnQuota()) {
+                        // Do not count a quota rotation as a transient reconnect retry.
+                        // The next loop uses a different key/model and starts a fresh session.
+                        attempt = 0
+                        continue
+                    }
+                    _connectionState.value = ConnectionState.Error(terminalCloseReason!!)
+                    logError("LiveGemini", "🛑 Terminal Live API/session error: $terminalCloseReason")
+                    break
+                }
                 // Server-initiated close (GoAway / session duration limit ~10-15 นาทีของ Live API)
                 // เดิม break ทิ้ง → session ตายเงียบ ผู้ใช้ยังเปิด Live แต่ทุกข้อความส่งไม่ถึง
                 // (เคสจริง 2026-08-18: evolve เสร็จ 12:15 แต่ session ถูก server ปิด 12:11 → AI ไม่รายงานผล)
@@ -447,9 +641,6 @@ class LiveGeminiService(
                     break
                 }
                 logDebug("LiveGemini", "🔁 Server closed session (GoAway/timeout) — auto-reconnecting (attempt $attempt/$maxRetries)")
-                if (pendingGreetingOnReady == null) {
-                    pendingGreetingOnReady = "[SYSTEM] Live session เพิ่งขาดและเชื่อมต่อใหม่สำเร็จแล้ว โปรดพูดแจ้งผู้ใช้สั้นๆ 1 ประโยค (เช่น 'เชื่อมต่อใหม่แล้วค่ะ พร้อมคุยต่อครับ') ไม่ต้องทำงานอื่นต่อ"
-                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
@@ -489,36 +680,52 @@ class LiveGeminiService(
             val msg = json.decodeFromString<LiveServerMessage>(rawJson)
             // logDebug("LiveGemini", "⬇ Parsed from: $rawJson")
 
+            msg.sessionResumptionUpdate?.let { update ->
+                if (update.resumable == true && !update.newHandle.isNullOrBlank()) {
+                    sessionResumptionHandle = update.newHandle
+                    logDebug("LiveGemini", "♻️ Session resumption handle updated")
+                }
+            }
+
+            msg.goAway?.let { goAway ->
+                goAwayReceived = true
+                logDebug("LiveGemini", "⚠️ GoAway received from Live API (timeLeft=${goAway.timeLeft})")
+            }
+
             msg.error?.let {
                 logError("LiveGemini", "API Error: ${it.message}")
                 return
             }
 
             msg.setupComplete?.let {
-                logDebug("LiveGemini", "✅ Live session READY")
+                val readyLatencyMs = if (connectionStartedAtMs > 0L) {
+                    System.currentTimeMillis() - connectionStartedAtMs
+                } else 0L
+                logDebug("LiveGemini", "✅ Live session READY (${readyLatencyMs}ms)")
                 isSetupComplete = true
                 sessionWasReady = true
+                // Give the WebSocket a short scheduling window after setupComplete before
+                // accepting realtime PCM from the microphone. This prevents a cross-coroutine
+                // race where the first audio frame is emitted in the same scheduler slice as
+                // the setup acknowledgement and the server closes with NOT_CONSISTENT.
+                realtimeInputReadyAtMs = System.currentTimeMillis() + realtimeInputReadyGraceMs
                 _connectionState.value = ConnectionState.Connected
                 // Flush เสียงที่ผู้ใช้พูดระหว่างรอ READY (ไมค์เปิดก่อน session พร้อม)
-                val bufferedChunks = preReadyMutex.withLock {
-                    val chunks = preReadyAudioBuffer.toList()
+                val preReadyCount = preReadyMutex.withLock {
+                    val count = preReadyAudioBuffer.size
                     preReadyAudioBuffer.clear()
-                    chunks
+                    count
                 }
-                if (bufferedChunks.isNotEmpty() || droppedPreReadyChunks > 0) {
-                    logDebug("LiveGemini", "🎤 Flushing ${bufferedChunks.size} pre-READY audio chunks (dropped oldest=$droppedPreReadyChunks)")
-                    bufferedChunks.forEach { chunk -> sendAudioChunk(chunk) }
+                // Do not burst-flush audio captured before READY. The microphone remains active;
+                // fresh PCM after setup is safer than replaying stale frames in a tight burst.
+                if (preReadyCount > 0 || droppedPreReadyChunks > 0) {
+                    logDebug("LiveGemini", "🧹 Dropped $preReadyCount pre-READY audio chunks (dropped oldest=$droppedPreReadyChunks) — starting with fresh realtime PCM")
                 }
                 droppedPreReadyChunks = 0
-                // ถ้ามี greeting ค้างไว้ (เช่นหลังเปลี่ยนเสียง) ส่งทันทีที่ READY เพื่อให้ model พูดทักก่อน
-                pendingGreetingOnReady?.let { greeting ->
-                    pendingGreetingOnReady = null
-                    logDebug("LiveGemini", "🔔 Sending pending greeting on ready: ${greeting.take(60)}")
-                    scope.launch {
-                        kotlinx.coroutines.delay(800) // รอ audio pipeline นิ่งก่อน
-                        sendRealtimeText(greeting) // realtimeInput — trigger generation ได้แม้ audio streaming อยู่
-                    }
-                }
+                // Do not inject an automatic greeting into a fresh/reconnected audio stream.
+                // It can race with the first microphone turn and makes protocol failures harder to isolate.
+                // The user can speak immediately; normal model response will confirm the session.
+                pendingGreetingOnReady = null
                 return
             }
 
@@ -541,7 +748,10 @@ class LiveGeminiService(
                 // ต้อง flush คิวเสียงที่ค้างเล่นทันที ไม่งั้นเสียงเก่าเล่นต่อทับ turn ใหม่ (ตาม Live API guide)
                 if (content.interrupted == true) {
                     logDebug("LiveGemini", "⚡ Interrupted (VAD/user) — flushing playback queue")
+                    turnWasInterrupted = true
                     audioBytesThisTurn = 0
+                    pendingUserTurnText = null
+                    pendingModelTurnText = null
                     pendingModelTextParts = null
                     onInterrupted?.invoke()
                 }
@@ -579,9 +789,24 @@ class LiveGeminiService(
 
                 content.inputTranscription?.text?.let { text ->
                     if (text.isNotBlank()) {
+                        val isFirst = pendingUserTurnText == null
+                        if (isFirst) turnWasInterrupted = false
                         pendingUserTurnText = text
                         lastUserText = text
                         logDebug("LiveGemini", "🎤 User (Progress): $text")
+
+                        // Input transcription was previously only logged. That made the UI look
+                        // frozen until JARVIS answered. Expose the same progressive transcript to
+                        // the chat as an ephemeral user bubble; it is still persisted only at turnComplete.
+                        scope.launch {
+                            _textOutputFlow.emit(LiveTextUpdate(
+                                text = text,
+                                role = "user",
+                                append = false,
+                                replace = !isFirst,
+                                isStatic = false
+                            ))
+                        }
                     }
                 }
                 
@@ -612,7 +837,7 @@ class LiveGeminiService(
                     // ใช้ transcription เป็นหลัก ถ้าไม่มี (model ตอบ text ล้วน) ใช้ text parts แทน
                     val modelText = pendingModelTurnText ?: pendingModelTextParts
 
-                    if (modelText != null && audioBytesThisTurn == 0) {
+                    if (modelText != null && audioBytesThisTurn == 0 && !turnWasInterrupted) {
                         // Failure mode: turn นี้ไม่มีเสียงออกเลย (model ตอบเป็น text แทน audio)
                         // → ส่งต่อให้ TTS fallback (Android VoiceManager) พูดแทน ไม่ให้เงียบเฉย
                         logDebug("LiveGemini", "🔇 Turn Complete with NO AUDIO (${modelText.length} chars text-only) — ใช้ TTS fallback")
@@ -634,6 +859,7 @@ class LiveGeminiService(
                     pendingModelTurnText = null
                     pendingModelTextParts = null
                     audioBytesThisTurn = 0
+                    turnWasInterrupted = false
                 }
             }
         } catch (e: Exception) {
@@ -648,7 +874,12 @@ class LiveGeminiService(
 
     suspend fun sendAudioChunk(pcmBase64: String) {
         // ยังไม่ READY — เก็บเข้า ring buffer แทนที่จะทิ้งเงียบๆ (flush ตอน setupComplete)
-        if (!isSetupComplete) {
+        if (!isSetupComplete || System.currentTimeMillis() < realtimeInputReadyAtMs) {
+            // During the short post-READY protocol grace period, intentionally discard PCM.
+            // The microphone remains running and the next frame will be sent normally.
+            if (isSetupComplete && System.currentTimeMillis() < realtimeInputReadyAtMs) {
+                return
+            }
             preReadyMutex.withLock {
                 if (preReadyAudioBuffer.size >= maxPreReadyChunks) {
                     preReadyAudioBuffer.removeFirst()
@@ -729,6 +960,24 @@ class LiveGeminiService(
         return sent
     }
 
+    /**
+     * Deliver a long-running task result through Live even if the WebSocket is briefly
+     * reconnecting. This is deliberately different from the normal one-shot send:
+     * temporary reconnect is not a reason to fire the notification/TTS fallback.
+     */
+    suspend fun sendRealtimeTextWhenReady(text: String, timeoutMs: Long = 30_000L): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var delayMs = 250L
+        while (System.currentTimeMillis() < deadline) {
+            if (userRequestedDisconnect) return false
+            if (sendRealtimeText(text)) return true
+            delay(delayMs)
+            delayMs = (delayMs * 2).coerceAtMost(2_000L)
+        }
+        logDebug("LiveGemini", "⏳ Long-task result could not reach Live within ${timeoutMs}ms")
+        return false
+    }
+
     suspend fun sendNativeToolResponse(callId: String, toolName: String, result: String) {
         sendIfReady {
             val responseObj = buildJsonObject { put("result", result) }
@@ -765,6 +1014,12 @@ class LiveGeminiService(
             // logDebug("LiveGemini", "⬆ SENDING: $jsonStr")
             session.send(Frame.Text(jsonStr))
             return true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // The WebSocket/session can be cancelled while the MIC sender is still draining
+            // audio chunks (stop, GoAway, reconnect, or parent coroutine shutdown). This is
+            // expected lifecycle control, NOT a send/network error. Do not log one ERROR per
+            // PCM chunk — audio arrives continuously and would flood Logcat hundreds of times.
+            return false
         } catch (e: Exception) {
             logError("LiveGemini", "Send failed", e)
             return false

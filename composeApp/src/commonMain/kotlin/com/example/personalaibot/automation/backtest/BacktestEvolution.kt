@@ -1,7 +1,6 @@
 package com.example.personalaibot.automation.backtest
 
 import com.example.personalaibot.automation.SignalMarkerProvider
-import com.example.personalaibot.data.GeminiService
 import com.example.personalaibot.logDebug
 import com.example.personalaibot.tools.trading.Candle
 
@@ -15,10 +14,7 @@ import com.example.personalaibot.tools.trading.Candle
  *  - ปรับต่อรอบไม่เกิน ±10% (clampStep) และห้ามหนีค่าเริ่มต้นเกิน ±30% (clampDrift)
  *  - ห้ามนิ่งเกิน 3 รอบติด (บังคับปรับเล็กน้อย ≥2%)
  */
-class BacktestEvolution(private val gemini: GeminiService?) {
-
-    /** Circuit breaker: เมื่อเจอ quota/429 ให้หยุดเรียก AI สำหรับรอบที่เหลือของ run นั้น (กันยิงซ้ำรัวๆ จนเปลือง quota) */
-    private var aiQuotaDead = false
+class BacktestEvolution {
 
     data class RoundResult(
         val round: Int,
@@ -42,7 +38,13 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         val fromSl: Double, val fromTp: Double,
         val toSl: Double, val toTp: Double,
         val totalR: Double, val avgR: Double, val profitFactor: Double,
-        val trades: Int, val deltaVsBaseline: Double, val note: String
+        val trades: Int, val deltaVsBaseline: Double, val note: String,
+        /**
+         * causal delta ของ mutation รอบก่อน: params ปัจจุบัน vs params รอบก่อน บน segment เดียวกัน
+         * (แก้ปัญหาเดิมที่เทียบกับ initial ทุกรอบ → memory เรียนรู้ผิดทิศ เช่น B ดีกว่า A แต่แย่กว่า default ถูกบันทึกว่า "แย่")
+         * null = รอบแรก (ยังไม่มี mutation ก่อนหน้า)
+         */
+        val deltaVsPrev: Double? = null
     )
 
     data class EvolutionResult(
@@ -66,14 +68,17 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         strategyName: (String) -> String,
         segments: Int = 8,
         config: BacktestConfig = BacktestConfig(),
-        initialOverride: TpSlParams? = null,   // params ล่าสุดที่ optimize/apply ไว้ — ทำให้ evolution ต่อเนื่อง ไม่เริ่มจาก default ทุกครั้ง
-        memoryLines: List<String> = emptyList() // ประวัติการปรับย้อนหลัง (OptimizationTrial) — ให้ AI เรียนรู้จากผลการปรับตัวเอง
+        initialOverride: TpSlParams? = null,
+        memoryLines: List<String> = emptyList(),
+        trainingFraction: Double = 0.70
     ): EvolutionResult {
-        // ไม่ reset aiQuotaDead ที่นี่ — instance ถูกสร้างใหม่ทุก task (runEvolveTask) และ evolve() ถูกเรียกต่อกันหลายกลยุทธ์
-        // ถ้า quota ตายกลาง task ต้องคงสถานะข้ามกลยุทธ์ไว้ ไม่เช่นนั้นจะกลับไปยิง 429 ซ้ำทุกกลยุทธ์
         val n = candles.size
-        val segSize = n / segments
         val initial = initialOverride ?: TpSlParams.defaultsFor(kind)
+        val trainBars = (n * trainingFraction.coerceIn(0.60, 0.80)).toInt().coerceAtLeast(800)
+            .coerceAtMost(n)
+        val segSize = (trainBars / segments.coerceAtLeast(1)).coerceAtLeast(100)
+        val actualSegments = (trainBars / segSize).coerceAtLeast(1).coerceAtMost(segments)
+
         var params = initial
         val rounds = mutableListOf<RoundResult>()
         var usedAi = false
@@ -81,74 +86,178 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         var baselineTotalR = 0.0
         var evolvedTotalR = 0.0
         val trials = mutableListOf<ReflectionTrial>()
+        var prevParams: TpSlParams? = null
+        // Keep every accepted point. The last point of a walk is NOT necessarily the
+        // best point; returning the last mutation was a major source of regressions.
+        val visitedParams = linkedSetOf(initial)
+        var championParams = initial
+        var championFitness = Double.NEGATIVE_INFINITY
+        // Segment result cache: params เดิมมักถูกประเมินซ้ำหลายรอบ (rolling window โตขึ้นเรื่อยๆ)
+        // และ candidate fan ที่กว้างขึ้นก็แชร์ cache กันได้ — ต้นทุนหลักของ evolve คือ engine.run
+        // ผล deterministic ต่อ (params, segment) จึง cache ได้ปลอดภัย ไม่กระทบความถูกต้อง
+        val segCache = HashMap<Pair<TpSlParams, Int>, BacktestResult?>()
 
-        for (s in 0 until segments) {
-            val start = s * segSize
-            val end = if (s == segments - 1) n else (s + 1) * segSize
-            val segCandles = candles.subList(0, end) // ให้ indicator มีอดีต แต่เทรดเฉพาะช่วงนี้
+        fun runSegment(segment: Int, p: TpSlParams): BacktestResult? {
+            val start = segment * segSize
+            val end = if (segment == actualSegments - 1) trainBars else ((segment + 1) * segSize).coerceAtMost(trainBars)
+            if (start >= end || end > candles.size) return null
+            val segCandles = candles.subList(0, end)
             val segMarkers = markers.filter { m ->
-                val t = m.time
-                t >= segCandles[start].timestamp && t <= segCandles[end - 1].timestamp
+                m.time >= segCandles[start].timestamp && m.time <= segCandles[end - 1].timestamp
             }
-
-            fun runSeg(p: TpSlParams): BacktestResult? = runCatching {
+            return runCatching {
                 engine.run(
                     symbol = "", interval = "", source = "",
                     candles = segCandles, markers = segMarkers, kindFilter = setOf(kind),
                     kindOf = kindOf, strategyName = strategyName,
                     tpSl = { k, sd, c, i, a14, a6 -> parameterizedTpSl(k, sd, c, i, a14, a6, p) },
                     config = config,
-                    startIndex = start   // วัดผลเฉพาะช่วง segment (indicator warm จาก prefix อยู่แล้ว)
+                    startIndex = start
                 )
             }.getOrNull()
+        }
 
-            val baseline = runSeg(initial)
-            val evolved = runSeg(params)
+        fun runSeg(segment: Int, p: TpSlParams): BacktestResult? =
+            segCache.getOrPut(p to segment) { runSegment(segment, p) }
+
+        fun fitness(results: List<BacktestResult>): Double {
+            if (results.isEmpty()) return Double.NEGATIVE_INFINITY
+            val valid = results.filter { it.totalTrades > 0 }
+            if (valid.isEmpty()) return Double.NEGATIVE_INFINITY
+            val avgR = valid.map { it.expectancyR }.average()
+            val avgPf = valid.map { it.profitFactor.coerceIn(0.0, 5.0) }.average()
+            val avgDd = valid.map { it.maxDrawdownPct.coerceAtLeast(0.0) }.average()
+            val tradePenalty = valid.sumOf { it.totalTrades }.let { if (it < 10) 0.15 else 0.0 }
+            // Expectancy เป็นแกนหลัก; PF/Drawdown ใช้กันผลลัพธ์ที่ดีเพราะไม้ไม่กี่ไม้หรือ DD สูงเกินไป
+            return avgR + 0.08 * (avgPf - 1.0) - 0.008 * avgDd - tradePenalty
+        }
+
+        for (s in 0 until actualSegments) {
+            val baseline = runSeg(s, initial)
+            val evolved = runSeg(s, params)
             if (baseline != null) baselineTotalR += baseline.trades.sumOf { it.pnlR }
             if (evolved != null) evolvedTotalR += evolved.trades.sumOf { it.pnlR }
-
             val r = evolved ?: continue
+
             val slExits = r.trades.count { it.exitReason == "SL" }
-
-            // ── สะท้อนผล → params รอบถัดไป ──
-            val (nextParams, note, fromAi) = reflect(kind, s + 1, params, initial, r, slExits, noChangeStreak, memoryLines)
-            if (fromAi) usedAi = true
-            // RR floor: ห้ามผลลัพธ์สุดท้ายมี RR ต่ำกว่า 1.2 (กันเข็มทิศเสีย "ขยาย SL + หด TP" ที่ทำ evolved แพ้ระบบ 8/8 — forensics 2026-08-18)
-            val clamped = TpSlParams.enforceRrFloor(kind, TpSlParams.clampDrift(initial, TpSlParams.clampStep(params, nextParams)))
-            // นับ streak "นิ่ง" เฉพาะรอบที่มีไม้จริง — รอบ 0 ไม้ประเมินอะไรไม่ได้ ไม่ควรไปกระตุ้นปรับเล็กน้อย
-            noChangeStreak = if (clamped == params && r.totalTrades > 0) noChangeStreak + 1 else 0
-
-            // บันทึก trial (การปรับ → ผลที่ตามมา) — caller persist ลง OptimizationTrial เป็นความจำข้ามรัน
             val roundR = r.trades.sumOf { it.pnlR }
+            val prevRun = prevParams?.let { runSeg(s, it) }
+            val prevRoundR = prevRun?.trades?.sumOf { it.pnlR }
+            val deltaVsPrev = if (prevRoundR != null) roundR - prevRoundR else null
+
+            val (reflected, note, fromAi) = reflect(
+                kind, s + 1, params, initial, r, slExits, noChangeStreak, memoryLines
+            )
+            if (fromAi) usedAi = true
+
+            // Candidate search: ไม่พึ่งการเดาเพียงทิศทางเดียวของ heuristic.
+            // fan กว้างขึ้น (±5% / ±10% / joint moves) เพื่อกระโดดข้าม local plateau —
+            // ทุก candidate ยังผ่าน clampStep ±10%/รอบ และ clampDrift ±30% จาก initial เหมือนเดิม
+            // และต้องชนะ rolling validation เท่านั้นจึงถูกรับ (จำนวน candidate มากขึ้น ≠ เสี่ยงขึ้น)
+            val rawCandidates = listOf(
+                reflected,
+                params.copy(slMult = params.slMult * 0.95),
+                params.copy(slMult = params.slMult * 1.05),
+                params.copy(tpMult = params.tpMult * 0.95),
+                params.copy(tpMult = params.tpMult * 1.05),
+                params.copy(slMult = params.slMult * 0.90),
+                params.copy(slMult = params.slMult * 1.10),
+                params.copy(tpMult = params.tpMult * 0.90),
+                params.copy(tpMult = params.tpMult * 1.10),
+                params.copy(slMult = params.slMult * 0.95, tpMult = params.tpMult * 1.05),
+                params.copy(slMult = params.slMult * 1.05, tpMult = params.tpMult * 0.95)
+            )
+            val candidates = rawCandidates.map {
+                TpSlParams.enforceRrFloor(
+                    kind,
+                    TpSlParams.clampDrift(initial, TpSlParams.clampStep(params, it))
+                )
+            }.distinct()
+
+            val windowStart = 0
+            fun candidateFitness(p: TpSlParams): Double {
+                val rs = (windowStart..s).mapNotNull { runSeg(it, p) }
+                return fitness(rs)
+            }
+
+            val currentFitness = candidateFitness(params)
+            val bestCandidate = candidates
+                .map { it to candidateFitness(it) }
+                .maxByOrNull { it.second }
+            var accepted = params
+            var finalNote = note
+            if (bestCandidate != null && bestCandidate.second > currentFitness + 0.002) {
+                accepted = bestCandidate.first
+                finalNote = "$note → ✅ รับ candidate ที่ fitness ดีขึ้น ${"%.4f".format(currentFitness)} → ${"%.4f".format(bestCandidate.second)} (rolling ${windowStart + 1}..${s + 1})"
+                logDebug("BacktestEvolution", "Round ${s + 1} $kind: ACCEPT ${params.slMult}/${params.tpMult} → ${accepted.slMult}/${accepted.tpMult} fitness ${"%.4f".format(currentFitness)} → ${"%.4f".format(bestCandidate.second)}")
+            } else if (candidates.any { it != params }) {
+                finalNote = "$note → 🚫 reject candidates: ไม่มีตัวไหนชนะ rolling validation (fitness ${"%.4f".format(currentFitness)})"
+                logDebug("BacktestEvolution", "Round ${s + 1} $kind: REJECT candidates (best did not beat rolling fitness)")
+            }
+
+            noChangeStreak = if (accepted == params && r.totalTrades > 0) noChangeStreak + 1 else 0
+            visitedParams += accepted
+            // Track a rolling champion during the walk, but do not trust it blindly:
+            // all visited points are re-ranked on the complete training set below.
+            val acceptedFitness = candidateFitness(accepted)
+            if (acceptedFitness > championFitness) {
+                championFitness = acceptedFitness
+                championParams = accepted
+            }
             val baseR = baseline?.trades?.sumOf { it.pnlR }
             trials += ReflectionTrial(
                 round = s + 1,
                 fromSl = params.slMult, fromTp = params.tpMult,
-                toSl = clamped.slMult, toTp = clamped.tpMult,
+                toSl = accepted.slMult, toTp = accepted.tpMult,
                 totalR = roundR, avgR = r.expectancyR, profitFactor = r.profitFactor,
                 trades = r.totalTrades,
                 deltaVsBaseline = if (baseR != null) roundR - baseR else 0.0,
-                note = note
+                note = finalNote,
+                deltaVsPrev = deltaVsPrev
             )
 
             rounds += RoundResult(
                 round = s + 1,
-                bars = end - start,
+                bars = (if (s == actualSegments - 1) trainBars else ((s + 1) * segSize)) - (s * segSize),
                 params = params,
                 trades = r.totalTrades,
                 wins = r.wins, losses = r.losses, timeouts = r.timeouts,
                 winRate = r.winRate, avgR = r.expectancyR,
-                totalR = roundR,
-                profitFactor = r.profitFactor,
-                slExits = slExits,
-                reflection = note
+                totalR = roundR, profitFactor = r.profitFactor,
+                slExits = slExits, reflection = finalNote
             )
-            params = clamped
+            prevParams = params
+            params = accepted
         }
+
+        // Final selection is a stable training-set championship, not simply the last
+        // accepted mutation. This prevents a good parameter found in round 3 from being
+        // overwritten by a worse round-8 mutation.
+        fun trainingFitness(p: TpSlParams): Double = (0 until actualSegments)
+            .mapNotNull { runSeg(it, p) }
+            .let(::fitness)
+
+        var bestTrainFitness = trainingFitness(initial)
+        championParams = initial
+        for (p in visitedParams) {
+            val f = trainingFitness(p)
+            if (f > bestTrainFitness + 0.0005) {
+                bestTrainFitness = f
+                championParams = p
+            }
+        }
+        evolvedTotalR = (0 until actualSegments).sumOf { segment ->
+            runSeg(segment, championParams)?.trades?.sumOf { it.pnlR } ?: 0.0
+        }
+        logDebug(
+            "BacktestEvolution",
+            "FINAL CHAMPION $kind: ${championParams.slMult}/${championParams.tpMult} " +
+                "trainFitness=${"%.4f".format(bestTrainFitness)} visited=${visitedParams.size}"
+        )
 
         return EvolutionResult(
             kind = kind, segments = rounds.size,
-            initialParams = initial, finalParams = params,
+            initialParams = initial, finalParams = championParams,
             rounds = rounds,
             baselineTotalR = baselineTotalR, evolvedTotalR = evolvedTotalR,
             usedAiReflection = usedAi,
@@ -165,54 +274,82 @@ class BacktestEvolution(private val gemini: GeminiService?) {
         r: BacktestResult, slExits: Int, noChangeStreak: Int,
         memoryLines: List<String> = emptyList()
     ): Reflection {
-        // รอบที่ไม้น้อยเกิน ประเมินอะไรไม่ได้ (สถิติระดับ 1-4 ไม้คือ noise — การปรับตาม noise = เดินสุ่ม)
-        // เดิมกันแค่ 0 ไม้ → AI ถูกบังคับตอบบนสถิติที่ไม่มีนัยสำคัญทุกรอบ (forensics 2026-08-18)
+        // IMPORTANT: evolution เป็น inner-loop optimizer ไม่ควรเรียก Gemini Chat ทุก round.
+        // เดิม 8 rounds × หลาย strategy × หลาย concurrent TF ทำให้ free-tier Chat ถูกเผา
+        // ทั้งที่ Live session เป็นผู้ถือ context และ tool call อยู่แล้ว.
+        // ใช้ deterministic local reflection เป็น default: ไม่มี network, ไม่มี 429,
+        // latency ต่ำ และผล reproduce ได้จากข้อมูลชุดเดียวกัน.
         if (r.totalTrades < 5) {
-            return Reflection(current, "ไม้น้อยเกิน (${r.totalTrades} < 5) — noise ประเมินไม่ได้ → คง params (กฎ)", false)
+            return Reflection(
+                current,
+                "ไม้น้อยเกิน (${r.totalTrades} < 5) — noise ประเมินไม่ได้ → คง params (local)",
+                false
+            )
         }
-        val g = gemini
-        if (g != null && !aiQuotaDead) {
-            val curRr = if (current.slMult > 0) current.tpMult / current.slMult else 0.0
-            val prompt = buildString {
-                appendLine("คุณคือ quant ที่ปรับจูนกลยุทธ์เทรด '$kind' แบบ walk-forward evolution")
-                appendLine("กฎเหล็ก:")
-                appendLine("1) ปรับทีละนิด ≤±10% ต่อรอบ ห้ามหนีค่าเริ่มต้น ${initial.slMult}/${initial.tpMult} เกิน ±30%")
-                appendLine("2) ห้ามทำ RR (tp_mult/sl_mult) ต่ำกว่า 1.2 เด็ดขาด — winrate โดยทั่วไป ~40% ถ้า RR < 1.2 ระบบแพ้โดยโครงสร้าง แม้ winrate จะสูงขึ้น")
-                appendLine("3) ถ้า winRate สูงแต่ PF ต่ำ = RR ต่ำเกินไป → ห้ามลด TP ต่อ ให้ขยาย TP หรือหด SL แทน")
-                appendLine("4) SL-exits เยอะไม่ได้แปลว่า SL แคบเสมอไป — ถ้ารอบก่อนเพิ่งขยาย SL แล้วผลไม่ดีขึ้น ห้ามขยายซ้ำ ให้ลองหด SL หรือคงค่า")
-                appendLine("ผลรอบ $round: trades=${r.totalTrades} ชนะ=${r.wins} แพ้=${r.losses} ค้าง=${r.timeouts} SL-exits=$slExits winRate=${"%.1f".format(r.winRate * 100)}% avgR=${"%+.2f".format(r.expectancyR)} PF=${"%.2f".format(r.profitFactor)}")
-                appendLine("params ปัจจุบัน: sl_mult=${current.slMult}, tp_mult=${current.tpMult} (RR ปัจจุบัน=${"%.2f".format(curRr)})")
-                if (memoryLines.isNotEmpty()) {
-                    appendLine("ประวัติการปรับล่าสุดและผลที่ตามมา (เรียนรู้จากตรงนี้ — ทิศที่เคยปรับแล้วแย่ลง ห้ามทำซ้ำ):")
-                    memoryLines.forEach { appendLine("- $it") }
-                }
-                appendLine("ตอบเป็น JSON บรรทัดเดียวเท่านั้น ห้ามมีข้อความอื่น: {\"sl_mult\": <ตัวเลข>, \"tp_mult\": <ตัวเลข>, \"note\": \"<เหตุผลสั้นๆ ภาษาไทย>\"}")
-            }
-            val resp = runCatching {
-                g.generateResponse(prompt, timeoutMs = 25_000)
-            }.getOrNull().orEmpty()
-            val parsed = parseReflectionJson(resp)
-            // throttle ทุกครั้งหลังเรียก AI (ทั้งสำเร็จ/ล้มเหลว) — free tier จำกัด 15 RPM/key (≈4s/request)
-            // เดิม delay เฉพาะตอนสำเร็จและแค่ 400ms → burst ชนลิมิตทุก key ภายในไม่กี่วินาที (log 2026-08-18)
-            kotlinx.coroutines.delay(2_000)
-            if (parsed != null) {
-                // ปฏิเสธคำแนะนำที่ทำ RR ต่ำกว่า 1.2 (AI มักเบี่ยงไปขยาย SL/หด TP ทุกรอบ — forensics 2026-08-18)
-                val newRr = parsed.params.tpMult / parsed.params.slMult
-                if (newRr < 1.2 && curRr >= 1.2) {
-                    logDebug("BacktestEvolution", "❌ ปฏิเสธ AI reflection round $round ($kind): RR ใหม่ ${"%.2f".format(newRr)} < 1.2 — คง params เดิม")
-                    return Reflection(current, "AI เสนอ RR ${"%.2f".format(newRr)} ต่ำกว่าพื้น 1.2 → ปฏิเสธ คง params (กฎ RR)", false)
-                }
-                logDebug("BacktestEvolution", "AI reflection round $round ($kind): $resp")
-                return Reflection(parsed.params, parsed.note + " (AI)", true)
-            }
-            // ล้มเหลว: ถ้าเป็น quota/429 ให้ตัดวงจร — รอบที่เหลือของ run นี้ใช้กฎ heuristic หมด ไม่ยิงซ้ำ
-            val low = resp.lowercase()
-            if ("429" in resp || "quota" in low || "too many" in low || "rate" in low && "limit" in low) {
-                if (!aiQuotaDead) logDebug("BacktestEvolution", "⚠️ AI reflection quota หมด/ถูกจำกัด ($resp) — ปิด AI สำหรับ run นี้ ใช้กฎ heuristic ต่อ")
-                aiQuotaDead = true
-            }
+
+        val next = localAdaptiveAdjust(current, r, slExits, noChangeStreak)
+        val note = localAdaptiveNote(current, next, r, slExits, noChangeStreak)
+        return Reflection(next, note, false)
+    }
+
+    /**
+     * Local optimizer policy สำหรับ inner loop ของ evolution.
+     * ไม่เรียก network/LLM: proposal ถูกพิสูจน์ซ้ำด้วย hill-climbing ใน evolve()
+     * ก่อนรับจริง ดังนั้นการปรับ params จะไม่ทำให้ strategy drift เพียงเพราะ LLM ตีความ noise.
+     */
+    private fun localAdaptiveAdjust(
+        current: TpSlParams,
+        r: BacktestResult,
+        slExits: Int,
+        noChangeStreak: Int
+    ): TpSlParams {
+        if (r.totalTrades <= 0) return current
+
+        val decided = (r.wins + r.losses).coerceAtLeast(1)
+        val slRate = slExits.toDouble() / decided.toDouble()
+        val timeoutRate = r.timeouts.toDouble() / r.totalTrades.toDouble()
+        val rr = if (current.slMult > 0.0) current.tpMult / current.slMult else 0.0
+
+        // ให้ priority กับ risk structure ก่อน: RR ต่ำกว่า floor ให้แก้ด้วย TP ขึ้น
+        // หรือ SL ลงเล็กน้อย แทนการปล่อยให้ evolution ไหลไปทาง reward/risk ที่เสียเปรียบ.
+        if (rr < 1.20) {
+            return current.copy(tpMult = current.tpMult * 1.05)
         }
-        return Reflection(ruleBasedAdjust(current, r, slExits, noChangeStreak), ruleNote(r, slExits, noChangeStreak), false)
+
+        return when {
+            // SL ชนหนักจริง → ขยาย SL เล็กน้อย แต่ไม่เกิน step ที่ clampDrift บังคับ
+            slRate >= 0.70 -> current.copy(slMult = current.slMult * 1.05)
+            // timeout สูง → TP ไกลเกินไปสำหรับ regime นี้ ลดเล็กน้อย
+            timeoutRate >= 0.50 -> current.copy(tpMult = current.tpMult * 0.95)
+            // win-rate ดีแต่ expectancy/PF ยังไม่ดี → reward ยังไม่พอ
+            r.winRate >= 0.50 && r.profitFactor < 1.0 -> current.copy(tpMult = current.tpMult * 1.05)
+            // PF แข็งแรงแต่มี SL มากพอสมควร → อย่าขยายแรง; ทดสอบลด SL เล็กน้อย
+            r.profitFactor >= 1.20 && slRate >= 0.45 -> current.copy(slMult = current.slMult * 0.97)
+            // ไม่มี signal direction ชัดเจนหลายรอบ → mutation เล็กมากเพื่อค้นหา local optimum
+            noChangeStreak >= 3 -> current.copy(tpMult = current.tpMult * 1.02)
+            else -> current
+        }
+    }
+
+    private fun localAdaptiveNote(
+        current: TpSlParams,
+        next: TpSlParams,
+        r: BacktestResult,
+        slExits: Int,
+        noChangeStreak: Int
+    ): String {
+        if (next == current) return "local optimizer: โครงสร้างสุขภาพดี → คง params"
+        val rr = if (current.slMult > 0.0) current.tpMult / current.slMult else 0.0
+        val nextRr = if (next.slMult > 0.0) next.tpMult / next.slMult else 0.0
+        return when {
+            rr < 1.20 -> "local optimizer: RR ${"%.2f".format(rr)} ต่ำกว่า 1.20 → เพิ่ม TP 5%"
+            slExits.toDouble() / (r.wins + r.losses).coerceAtLeast(1) >= 0.70 -> "local optimizer: SL-exit สูง → ขยาย SL 5%"
+            r.timeouts.toDouble() / r.totalTrades >= 0.50 -> "local optimizer: timeout สูง → ลด TP 5%"
+            r.winRate >= 0.50 && r.profitFactor < 1.0 -> "local optimizer: win-rate ดีแต่ PF ต่ำ → เพิ่ม TP 5%"
+            r.profitFactor >= 1.20 -> "local optimizer: PF แข็งแรงแต่ SL สูง → ลด SL เล็กน้อย"
+            noChangeStreak >= 3 -> "local optimizer: plateau → สำรวจ TP +2%"
+            else -> "local optimizer: ปรับ ${current.slMult}/${current.tpMult} → ${next.slMult}/${next.tpMult}"
+        } + " (RR ใหม่ ${"%.2f".format(nextRr)})"
     }
 
     private data class Parsed(val params: TpSlParams, val note: String)

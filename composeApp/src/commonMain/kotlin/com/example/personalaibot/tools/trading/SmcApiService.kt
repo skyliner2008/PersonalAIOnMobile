@@ -143,9 +143,11 @@ class SmcApiService(private val client: HttpClient) {
         private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
 
         // Backtest dataset cache (ระดับ process — SmcApiService มีหลาย instance):
-        // ชุดแท่งเทียนย้อนหลัง 5,000 แท่งต่อ sym|interval เก็บไว้ 10 นาที กันดึงซ้ำตอนรัน backtest ต่อเนื่อง
+        // ชุดข้อมูล 5,000 แท่งต้องคง snapshot เดิมระหว่าง backtest → evolve → backtest
+        // เพื่อไม่ให้ ranking เปลี่ยนเพราะ rolling window เลื่อนระหว่างงาน evolution ที่ใช้เวลานาน
+        // 2 ชั่วโมงยังสดพอสำหรับงาน backtest แต่ยาวพอให้ long-task workflow ใช้ dataset เดียวกัน
         const val BACKTEST_BARS = 5000
-        private const val BACKTEST_CACHE_TTL_MS = 10 * 60 * 1000L
+        private const val BACKTEST_CACHE_TTL_MS = 2 * 60 * 60 * 1000L
         private val backtestCandleCache = mutableMapOf<String, Pair<Long, CandleFetchResult>>()
     }
 
@@ -424,7 +426,7 @@ class SmcApiService(private val client: HttpClient) {
         val key = "$sym|${interval.lowercase()}"
         backtestCandleCache[key]?.let { (cachedAt, cached) ->
             if (Clock.System.now().toEpochMilliseconds() - cachedAt < BACKTEST_CACHE_TTL_MS && cached.candles.isNotEmpty()) {
-                logDebug("SmcApiService", "Backtest cache hit $key: ${cached.candles.size} แท่ง (${cached.source})")
+                logDebug("SmcApiService", "Backtest cache hit $key: ${cached.candles.size} แท่ง (${cached.source}) ${cached.candles.first().timestamp} → ${cached.candles.last().timestamp} — REPRODUCIBLE SNAPSHOT")
                 return cached
             }
         }

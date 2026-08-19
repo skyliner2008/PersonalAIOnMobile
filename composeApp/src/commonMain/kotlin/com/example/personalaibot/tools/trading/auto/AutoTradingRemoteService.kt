@@ -16,6 +16,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -101,63 +104,71 @@ class AutoTradingRemoteService(
         )
     }
 
+    /**
+     * Builds the remote trading configuration as a typed JSON object.
+     *
+     * Security boundary: AI API keys are local-only credentials and MUST NOT be
+     * included in the remote trading configuration payload.
+     */
     private fun buildConfigPayload(config: AutoTradingEngine.Config): String {
-        fun listJson(items: List<String>) = items.joinToString(prefix = "[", postfix = "]") { "\"${it.replace("\"", "\\\"")}\"" }
-        fun setJson(items: Set<String>) = items.toList().joinToString(prefix = "[", postfix = "]") { "\"${it.replace("\"", "\\\"")}\"" }
-
-        return """
-            {
-              "watchlist": ${listJson(config.watchlist)},
-              "timeframe": "${config.timeframe}",
-              "tickIntervalMs": ${config.tickIntervalMs},
-              "manageIntervalMs": ${config.manageIntervalMs},
-              "learnIntervalMs": ${config.learnIntervalMs},
-              "minConfluence": ${config.minConfluence},
-              "minFitness": ${config.minFitness},
-              "minRRR": ${config.minRRR},
-              "enableLiveTrading": ${config.enableLiveTrading},
-              "enableAiMode": ${config.enableAiMode},
-              "preferredStrategies": ${setJson(config.preferredStrategies.map { it.name }.toSet())},
-              "symbolBlacklist": ${setJson(config.symbolBlacklist)},
-              "breakEvenTriggerR": ${config.breakEvenTriggerR},
-              "trailAfterR": ${config.trailAfterR},
-              "autoTune": ${config.autoTune},
-              "autoBlacklistAfterLosses": ${config.autoBlacklistAfterLosses},
-              "risk": {
-                "riskPerTradePct": ${config.risk.riskPerTradePct},
-                "maxTotalExposurePct": ${config.risk.maxTotalExposurePct},
-                "maxOpenPositions": ${config.risk.maxOpenPositions},
-                "maxDailyLossPct": ${config.risk.maxDailyLossPct},
-                "maxDrawdownPct": ${config.risk.maxDrawdownPct},
-                "minFreeMarginPct": ${config.risk.minFreeMarginPct},
-                "correlationCap": ${config.risk.correlationCap},
-                "minLotStep": ${config.risk.minLotStep},
-                "maxLot": ${config.risk.maxLot},
-                "minLot": ${config.risk.minLot},
-                "pointValueOverride": {${config.risk.pointValueOverride.entries.joinToString(",") { "\"${it.key}\":${it.value}" }}}
-              },
-              "strategy": {
-                "minRRR": ${config.strategy.minRRR},
-                "minConfluence": ${config.strategy.minConfluence},
-                "scalpingRRR": ${config.strategy.scalpingRRR},
-                "swingRRR": ${config.strategy.swingRRR},
-                "gridLegs": ${config.strategy.gridLegs},
-                "gridStepPct": ${config.strategy.gridStepPct},
-                "trailingAtrMult": ${config.strategy.trailingAtrMult},
-                "breakoutBufferPct": ${config.strategy.breakoutBufferPct}
-              },
-              "aiModel": "${config.aiModel}",
-              "apiKey": "${config.apiKey}",
-              "agentPrompt": "${config.agentPrompt.replace("\"", "\\\"").replace("\n", "\\n")}",
-              "preferFreeOnly": ${config.preferFreeOnly},
-              "notificationSettings": {
-                "onAnalysis": ${config.notificationSettings.onAnalysis},
-                "onOrder": ${config.notificationSettings.onOrder},
-                "onLoss": ${config.notificationSettings.onLoss},
-                "onClose": ${config.notificationSettings.onClose}
-              }
-            }
-        """.trimIndent()
+        val payload = buildJsonObject {
+            put("watchlist", buildJsonArray { config.watchlist.forEach { add(JsonPrimitive(it)) } })
+            put("timeframe", config.timeframe)
+            put("tickIntervalMs", config.tickIntervalMs)
+            put("manageIntervalMs", config.manageIntervalMs)
+            put("learnIntervalMs", config.learnIntervalMs)
+            put("minConfluence", config.minConfluence)
+            put("minFitness", config.minFitness)
+            put("minRRR", config.minRRR)
+            put("enableLiveTrading", config.enableLiveTrading)
+            put("enableAiMode", config.enableAiMode)
+            put("preferredStrategies", buildJsonArray {
+                config.preferredStrategies.forEach { add(JsonPrimitive(it.name)) }
+            })
+            put("symbolBlacklist", buildJsonArray {
+                config.symbolBlacklist.forEach { add(JsonPrimitive(it)) }
+            })
+            put("breakEvenTriggerR", config.breakEvenTriggerR)
+            put("trailAfterR", config.trailAfterR)
+            put("autoTune", config.autoTune)
+            put("autoBlacklistAfterLosses", config.autoBlacklistAfterLosses)
+            put("risk", buildJsonObject {
+                put("riskPerTradePct", config.risk.riskPerTradePct)
+                put("maxTotalExposurePct", config.risk.maxTotalExposurePct)
+                put("maxOpenPositions", config.risk.maxOpenPositions)
+                put("maxDailyLossPct", config.risk.maxDailyLossPct)
+                put("maxDrawdownPct", config.risk.maxDrawdownPct)
+                put("minFreeMarginPct", config.risk.minFreeMarginPct)
+                put("correlationCap", config.risk.correlationCap)
+                put("minLotStep", config.risk.minLotStep)
+                put("maxLot", config.risk.maxLot)
+                put("minLot", config.risk.minLot)
+                put("pointValueOverride", buildJsonObject {
+                    config.risk.pointValueOverride.forEach { (symbol, value) -> put(symbol, value) }
+                })
+            })
+            put("strategy", buildJsonObject {
+                put("minRRR", config.strategy.minRRR)
+                put("minConfluence", config.strategy.minConfluence)
+                put("scalpingRRR", config.strategy.scalpingRRR)
+                put("swingRRR", config.strategy.swingRRR)
+                put("gridLegs", config.strategy.gridLegs)
+                put("gridStepPct", config.strategy.gridStepPct)
+                put("trailingAtrMult", config.strategy.trailingAtrMult)
+                put("breakoutBufferPct", config.strategy.breakoutBufferPct)
+            })
+            put("aiModel", config.aiModel)
+            // apiKey intentionally omitted: it is a local-only secret.
+            put("agentPrompt", config.agentPrompt)
+            put("preferFreeOnly", config.preferFreeOnly)
+            put("notificationSettings", buildJsonObject {
+                put("onAnalysis", config.notificationSettings.onAnalysis)
+                put("onOrder", config.notificationSettings.onOrder)
+                put("onLoss", config.notificationSettings.onLoss)
+                put("onClose", config.notificationSettings.onClose)
+            })
+        }
+        return payload.toString()
     }
 
     private fun parseConfig(obj: JsonObject?): AutoTradingEngine.Config {
@@ -205,7 +216,8 @@ class AutoTradingRemoteService(
                 breakoutBufferPct = strategy.double("breakoutBufferPct", defaults.strategy.breakoutBufferPct)
             ),
             aiModel = obj.string("aiModel", defaults.aiModel),
-            apiKey = obj.string("apiKey", defaults.apiKey),
+            // API keys are intentionally not read from the remote service.
+            apiKey = defaults.apiKey,
             agentPrompt = obj.string("agentPrompt", defaults.agentPrompt),
             preferFreeOnly = obj.boolean("preferFreeOnly", defaults.preferFreeOnly),
             notificationSettings = run {

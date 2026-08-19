@@ -6,9 +6,21 @@ import kotlin.math.min
 
 /**
  * ParamOptimizer — grid search บน TpSlParams (port จาก OLD_Code backtest/optimizer.py)
- * composite score = Sharpe × ProfitFactor(cap 10) × WinRate, กรอง min trades
+ *
+ * Objective (ปรับ 2026-08-19 — เดิม Sharpe × PF(cap10) × WinRate ซึ่งไม่มี expectancy/DD
+ * และคูณปัจจัยที่ correlate กันซ้ำซ้อน ทำ optimizer เลือกผิดตัว):
+ *
+ *   hard constraints (ตกทันที): trades < minTrades | PF < 1.0 | expectancyR ≤ 0 | DD > 35%
+ *   score = expectancyR × pfWeight × sharpeWeight × ddPenalty × tradeConfidence
+ *
+ * expectancy เป็นตัวตั้ง (คำตอบตรงๆ ว่าไม้นึงได้กี่ R) ส่วน PF/Sharpe/DD/จำนวนไม้
+ * เป็นน้ำหนักประกอบ ไม่เอามาคูณแข่งกับ expectancy ตรงๆ
  */
 object ParamOptimizer {
+
+    /** hard constraint: กำไรสุทธิต้องมีจริง และ DD ต้องไม่ลึกเกินรับได้ */
+    const val HARD_MIN_PF = 1.0
+    const val HARD_MAX_DD_PCT = 35.0
 
     data class ComboResult(
         val params: TpSlParams,
@@ -23,10 +35,18 @@ object ParamOptimizer {
     )
 
     fun score(r: BacktestResult, minTrades: Int = 5): Double {
+        // ── hard constraints: แพ้ข้อใดข้อหนึ่งตกทันที ──
         if (r.totalTrades < minTrades) return -999.0
-        if (r.profitFactor <= 0) return -999.0
-        val pf = min(r.profitFactor, 10.0)
-        return r.sharpe * pf * r.winRate
+        if (r.profitFactor < HARD_MIN_PF) return -999.0
+        if (r.expectancyR <= 0) return -999.0
+        if (r.maxDrawdownPct > HARD_MAX_DD_PCT) return -999.0
+
+        // ── expectancy-first objective ──
+        val pfW = 0.5 + 0.5 * (min(r.profitFactor, 3.0) / 3.0)              // 0.67–1.0 (PF ≥3 ถือว่าพอ ไม่ให้ PF สูงเวอร์ครอบงำ)
+        val sharpeW = 1.0 + (r.sharpe.coerceIn(-2.0, 3.0) / 3.0) * 0.3      // 0.8–1.3
+        val ddW = 1.0 / (1.0 + r.maxDrawdownPct / 20.0)                     // DD 20% → หักครึ่งนึง
+        val tradeW = min(1.0, r.totalTrades / 20.0)                         // ไม้น้อย = หลักฐานน้อย คะแนนหดตาม
+        return r.expectancyR * pfW * sharpeW * ddW * tradeW
     }
 
     /**

@@ -186,7 +186,11 @@ class AutoTradingViewModel(
     }
 
     private fun applySnapshot(snapshot: AutoTradingRemoteService.Snapshot) {
-        _config.value = snapshot.config
+        // API keys are local-only secrets. Never replace the local credential with
+        // a value returned by the remote trading service (and never trust a remote
+        // snapshot to carry one).
+        val localApiKey = _config.value.apiKey
+        _config.value = snapshot.config.copy(apiKey = localApiKey)
         _state.value = snapshot.state
         _lastDecisions.value = snapshot.lastDecisions
         _openJournal.value = snapshot.openJournal

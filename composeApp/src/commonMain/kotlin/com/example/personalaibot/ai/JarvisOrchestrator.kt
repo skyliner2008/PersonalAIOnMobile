@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.plus
@@ -24,6 +25,17 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+
+sealed interface ChatStreamEvent {
+    data class Text(val content: String) : ChatStreamEvent
+    data class ToolStarted(val toolName: String) : ChatStreamEvent
+    data class ToolResult(
+        val toolName: String,
+        val result: String,
+        val isError: Boolean = false
+    ) : ChatStreamEvent
+    data class System(val message: String) : ChatStreamEvent
+}
 
 class JarvisOrchestrator(
     private val client: HttpClient,
@@ -95,8 +107,10 @@ class JarvisOrchestrator(
         com.example.personalaibot.logDebug("Orchestrator", "Gemini fallback chain = ${models.ifEmpty { com.example.personalaibot.data.ModelConfig.GEMINI_FALLBACK_MODELS }}")
     }    /** ตั้ง list Gemini API keys สำหรับ rotation เมื่อ key ปัจจุบันติดลิมิต (multi free-tier accounts) */
     fun updateGeminiApiKeys(keys: List<String>) {
-        geminiService.apiKeysOverride = keys.filter { it.isNotBlank() }
-        com.example.personalaibot.logDebug("Orchestrator", "Gemini API keys for rotation: ${keys.size} key(s)")
+        val normalized = keys.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        geminiService.apiKeysOverride = normalized
+        liveService.updateLiveApiKeys(normalized)
+        com.example.personalaibot.logDebug("Orchestrator", "Gemini API keys for rotation: ${normalized.size} key(s) — Live pool synchronized")
     }
 
     fun updateConfig(
@@ -110,6 +124,15 @@ class JarvisOrchestrator(
         liveModelName = newLiveModelName
         geminiService.updateConfig(newApiKey, newModelName)
         liveService.updateConfig(newApiKey, newLiveModelName, newVoiceName)
+        // Live has its own persistent-WebSocket rotation pool; keep it synchronized with
+        // the same multi-key settings used by GeminiService.
+        geminiService.apiKeysOverride?.let { liveService.updateLiveApiKeys(it) }
+        liveService.updateLiveModelChain(
+            listOf(
+                newLiveModelName,
+                "gemini-2.5-flash-native-audio-preview-12-2025"
+            )
+        )
         // cloud embedding ต้องได้ key ใหม่ด้วย — ไม่งั้น semantic memory เงียบทั้งระบบ
         embeddingRegistry.updateGeminiKey(newApiKey)
     }
@@ -175,7 +198,7 @@ class JarvisOrchestrator(
         historySnapshot: List<Pair<String, String>> = emptyList(),
         coreContext: String = "",
         attachments: List<com.example.personalaibot.data.InlineData> = emptyList()
-    ): Flow<String> {
+    ): Flow<ChatStreamEvent> {
         val providerId = if (modelName.contains("/")) modelName.substringBefore("/") else "gemini"
         com.example.personalaibot.logDebug("Orchestrator", "Chat Request: modelName='$modelName', resolvedProviderId='$providerId', internalApiKeyLength=${apiKey.length}, attachments=${attachments.size}")
 
@@ -200,8 +223,8 @@ class JarvisOrchestrator(
                 // หมายเหตุ: Live mode ไม่ได้ใช้ path นี้ — LiveToolBridge execute tools เองตรงๆ
                 if (geminiService.lastFatalError != null) {
                     com.example.personalaibot.logError("Orchestrator", "Gemini fatal — starting cross-provider fallback: ${geminiService.lastFatalError}")
-                    emit("\n\n🌐 Gemini ใช้ไม่ได้ทั้งหมด — กำลังสลับไป provider สำรอง…\n")
-                    chatWithCrossProviderFallback(text, historySnapshot, coreContext).collect { emit(it) }
+                    emit(ChatStreamEvent.System("🌐 Gemini ใช้ไม่ได้ทั้งหมด — กำลังสลับไป provider สำรอง…"))
+                    chatWithCrossProviderFallback(text, historySnapshot, coreContext).collect { emit(ChatStreamEvent.Text(it)) }
                 }
             }
         } else {
@@ -210,6 +233,7 @@ class JarvisOrchestrator(
             }
             com.example.personalaibot.logDebug("Orchestrator", "Routing to external provider: $providerId")
             return chatWithExternalProvider(providerId, text, historySnapshot, coreContext)
+                .map { ChatStreamEvent.Text(it) }
         }
     }
 
@@ -609,6 +633,10 @@ class JarvisOrchestrator(
      * clientContent ขณะ audio streaming เป็นแค่ context (พิสูจน์แล้วจากเคส voice-change greeting 2026-08-09)
      */
     suspend fun sendLiveRealtimeText(text: String) = liveService.sendRealtimeText(text)
+
+    /** Long-task delivery: wait through a transient Live reconnect before falling back to notification/TTS. */
+    suspend fun sendLiveRealtimeTextWhenReady(text: String, timeoutMs: Long = 30_000L) =
+        liveService.sendRealtimeTextWhenReady(text, timeoutMs)
 
     /** ตั้งข้อความให้ AI พูดทักอัตโนมัติทันทีที่ Live session READY ครั้งถัดไป */
     fun setLiveGreetingOnReady(text: String?) {

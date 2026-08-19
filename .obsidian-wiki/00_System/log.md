@@ -1583,3 +1583,146 @@ Build: BUILD SUCCESSFUL
 **⚠️ สิ่งที่ผู้ใช้ต้องรู้:** params ที่ถูก apply ไปแล้วจากรอบ 12:03 (เช่น DC/E/UT/3BR 15m ที่ OOS ติดลบ) ยังค้างใน DB ของเครื่อง B — ควรรัน optimize ใหม่หลังอัปเดต APK นี้ (gate ใหม่จะคัดทิ้ง) หรือรีเซ็ต tuning ของ 15m
 
 **Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit)
+
+
+## 2026-08-18 — Full Review 3 ส่วนตาม log (Live Voice / AI-Gemini / Trading Intelligence)
+
+ตรวจโค้ดจริงทุกจุดเทียบกับรายการที่เคยปรับปรุง สรุป:
+
+### ส่วน 1: Live Voice — ผ่านเกือบทั้งหมด, พบบั๊กจริง 2 จุด (แก้แล้ว)
+- ✅ pre-READY ring buffer 250 chunks + flush ตอน setupComplete + ล้างใน finally (`LiveGeminiService.kt`)
+- ✅ liveMicChannel Channel(50) + sender เดียว + drop oldest + heartbeat (`JarvisViewModel.kt`)
+- ✅ Live connection state → UI, ข้อความ "⏳ กำลังเชื่อมต่อ" ถ้าไม่ Connected ใน 2.5 วิ
+- ✅ auto-reconnect หลัง server close/GoAway (attempt=1 ถ้าเคย READY) + greeting ตอน reconnect
+- ✅ sendIfReady/sendRealtimeText คืน Boolean จริง + fallback announceLongTaskCompletion เมื่อ Live ตายระหว่าง LongTask
+- ❌ **บั๊ก 1:** `setLiveInterruptionHandler` ถูกสร้างไว้ใน JarvisOrchestrator แต่ **ไม่มีที่ไหนเรียกใช้เลย** → เวลาผู้ใช้พูดแทรก (VAD interrupt) server สั่งยกเลิก generation แต่คิวเสียง AI เก่าใน AudioTrack ไม่ถูก flush เสียงเก่าเล่นต่อทับ turn ใหม่
+- ❌ **บั๊ก 2:** `setLiveNoAudioFallback` ก็ไม่เคยถูก wire เช่นกัน → turn ที่ model ตอบเป็น text ล้วน (ไม่มี audio) AI จะเงียบเฉย ทั้งที่ออกแบบไว้ให้ Android TTS พูดแทน
+- 🔧 **แก้ทั้งคู่** ใน `JarvisViewModel.startVoiceInput()`: wire interruption → `pcmAudioEngine.stopPlaying()` (pause+flush+play มีอยู่แล้วใน PcmAudioEngine) และ wire no-audio fallback → `voiceManager.speak()`
+
+### ส่วน 2: AI / Gemini — ผ่านทุกจุด
+- ✅ Key Health Registry (`GeminiService` companion): key → deadUntilMs แชร์ข้าม instance, กัน task ใหม่ชน key ที่เพิ่งติด 429
+- ✅ cooldown แยกประเภท quota: per-minute พักตาม hint, daily พักยาว
+- ✅ parse "Please retry in X.XXs" จาก 429 body + RetryInfo.retryDelay → รอตาม hint (สูงสุด 60s, ไม่เกิน 3 ครั้ง/รอบ) ก่อนหมุน key/โมเดล
+- ✅ ทั้ง stream และ non-stream path มี key+model fallback เหมือนกัน (non-stream เดิมไม่มีเลย — เคยทำให้ evolution reflection error ซ้ำโมเดลเดิม)
+- ✅ chain fallback ครบตาม list ผู้ใช้ยืนยัน: 2.5-flash → 3.5-flash-lite → 3.1-flash-lite → 3-flash → 2.5-flash-lite → 3.5-flash → **3.6-flash → 3.7-flash** (`ModelConfig.GEMINI_FALLBACK_MODELS`)
+- ✅ throttle AI reflection ทุกครั้งหลังเรียก AI ใน BacktestEvolution (free tier 15 RPM/key) + ปิด AI ทั้ง run เมื่อ quota หมด ใช้กฎ heuristic ต่อ
+
+### ส่วน 3: Trading Intelligence — ผ่านทุกจุด
+- ✅ SMC `MIN_SL_ATR = 0.75` + `MIN_RRR = 1.2` (กลับตามต้นฉบับ MT5) ใน SmcSignalDetector
+- ✅ Per-TF Strategy Gate: `saveStrategyHealth`/`isStrategyGated` (PF<1.0, ไม้≥5 → บล็อก) ใช้จริงใน SignalAlertProvider ก่อนยิง alert ทุกครั้ง
+- ✅ interval=all ขยายเป็น 15m/1h/4h จริงทั้ง backtest/optimize/evolve (กัน tuning เซฟใต้ key "all")
+- ✅ Entry params tuning ใช้ใน signal จริง: SignalAlertProvider อ่าน getTunedEntryParams ทั้ง detect และ reason
+- ✅ Apply gates: full-backtest + holdout 30% ท้าย + hard block OOS Sharpe≤0 / permutation p≥0.10 (ทั้ง entry และ evolve)
+- ✅ Reflection Memory + RR floor 1.2 (ปฏิเสธ AI proposal ที่ RR<1.2)
+- ✅ gap-through-SL (ได้ราคาแย่กว่า SL เมื่อแท่งเปิดทะลุ), Sharpe annualized แบบ data-driven (bars/ปีจากระยะแท่งจริง), permutation p = (beat+1)/(trials+1), OverfittingScore ให้คะแนนแย่สุดเมื่อ IS Sharpe≤0, AdaptiveOptimizer margin additive
+
+### จุดเสี่ยงที่ยังค้าง (ไม่ใช่บั๊กโค้ด แต่ต้องทำต่อ)
+1. **params ตัวแย่ค้างใน DB เครื่อง B** จากรอบ optimize ก่อนมี gate ใหม่ — ควรรัน optimize ใหม่หลังอัปเดต APK นี้
+2. **evolve reflection แกว่งไม่ converge** (รู้กันแล้ว) — AI ปรับไปมาโดยไม่มีทิศ ยังเป็นขีดจำกัดของ reflection-based tuning
+3. **MixSignalEngine ยังไม่ใช้ tuned entry params** — สัญญาณ mix ยังคำนวณด้วย entry params default
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รอผู้ใช้สั่ง)
+
+
+## 2026-08-18 — แก้ AI แนบการ์ดกราฟพ่วงติดคำตอบ tool ที่ไม่เกี่ยว
+
+**อาการ:** ผู้ใช้สั่ง tool ที่ไม่เกี่ยวกับกราฟ (เช่น backtest/optimize/alert) แต่ AI แนบการ์ดกราฟใส่แชทให้เองทุกครั้ง เหมือนพ่วงติดกัน
+
+**Root cause:** กฎใน `JarvisPersona.CHAT_RULES` ข้อ 6 เขียนกว้างเกิน — "ทุกครั้งที่ตอบเกี่ยวกับกราฟหรือผลวิเคราะห์ของ symbol ใดๆ ... ให้แนบการ์ดกราฟท้ายคำตอบเสมอ" ทำให้ทุกคำตอบที่กล่าวถึง symbol (รวมผล backtest/optimize/stats) ถูกแนบ ```chart fence ตามมาด้วย
+
+**ยืนยันแล้วว่า:** ไม่มี tool executor ไหนแทรก chart fence อัตโนมัติ — การ์ดกราฟมาจาก 2 ทางเท่านั้น: (1) โมเดลแนบเองตามกฎ prompt (ตัวการ), (2) Live mode auto-card เมื่อสั่ง chart_dashboard_control action=open (พฤติกรรมที่ตั้งใจไว้ ไม่แตะ)
+
+**Fix:** แก้กฎข้อ 6 ให้แคบลง — แนบการ์ดเฉพาะเมื่อผู้ใช้ขอดู/เปิดกราฟ หรือคำตอบเป็นการวิเคราะห์ราคา/เทคนิคอลเป็นประเด็นหลัก + 🚫 ห้ามแนบเมื่อตอบผล trading_backtest / optimize / evolve / signal_stats / mix_config / automation_manage_alerts (มีรูปแบบแสดงผลของตัวเอง) + จำกัดสูงสุด 1 การ์ดต่อคำตอบ
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit)
+
+
+## 2026-08-19 — แก้ 3 จุดบกพร่อง Adaptive Trading Intelligence (จากการวิเคราะห์ของผู้ใช้ ยืนยันตรงกับโค้ดทั้ง 3 ข้อ)
+
+### ข้อ 1: Objective Function ใหม่ของ Optimizer (ParamOptimizer.score)
+**เดิม:** `Sharpe × PF(cap 10) × WinRate` — ไม่มี expectancy/DD, คูณปัจจัย correlate ซ้ำซ้อน, PF 15 กับ 50 เท่ากัน
+**ใหม่ (expectancy-first):**
+- Hard constraints (ตกทันที): trades < minTrades | PF < 1.0 | expectancyR ≤ 0 | DD > 35%
+- `score = expectancyR × pfWeight(cap 3) × sharpeWeight(±) × ddPenalty(1/(1+DD/20)) × tradeConfidence(เต็มที่เมื่อ ≥20 ไม้)`
+- ผู้ใช้งานอัตโนมัติ: gridSearch + AdaptiveOptimizer (ใช้ score เดียวกัน)
+
+### ข้อ 2: Evolution causal delta + hill-climbing (BacktestEvolution)
+**เดิม:** ทุกรอบเทียบ params กับ `initial` → `deltaVsBaseline` ไม่ใช่ causal delta ของ mutation ล่าสุด → Reflection Memory เรียนรู้ผิดทิศ (B ดีกว่า A แต่แย่กว่า default ถูกบันทึกว่า "แย่") — น่าจะเป็น root cause ของ "evolve ยิ่งทำยิ่งแย่"
+**ใหม่:**
+- ทุกรอบรัน `prevParams` บน segment เดียวกันเพิ่ม → ได้ `deltaVsPrev` ที่ causal จริง (ReflectionTrial มี field ใหม่)
+- **Hill-climbing:** proposal ใหม่ต้องรันเทียบ params ปัจจุบันบน segment เดียวกัน ถ้าแพ้ → 🚫 ปฏิเสธ คง params เดิม (mutation แย่ไม่สะสมข้ามรอบอีก) + noChangeStreak ทำงานร่วมกระตุ้นปรับทิศใหม่
+- persist ลง OptimizationTrial ใช้ causal delta เป็นหลัก (fallback delta เทียบ initial ในรอบแรก) — memory lines ที่ AI อ่านจึงถูกทิศจริง
+- ต้นทุนเพิ่ม: ~2 backtest/รอบ (segment ขนาดเล็ก รับได้)
+
+### ข้อ 3: Per-TF Gate ยกระดับเป็น 4 ระดับ (AutomationManager)
+**เดิม:** boolean PF-only (`trades≥5 && PF<1.0 → block`) — PF 1.02 / DD 18% ผ่าน gate
+**ใหม่:** `StrategyGateLevel` จาก StrategyHealth (PF, avgR, winRate, trades):
+- `UNKNOWN` = ข้อมูลไม่พอ → ผ่าน (หลักการเดิม: ไม่มีข้อมูลไม่ block)
+- `BLOCK` = PF < 1.0 หรือ avgR ≤ 0 → ห้ามยิง alert
+- `WEAK` = PF < 1.25 หรือ avgR < 0.1R หรือ WR < 35% → ยิงได้แต่ติดป้าย `signal_weak` ใน metadata + log ⚠️
+- `STRONG` = PF ≥ 1.8, avgR ≥ 0.25R, WR ≥ 40%, ไม้ ≥ 20
+- `NORMAL` = ระหว่างกลาง
+- `isStrategyGated()` คง signature เดิม (wrapper = BLOCK เท่านั้น) — caller เก่าไม่พัง
+
+**Build:** `:composeApp:assembleDebug` BUILD SUCCESSFUL (ยังไม่ commit — รอผู้ใช้สั่ง)
+**หมายเหตุ:** ค่าเกณฑ์ WEAK/STRONG เป็น heuristic เริ่มต้น — ควรทบทวนหลังมีข้อมูล backtest สะสมพอ
+
+## 2026-08-19 Refactor JarvisViewModel → Controllers (Phase 1-5)
+**สาเหตุ:** God ViewModel (2,950 บรรทัด) coupling สูง — test ยาก, regression ง่าย, feature ใหม่กระทบ feature เก่า
+**สิ่งที่ทำ:** แยก JarvisViewModel ออกเป็น 6 controllers ใน `controller/` โดย VM คง public API/StateFlow ชื่อเดิมทั้งหมดเป็น forwarders — UI (App.kt, screens) ไม่ต้องแก้เลย
+- **Phase 1 — Mt5Controller (1,220 บรรทัด):** MT5 Terminal + AI Tracking ทั้งหมด (state, connect/pair, realtime WS, snapshot cache, order actions, ema/rsi) + `Mt5ClientRuntimeInfo` ย้ายพร้อม typealias คง import เดิมของ UI
+- **Phase 2 — ChartController (390 บรรทัด):** chart state, dashboard controls, chartCardCache, applyChartControl, ChartStateManager sync collectors, chart settings load
+- **Phase 3 — VoiceController (214 บรรทัด):** Live voice session (mic Channel bounded, audio out, mute, error) + volume bridge; coupling กับแชท/หน่วยความจำผ่าน lambda (coreContextProvider, messages flow, onUserSpeakingChanged)
+- **Phase 4 — ChatController (191 บรรทัด):** _messages/_isTyping, sendMessage stream pipeline, loadHistory/clearChat, memory post-processing (storeMessage/KG/coreMemory/sleep trigger)
+- **Phase 5 — SettingsController (514) + AlertController (176):** API keys/โมเดล/เสียง/identity/provider keys + alert settings/createAlert/createScheduledTask/companion normalizeAlertVoiceEngine (ไม่มี caller ภายนอก)
+**ผล:** JarvisViewModel 2,950 → 701 บรรทัด (ลด 76%) — เหลือเฉพาะ wiring, forwarders, camera, LongTask/AlertChatBus collectors, sleep cycle
+**Verify:** `:composeApp:assembleDebug` ผ่านทุก phase (5 รอบ) — build สุดท้าย BUILD SUCCESSFUL; grep ไม่พบ private state เก่าหลงเหลือใน VM
+**หมายเหตุ:** backup `.backup/` ลบแล้วตามที่สั่ง; จุดเสี่ยงที่ต้องทดสอบบนเครื่องจริง — voice greeting/voice-change restart, chart fence ตอน live, LongTask announce (ทุกจุดผ่าน forwarder/lambda ตรงตามเดิม)
+
+## 2026-08-20 Dataset Fingerprint — ปิดประเด็น Backtest Reproducibility (ตาม Evolution Audit)
+**บริบท:** จากประวัติแชท 19/08 — ผล backtest/evolve สวิง (M15/H4 ดีสุด → H1 ดีสุด ทั้งที่ symbol/แท่งเดียวกัน) เพราะไม่มีทางพิสูจน์ว่าสองรันใช้ dataset ชุดเดียวกัน (cache 2 ชม. หมด → refetch หน้าต่างใหม่)
+**สิ่งที่ทำ (TradingToolExecutor.kt):**
+- เพิ่ม `datasetTag(candles)` — FNV-1a 64-bit hash จากจำนวนแท่ง + timestamp + close (sample 64 จุดกระจายทั้งชุด) + ช่วงเวลา UTC รูปแบบ `DS#xxxxxxxx · N แท่ง · ต้น → ท้าย UTC`
+- แสดง tag ในผล **backtest** (chat + logcat), **optimize** (header), **evolve** (header) — รันไหน tag ตรงกัน = dataset เดียวกันเป๊ะ เทียบผลได้ตรง; tag ต่าง = ข้อมูลขยับ ห้ามเทียบตรง
+**สถานะที่ตรวจแล้วว่าดีอยู่แล้ว (ไม่ต้องแก้):**
+- Engine deterministic (ไม่มี Random/Clock ใน BacktestEngine)
+- backtest/optimize/evolve ใช้ snapshot เดียวผ่าน `fetchBacktestCandles` cache 2 ชม.
+- Apply gate ของ evolve: full-run + holdout 30% + expectancy/PF/DD/ไม้≥10 ครบ
+- Champion selection: re-rank ทุก visited params บน training set เต็ม (ไม่ใช้ผล mutation สุดท้าย)
+- `compileDebugKotlinAndroid` ผ่าน (JBR ของ Android Studio)
+**ขั้นต่อไปที่ยังค้าง:** ทดสอบบนเครื่องจริง — สั่ง backtest → evolve → backtest ซ้ำ แล้วเทียบ DS# tag ต้องตรงกัน (ภายใน 2 ชม.); ถ้าจะให้ข้ามวันได้ต้อง persist snapshot ลง disk (ยังไม่ทำ)
+
+## 2026-08-20 (รอบ 2) ทดสอบจริง + แยกเหตุผล Apply Gate ของ Evolution
+**ผลทดสอบจาก logcat จริง (00:31-00:32):**
+- ✅ DS# tag ตรงกันครบทั้ง 3 TF ระหว่าง backtest → evolve (15m=4a1d5b5b, 1h=7af7b6dc, 4h=3b4b05c4) → reproducibility ใน session พิสูจน์แล้ว
+- ✅ Hill-climbing ACCEPT/REJECT + FINAL CHAMPION re-rank ทำงานถูก (MOM champion 0.74/5.0 จาก visited=7)
+- ✅ Apply gate บล็อกถูกต้องทุกเคส รวมถึงเคส champion แพ้บน full set (PF 2.05→1.78) — หลักฐานว่า gate กันค่า overfit ได้จริง
+**บั๊ก UX ที่พบ:** ข้อความ "⛔ ไม่ apply (ใหม่ไม่ชนะบนข้อมูลเต็ม)" กว้างเกิน — เคส PF 1.47→1.50, avgR +0.43→+0.49 (ดีขึ้นทั้งคู่) ถูกบล็อกเพราะ MaxDD แย่ลงเกิน +1% แต่ผู้ใช้อ่านไม่ออก
+**แก้:** แยกเงื่อนไข gate เป็น condExpectancy/condPf/condTrades/condDd → รายงานข้อที่ fail ตรงๆ พร้อมตัวเลข DD ทั้งสองฝั่ง; ข้อความ holdout block เพิ่ม PF/DD ประกอบ (เดิมโชว์แค่ avgR ทำให้เคส avgR ดีกว่าแต่โดนบล็อกดูขัดแย้ง)
+**Build:** compileDebugKotlinAndroid ผ่าน
+
+## 2026-08-20 (รอบ 3) ขยาย Evolution Candidate Fan + Segment Cache
+**วินิจฉัยจาก logcat รอบ 2 (00:42):** reproducibility สมบูรณ์ (DS# ตรงรอบแรกทุก TF, champion/ fitness ซ้ำเป๊ะ) แต่ผลไม่คุ้ม apply — สาเหตุเชิงระบบ: candidate fan แคบ (5 ตัว ±5% ทิศเดียว) + clampDrift ±30% จาก initial → hill-climb ติด local optimum รอบค่า default ที่ดีอยู่แล้ว; gate บล็อกของเสือกถูกต้องทุกเคส (2/24 ผ่านเกณฑ์จริงในโหมด dry-run)
+**สิ่งที่ทำ (BacktestEvolution.kt):**
+- Candidate fan 5 → 11 ตัว/รอบ: เพิ่ม ±10% (ขอบ clampStep) + joint moves (SL↓TP↑ / SL↑TP↓) — ขอบเขตความเสี่ยงเดิม (clampStep ±10%/รอบ, clampDrift ±30%, rolling validation gate, full+holdout apply gate) ไม่เปลี่ยน
+- Segment result cache (`segCache: HashMap<Pair<TpSlParams,Int>, BacktestResult?>`) — params ซ้ำข้ามรอบไม่ต้องรัน engine ใหม่ รองรับ fan ที่กว้างขึ้นโดย runtime ไม่พุ่ง (deterministic ต่อ (params, segment) จึง cache ปลอดภัย)
+**สรุปเชิงความจริง:** ค่า default ของ XAUUSD ใกล้ local optimum อยู่แล้ว — evolution จะให้ gain จำกัดโดยธรรมชาติ; ถ้าต้องการกระโดดไกลกว่านี้ให้ใช้ trading_backtest_optimize (grid 25 combos + walk-forward + permutation + Monte Carlo) ซึ่งเป็นเครื่องมือ global search ของระบบ
+**Build:** compileDebugKotlinAndroid ผ่าน (ยังไม่ commit)
+
+## 2026-08-20 (รอบ 4) ทดสอบครบ chain backtest → optimize → evolve
+**ผลจาก logcat จริง (00:54-00:56, PID เปลี่ยน = รีสตาร์ทแอป):**
+- ✅ DS# ทำหน้าที่เป๊ะ: 1h/4h tag คงเดิม (แท่งปิดล่าสุดยังไม่ขยับ → ข้อมูลเหมือนเดิมหลัง refetch) ส่วน 15m เปลี่ยนเป็น DS#92bb9e88 เพราะแท่ง 15m ปิดใหม่ 1 แท่ง (17:30→17:45) — fingerprint จับการขยับของหน้าต่างข้อมูลได้ถูกต้องแม้ cache หายจากการรีสตาร์ท
+- ✅ optimize scope=entry ได้ AUTO-APPLY จริงครั้งแรก: TR entry `trSlow 200→100` avgR −0.16 → +0.03 (PF 1.05, 36 ไม้) บน XAUUSD 15m
+- ✅ evolve (fan ใหม่) เร็วขึ้นมาก (~6 วิ/TF vs ~11 วิ ก่อนมี segment cache) และมี 3 กลยุทธ์ผ่าน full+holdout ครบ (แสดง 🚫 dry-run เพราะ apply=off)
+**บั๊ก UX ที่พบ+แก้:** holdout ที่มีไม้ <10 ทั้งสองฝั่งพิมพ์ "avgR +0.00 PF 0.00" ดูเหมือนบั๊ก → เปลี่ยนเป็นรายงานตรงๆ ว่า "holdout มีไม้ไม่พอประเมิน (เดิม X ไม้ / ใหม่ Y ไม้) → ไม่เสี่ยงเซฟ"
+**Build:** compileDebugKotlinAndroid ผ่าน (ยังไม่ commit)
+**ค้างต่อไป:** persist backtest snapshot ลง disk (กัน cache หายตอนรีสตาร์ทแอปสำหรับ TF เล็ก) / พิจารณา multi-start evolve
+
+## 2026-08-20 (รอบ 5) เข้ารหัสดุลยพินิจ "คุ้ม" ลง Apply Gate (MIN_EVOLVE_GAIN_R)
+**บริบท:** logcat 01:10 — 4 กลยุทธ์ผ่าน gate แต่ gain จิ๋ว (+0.01~+0.09R บน ~100 ไม้) ผู้ใช้ตัดสินเองว่า "ไม่คุ้มบันทึก" ถูกต้องตามสถิติ: gain ระดับนั้นคือ noise ของ sample size
+**สิ่งที่ทำ (TradingToolExecutor.kt):**
+- เพิ่ม `MIN_EVOLVE_GAIN_R = 0.05` (companion) — condExpectancy เปลี่ยนจาก `>` เป็น `>= เดิม + 0.05R` → ผ่าน gate = คุ้มจริงโดยนิยาม ไม่ต้องมาตัดสินเองทุกรอบ
+- ข้อความบล็อกเปลี่ยนเป็น "expectancy ดีขึ้นไม่ถึงเกณฑ์คุ้ม (+0.04R < +0.05R)" — โปร่งใสว่าตัดสินด้วยเกณฑ์ไหน
+- ผลข้างเคียง: เซฟ compute เพราะ holdout validation จะรันเฉพาะ candidate ที่ผ่านเกณฑ์คุ้มก่อนแล้ว
+**หมายเหตุเชิงกลยุทธ์:** หลักฐาน 4 รอบชี้ว่า default params ของ XAUUSD ใกล้ local optimum สำหรับ 8 กลยุทธ์ classic — evolve ให้ gain จำกัดโดยธรรมชาติ; ตัวที่ทำเงินได้จริงคือ entry tuning (optimize scope=entry → TR 15m −0.16R→+0.03R auto-applied)
+**Build:** compileDebugKotlinAndroid ผ่าน (ยังไม่ commit)

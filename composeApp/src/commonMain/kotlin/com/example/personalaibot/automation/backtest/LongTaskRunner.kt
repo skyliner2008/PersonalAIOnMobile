@@ -43,12 +43,24 @@ object LongTaskRunner {
     private val _running = MutableStateFlow<Map<Long, String>>(emptyMap())
     val running: StateFlow<Map<Long, String>> = _running.asStateFlow()
 
+    // กัน tool call ซ้ำจาก Live model / reconnect: งานเดียวกันที่ยังรันอยู่ต้องมีเพียง 1 instance
+    // key ผูกกับ kind + title ซึ่ง caller สร้างจาก symbol/TF/strategy/apply แล้ว
+    private val activeKeys = mutableMapOf<String, Long>()
+
     /**
      * เริ่มงานพื้นหลัง — block คืน (chatBody, speech)
      * คืน task id ทันที (caller เอาไปตอบ ack ให้ผู้ใช้ได้เลย)
      */
     fun launch(kind: String, title: String, block: suspend () -> Pair<String, String>): Long {
+        val key = "$kind|${title.trim().lowercase()}"
+        synchronized(activeKeys) {
+            activeKeys[key]?.let { existingId ->
+                com.example.personalaibot.logDebug("LongTask", "♻️ DEDUP: ข้ามงานซ้ำ [$kind] $title — ใช้งาน #$existingId ที่กำลังรันอยู่")
+                return existingId
+            }
+        }
         val id = Clock.System.now().toEpochMilliseconds() * 1000 + Random.nextInt(1000)
+        synchronized(activeKeys) { activeKeys[key] = id }
         _running.value = _running.value + (id to title)
         com.example.personalaibot.logDebug("LongTask", "▶ เริ่มงานพื้นหลัง #$id [$kind] $title (กำลังรัน ${_running.value.size} งาน)")
         scope.launch {
@@ -61,6 +73,9 @@ object LongTaskRunner {
             } catch (e: Exception) {
                 com.example.personalaibot.logError("LongTask", "❌ งาน #$id [$kind] พัง: ${e.message}", e)
                 Triple("❌ **$title** ไม่สำเร็จ: ${e.message}", "งาน $title ไม่สำเร็จครับ", false)
+            }
+            synchronized(activeKeys) {
+                if (activeKeys[key] == id) activeKeys.remove(key)
             }
             _running.value = _running.value - id
             val elapsed = Clock.System.now().toEpochMilliseconds() - t0

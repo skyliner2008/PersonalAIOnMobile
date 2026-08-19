@@ -86,22 +86,33 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             logDebug("SignalAlert", "$symbol/$tf MIX score=$mixScore/${mixCfg.second} [$mixVoteDetail] edges=${mixEdges.size}")
         }
 
-        // ── Per-TF Strategy Gate ──
-        // บล็อกสัญญาณของกลยุทธ์ที่ backtest ล่าสุดใน TF นี้แพ้ (PF < 1.0, ไม้ ≥5)
-        // เพราะข้อมูลพิสูจน์แล้วว่าไม่มีกลยุทธ์ไหนดีทุก TF — ยิงเฉพาะคู่กลยุทธ์×TF ที่ผ่าน
+        // ── Per-TF Strategy Gate (4 ระดับ: BLOCK/WEAK/NORMAL/STRONG) ──
+        // บล็อกเฉพาะ BLOCK (backtest ล่าสุดแพ้ระบบชัด: PF<1.0 หรือ expectancy≤0, ไม้ ≥5)
+        // WEAK ยังยิงได้ แต่ติดป้ายใน metadata ให้ AI/ผู้ใช้รู้ว่ากลยุทธ์อ่อน
         var gatedKinds = emptyList<String>()
+        var weakKinds = emptyList<String>()
         val gateMgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
         if (gateMgr != null && (edges.isNotEmpty() || smcNew.isNotEmpty())) {
             edges.removeAll { e ->
                 val k = signalKindOf(e.label)
-                if (gateMgr.isStrategyGated(symbol, tf, k)) { gatedKinds = gatedKinds + k; true } else false
+                val level = gateMgr.strategyGateLevel(symbol, tf, k)
+                if (level == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.WEAK) weakKinds = weakKinds + k
+                if (level == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.BLOCK) { gatedKinds = gatedKinds + k; true } else false
             }
-            if (smcNew.isNotEmpty() && gateMgr.isStrategyGated(symbol, tf, "SMC")) {
-                gatedKinds = gatedKinds + "SMC"
-                smcNew = emptyList()
+            if (smcNew.isNotEmpty()) {
+                val smcLevel = gateMgr.strategyGateLevel(symbol, tf, "SMC")
+                if (smcLevel == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.BLOCK) {
+                    gatedKinds = gatedKinds + "SMC"
+                    smcNew = emptyList()
+                } else if (smcLevel == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.WEAK) {
+                    weakKinds = weakKinds + "SMC"
+                }
             }
             if (gatedKinds.isNotEmpty()) {
-                logDebug("JarvisVM", "⛔ Gate บล็อก $symbol/$tf: ${gatedKinds.joinToString(",")} (backtest ล่าสุด PF<1) — ไม่ยิง alert")
+                logDebug("JarvisVM", "⛔ Gate บล็อก $symbol/$tf: ${gatedKinds.joinToString(",")} (backtest ล่าสุด PF<1/expectancy≤0) — ไม่ยิง alert")
+            }
+            if (weakKinds.isNotEmpty()) {
+                logDebug("JarvisVM", "⚠️ Gate WEAK $symbol/$tf: ${weakKinds.joinToString(",")} (ผ่านแบบหวุดหวิด — PF<1.25/avgR<0.1/WR<35%)")
             }
         }
 
@@ -136,6 +147,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 "signal_mix_score" to mixScore.toString(),
                 "signal_mix_votes" to mixVoteDetail,
                 "signal_gated" to gatedKinds.joinToString(","),
+                "signal_weak" to weakKinds.joinToString(","),
                 "close" to fmt(close),
                 "signal_context" to context
             )
@@ -201,6 +213,8 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "signal_stars" to (primarySmc?.confluenceStars?.toString() ?: "0"),
             "signal_mix_score" to mixScore.toString(),
             "signal_mix_votes" to mixVoteDetail,
+            "signal_gated" to gatedKinds.joinToString(","),
+            "signal_weak" to weakKinds.joinToString(","),
             "signal_context" to context,
             "signal_bar_time" to sigTime.toString(),
             "close" to fmt(close)

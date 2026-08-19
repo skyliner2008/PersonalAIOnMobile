@@ -40,3 +40,8 @@ mt5-core-server/scratch/
 
 
 OLD_Code/
+
+# Serena / session artifacts / local logs
+.serena/
+**/GeminiService.HEAD.kt
+logcat*.txt

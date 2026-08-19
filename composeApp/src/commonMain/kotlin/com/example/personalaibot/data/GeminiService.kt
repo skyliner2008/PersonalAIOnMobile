@@ -15,13 +15,19 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.utils.io.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.flow
+import com.example.personalaibot.ai.ChatStreamEvent
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
 // ─── Request / Response Models ──────────────────────────────────────────────
+
+private suspend fun FlowCollector<ChatStreamEvent>.emitText(text: String) {
+    emit(ChatStreamEvent.Text(text))
+}
 
 @Serializable
 data class GeminiRequest(
@@ -165,7 +171,10 @@ class GeminiService(
          */
         private val keyDeadUntilMs = mutableMapOf<String, Long>()
         private val keyHealthMutex = Mutex()
-        /** per-minute quota ไม่มี hint → พักสั้น 30s; per-day quota → พักยาว (กันชนลิมิตรายวันซ้ำๆ) */
+        /**
+         * Health is scoped to key + model + quota class, not key alone.
+         * A key may be healthy for one model while another model/project-model bucket is exhausted.
+         */
         private const val KEY_COOLDOWN_MINUTE_MS = 30_000L
         private const val KEY_COOLDOWN_DAILY_MS = 12 * 3_600_000L
 
@@ -176,33 +185,48 @@ class GeminiService(
          * free-tier per-minute limit (เช่น 15 RPM) รีเซ็ตเร็ว API บอกเวลามาเอง → ควร "รอ" ไม่ใช่ "หมุน key"
          */
         fun parseRetryAfterMs(errBody: String): Long? {
-            val m = Regex("""Please retry in ([\d.]+)s""").find(errBody)
-                ?: Regex(""""retryDelay"\s*:\s*"([\d.]+)s"""").find(errBody)
+            val m = Regex("""Please retry in ([\\d.]+)s""").find(errBody)
+                ?: Regex(""""retryDelay"\\s*:\\s*"([\\d.]+)s"""").find(errBody)
                 ?: return null
             val sec = m.groupValues[1].toDoubleOrNull() ?: return null
             return (sec * 1000).toLong()
         }
 
-        /** บันทึก key ที่ติด 429 — พักตาม hint ของ API ถ้ามี (per-minute รีเซ็ตเร็ว), daily พักยาว */
-        suspend fun markKeyDead(key: String, errBody: String) {
+        /**
+         * Gemini free-tier request quotas are project/model scoped. A
+         * GenerateRequestsPerDayPerProjectPerModel-FreeTier violation is a hard
+         * quota exhaustion; RetryInfo must not turn it into a 30-60s retry loop.
+         */
+        fun isDailyQuotaError(errBody: String): Boolean =
+            errBody.contains("GenerateRequestsPerDayPerProjectPerModel-FreeTier", ignoreCase = true) ||
+            errBody.contains("GenerateRequestsPerDay", ignoreCase = true) ||
+            (errBody.contains("quotaId", ignoreCase = true) && errBody.contains("PerDay", ignoreCase = true))
+
+        /** บันทึก key ที่ติด 429 — daily/project-model พักยาว, per-minute ใช้ retry hint */
+        suspend fun markKeyDead(key: String, model: String, errBody: String) {
             if (key.isBlank()) return
-            val daily = errBody.contains("per_day", ignoreCase = true) || errBody.contains("PerDay")
+            val daily = isDailyQuotaError(errBody)
             val hintMs = parseRetryAfterMs(errBody)
+            val quotaClass = if (daily) "daily" else "minute"
+            val bucket = "${key}|${model.lowercase()}|$quotaClass"
             val cooldown = when {
                 daily -> KEY_COOLDOWN_DAILY_MS
-                hintMs != null -> hintMs + 1_000 // per-minute: พักตามที่ API แนะนำพอดี ไม่ต้องพักยาวเกิน
+                hintMs != null -> hintMs + 1_000
                 else -> KEY_COOLDOWN_MINUTE_MS
             }
-            keyHealthMutex.withLock { keyDeadUntilMs[key] = nowMs() + cooldown }
-            logDebug("GeminiService", "Key health: ${com.example.personalaibot.maskApiKey(key)} พัก ${cooldown / 1000}s (${if (daily) "daily" else "per-minute"} quota)")
+            keyHealthMutex.withLock { keyDeadUntilMs[bucket] = nowMs() + cooldown }
+            logDebug("GeminiService", "Key health: ${com.example.personalaibot.maskApiKey(key)} model=$model พัก ${cooldown / 1000}s ($quotaClass quota)")
         }
 
         /** key นี้ยังอยู่ในช่วงพักหรือไม่ (เก็บกวาดรายการหมดอายุไปด้วย) */
-        suspend fun isKeyDead(key: String): Boolean = keyHealthMutex.withLock {
+        suspend fun isKeyDead(key: String, model: String = "*"): Boolean = keyHealthMutex.withLock {
             val now = nowMs()
             val it = keyDeadUntilMs.entries.iterator()
-            while (it.hasNext()) { if (it.next().value <= now) it.remove() }
-            (keyDeadUntilMs[key] ?: 0L) > now
+            while (it.hasNext()) if (it.next().value <= now) it.remove()
+            keyDeadUntilMs.any { (bucket, until) ->
+                until > now && bucket.startsWith("${key}|") &&
+                    (model == "*" || bucket.startsWith("${key}|${model.lowercase()}|"))
+            }
         }
     }
 
@@ -448,10 +472,10 @@ class GeminiService(
         coreContext: String = "",
         enableGrounding: Boolean = false,
         initialFiles: List<InlineData> = emptyList()
-    ): Flow<String> = flow {
+    ): Flow<ChatStreamEvent> = flow {
         if (apiKey.isBlank()) {
             logError("GeminiService", "Chat failed: API Key is blank")
-            emit("⚠️ ไม่สามารถเชื่อมต่อ Gemini ได้: กรุณาตรวจสอบ API Key ใน Settings และกด 'บันทึกการตั้งค่า' ก่อนใช้งาน")
+            emitText("⚠️ ไม่สามารถเชื่อมต่อ Gemini ได้: กรุณาตรวจสอบ API Key ใน Settings และกด 'บันทึกการตั้งค่า' ก่อนใช้งาน")
             return@flow
         }
 
@@ -489,8 +513,8 @@ class GeminiService(
         // key เริ่มต้นอาจเพิ่งติด 429 จาก task ก่อน (key health registry แชร์ข้าม instance)
         // → ข้ามไป key ที่ยังมีชีวิตก่อนยิง request แรก กันเจอ 429 รอบแรกทุกครั้ง
         apiKeysOverride?.let { chain ->
-            if (isKeyDead(apiKey)) {
-                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it) }?.let { alt ->
+            if (isKeyDead(apiKey, modelName)) {
+                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it, modelName) }?.let { alt ->
                     triedKeys.add(alt); rotateApiKey(alt)
                 }
             }
@@ -500,12 +524,13 @@ class GeminiService(
         // ถูกกว่าหมุน key (key อื่นชนลิมิตเดียวกันเมื่อมี burst) — จำกัด 3 ครั้ง/การเรียก กันวนไม่รู้จบ
         var waited429 = 0
         var quotaWaitMs: Long? = null
+        var quotaHard = false
 
         suspend fun trySwitchFallbackKey(): String? {
             val chain = apiKeysOverride ?: return null
             val untried = chain.filter { it.isNotBlank() && it !in triedKeys }
             // ข้าม key ที่เพิ่งติด 429 (ยังอยู่ในช่วง cooldown) ก่อน — เผื่อตายหมดค่อยกลับมาลอง
-            val next = untried.firstOrNull { !isKeyDead(it) } ?: untried.firstOrNull() ?: return null
+            val next = untried.firstOrNull { !isKeyDead(it, modelName) } ?: untried.firstOrNull() ?: return null
             triedKeys.add(next)
             rotateApiKey(next)
             return next
@@ -583,15 +608,16 @@ class GeminiService(
                             if (httpResponse.status.value in listOf(429, 500, 503)) {
                                 // ลิมิต/เซิร์ฟเวอร์ล้ม — ให้สลับโมเดลสำรองแล้วลองใหม่
                                 if (httpResponse.status.value == 429) {
-                                    markKeyDead(apiKey, err)
-                                    quotaWaitMs = parseRetryAfterMs(err) // API บอกเวลารีเซ็ตมาเอง — ให้รอแทนการหมุน key
+                                    markKeyDead(apiKey, modelName, err)
+                                    quotaHard = isDailyQuotaError(err)
+                                    quotaWaitMs = if (quotaHard) null else parseRetryAfterMs(err)
                                 }
                                 modelFailed = true
                             } else if (httpResponse.status.value == 404) {
                                 // โมเดลไม่มีจริง/ใช้ generateContent ไม่ได้ — หมุน key ไม่ช่วย ข้ามไปสลับโมเดลเลย
                                 modelFailed = true; modelNotFound = true
                             } else {
-                                emit("⚠️ API Error ${httpResponse.status.value}: ${err.take(300)}")
+                                emitText("⚠️ API Error ${httpResponse.status.value}: ${err.take(300)}")
                             }
                             return@execute
                         }
@@ -623,7 +649,7 @@ class GeminiService(
                                     val text = partObj["text"]?.jsonPrimitive?.content
                                     if (!text.isNullOrEmpty()) {
                                         if (toolHistory.isNotEmpty()) {
-                                            emit(text)
+                                            emitText(text)
                                             emittedAnyText = true
                                         } else {
                                             textBuffer.append(text)
@@ -650,7 +676,7 @@ class GeminiService(
                                                 logDebug("GeminiService", "MALFORMED_FUNCTION_CALL (model=$modelName round=$round emittedAnyText=$emittedAnyText) — suppress raw warning")
                                                 if (!emittedAnyText && textBuffer.isEmpty()) modelFailed = true
                                             }
-                                            else -> emit("\n⚠️ Response interrupted: $reason")
+                                            else -> emitText("\n⚠️ Response interrupted: $reason")
                                         }
                                     }
                                 }
@@ -682,7 +708,7 @@ class GeminiService(
                     //    (ไม่เผา key อื่น — key ทุกตัวชนลิมิต 15 RPM เดียวกันเมื่อมี burst)
                     val waitMs = quotaWaitMs
                     quotaWaitMs = null
-                    if (waitMs != null && waitMs <= 60_000 && waited429 < 3) {
+                    if (!quotaHard && waitMs != null && waitMs <= 60_000 && waited429 < 2) {
                         waited429++
                         logDebug("GeminiService", "429 per-minute — รอ ${waitMs}ms ตาม hint ของ API แล้วลองใหม่ (key/โมเดลเดิม, ครั้งที่ $waited429)")
                         kotlinx.coroutines.delay(waitMs + 500)
@@ -694,7 +720,8 @@ class GeminiService(
                         val nextKey = trySwitchFallbackKey()
                         if (nextKey != null) {
                             waited429 = 0
-                            emit("\n🔄 key เดิมติดลิมิต — สลับไปใช้ key ถัดไป (${com.example.personalaibot.maskApiKey(nextKey)}) อัตโนมัติ\n")
+                            quotaHard = false
+                            emitText("\n🔄 key เดิมติดลิมิต — สลับไปใช้ key ถัดไป (${com.example.personalaibot.maskApiKey(nextKey)}) อัตโนมัติ\n")
                             continue
                         }
                     }
@@ -702,12 +729,12 @@ class GeminiService(
                     // 2) key หมดแล้ว → สลับโมเดลสำรอง
                     val next = trySwitchFallbackModel()
                     if (next != null) {
-                        emit("\n🔄 โมเดลเดิมมีปัญหา (ลิมิต/ไม่ตอบสนอง) — สลับไปใช้ `$next` อัตโนมัติ\n")
+                        emitText("\n🔄 โมเดลเดิมมีปัญหา (ลิมิต/ไม่ตอบสนอง) — สลับไปใช้ `$next` อัตโนมัติ\n")
                         continue // retry round เดิมด้วยโมเดลใหม่
                     } else {
                         logError("GeminiService", "All fallback models failed: $triedModels")
                         lastFatalError = "All Gemini keys+models failed: keys=${triedKeys.size} models=$triedModels"
-                        emit("⚠️ โมเดล Gemini ทุกตัวที่ลอง (${triedModels.joinToString(", ")}) ใช้ไม่ได้ชั่วคราว — อาจหมดลิมิต free tier หรือเน็ตมีปัญหา ลองใหม่อีกครั้งภายหลัง")
+                        emitText("⚠️ โมเดล Gemini ทุกตัวที่ลอง (${triedModels.joinToString(", ")}) ใช้ไม่ได้ชั่วคราว — อาจหมดลิมิต free tier หรือเน็ตมีปัญหา ลองใหม่อีกครั้งภายหลัง")
                         break
                     }
                 }
@@ -729,7 +756,7 @@ class GeminiService(
                 // Emit buffered text เฉพาะเมื่อไม่มี function call (= final answer)
                 // ถ้ามี function call → text เป็นแค่ "thinking" ที่อาจมีตัวเลขหลอน → ทิ้ง
                 if (!foundFunctionCall && textBuffer.isNotEmpty()) {
-                    emit(textBuffer.toString())
+                    emitText(textBuffer.toString())
                 } else if (foundFunctionCall && textBuffer.isNotEmpty()) {
                     logDebug("GeminiService", "Discarded pre-tool text (${textBuffer.length} chars) to prevent hallucination")
                 }
@@ -745,10 +772,12 @@ class GeminiService(
                     val toolResponseParts = mutableListOf<JsonElement>()
                     for (fc in currentRoundFunctionCalls) {
                         logDebug("GeminiService", "Tool Request: ${fc.name}(${fc.args})")
+                        emit(ChatStreamEvent.ToolStarted(fc.name))
 
                         // Strict MT5 mode: ซ่อนผลลัพธ์ TV tools (policy เดียวกับทุก provider path)
                         if (policy.shouldSuppressToolResult(fc.name)) {
                             logDebug("GeminiService", "Strict MT5 Mode: Suppressing TV tool result for ${fc.name}")
+                            emit(ChatStreamEvent.ToolResult(fc.name, policy.suppressedResultMessage, isError = false))
                             toolResponseParts.add(buildJsonObject {
                                 put("functionResponse", buildJsonObject {
                                     put("name", fc.name)
@@ -767,8 +796,9 @@ class GeminiService(
                         }
 
                         logDebug("GeminiService", "Tool Result: ${sanitizeToolResultForLog(toolResult.result)}")
+                        emit(ChatStreamEvent.ToolResult(fc.name, toolResult.result, toolResult.isError))
                         if (showToolResultInChat) {
-                            emit("\n\n${sanitizeToolResultForChat(toolResult.result)}\n")
+                            emitText("\n\n${sanitizeToolResultForChat(toolResult.result)}\n")
                         }
 
                         // Intercept Binary Files for Native Processing
@@ -835,7 +865,7 @@ class GeminiService(
             // Force Final Summary if max rounds reached
             if (round > maxRounds && lastToolCallDetected) {
                 logDebug("GeminiService", "Max rounds reached. Forcing final summary.")
-                emit("\n\n(ระบบ: วิเคราะห์ข้อมูลครบถ้วนแล้ว กำลังสรุปผล...)\n")
+                emitText("\n\n(ระบบ: วิเคราะห์ข้อมูลครบถ้วนแล้ว กำลังสรุปผล...)\n")
 
                 val finalRequestBody = buildRequestJson(
                     userMessage = prompt,
@@ -868,7 +898,7 @@ class GeminiService(
                                     val parts = content?.get("parts")?.jsonArray
                                     parts?.forEach { part ->
                                         val text = part.jsonObject["text"]?.jsonPrimitive?.content
-                                        if (!text.isNullOrEmpty()) emit(text)
+                                        if (!text.isNullOrEmpty()) emitText(text)
                                     }
                                 } catch (_: Exception) {}
                             }
@@ -879,7 +909,7 @@ class GeminiService(
 
         } catch (e: Exception) {
             logError("GeminiService", "Multi-round orchestration error", e)
-            generateResponseFlow(prompt, history, intentAddon, coreContext, enableGrounding).collect { emit(it) }
+            generateResponseFlow(prompt, history, intentAddon, coreContext, enableGrounding).collect { emitText(it) }
         }
     }
 
@@ -948,8 +978,8 @@ class GeminiService(
         // key เริ่มต้นอาจเพิ่งติด 429 จาก task ก่อน (key health registry แชร์ข้าม instance)
         // → ข้ามไป key ที่ยังมีชีวิตก่อนยิง request แรก กันเจอ 429 รอบแรกทุกครั้ง
         apiKeysOverride?.let { chain ->
-            if (isKeyDead(apiKey)) {
-                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it) }?.let { alt ->
+            if (isKeyDead(apiKey, modelName)) {
+                chain.firstOrNull { it.isNotBlank() && it !in triedKeys && !isKeyDead(it, modelName) }?.let { alt ->
                     triedKeys.add(alt); rotateApiKey(alt)
                 }
             }
@@ -958,7 +988,7 @@ class GeminiService(
         suspend fun switchKey(): Boolean {
             val chain = apiKeysOverride ?: return false
             val untried = chain.filter { it.isNotBlank() && it !in triedKeys }
-            val next = untried.firstOrNull { !isKeyDead(it) } ?: untried.firstOrNull() ?: return false
+            val next = untried.firstOrNull { !isKeyDead(it, modelName) } ?: untried.firstOrNull() ?: return false
             triedKeys.add(next); rotateApiKey(next); return true
         }
         fun switchModel(): Boolean {
@@ -1009,11 +1039,15 @@ class GeminiService(
                 logError("GeminiService", "API Error $code (model=$modelName): ${errBody.take(700)}")
                 if (code in listOf(429, 500, 503)) {
                     if (code == 429) {
-                        markKeyDead(apiKey, errBody)
+                        val dailyQuota = isDailyQuotaError(errBody)
+                        markKeyDead(apiKey, modelName, errBody)
                         // ลิมิตรายนาที (เช่น 15 RPM) — API บอกเวลารีเซ็ตมาเอง: รอตามนั้นแล้วลอง key/โมเดลเดิมซ้ำ
                         // ถูกกว่าและเร็วกว่าหมุน key (key อื่นก็ชนลิมิตเดียวกันเมื่อมี burst)
+                        if (dailyQuota) {
+                            logDebug("GeminiService", "429 hard quota (daily/project-model) — rotate key/model immediately; no timed retry")
+                        }
                         val hint = parseRetryAfterMs(errBody)
-                        if (hint != null && hint <= 60_000 && waited429 < 3) {
+                        if (!dailyQuota && hint != null && hint <= 60_000 && waited429 < 3) {
                             waited429++
                             logDebug("GeminiService", "429 per-minute — รอ ${hint}ms ตาม hint ของ API แล้วลองใหม่ (key/โมเดลเดิม, ครั้งที่ $waited429)")
                             kotlinx.coroutines.delay(hint + 500)
