@@ -1726,3 +1726,74 @@ Build: BUILD SUCCESSFUL
 - ผลข้างเคียง: เซฟ compute เพราะ holdout validation จะรันเฉพาะ candidate ที่ผ่านเกณฑ์คุ้มก่อนแล้ว
 **หมายเหตุเชิงกลยุทธ์:** หลักฐาน 4 รอบชี้ว่า default params ของ XAUUSD ใกล้ local optimum สำหรับ 8 กลยุทธ์ classic — evolve ให้ gain จำกัดโดยธรรมชาติ; ตัวที่ทำเงินได้จริงคือ entry tuning (optimize scope=entry → TR 15m −0.16R→+0.03R auto-applied)
 **Build:** compileDebugKotlinAndroid ผ่าน (ยังไม่ commit)
+
+## 2026-08-20 (รอบ 6) STRATEGY-NATIVE SL/TP OVERHAUL + 52H rolling window
+**Audit เทียบหลักการมาตรฐาน 8 กลยุทธ์:**
+- จุดเข้า 7/8 ถูกตามหลัก (TSMOM flip, EMA cross ×2, RSI+BB reversal, Donchian breakout, UT Bot flip, 3-bar reversal)
+- ❌ 52H ผิดหลัก: runHigh สะสมตั้งแต่แท่งแรกของข้อมูล = "สูงสุดของไฟล์" ไม่ใช่ 52-week high (15m 5,000 แท่ง ≈ 52 วัน; live ~300 แท่ง ≈ ไม่กี่วัน)
+- ❌ SL/TP เกือบทุกกลยุทธ์เป็น ATR multiple ล้วน ไม่ได้ยึดโครงสร้างของกลยุทธ์
+**สิ่งที่แก้:**
+1. **52H rolling window** — EntryParams เพิ่ม `w52Lookback` (default 2000 ≈ 1 ปีบน 4h, จูนได้ grid 1000/4000) — marker ใช้ sliding-max deque O(n) ไม่รวมแท่งปัจจุบัน; live (StrategySignalProvider) ใช้ window เดียวกัน → live==backtest
+2. **parameterizedTpSl เขียนใหม่เป็น strategy-native** (slMult=buffer ×ATR หลัง structure, tpMult=RR ของ risk จริง):
+   - MOM/TR/E/52H/MIX: SL หลัง swing 10 แท่ง + buffer
+   - DC: SL = Donchian exit band 10 แท่งฝั่งตรงข้าม (Turtle 20-in/10-out)
+   - REV: SL สุดขอบ swing + buffer (cap 2.5×ATR), TP = BB basis (mean reversion ถูกอยู่แล้ว)
+   - UT: คง ATR6 multiples — trailing stop ของ UT คือ structure ของมันเอง
+   - 3BR: คงเดิม (structural อยู่แล้ว)
+   - risk clamp [0.3, 3.5]×ATR (structure แคบเกิน=noise / ไกลเกิน=เข้าช้า)
+3. **computeTpSl (live) → delegate ไป parameterizedTpSl** — ลดโค้ดซ้ำ การันตี live==backtest
+4. defaultsFor ใหม่ตาม semantics (เช่น MOM/TR/E: 0.5/2.0), grid ใหม่ {0.2–2.0}×{1.2–3.0}
+**⚠️ ผลข้างเคียง:** tuned params เก่าใน DB (เช่น DC 1h 2.0/2.0 ที่ auto-apply ไว้) ถูกตีความด้วย semantics ใหม่ (buffer/RR) — ค่ายังปลอดภัยแต่ควร optimize ใหม่
+**Build:** compileDebugKotlinAndroid ผ่าน (ยังไม่ commit)
+**ขั้นต่อไป:** backtest/optimize/evolve ทีละกลยุทธ์บน semantics ใหม่ → ตัดสินว่ากลยุทธ์ไหนใช้ได้จริง
+
+## 2026-08-20 (รอบ 7) Pine Script V6 — 8 กลยุทธ์สำหรับตรวจสายตาบน TradingView
+**วัตถุประสงค์:** ผู้ใช้ต้องการเห็นภาพจริงของ entry/SL/TP แต่ละกลยุทธ์บนกราฟ TV เพื่อยืนยันว่า semantics ใหม่ (รอบ 6) ถูกต้องตามหลักการ
+**สิ่งที่สร้าง:** โฟลเดอร์ `Pine Script/` — 8 ไฟล์ strategy + README.md
+- 01 TSMOM (ROC flip) · 02 Trend EMA 50/200 · 03 REV (RSI+BB edge) · 04 Donchian 20/10 · 05 52H rolling · 06 EMA 14/60 · 07 UT Bot · 08 3BR
+- ทุกไฟล์: entry edge-triggered ตรง SignalMarkerProvider.kt เป๊ะ + SL/TP strategy-native ตรง parameterizedTpSl เป๊ะ (structural risk, clamp [0.3,3.5]×ATR, RR multiples, REV cap 2.5/TP=BB basis, 3BR floor, UT ATR6)
+- ปลอด look-ahead: ทุก anchor ใช้ `[1]` (ไม่รวมแท่งสัญญาณ), `process_orders_on_close=true`
+- plot: ลูกศรจุดเข้า + เส้น Entry/SL/TP (linebr) + โครงสร้างที่เกี่ยว (swing/DC band/UT stop/52W high) + แดชบอร์ด (trades, win%, PF, net, open SL/TP, position)
+**ความต่างที่รู้ตัว (จดใน README):** EMA seeding ต้นกราฟ, commission=0, 52H clamp หน้าต่างตามข้อมูล — ไม่กระทบตรรกะ
+**ขั้นต่อไป:** ผู้ใช้เทียบสายตาบน TV → ยืนยันหลักการ → รัน backtest/optimize/evolve ทีละกลยุทธ์ในแอปเพื่อตัดสินว่ากลยุทธ์ไหนใช้ได้จริง
+**Build:** ไม่มีการแก้ Kotlin รอบนี้ (งานรอบ 6 ยังไม่ commit — รอผู้ใช้สั่ง)
+
+## 2026-08-20 (รอบ 8) Pine Script รวม 8 กลยุทธ์ในไฟล์เดียว
+**คำขอ:** รวม 8 กลยุทธ์เป็น 1 สคริปต์ มี input เปิด/ปิดแยกแต่ละกลยุทธ์
+**สิ่งที่สร้าง:** `Pine Script/00_AllStrategies_Combined.pine`
+- toggle เปิด/ปิด 8 ตัว (group "เปิด/ปิดกลยุทธ์") + params แยก group ต่อกลยุทธ์ (default = Kotlin)
+- แต่ละกลยุทธ์ถือ position ของตัวเอง: entry id แยก (MOM/TR/REV/DC/52H/E/UT/3BR), pyramiding=8, 10% equity/ไม้
+- SL/TP ต่อกลยุทธ์ plot เฉพาะตอนถือ position (เช็คผ่าน strategy.opentrades.entry_id)
+- แดชบอร์ด 6 คอลัมน์ × 10 แถว: สถิติแยกรายกลยุทธ์ (On/Trades/Win%/PF/Net) คำนวณจาก strategy.closedtrades bucket ตาม entry_id + แถว TOTAL
+- alertcondition ครบ 16 (buy/sell × 8)
+- ปิด toggle กลางทาง = ไม่เปิดไม้ใหม่ ไม้เก่ายังปิดด้วย SL/TP เดิม
+**ขั้นต่อไป:** ผู้ใช้เทียบสายตาบน TV → รัน backtest/optimize ทีละกลยุทธ์ในแอปบน semantics ใหม่
+
+## 2026-08-20 (รอบ 8.1) แก้คำเตือน Pine ทั้ง 9 ไฟล์
+- ta.crossover/crossunder ถูก `and` short-circuit (TR/E ในไฟล์รวม) → แยกคำนวณเป็นตัวแปร global ก่อน ค่อย and กับ toggle
+- alertcondition() ใช้ใน strategy ไม่ได้ → เปลี่ยนเป็น alert() (freq_once_per_bar_close) ทั้งไฟล์รวม 16 เงื่อนไขและไฟล์ 01–08 — ตั้ง alert ใน TV ด้วย "alert() function calls only"
+- คำเตือน barstate.islast ไม่แก้โดยตั้งใจ: แดชบอร์ดอัปเดตตอนแท่งยืนยันแล้วเท่านั้น ไม่กระทบผล backtest
+
+## 2026-08-20 (รอบ 8.2) แก้คำเตือน barstate.islast ใน 00_AllStrategies_Combined.pine
+เปลี่ยนเงื่อนไขอัปเดตแดชบอร์ดเป็น `barstate.islastconfirmedhistory or barstate.isrealtime` — คำเตือนหาย โดยไม่ต้องเปิด calc_on_every_tick (ผู้ใช้สั่งแก้เฉพาะไฟล์รวม)
+
+## 2026-08-20 (รอบ 9) 01b_TSMOM_FlipExit.pine — แก้ TP/SL ขัดหลัก TSMOM
+**บริบท:** ผู้ใช้ทดสอบ MOM lookback=16 บน TV (XAUUSD 15m/1h/4h) — ทิศทางถูกส่วนใหญ่ แต่ win ~35%
+และ RR จริง ~1.2–1.4 (ตั้งใจ 2R): TP 2R แทบไม่ถึงเพราะ flip มาช้า + ไม้ถูกทางถูก reverse ปิดกลางทาง
+→ วินิจฉัย: fixed TP ตัดหางขวาของ TSMOM (edge อยู่ที่เทรนด์ยาว) — โครงสร้างผิดหลัก ไม่ใช่แค่เลขผิด
+**สิ่งที่สร้าง:** `Pine Script/01b_TSMOM_FlipExit.pine` — entry เหมือน 01 เป๊ะ, exit เลือก 3 โหมด:
+FLIP (ถือจน ROC พลิก + disaster SL swing+1.5×ATR cap 5×ATR) / TRAIL (chandelier 3×ATR) / PARTIAL (50%@1.5R + trail)
+default lookback=16 ตามผลทดสอบผู้ใช้
+**ขั้นต่อไป:** ผู้ใช้เทียบ PF ของ 01 vs 01b ทั้ง 3 โหมด → ถ้า FLIP/TRAIL ชนะชัด จะเสนอเพิ่ม exit-mode เข้า Kotlin (parameterizedTpSl รองรับ flip/trailing exit)
+
+## 2026-08-20/21 (รอบ 10) MOM บน M15 ไม่มี edge + เพิ่ม Regime Filter ใน 01b
+**ผลทดสอบผู้ใช้ (XAUUSD M15, lookback 16):** 01b ทั้ง 3 exit mode PF 1.08–1.11 (แย่กว่า 01 เดิม 1.19)
+→ สมมติฐาน "TP 2R ฆ่า edge" ไม่จริงบน M15 — ปัญหาอยู่ที่ entry: ROC flip บน TF เล็กคือ noise
+**วิเคราะห์การกระจุกของสัญญาณ:** ROC ข้ามศูนย์ทุกครั้งที่ราคาแกว่งผ่านราคา 16 แท่งก่อน
+(ตลาด sideway = anchor ≈ ค่ากลาง range → flip ถี่ทุก wiggle) + ไม่มี magnitude/cooldown/regime filter
+**สิ่งที่แก้ใน 01b:**
+- เพิ่ม Filter 2 ชั้น (เปิด/ปิดได้): ADX regime (default ≥20, ta.dmi) + ROC magnitude (|ROC| ≥ 0.5×ATR14)
+- bgcolor แดงจางในโซน ADX ต่ำ (เห็นชัดว่าสัญญาณถูกบล็อกตรงไหน), แดชบอร์ดมีแถว Filter PASS/BLOCK
+- ขนาดไม้ 100% → 20% equity ตัด margin call distortion ที่เจอตอนเทสต์ SL กว้าง
+- prevSign track แบบไม่ผ่าน filter (flip ตอน ADX ต่ำจะไม่ยิงย้อนหลัง ต้องรอ flip ใหม่)
+**สรุปเชิงตัดสินใจ (รอผล filter):** ถ้า filter แล้ว M15 ยัง PF~1.1 → ปิด MOM เฉพาะ TF เล็กในแอป; ถ้าดีขึ้นชัด → พอร์ต regime filter เข้า Kotlin

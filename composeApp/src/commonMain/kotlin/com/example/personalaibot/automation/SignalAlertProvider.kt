@@ -223,43 +223,17 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
 
     // ─── TP/SL เฉพาะกลยุทธ์ (ออกแบบตามพฤติกรรมของแต่ละตัว) ─────────────────
 
+    /**
+     * SL/TP เฉพาะกลยุทธ์ — SINGLE SOURCE OF TRUTH คือ parameterizedTpSl (StrategyParams.kt)
+     * ที่นี่เป็น wrapper ส่งค่า default เข้าไป (กรณีไม่มี tuned params) เพื่อการันตี live == backtest
+     * (2026-08-20: strategy-native SL/TP — swing/Donchian band/BB basis แทน ATR multiple ล้วน)
+     */
     internal fun computeTpSl(
         kind: String, side: String, candles: List<Candle>, i: Int, atr14: Double, atr6: Double
-    ): Pair<Double, Double> {
-        val entry = candles[i].close
-        val isBuy = side == "BUY"
-        fun levels(slDist: Double, tpDist: Double): Pair<Double, Double> =
-            if (isBuy) (entry - slDist) to (entry + tpDist) else (entry + slDist) to (entry - tpDist)
-
-        return when (kind) {
-            // ตามเทรนด์ — ให้เทรนด์วิ่ง RR 1:1.5
-            "MOM", "TR", "E" -> levels(2.0 * atr14, 3.0 * atr14)
-            // UT Bot — SL = ระยะ trailing stop ของมันเอง (2×ATR6), TP = 2×risk
-            "UT" -> levels(2.0 * atr6, 4.0 * atr6)
-            // Donchian breakout — กัน false breakout
-            "DC" -> levels(1.5 * atr14, 2.5 * atr14)
-            // Mean reversion — SL สั้น 1×ATR, TP = BB basis (เส้นกลาง) ถ้าอยู่ฝั่งกำไร ไม่งั้น 1.5×ATR
-            "REV" -> {
-                val basis = sma(candles.map { it.close }, 20)[i]
-                val tp = if (!basis.isNaN() && (if (isBuy) basis > entry else basis < entry)) {
-                    basis
-                } else if (isBuy) entry + 1.5 * atr14 else entry - 1.5 * atr14
-                (if (isBuy) entry - atr14 else entry + atr14) to tp
-            }
-            // 3-Bar Reversal — SL = จุดสุดของแท่งกลาง pattern, TP = 2×risk
-            "3BR" -> {
-                val mid = candles[i - 1]
-                val slRaw = if (isBuy) mid.low - 0.2 * atr14 else mid.high + 0.2 * atr14
-                val risk = abs(entry - slRaw).coerceAtLeast(0.5 * atr14)
-                (if (isBuy) entry - risk else entry + risk) to (if (isBuy) entry + 2 * risk else entry - 2 * risk)
-            }
-            // 52W High — momentum continuation
-            "52H" -> levels(1.5 * atr14, 2.0 * atr14)
-            // Mix Voting — สัญญาณผสมหลายกลยุทธ์ (ต้องโหวตผ่านเกณฑ์) ให้ห้องหายใจกว้างหน่อย
-            "MIX" -> levels(1.5 * atr14, 2.5 * atr14)
-            else -> levels(1.5 * atr14, 2.0 * atr14)
-        }
-    }
+    ): Pair<Double, Double> = com.example.personalaibot.automation.backtest.parameterizedTpSl(
+        kind, side, candles, i, atr14, atr6,
+        com.example.personalaibot.automation.backtest.TpSlParams.defaultsFor(kind)
+    )
 
     internal fun strategyName(kind: String): String = when (kind) {
         "MOM" -> "Time-Series Momentum"
@@ -292,7 +266,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "TR" -> if (up) "EMA${ep?.trFast ?: 50} ตัดขึ้นเหนือ EMA${ep?.trSlow ?: 200} (Golden Cross)" else "EMA${ep?.trFast ?: 50} ตัดลงใต้ EMA${ep?.trSlow ?: 200} (Death Cross)"
             "REV" -> if (up) "RSI ต่ำกว่า ${(ep?.revRsiLow ?: 30.0).toInt()} + ราคาแตะ Bollinger Lower (ขายมากเกิน คาดเด้ง)" else "RSI สูงกว่า ${(ep?.revRsiHigh ?: 70.0).toInt()} + ราคาแตะ Bollinger Upper (ซื้อมากเกิน คาดย่อ)"
             "DC" -> if (up) "ราคาปิดทะลุ High ${ep?.dcPeriod ?: 20} แท่ง (breakout ขึ้น)" else "ราคาปิดหลุด Low ${ep?.dcPeriod ?: 20} แท่ง (breakout ลง)"
-            "52H" -> if (up) "ราคาเข้าใกล้จุดสูงสุดสะสม (≥${((ep?.w52ProxBuy ?: 0.98) * 100).toInt()}% — momentum แรงต่อเนื่อง)" else "ราคาหลุด ${((ep?.w52ProxSell ?: 0.90) * 100).toInt()}% จากจุดสูงสุดสะสม (โมเมนตัมเสีย)"
+            "52H" -> if (up) "ราคาเข้าใกล้จุดสูงสุด rolling ${ep?.w52Lookback ?: 2000} แท่ง (≥${((ep?.w52ProxBuy ?: 0.98) * 100).toInt()}% — momentum แรงต่อเนื่อง)" else "ราคาหลุด ${((ep?.w52ProxSell ?: 0.90) * 100).toInt()}% จากจุดสูงสุด rolling ${ep?.w52Lookback ?: 2000} แท่ง (โมเมนตัมเสีย)"
             "E" -> if (up) "EMA${ep?.eFast ?: 14} ตัดขึ้นเหนือ EMA${ep?.eSlow ?: 60} พร้อมแท่งยืนยัน" else "EMA${ep?.eFast ?: 14} ตัดลงใต้ EMA${ep?.eSlow ?: 60} พร้อมแท่งยืนยัน"
             "UT" -> if (up) "ราคาปิดเหนือ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาขึ้น" else "ราคาปิดใต้ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาลง"
             "3BR" -> if (up) "รูปแบบ 3-Bar Reversal ขาขึ้น (แท่ง 3 กลืนกิน high แท่งแรก)" else "รูปแบบ 3-Bar Reversal ขาลง (แท่ง 3 กลืนกิน low แท่งแรก)"

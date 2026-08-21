@@ -153,17 +153,25 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             out += marks.takeLast(maxPerKind)
         }
 
-        // 5) 52-Weeks High proximity — EDGE แบบ state-change เหมือนกัน
-        //    (เข้าโซน ≥98% ครั้งแรกของรอบ / หลุด ≤90% ครั้งแรกของรอบ) + แยกสี BUY/SELL
-        //    warmup: ข้าม 100 แท่งแรก — runHigh เพิ่งเริ่มสะสม สัญญาณช่วงต้นชุดข้อมูลไม่มีความหมาย
+        // 5) 52-Weeks High proximity — ROLLING window (w52Lookback แท่ง ไม่รวมแท่งปัจจุบัน)
+        //    เดิม runHigh สะสมตั้งแต่แท่งแรกของชุดข้อมูล = "สูงสุดของไฟล์" ไม่ใช่ 52w high จริง
+        //    (15m 5,000 แท่ง ≈ 52 วัน) และไม่ tune ได้ — แก้เป็น sliding max (deque) O(n)
+        //    EDGE แบบ state-change เหมือนเดิม + warmup 100 แท่งแรก
         run {
+            val lb = ep52H.w52Lookback.coerceAtLeast(50)
             val marks = mutableListOf<SignalMarker>()
             val sides = IntArray(n)
-            var runHigh = 0.0
+            val dq = ArrayDeque<Int>()  // sliding max ของ high บนหน้าต่าง [i-lb, i-1]
             for (i in 0 until n) {
-                runHigh = max(runHigh, candles[i].high)
-                val prox = closes[i] / runHigh
-                sides[i] = if (i < 100) 0 else if (prox >= ep52H.w52ProxBuy) 1 else if (prox <= ep52H.w52ProxSell) -1 else 0
+                while (dq.isNotEmpty() && dq.first() < i - lb) dq.removeFirst()
+                val winHigh = if (dq.isEmpty()) Double.NaN else candles[dq.first()].high
+                val prox = if (winHigh.isNaN() || winHigh <= 0.0) 1.0 else closes[i] / winHigh
+                sides[i] = if (i < 100 || dq.isEmpty()) 0
+                    else if (prox >= ep52H.w52ProxBuy) 1
+                    else if (prox <= ep52H.w52ProxSell) -1
+                    else 0
+                while (dq.isNotEmpty() && candles[dq.last()].high <= candles[i].high) dq.removeLast()
+                dq.addLast(i)
             }
             for (i in 1 until n) {
                 val side = sides[i]

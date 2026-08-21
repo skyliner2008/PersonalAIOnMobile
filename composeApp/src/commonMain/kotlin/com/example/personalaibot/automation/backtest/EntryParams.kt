@@ -26,9 +26,13 @@ data class EntryParams(
     val revBbMult: Double = 2.0,
     // DC — Donchian Breakout: channel period
     val dcPeriod: Int = 20,
-    // 52H — 52-Weeks High proximity thresholds
+    // 52H — 52-Weeks High proximity thresholds + rolling lookback (แท่ง)
+    // เดิม runHigh สะสมตั้งแต่แท่งแรกของข้อมูล = "จุดสูงสุดของชุดข้อมูล" ไม่ใช่ 52-week high จริง
+    // (15m 5,000 แท่ง ≈ 52 วันเท่านั้น) — เปลี่ยนเป็น rolling window L แท่ง ไม่รวมแท่งปัจจุบัน
+    // ค่า default 2000 ≈ 1 ปีบน 4h; TF เล็กจะสั้นกว่า 52 สัปดาห์ตามข้อมูลที่มี (จูนได้)
     val w52ProxBuy: Double = 0.98,
     val w52ProxSell: Double = 0.90,
+    val w52Lookback: Int = 2000,
     // E — EMA 14/60 cross
     val eFast: Int = 14,
     val eSlow: Int = 60,
@@ -60,6 +64,9 @@ data class EntryParams(
                 for (b in listOf(0.95, 0.98, 0.99)) for (s in listOf(0.85, 0.90, 0.95)) {
                     if (b > s) add(EntryParams(w52ProxBuy = b, w52ProxSell = s))
                 }
+                // rolling lookback ตัวแทนช่วง 52 สัปดาห์ตาม TF (4h: 2000≈1ปี / 1h: 4000≈7เดือน)
+                add(EntryParams(w52Lookback = 1000))
+                add(EntryParams(w52Lookback = 4000))
             }
             "E" -> listOf(8 to 21, 9 to 30, 14 to 60, 20 to 50)
                 .map { (f, s) -> EntryParams(eFast = f, eSlow = s) }
@@ -77,7 +84,7 @@ data class EntryParams(
             "TR" -> "trFast=${p.trFast};trSlow=${p.trSlow}"
             "REV" -> "revRsiLow=${p.revRsiLow};revRsiHigh=${p.revRsiHigh}"
             "DC" -> "dcPeriod=${p.dcPeriod}"
-            "52H" -> "w52ProxBuy=${p.w52ProxBuy};w52ProxSell=${p.w52ProxSell}"
+            "52H" -> "w52ProxBuy=${p.w52ProxBuy};w52ProxSell=${p.w52ProxSell};w52Lookback=${p.w52Lookback}"
             "E" -> "eFast=${p.eFast};eSlow=${p.eSlow}"
             "UT" -> "utKey=${p.utKey};utAtrPeriod=${p.utAtrPeriod}"
             else -> ""
@@ -96,7 +103,7 @@ data class EntryParams(
                     "TR" -> EntryParams(trFast = map.getValue("trFast").toInt(), trSlow = map.getValue("trSlow").toInt())
                     "REV" -> EntryParams(revRsiLow = map.getValue("revRsiLow").toDouble(), revRsiHigh = map.getValue("revRsiHigh").toDouble())
                     "DC" -> EntryParams(dcPeriod = map.getValue("dcPeriod").toInt())
-                    "52H" -> EntryParams(w52ProxBuy = map.getValue("w52ProxBuy").toDouble(), w52ProxSell = map.getValue("w52ProxSell").toDouble())
+                    "52H" -> EntryParams(w52ProxBuy = map.getValue("w52ProxBuy").toDouble(), w52ProxSell = map.getValue("w52ProxSell").toDouble(), w52Lookback = map["w52Lookback"]?.toInt() ?: 2000)
                     "E" -> EntryParams(eFast = map.getValue("eFast").toInt(), eSlow = map.getValue("eSlow").toInt())
                     "UT" -> EntryParams(utKey = map.getValue("utKey").toDouble(), utAtrPeriod = map.getValue("utAtrPeriod").toInt())
                     else -> null

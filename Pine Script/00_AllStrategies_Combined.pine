@@ -1,0 +1,408 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  00 · ALL STRATEGIES COMBINED — 8 กลยุทธ์ในสคริปต์เดียว [PAIBot]
+//  Mirror ของ PersonalAIBot: SignalMarkerProvider.kt + StrategyParams.kt
+//
+//  · เปิด/ปิดแต่ละกลยุทธ์ได้อิสระ (group "เปิด/ปิดกลยุทธ์")
+//  · แต่ละกลยุทธ์ถือ position ของตัวเอง (entry id แยก, pyramiding=8, 10% equity/ไม้)
+//  · Entry edge-triggered ตรง Kotlin เป๊ะ · SL/TP strategy-native ตรง parameterizedTpSl เป๊ะ
+//  · แดชบอร์ดมุมขวาบน: สถิติแยกรายกลยุทธ์ (Trades / Win% / PF / Net) คำนวณจาก closed trades จริง
+//  · ปิด toggle กลางทาง = ไม่เปิดไม้ใหม่ (ไม้เก่ายังปิดด้วย SL/TP เดิม)
+//  · Alert: ตั้งใน TV ด้วยเงื่อนไข "alert() function calls only"
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("00 · All Strategies Combined [PAIBot]", shorttitle="ALL-8", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     pyramiding=8, process_orders_on_close=true, calc_on_every_tick=false)
+
+// ══ Inputs — เปิด/ปิด ═══════════════════════════════════════════════════════
+gT = "เปิด/ปิดกลยุทธ์"
+onMOM = input.bool(true, "MOM · TSMOM (ROC flip)",      group=gT)
+onTR  = input.bool(true, "TR · Trend EMA cross",        group=gT)
+onREV = input.bool(true, "REV · RSI + Bollinger",       group=gT)
+onDC  = input.bool(true, "DC · Donchian Breakout",      group=gT)
+on52H = input.bool(true, "52H · 52-Week High",          group=gT)
+onE   = input.bool(true, "E · EMA 14/60",               group=gT)
+onUT  = input.bool(true, "UT · UT Bot",                 group=gT)
+on3BR = input.bool(true, "3BR · 3-Bar Reversal",        group=gT)
+
+// ══ Inputs — params ต่อกลยุทธ์ (default = Kotlin) ═══════════════════════════
+momLB   = input.int(20,     "ROC lookback",        minval=2,  group="MOM")
+momBuf  = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="MOM")
+momRR   = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="MOM")
+
+trFast  = input.int(50,     "EMA fast",            minval=2,  group="TR")
+trSlow  = input.int(200,    "EMA slow",            minval=3,  group="TR")
+trBuf   = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="TR")
+trRR    = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="TR")
+
+revRsiP = input.int(14,     "RSI period",          minval=2,  group="REV")
+revLo   = input.float(30.0, "RSI oversold",        step=1.0,  group="REV")
+revHi   = input.float(70.0, "RSI overbought",      step=1.0,  group="REV")
+revBbP  = input.int(20,     "BB period",           minval=2,  group="REV")
+revBbM  = input.float(2.0,  "BB mult (σ)",         step=0.1,  group="REV")
+revBuf  = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="REV")
+revCap  = input.float(2.5,  "SL cap ×ATR14",       step=0.1,  group="REV")
+revTpM  = input.float(1.5,  "TP fallback ×ATR14",  step=0.1,  group="REV")
+
+dcLen   = input.int(20,     "Donchian entry",      minval=2,  group="DC")
+dcExit  = input.int(10,     "Exit band (SL)",      minval=2,  group="DC")
+dcBuf   = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="DC")
+dcRR    = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="DC")
+
+w52Len  = input.int(2000,   "52W lookback (bars)", minval=50, group="52H")
+w52Buy  = input.float(0.98, "Proximity BUY (≥)",   step=0.01, group="52H")
+w52Sell = input.float(0.90, "Proximity SELL (≤)",  step=0.01, group="52H")
+w52Warm = input.int(100,    "Warmup bars",         minval=0,  group="52H")
+w52Buf  = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="52H")
+w52RR   = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="52H")
+
+eFast   = input.int(14,     "EMA fast",            minval=2,  group="E")
+eSlow   = input.int(60,     "EMA slow",            minval=3,  group="E")
+eBuf    = input.float(0.5,  "SL buffer ×ATR14",    step=0.1,  group="E")
+eRR     = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="E")
+
+utKey   = input.float(2.0,  "UT key (×ATR)",       step=0.1,  group="UT")
+utAtrP  = input.int(6,      "UT ATR period",       minval=1,  group="UT")
+utSL    = input.float(2.0,  "SL ×ATR",             step=0.1,  group="UT")
+utTP    = input.float(4.0,  "TP ×ATR",             step=0.1,  group="UT")
+
+brFloor = input.float(1.0,  "SL floor (×0.5 ATR14)", step=0.1, group="3BR")
+brRR    = input.float(2.0,  "TP = RR × risk",      step=0.1,  group="3BR")
+
+swingLen = input.int(10,    "Swing lookback (bars) — ใช้ร่วม MOM/TR/REV/52H/E", minval=2, group="SL / TP ร่วม")
+
+// ══ Indicators ร่วม ═════════════════════════════════════════════════════════
+atr14   = ta.atr(14)
+swingLo = ta.lowest(low, swingLen)[1]     // ไม่รวมแท่งปัจจุบัน (point-in-time)
+swingHi = ta.highest(high, swingLen)[1]
+
+// structural risk — ตรง parameterizedTpSl: clamp [0.3, 3.5]×ATR, fallback max(1.5, buf)×ATR
+structRisk(anchor, isBuy, buf) =>
+    usable = not na(anchor) and (isBuy ? anchor < close : anchor > close)
+    usable ? math.min(math.max(math.abs(close - anchor) + buf * atr14, 0.3 * atr14), 3.5 * atr14)
+           : math.max(1.5, buf) * atr14
+
+// position ของ entry id นั้นยังเปิดอยู่ไหม
+isOpen(id) =>
+    found = false
+    for t = 0 to strategy.opentrades - 1
+        if strategy.opentrades.entry_id(t) == id
+            found := true
+    found
+
+// ══ 1) MOM — ROC flip ═══════════════════════════════════════════════════════
+rocM = close - close[momLB]
+sgnM = rocM > 0 ? 1 : rocM < 0 ? -1 : 0
+var int prevSignM = 0
+momBuy  = onMOM and sgnM == 1  and prevSignM == -1
+momSell = onMOM and sgnM == -1 and prevSignM == 1
+if sgnM != 0
+    prevSignM := sgnM
+
+var float slMOM = na
+var float tpMOM = na
+if momBuy
+    risk = structRisk(swingLo, true, momBuf)
+    slMOM := close - risk
+    tpMOM := close + momRR * risk
+    strategy.entry("MOM", strategy.long)
+    strategy.exit("MOM-X", from_entry="MOM", stop=slMOM, limit=tpMOM)
+if momSell
+    risk = structRisk(swingHi, false, momBuf)
+    slMOM := close + risk
+    tpMOM := close - momRR * risk
+    strategy.entry("MOM", strategy.short)
+    strategy.exit("MOM-X", from_entry="MOM", stop=slMOM, limit=tpMOM)
+
+// ══ 2) TR — EMA fast/slow cross ═════════════════════════════════════════════
+eFastTR   = ta.ema(close, trFast)
+eSlowTR   = ta.ema(close, trSlow)
+trCrossUp = ta.crossover(eFastTR, eSlowTR)      // คำนวณทุกแท่ง กัน short-circuit
+trCrossDn = ta.crossunder(eFastTR, eSlowTR)
+trBuy  = onTR and trCrossUp
+trSell = onTR and trCrossDn
+
+var float slTR = na
+var float tpTR = na
+if trBuy
+    risk = structRisk(swingLo, true, trBuf)
+    slTR := close - risk
+    tpTR := close + trRR * risk
+    strategy.entry("TR", strategy.long)
+    strategy.exit("TR-X", from_entry="TR", stop=slTR, limit=tpTR)
+if trSell
+    risk = structRisk(swingHi, false, trBuf)
+    slTR := close + risk
+    tpTR := close - trRR * risk
+    strategy.entry("TR", strategy.short)
+    strategy.exit("TR-X", from_entry="TR", stop=slTR, limit=tpTR)
+
+// ══ 3) REV — RSI สุดโต่ง + แตะ BB (edge) ════════════════════════════════════
+rsiV = ta.rsi(close, revRsiP)
+[basis, bbUp, bbLo] = ta.bb(close, revBbP, revBbM)
+bullNow = rsiV < revLo and close <= bbLo
+bearNow = rsiV > revHi and close >= bbUp
+revBuy  = onREV and bullNow and not bullNow[1]
+revSell = onREV and bearNow and not bearNow[1]
+
+revRisk(anchor, isBuy) =>
+    usable = not na(anchor) and (isBuy ? anchor < close : anchor > close)
+    raw = usable ? math.min(math.max(math.abs(close - anchor) + revBuf * atr14, 0.3 * atr14), 3.5 * atr14)
+                 : math.max(1.5, revBuf) * atr14
+    math.min(raw, revCap * atr14)
+
+var float slREV = na
+var float tpREV = na
+if revBuy
+    risk = revRisk(swingLo, true)
+    slREV := close - risk
+    tpREV := basis > close ? basis : close + revTpM * atr14
+    strategy.entry("REV", strategy.long)
+    strategy.exit("REV-X", from_entry="REV", stop=slREV, limit=tpREV)
+if revSell
+    risk = revRisk(swingHi, false)
+    slREV := close + risk
+    tpREV := basis < close ? basis : close - revTpM * atr14
+    strategy.entry("REV", strategy.short)
+    strategy.exit("REV-X", from_entry="REV", stop=slREV, limit=tpREV)
+
+// ══ 4) DC — Donchian breakout (state-change) ════════════════════════════════
+dcUp = ta.highest(high, dcLen)[1]
+dcLo = ta.lowest(low, dcLen)[1]
+dcExLo = ta.lowest(low, dcExit)[1]
+dcExHi = ta.highest(high, dcExit)[1]
+dcSide = close > dcUp ? 1 : close < dcLo ? -1 : 0
+dcBuy  = onDC and dcSide == 1  and dcSide[1] != 1
+dcSell = onDC and dcSide == -1 and dcSide[1] != -1
+
+var float slDC = na
+var float tpDC = na
+if dcBuy
+    risk = structRisk(dcExLo, true, dcBuf)
+    slDC := close - risk
+    tpDC := close + dcRR * risk
+    strategy.entry("DC", strategy.long)
+    strategy.exit("DC-X", from_entry="DC", stop=slDC, limit=tpDC)
+if dcSell
+    risk = structRisk(dcExHi, false, dcBuf)
+    slDC := close + risk
+    tpDC := close - dcRR * risk
+    strategy.entry("DC", strategy.short)
+    strategy.exit("DC-X", from_entry="DC", stop=slDC, limit=tpDC)
+
+// ══ 5) 52H — rolling 52-week high proximity (state-change) ══════════════════
+effLen  = math.max(1, math.min(w52Len, bar_index))
+winHigh = ta.highest(high[1], effLen)
+prox    = na(winHigh) or winHigh <= 0 ? 1.0 : close / winHigh
+w52Side = bar_index < w52Warm ? 0 : prox >= w52Buy ? 1 : prox <= w52Sell ? -1 : 0
+w52BuyS  = on52H and w52Side == 1  and w52Side[1] != 1
+w52SellS = on52H and w52Side == -1 and w52Side[1] != -1
+
+var float sl52 = na
+var float tp52 = na
+if w52BuyS
+    risk = structRisk(swingLo, true, w52Buf)
+    sl52 := close - risk
+    tp52 := close + w52RR * risk
+    strategy.entry("52H", strategy.long)
+    strategy.exit("52H-X", from_entry="52H", stop=sl52, limit=tp52)
+if w52SellS
+    risk = structRisk(swingHi, false, w52Buf)
+    sl52 := close + risk
+    tp52 := close - w52RR * risk
+    strategy.entry("52H", strategy.short)
+    strategy.exit("52H-X", from_entry="52H", stop=sl52, limit=tp52)
+
+// ══ 6) E — EMA 14/60 cross ══════════════════════════════════════════════════
+emaF     = ta.ema(close, eFast)
+emaS     = ta.ema(close, eSlow)
+eCrossUp = ta.crossover(emaF, emaS)             // คำนวณทุกแท่ง กัน short-circuit
+eCrossDn = ta.crossunder(emaF, emaS)
+eBuy  = onE and eCrossUp
+eSell = onE and eCrossDn
+
+var float slE = na
+var float tpE = na
+if eBuy
+    risk = structRisk(swingLo, true, eBuf)
+    slE := close - risk
+    tpE := close + eRR * risk
+    strategy.entry("E", strategy.long)
+    strategy.exit("E-X", from_entry="E", stop=slE, limit=tpE)
+if eSell
+    risk = structRisk(swingHi, false, eBuf)
+    slE := close + risk
+    tpE := close - eRR * risk
+    strategy.entry("E", strategy.short)
+    strategy.exit("E-X", from_entry="E", stop=slE, limit=tpE)
+
+// ══ 7) UT — UT Bot flip ═════════════════════════════════════════════════════
+atrUT  = ta.atr(utAtrP)
+nLoss  = utKey * atrUT
+var float tStop = 0.0
+tStop := if close > tStop[1] and close[1] > tStop[1]
+    math.max(tStop[1], close - nLoss)
+else if close < tStop[1] and close[1] < tStop[1]
+    math.min(tStop[1], close + nLoss)
+else if close > tStop[1]
+    close - nLoss
+else
+    close + nLoss
+utBuy  = onUT and close > tStop and close[1] <= tStop[1]
+utSell = onUT and close < tStop and close[1] >= tStop[1]
+
+var float slUT = na
+var float tpUT = na
+if utBuy
+    slUT := close - utSL * atrUT
+    tpUT := close + utTP * atrUT
+    strategy.entry("UT", strategy.long)
+    strategy.exit("UT-X", from_entry="UT", stop=slUT, limit=tpUT)
+if utSell
+    slUT := close + utSL * atrUT
+    tpUT := close - utTP * atrUT
+    strategy.entry("UT", strategy.short)
+    strategy.exit("UT-X", from_entry="UT", stop=slUT, limit=tpUT)
+
+// ══ 8) 3BR — 3-Bar Reversal ═════════════════════════════════════════════════
+brBuy  = on3BR and close[2] < open[2] and low[1] < low[2]  and high[1] < high[2] and close[1] < open[1] and close > open and high > high[2]
+brSell = on3BR and close[2] > open[2] and high[1] > high[2] and low[1] > low[2]  and close[1] > open[1] and close < open and low < low[2]
+
+var float slBR = na
+var float tpBR = na
+if brBuy
+    slRaw = low[1] - 0.2 * atr14
+    risk  = math.max(math.abs(close - slRaw), brFloor * 0.5 * atr14)
+    slBR := close - risk
+    tpBR := close + brRR * risk
+    strategy.entry("3BR", strategy.long)
+    strategy.exit("3BR-X", from_entry="3BR", stop=slBR, limit=tpBR)
+if brSell
+    slRaw = high[1] + 0.2 * atr14
+    risk  = math.max(math.abs(close - slRaw), brFloor * 0.5 * atr14)
+    slBR := close + risk
+    tpBR := close - brRR * risk
+    strategy.entry("3BR", strategy.short)
+    strategy.exit("3BR-X", from_entry="3BR", stop=slBR, limit=tpBR)
+
+// ══ Plots — จุดเข้า (label แยกกลยุทธ์) ══════════════════════════════════════
+plotshape(momBuy,   "MOM BUY",  shape.triangleup,   location.belowbar, color.new(#26A69A, 0), size=size.tiny, text="MOM")
+plotshape(momSell,  "MOM SELL", shape.triangledown, location.abovebar, color.new(#EF5350, 0), size=size.tiny, text="MOM")
+plotshape(trBuy,    "TR BUY",   shape.triangleup,   location.belowbar, color.new(#26A69A, 0), size=size.tiny, text="TR")
+plotshape(trSell,   "TR SELL",  shape.triangledown, location.abovebar, color.new(#EF5350, 0), size=size.tiny, text="TR")
+plotshape(revBuy,   "REV BUY",  shape.triangleup,   location.belowbar, color.new(#66BB6A, 0), size=size.tiny, text="REV")
+plotshape(revSell,  "REV SELL", shape.triangledown, location.abovebar, color.new(#E57373, 0), size=size.tiny, text="REV")
+plotshape(dcBuy,    "DC BUY",   shape.triangleup,   location.belowbar, color.new(#4FC3F7, 0), size=size.tiny, text="DC")
+plotshape(dcSell,   "DC SELL",  shape.triangledown, location.abovebar, color.new(#FF8A65, 0), size=size.tiny, text="DC")
+plotshape(w52BuyS,  "52H BUY",  shape.triangleup,   location.belowbar, color.new(#9CCC65, 0), size=size.tiny, text="52H")
+plotshape(w52SellS, "52H SELL", shape.triangledown, location.abovebar, color.new(#FF8A65, 0), size=size.tiny, text="52H")
+plotshape(eBuy,     "E BUY",    shape.triangleup,   location.belowbar, color.new(#FFD54F, 0), size=size.tiny, text="E")
+plotshape(eSell,    "E SELL",   shape.triangledown, location.abovebar, color.new(#FFB74D, 0), size=size.tiny, text="E")
+plotshape(utBuy,    "UT BUY",   shape.triangleup,   location.belowbar, color.new(#4DB6AC, 0), size=size.tiny, text="UT")
+plotshape(utSell,   "UT SELL",  shape.triangledown, location.abovebar, color.new(#F06292, 0), size=size.tiny, text="UT")
+plotshape(brBuy,    "3BR BUY",  shape.triangleup,   location.belowbar, color.new(#81C784, 0), size=size.tiny, text="3BR")
+plotshape(brSell,   "3BR SELL", shape.triangledown, location.abovebar, color.new(#BA68C8, 0), size=size.tiny, text="3BR")
+
+// ══ Plots — SL/TP ต่อกลยุทธ์ (แสดงเฉพาะตอนถือ position) ═════════════════════
+plot(isOpen("MOM") ? slMOM : na, "MOM SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("MOM") ? tpMOM : na, "MOM TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("TR")  ? slTR  : na, "TR SL",  color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("TR")  ? tpTR  : na, "TR TP",  color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("REV") ? slREV : na, "REV SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("REV") ? tpREV : na, "REV TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("DC")  ? slDC  : na, "DC SL",  color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("DC")  ? tpDC  : na, "DC TP",  color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("52H") ? sl52  : na, "52H SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("52H") ? tp52  : na, "52H TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("E")   ? slE   : na, "E SL",   color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("E")   ? tpE   : na, "E TP",   color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("UT")  ? slUT  : na, "UT SL",  color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("UT")  ? tpUT  : na, "UT TP",  color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(isOpen("3BR") ? slBR  : na, "3BR SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(isOpen("3BR") ? tpBR  : na, "3BR TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+
+// ══ Dashboard — สถิติแยกรายกลยุทธ์ (จาก closed trades จริง) ═════════════════
+var table dash = table.new(position.top_right, 6, 10, bgcolor=color.new(#0D1117, 15), border_width=1, border_color=color.new(#30363D, 0))
+// อัปเดตแดชบอร์ดที่แท่งประวัติสุดท้าย + ทุกครั้งที่คำนวณบนแท่ง realtime (ตอนแท่งปิด)
+// — ใช้เงื่อนไขนี้แทน barstate.islast เพื่อเลี่ยง dependency กับ calc_on_every_tick
+if barstate.islastconfirmedhistory or barstate.isrealtime
+    ids   = array.from("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR")
+    names = array.from("MOM · TSMOM", "TR · EMA cross", "REV · RSI+BB", "DC · Donchian", "52H · 52w high", "E · EMA14/60", "UT · UT Bot", "3BR · 3-Bar Rev")
+    en    = array.from(onMOM, onTR, onREV, onDC, on52H, onE, onUT, on3BR)
+    trades = array.new_int(8, 0)
+    wins   = array.new_int(8, 0)
+    gp     = array.new_float(8, 0.0)
+    gl     = array.new_float(8, 0.0)
+    for t = 0 to strategy.closedtrades - 1
+        idx = array.indexof(ids, strategy.closedtrades.entry_id(t))
+        if idx >= 0
+            p = strategy.closedtrades.profit(t)
+            array.set(trades, idx, array.get(trades, idx) + 1)
+            if p > 0
+                array.set(wins, idx, array.get(wins, idx) + 1)
+                array.set(gp, idx, array.get(gp, idx) + p)
+            else
+                array.set(gl, idx, array.get(gl, idx) + math.abs(p))
+    // header
+    table.cell(dash, 0, 0, "Strategy", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 0, "On",       text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 2, 0, "Trades",   text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 3, 0, "Win%",     text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 4, 0, "PF",       text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 5, 0, "Net",      text_color=#8B949E, text_size=size.small)
+    for i = 0 to 7
+        row = i + 1
+        n   = array.get(trades, i)
+        wrT = n > 0 ? 100.0 * array.get(wins, i) / n : na
+        pfT = array.get(gl, i) != 0 ? array.get(gp, i) / array.get(gl, i) : na
+        net = array.get(gp, i) - array.get(gl, i)
+        on  = array.get(en, i)
+        table.cell(dash, 0, row, array.get(names, i), text_color=on ? color.white : #6E7681, text_size=size.small)
+        table.cell(dash, 1, row, on ? "✔" : "✘", text_color=on ? #3FB950 : #F85149, text_size=size.small)
+        table.cell(dash, 2, row, str.tostring(n), text_color=color.white, text_size=size.small)
+        table.cell(dash, 3, row, na(wrT) ? "—" : str.tostring(wrT, "#.#"), text_color=color.white, text_size=size.small)
+        table.cell(dash, 4, row, na(pfT) ? "—" : str.tostring(pfT, "#.##"), text_color=(not na(pfT)) and pfT > 1 ? #3FB950 : #F85149, text_size=size.small)
+        table.cell(dash, 5, row, str.tostring(net, "#.##"), text_color=net > 0 ? #3FB950 : net < 0 ? #F85149 : color.white, text_size=size.small)
+    // total
+    table.cell(dash, 0, 9, "TOTAL", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 9, "", text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 9, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    totWr = strategy.closedtrades > 0 ? 100.0 * strategy.wintrades / strategy.closedtrades : na
+    totPf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(dash, 3, 9, na(totWr) ? "—" : str.tostring(totWr, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(dash, 4, 9, na(totPf) ? "—" : str.tostring(totPf, "#.##"), text_color=(not na(totPf)) and totPf > 1 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 5, 9, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit > 0 ? #3FB950 : #F85149, text_size=size.small)
+
+// ══ Alerts — ตั้งใน TV ด้วยเงื่อนไข "alert() function calls only" ═══════════
+if momBuy
+    alert("MOM BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if momSell
+    alert("MOM SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if trBuy
+    alert("TR BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if trSell
+    alert("TR SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if revBuy
+    alert("REV BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if revSell
+    alert("REV SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if dcBuy
+    alert("DC BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if dcSell
+    alert("DC SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if w52BuyS
+    alert("52H BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if w52SellS
+    alert("52H SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if eBuy
+    alert("E BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if eSell
+    alert("E SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if utBuy
+    alert("UT BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if utSell
+    alert("UT SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if brBuy
+    alert("3BR BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if brSell
+    alert("3BR SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)

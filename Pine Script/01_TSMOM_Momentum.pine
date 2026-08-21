@@ -1,0 +1,90 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  01 · Time-Series Momentum (TSMOM) — ROC sign flip
+//  Mirror ของ PersonalAIBot: SignalMarkerProvider.kt (MOM) + StrategyParams.kt
+//  Entry : ROC = close − close[lookback] พลิกเครื่องหมาย (edge-triggered ไม่ซ้ำทุกแท่ง)
+//  SL    : swing low/high 10 แท่ง (ไม่รวมแท่งสัญญาณ) + slBuf×ATR14
+//          risk clamp [0.3, 3.5]×ATR14 · anchor ใช้ไม่ได้ → fallback max(1.5, slBuf)×ATR14
+//  TP    : rr × risk จริง
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("01 · TSMOM — ROC Flip [PAIBot]", shorttitle="TSMOM", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     process_orders_on_close=true, calc_on_every_tick=false)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+lookback = input.int(20,     "ROC lookback",          minval=2, group="Entry")
+swingLen = input.int(10,     "Swing lookback (bars)", minval=2, group="SL / TP")
+slBuf    = input.float(0.5,  "SL buffer (×ATR14)",    step=0.1, group="SL / TP")
+rr       = input.float(2.0,  "TP = RR × risk",        step=0.1, group="SL / TP")
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+atr14   = ta.atr(14)
+swingLo = ta.lowest(low, swingLen)[1]     // ไม่รวมแท่งปัจจุบัน (point-in-time)
+swingHi = ta.highest(high, swingLen)[1]
+
+// ── Entry: ROC flip ข้าม 0 (ตรง SignalMarkerProvider.kt เป๊ะ) ───────────────
+roc = close - close[lookback]
+sgn = roc > 0 ? 1 : roc < 0 ? -1 : 0
+var int prevSign = 0
+buySig  = sgn == 1  and prevSign == -1
+sellSig = sgn == -1 and prevSign == 1
+if sgn != 0
+    prevSign := sgn
+
+// ── SL/TP: structural risk (เหมือน parameterizedTpSl) ───────────────────────
+structRisk(anchor, isBuy) =>
+    usable = not na(anchor) and (isBuy ? anchor < close : anchor > close)
+    usable ? math.min(math.max(math.abs(close - anchor) + slBuf * atr14, 0.3 * atr14), 3.5 * atr14)
+           : math.max(1.5, slBuf) * atr14
+
+var float sl = na
+var float tp = na
+if buySig
+    risk = structRisk(swingLo, true)
+    sl := close - risk
+    tp := close + rr * risk
+    strategy.entry("BUY", strategy.long)
+    strategy.exit("BUY-EXIT", from_entry="BUY", stop=sl, limit=tp)
+if sellSig
+    risk = structRisk(swingHi, false)
+    sl := close + risk
+    tp := close - rr * risk
+    strategy.entry("SELL", strategy.short)
+    strategy.exit("SELL-EXIT", from_entry="SELL", stop=sl, limit=tp)
+
+// ── Plots: จุดเข้า + SL/TP ─────────────────────────────────────────────────
+inPos = strategy.position_size != 0
+plotshape(buySig,  "BUY",  shape.triangleup,   location.belowbar, color.new(#26A69A, 0), size=size.small, text="BUY")
+plotshape(sellSig, "SELL", shape.triangledown, location.abovebar, color.new(#EF5350, 0), size=size.small, text="SELL")
+plot(inPos ? strategy.position_avg_price : na, "Entry", color.new(#58A6FF, 0), 1, plot.style_linebr)
+plot(inPos ? sl : na, "SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(inPos ? tp : na, "TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+plot(swingLo, "Swing Low",  color.new(#F85149, 70), 1, plot.style_circles)
+plot(swingHi, "Swing High", color.new(#3FB950, 70), 1, plot.style_circles)
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(#0D1117, 15), border_width=1, border_color=color.new(#30363D, 0))
+if barstate.islast
+    closed = strategy.closedtrades
+    wr = closed > 0 ? 100.0 * strategy.wintrades / closed : na
+    pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(dash, 0, 0, "TSMOM · ROC " + str.tostring(lookback), text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, "SL swing+" + str.tostring(slBuf) + "×ATR · RR " + str.tostring(rr), text_color=color.gray, text_size=size.small)
+    table.cell(dash, 0, 1, "Trades", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(closed), text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "Win rate", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 2, na(wr) ? "—" : str.tostring(wr, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "Profit factor", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 3, na(pf) ? "—" : str.tostring(pf, "#.##"), text_color=(not na(pf)) and pf > 1 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 4, "Net profit", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit > 0 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 5, "Open SL / TP", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 5, inPos ? str.tostring(sl, format.mintick) + " / " + str.tostring(tp, format.mintick) : "—", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 6, "Position", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 6, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? #3FB950 : strategy.position_size < 0 ? #F85149 : #8B949E, text_size=size.small)
+
+// Alerts — ตั้งใน TV ด้วยเงื่อนไข "alert() function calls only"
+if buySig
+    alert("TSMOM BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if sellSig
+    alert("TSMOM SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)

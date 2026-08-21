@@ -110,8 +110,11 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
             else -> "NONE"
         }
 
-        // ── 5) 52-Weeks High proximity (จากข้อมูลที่มี) ──
-        val periodHigh = candles.maxOf { it.high }
+        // ── 5) 52-Weeks High proximity — ROLLING window (w52Lookback แท่ง ไม่รวมแท่งปัจจุบัน) ──
+        //    เดิม maxOf ทั้งชุดที่ดึงมา (live ~300 แท่ง = ไม่กี่วัน ไม่ใช่ 52 สัปดาห์) — ให้ตรงกับ
+        //    SignalMarkerProvider (backtest) เพื่อ live == backtest parity
+        val w52From = maxOf(0, n - 1 - ep52H.w52Lookback)
+        val periodHigh = candles.subList(w52From, n - 1).maxOf { it.high }
         val proximity = last.close / periodHigh
         val w52Signal = when {
             proximity >= ep52H.w52ProxBuy -> "BUY"

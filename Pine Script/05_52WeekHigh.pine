@@ -1,0 +1,98 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  05 · 52-Weeks High proximity — ROLLING window (state-change edge)
+//  Mirror ของ PersonalAIBot: SignalMarkerProvider.kt (52H) + StrategyParams.kt
+//  Entry : close / rolling highest high (lookback แท่ง ไม่รวมแท่งปัจจุบัน)
+//          ≥ proxBuy → BUY · ≤ proxSell → SELL · ยิงแท่งแรกที่เข้าสถานะเท่านั้น
+//          warmup 100 แท่งแรกไม่ยิง (ตรง Kotlin)
+//  SL    : swing low/high 10 แท่ง + slBuf×ATR14, clamp [0.3, 3.5]×ATR14
+//  TP    : rr × risk จริง
+//  หมายเหตุ: lookback 2000 แท่ง ≈ 1 ปีบนกราฟ 4h — TF เล็กจะครอบคลุมสั้นกว่า 52 สัปดาห์
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("05 · 52-Week High Proximity [PAIBot]", shorttitle="52H", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     process_orders_on_close=true, calc_on_every_tick=false)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+w52Len   = input.int(2000,   "52W lookback (bars)",   minval=50,  group="Entry")
+proxBuy  = input.float(0.98, "Proximity BUY (≥)",     step=0.01,  group="Entry")
+proxSell = input.float(0.90, "Proximity SELL (≤)",    step=0.01,  group="Entry")
+warmup   = input.int(100,    "Warmup bars",           minval=0,   group="Entry")
+swingLen = input.int(10,     "Swing lookback (bars)", minval=2,   group="SL / TP")
+slBuf    = input.float(0.5,  "SL buffer (×ATR14)",    step=0.1,   group="SL / TP")
+rr       = input.float(2.0,  "TP = RR × risk",        step=0.1,   group="SL / TP")
+
+// ── Indicators ──────────────────────────────────────────────────────────────
+atr14   = ta.atr(14)
+swingLo = ta.lowest(low, swingLen)[1]
+swingHi = ta.highest(high, swingLen)[1]
+
+// rolling high ของหน้าต่าง [i-lookback, i-1] — clamp ตามข้อมูลที่มี (ตรง Kotlin sliding window)
+effLen   = math.max(1, math.min(w52Len, bar_index))
+winHigh  = ta.highest(high[1], effLen)
+prox     = na(winHigh) or winHigh <= 0 ? 1.0 : close / winHigh
+
+// ── Entry: state-change edge + warmup ───────────────────────────────────────
+side    = bar_index < warmup ? 0 : prox >= proxBuy ? 1 : prox <= proxSell ? -1 : 0
+buySig  = side == 1  and side[1] != 1
+sellSig = side == -1 and side[1] != -1
+
+// ── SL/TP: structural risk ──────────────────────────────────────────────────
+structRisk(anchor, isBuy) =>
+    usable = not na(anchor) and (isBuy ? anchor < close : anchor > close)
+    usable ? math.min(math.max(math.abs(close - anchor) + slBuf * atr14, 0.3 * atr14), 3.5 * atr14)
+           : math.max(1.5, slBuf) * atr14
+
+var float sl = na
+var float tp = na
+if buySig
+    risk = structRisk(swingLo, true)
+    sl := close - risk
+    tp := close + rr * risk
+    strategy.entry("BUY", strategy.long)
+    strategy.exit("BUY-EXIT", from_entry="BUY", stop=sl, limit=tp)
+if sellSig
+    risk = structRisk(swingHi, false)
+    sl := close + risk
+    tp := close - rr * risk
+    strategy.entry("SELL", strategy.short)
+    strategy.exit("SELL-EXIT", from_entry="SELL", stop=sl, limit=tp)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+inPos = strategy.position_size != 0
+plot(winHigh, "Rolling 52W high", color.new(#D29922, 20), 2)
+bgcolor(side == 1 ? color.new(#3FB950, 92) : side == -1 ? color.new(#F85149, 92) : na, title="proximity state")
+plotshape(buySig,  "BUY",  shape.triangleup,   location.belowbar, color.new(#9CCC65, 0), size=size.small, text="BUY")
+plotshape(sellSig, "SELL", shape.triangledown, location.abovebar, color.new(#FF8A65, 0), size=size.small, text="SELL")
+plot(inPos ? strategy.position_avg_price : na, "Entry", color.new(#58A6FF, 0), 1, plot.style_linebr)
+plot(inPos ? sl : na, "SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(inPos ? tp : na, "TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 8, bgcolor=color.new(#0D1117, 15), border_width=1, border_color=color.new(#30363D, 0))
+if barstate.islast
+    closed = strategy.closedtrades
+    wr = closed > 0 ? 100.0 * strategy.wintrades / closed : na
+    pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(dash, 0, 0, "52H · " + str.tostring(w52Len) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, "prox ≥" + str.tostring(proxBuy, "#.##") + " / ≤" + str.tostring(proxSell, "#.##"), text_color=color.gray, text_size=size.small)
+    table.cell(dash, 0, 1, "Proximity now", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(prox, "#.###"), text_color=prox >= proxBuy ? #3FB950 : prox <= proxSell ? #F85149 : color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "Trades", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(closed), text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "Win rate", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 3, na(wr) ? "—" : str.tostring(wr, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 4, "Profit factor", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 4, na(pf) ? "—" : str.tostring(pf, "#.##"), text_color=(not na(pf)) and pf > 1 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 5, "Net profit", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit > 0 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 6, "Open SL / TP", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 6, inPos ? str.tostring(sl, format.mintick) + " / " + str.tostring(tp, format.mintick) : "—", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 7, "Position", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 7, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? #3FB950 : strategy.position_size < 0 ? #F85149 : #8B949E, text_size=size.small)
+
+// Alerts — ตั้งใน TV ด้วยเงื่อนไข "alert() function calls only"
+if buySig
+    alert("52H BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if sellSig
+    alert("52H SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)

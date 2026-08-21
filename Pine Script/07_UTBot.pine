@@ -1,0 +1,84 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  07 · UT Bot — key × ATR trailing stop flip
+//  Mirror ของ PersonalAIBot: SignalMarkerProvider.kt (UT) + StrategyParams.kt
+//  Entry : close ข้าม ATR trailing stop (flip) — สูตร UT Bot มาตรฐาน
+//  SL    : slMult × ATR(atrPeriod) จากจุดเข้า — trailing stop คือ structure ของมันเอง
+//  TP    : tpMult × ATR(atrPeriod)
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("07 · UT Bot [PAIBot]", shorttitle="UT", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     process_orders_on_close=true, calc_on_every_tick=false)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+utKey   = input.float(2.0, "UT key (×ATR)",      step=0.1, group="Entry")
+utAtr   = input.int(6,     "UT ATR period",      minval=1, group="Entry")
+slMult  = input.float(2.0, "SL (×ATR6)",         step=0.1, group="SL / TP")
+tpMult  = input.float(4.0, "TP (×ATR6)",         step=0.1, group="SL / TP")
+
+// ── UT Bot trailing stop (สูตรมาตรฐาน — ตรง Kotlin เป๊ะ) ────────────────────
+atrV  = ta.atr(utAtr)
+nLoss = utKey * atrV
+var float tStop = 0.0
+tStop := if close > tStop[1] and close[1] > tStop[1]
+    math.max(tStop[1], close - nLoss)
+else if close < tStop[1] and close[1] < tStop[1]
+    math.min(tStop[1], close + nLoss)
+else if close > tStop[1]
+    close - nLoss
+else
+    close + nLoss
+
+// ── Entry: flip เมื่อ close ข้าม stop ───────────────────────────────────────
+buySig  = close > tStop and close[1] <= tStop[1]
+sellSig = close < tStop and close[1] >= tStop[1]
+
+// ── SL/TP: ATR multiples (native) ───────────────────────────────────────────
+var float sl = na
+var float tp = na
+if buySig
+    sl := close - slMult * atrV
+    tp := close + tpMult * atrV
+    strategy.entry("BUY", strategy.long)
+    strategy.exit("BUY-EXIT", from_entry="BUY", stop=sl, limit=tp)
+if sellSig
+    sl := close + slMult * atrV
+    tp := close - tpMult * atrV
+    strategy.entry("SELL", strategy.short)
+    strategy.exit("SELL-EXIT", from_entry="SELL", stop=sl, limit=tp)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+inPos = strategy.position_size != 0
+plot(tStop, "UT trailing stop", color.new(close > tStop ? #4DB6AC : #F06292, 0), 2)
+plotshape(buySig,  "BUY",  shape.triangleup,   location.belowbar, color.new(#4DB6AC, 0), size=size.small, text="BUY")
+plotshape(sellSig, "SELL", shape.triangledown, location.abovebar, color.new(#F06292, 0), size=size.small, text="SELL")
+plot(inPos ? strategy.position_avg_price : na, "Entry", color.new(#58A6FF, 0), 1, plot.style_linebr)
+plot(inPos ? sl : na, "SL", color.new(#F85149, 0), 1, plot.style_linebr)
+plot(inPos ? tp : na, "TP", color.new(#3FB950, 0), 1, plot.style_linebr)
+
+// ── Dashboard ───────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 7, bgcolor=color.new(#0D1117, 15), border_width=1, border_color=color.new(#30363D, 0))
+if barstate.islast
+    closed = strategy.closedtrades
+    wr = closed > 0 ? 100.0 * strategy.wintrades / closed : na
+    pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+    table.cell(dash, 0, 0, "UT Bot · key " + str.tostring(utKey) + " × ATR" + str.tostring(utAtr), text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, "SL " + str.tostring(slMult) + "×ATR · TP " + str.tostring(tpMult) + "×ATR", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 0, 1, "Trades", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(closed), text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "Win rate", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 2, na(wr) ? "—" : str.tostring(wr, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 3, "Profit factor", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 3, na(pf) ? "—" : str.tostring(pf, "#.##"), text_color=(not na(pf)) and pf > 1 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 4, "Net profit", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit > 0 ? #3FB950 : #F85149, text_size=size.small)
+    table.cell(dash, 0, 5, "Open SL / TP", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 5, inPos ? str.tostring(sl, format.mintick) + " / " + str.tostring(tp, format.mintick) : "—", text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 6, "Position", text_color=#8B949E, text_size=size.small)
+    table.cell(dash, 1, 6, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color=strategy.position_size > 0 ? #3FB950 : strategy.position_size < 0 ? #F85149 : #8B949E, text_size=size.small)
+
+// Alerts — ตั้งใน TV ด้วยเงื่อนไข "alert() function calls only"
+if buySig
+    alert("UT BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
+if sellSig
+    alert("UT SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar_close)
