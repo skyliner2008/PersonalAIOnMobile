@@ -1,0 +1,392 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © officialjackofalltrades
+//@version=6
+indicator("Veyra Shift Ledger [JOAT]", shorttitle="VSL [JOAT]", overlay=true, max_lines_count=300, max_labels_count=260, max_boxes_count=180, max_bars_back=2500)
+
+// Veyra Shift Ledger [JOAT]
+// A close-confirmed execution ledger that merges trend, pressure, structure,
+// auction location, displacement, and volatility state into one institutional
+// shift score. It is designed for clean chart execution planning, not noisy marks.
+
+//==============================================================================
+// Inputs
+//==============================================================================
+groupTrend = "Trend + Regime"
+fastLen = input.int(21, "Fast EMA", minval=2, maxval=100, group=groupTrend)
+midLen = input.int(55, "Mid EMA", minval=5, maxval=200, group=groupTrend)
+slowLen = input.int(200, "Slow EMA", minval=50, maxval=500, group=groupTrend)
+atrLen = input.int(21, "ATR length", minval=2, maxval=100, group=groupTrend)
+adxLen = input.int(14, "DMI length", minval=5, maxval=50, group=groupTrend)
+adxSmooth = input.int(14, "ADX smoothing", minval=3, maxval=50, group=groupTrend)
+regimeLen = input.int(120, "Regime memory", minval=30, maxval=500, group=groupTrend)
+
+groupPressure = "Pressure + Auction"
+pressureLen = input.int(24, "Pressure window", minval=5, maxval=100, group=groupPressure)
+volumeLen = input.int(34, "Volume baseline", minval=5, maxval=200, group=groupPressure)
+auctionLen = input.int(90, "Auction memory", minval=20, maxval=300, group=groupPressure)
+valueDev = input.float(1.15, "Value deviation", minval=0.2, maxval=4.0, step=0.05, group=groupPressure)
+
+groupStructure = "Structure"
+pivotLen = input.int(5, "Pivot confirmation", minval=2, maxval=20, group=groupStructure)
+displaceMult = input.float(1.15, "Displacement ATR multiplier", minval=0.2, maxval=4.0, step=0.05, group=groupStructure)
+zoneLife = input.int(120, "Zone life bars", minval=20, maxval=500, group=groupStructure)
+
+groupSignal = "Signal Gate"
+longThreshold = input.float(72.0, "Long score threshold", minval=50.0, maxval=95.0, step=0.5, group=groupSignal)
+shortThreshold = input.float(72.0, "Short score threshold", minval=50.0, maxval=95.0, step=0.5, group=groupSignal)
+confirmSignals = input.bool(true, "Confirm on bar close", group=groupSignal)
+useHtfFilter = input.bool(true, "Use confirmed HTF filter", group=groupSignal)
+htfFrame = input.timeframe("240", "Confirmed HTF", group=groupSignal)
+htfLen = input.int(55, "HTF EMA length", minval=5, maxval=200, group=groupSignal)
+
+groupRisk = "Execution Rails"
+showRails = input.bool(true, "Show execution rails", group=groupRisk)
+riskAtr = input.float(1.7, "Stop ATR multiplier", minval=0.2, maxval=8.0, step=0.1, group=groupRisk)
+rr1 = input.float(1.0, "TP1 R", minval=0.2, maxval=10.0, step=0.1, group=groupRisk)
+rr2 = input.float(2.0, "TP2 R", minval=0.2, maxval=12.0, step=0.1, group=groupRisk)
+rr3 = input.float(3.2, "TP3 R", minval=0.2, maxval=20.0, step=0.1, group=groupRisk)
+railBars = input.int(72, "Rail projection bars", minval=10, maxval=300, group=groupRisk)
+
+groupVisual = "Visual System"
+showCloud = input.bool(true, "Show trend cloud", group=groupVisual)
+showZones = input.bool(true, "Show shift zones", group=groupVisual)
+showDashboard = input.bool(true, "Show dashboard", group=groupVisual)
+paintCandles = input.bool(true, "Color candles by ledger state", group=groupVisual)
+
+//==============================================================================
+// Palette
+//==============================================================================
+color joatCyan = color.rgb(8, 239, 251)
+color joatMagenta = color.rgb(217, 2, 255)
+color joatGold = color.rgb(255, 200, 0)
+color joatTeal = color.rgb(38, 166, 154)
+color joatCoral = color.rgb(239, 83, 80)
+color joatViolet = color.rgb(125, 92, 255)
+color joatBlue = color.rgb(56, 189, 248)
+color joatInk = color.rgb(8, 10, 18)
+color joatPanel = color.rgb(15, 18, 28)
+color joatGrid = color.rgb(42, 48, 68)
+color joatText = color.rgb(226, 232, 240)
+color joatMute = color.rgb(130, 140, 160)
+
+//==============================================================================
+// Utility
+//==============================================================================
+f_clamp(float value, float minValue, float maxValue) =>
+    math.max(minValue, math.min(maxValue, value))
+
+f_safeDiv(float num, float den, float fallback) =>
+    math.abs(den) > 0.0000001 ? num / den : fallback
+
+f_scoreColor(float score, int direction) =>
+    direction == 1 ? color.from_gradient(score, 0.0, 100.0, joatCoral, joatCyan) : color.from_gradient(score, 0.0, 100.0, joatTeal, joatMagenta)
+
+f_confirmedHtfEma(string tf, int len) =>
+    request.security(syminfo.tickerid, tf, ta.ema(close, len)[1], lookahead=barmerge.lookahead_on)
+
+f_boolScore(bool condition, float weight) =>
+    condition ? weight : 0.0
+
+//==============================================================================
+// Trend, Momentum, and Regime
+//==============================================================================
+atr = ta.atr(atrLen)
+fast = ta.ema(close, fastLen)
+mid = ta.ema(close, midLen)
+slow = ta.ema(close, slowLen)
+vwapLine = ta.vwap(hlc3)
+[macdLine, signalLine, macdHist] = ta.macd(close, 12, 26, 9)
+rsi = ta.rsi(close, 14)
+[plusDI, minusDI, adx] = ta.dmi(adxLen, adxSmooth)
+
+trendBull = fast > mid and mid > slow and close > mid
+trendBear = fast < mid and mid < slow and close < mid
+vwapBull = close > vwapLine and vwapLine > vwapLine[1]
+vwapBear = close < vwapLine and vwapLine < vwapLine[1]
+momentumBull = macdHist > 0 and rsi > 52 and plusDI > minusDI
+momentumBear = macdHist < 0 and rsi < 48 and minusDI > plusDI
+trendStrength = f_clamp(adx, 0.0, 50.0) * 2.0
+
+atrPct = close != 0.0 ? atr / close * 100.0 : 0.0
+atrRank = ta.percentrank(atrPct, regimeLen)
+atrRankSafe = na(atrRank) ? 50.0 : atrRank
+compression = atrRankSafe < 32.0
+expansion = atrRankSafe > 62.0
+
+htfBasis = f_confirmedHtfEma(htfFrame, htfLen)
+htfBull = close > htfBasis
+htfBear = close < htfBasis
+htfPassLong = not useHtfFilter or htfBull
+htfPassShort = not useHtfFilter or htfBear
+
+//==============================================================================
+// Pressure Engine
+//==============================================================================
+body = close - open
+spread = math.max(high - low, syminfo.mintick)
+bodyEfficiency = body / spread
+signedBody = bodyEfficiency * volume
+pressureRaw = ta.ema(signedBody, pressureLen)
+pressureBase = ta.ema(math.abs(signedBody), pressureLen)
+pressureOsc = f_clamp(f_safeDiv(pressureRaw, pressureBase, 0.0) * 100.0, -100.0, 100.0)
+volumeBase = ta.sma(volume, volumeLen)
+volumeImpulse = f_safeDiv(volume, volumeBase, 1.0)
+bidPressure = pressureOsc > 12.0 and volumeImpulse > 1.05
+askPressure = pressureOsc < -12.0 and volumeImpulse > 1.05
+absorptionBull = low < low[1] and close > open and pressureOsc > pressureOsc[1] and volumeImpulse > 1.1
+absorptionBear = high > high[1] and close < open and pressureOsc < pressureOsc[1] and volumeImpulse > 1.1
+
+//==============================================================================
+// Auction Engine
+//==============================================================================
+weightedPrice = f_safeDiv(ta.sma(hlc3 * volume, auctionLen), ta.sma(volume, auctionLen), hlc3)
+auctionDev = ta.stdev(hlc3, auctionLen)
+valueHigh = weightedPrice + auctionDev * valueDev
+valueLow = weightedPrice - auctionDev * valueDev
+auctionDiscount = close < valueLow and close > low + spread * 0.45
+auctionPremium = close > valueHigh and close < high - spread * 0.45
+auctionReclaim = close > valueLow and close[1] <= valueLow[1]
+auctionReject = close < valueHigh and close[1] >= valueHigh[1]
+insideValue = close <= valueHigh and close >= valueLow
+
+//==============================================================================
+// Structure Engine
+//==============================================================================
+pivotHigh = ta.pivothigh(high, pivotLen, pivotLen)
+pivotLow = ta.pivotlow(low, pivotLen, pivotLen)
+var float lastPivotHigh = na
+var float lastPivotLow = na
+var int lastPivotHighBar = na
+var int lastPivotLowBar = na
+
+if not na(pivotHigh)
+    lastPivotHigh := pivotHigh
+    lastPivotHighBar := bar_index - pivotLen
+if not na(pivotLow)
+    lastPivotLow := pivotLow
+    lastPivotLowBar := bar_index - pivotLen
+
+displacement = math.abs(close - open) > atr * displaceMult and volumeImpulse > 1.0
+bosUp = not na(lastPivotHigh) and close > lastPivotHigh and close[1] <= lastPivotHigh and displacement
+bosDown = not na(lastPivotLow) and close < lastPivotLow and close[1] >= lastPivotLow and displacement
+sweepLow = not na(lastPivotLow) and low < lastPivotLow and close > lastPivotLow
+sweepHigh = not na(lastPivotHigh) and high > lastPivotHigh and close < lastPivotHigh
+
+fvgBull = low > high[2] and close > open
+fvgBear = high < low[2] and close < open
+
+var int structureBias = 0
+if bosUp
+    structureBias := 1
+else if bosDown
+    structureBias := -1
+
+structureBull = structureBias == 1 or sweepLow or fvgBull
+structureBear = structureBias == -1 or sweepHigh or fvgBear
+
+//==============================================================================
+// Shift Score
+//==============================================================================
+longScoreRaw = 0.0
+longScoreRaw += f_boolScore(trendBull, 16.0)
+longScoreRaw += f_boolScore(vwapBull, 10.0)
+longScoreRaw += f_boolScore(momentumBull, 12.0)
+longScoreRaw += f_boolScore(bidPressure, 13.0)
+longScoreRaw += f_boolScore(absorptionBull, 9.0)
+longScoreRaw += f_boolScore(structureBull, 14.0)
+longScoreRaw += f_boolScore(auctionDiscount or auctionReclaim, 10.0)
+longScoreRaw += f_boolScore(htfPassLong, 8.0)
+longScoreRaw += f_boolScore(expansion and not auctionPremium, 4.0)
+longScoreRaw += f_clamp(trendStrength / 8.0, 0.0, 4.0)
+
+shortScoreRaw = 0.0
+shortScoreRaw += f_boolScore(trendBear, 16.0)
+shortScoreRaw += f_boolScore(vwapBear, 10.0)
+shortScoreRaw += f_boolScore(momentumBear, 12.0)
+shortScoreRaw += f_boolScore(askPressure, 13.0)
+shortScoreRaw += f_boolScore(absorptionBear, 9.0)
+shortScoreRaw += f_boolScore(structureBear, 14.0)
+shortScoreRaw += f_boolScore(auctionPremium or auctionReject, 10.0)
+shortScoreRaw += f_boolScore(htfPassShort, 8.0)
+shortScoreRaw += f_boolScore(expansion and not auctionDiscount, 4.0)
+shortScoreRaw += f_clamp(trendStrength / 8.0, 0.0, 4.0)
+
+longScore = f_clamp(longScoreRaw, 0.0, 100.0)
+shortScore = f_clamp(shortScoreRaw, 0.0, 100.0)
+dominantDir = longScore > shortScore ? 1 : shortScore > longScore ? -1 : 0
+dominantScore = math.max(longScore, shortScore)
+ledgerColor = dominantDir == 1 ? f_scoreColor(longScore, 1) : dominantDir == -1 ? f_scoreColor(shortScore, -1) : joatGold
+
+canConfirm = not confirmSignals or barstate.isconfirmed
+longSignal = canConfirm and longScore >= longThreshold and longScore > shortScore + 8.0 and htfPassLong and not auctionPremium
+shortSignal = canConfirm and shortScore >= shortThreshold and shortScore > longScore + 8.0 and htfPassShort and not auctionDiscount
+longExit = canConfirm and (shortScore > longScore or close < mid or auctionPremium and pressureOsc < 0)
+shortExit = canConfirm and (longScore > shortScore or close > mid or auctionDiscount and pressureOsc > 0)
+
+//==============================================================================
+// Visual Cloud
+//==============================================================================
+pFast = plot(showCloud ? fast : na, "VSL fast ledger", color=color.new(joatCyan, dominantDir == 1 ? 0 : 45), linewidth=1)
+pMid = plot(showCloud ? mid : na, "VSL mid ledger", color=color.new(ledgerColor, 0), linewidth=2)
+pSlow = plot(showCloud ? slow : na, "VSL slow ledger", color=color.new(joatMagenta, dominantDir == -1 ? 0 : 45), linewidth=1)
+fill(pFast, pMid, color=color.new(dominantDir == 1 ? joatCyan : joatGold, 88), title="VSL fast-mid pressure field")
+fill(pMid, pSlow, color=color.new(dominantDir == -1 ? joatMagenta : joatViolet, 90), title="VSL mid-slow regime field")
+
+pValueHigh = plot(valueHigh, "VSL value high", color=color.new(joatMagenta, 55), linewidth=1)
+pWeighted = plot(weightedPrice, "VSL weighted auction", color=color.new(joatGold, 10), linewidth=2)
+pValueLow = plot(valueLow, "VSL value low", color=color.new(joatCyan, 55), linewidth=1)
+fill(pValueHigh, pValueLow, color=color.new(joatViolet, insideValue ? 92 : 96), title="VSL value field")
+plot(htfBasis, "VSL confirmed HTF basis", color=color.new(joatBlue, useHtfFilter ? 30 : 100), linewidth=1)
+
+barcolor(paintCandles ? color.new(ledgerColor, dominantScore >= 72.0 ? 5 : 32) : na)
+
+//==============================================================================
+// Shift Zones
+//==============================================================================
+var box bullZone = na
+var box bearZone = na
+bool demandQualified = showZones and canConfirm and (bosUp or fvgBull or absorptionBull) and longScore >= 58.0 and (structureBias >= 0 or sweepLow)
+bool supplyQualified = showZones and canConfirm and (bosDown or fvgBear or absorptionBear) and shortScore >= 58.0 and (structureBias <= 0 or sweepHigh)
+
+if demandQualified
+    if not na(bullZone)
+        box.delete(bullZone)
+    demandAnchor = na(lastPivotLow) ? low : lastPivotLow
+    zoneBot = math.min(demandAnchor, low)
+    zoneTop = math.max(zoneBot + atr * 0.62, math.min(open, close))
+    bullZone := box.new(bar_index, zoneTop, bar_index + zoneLife, zoneBot, bgcolor=color.new(joatCyan, 86), border_color=color.new(joatCyan, 18), text="VSL DEMAND Q" + str.tostring(longScore, "#"), text_color=joatText, text_size=size.tiny)
+if supplyQualified
+    if not na(bearZone)
+        box.delete(bearZone)
+    supplyAnchor = na(lastPivotHigh) ? high : lastPivotHigh
+    zoneTop = math.max(supplyAnchor, high)
+    zoneBot = math.min(zoneTop - atr * 0.62, math.max(open, close))
+    bearZone := box.new(bar_index, zoneTop, bar_index + zoneLife, zoneBot, bgcolor=color.new(joatMagenta, 86), border_color=color.new(joatMagenta, 18), text="VSL SUPPLY Q" + str.tostring(shortScore, "#"), text_color=joatText, text_size=size.tiny)
+
+if not na(bullZone)
+    mitigatedBull = low <= box.get_top(bullZone) and close > box.get_bottom(bullZone)
+    invalidBull = close < box.get_bottom(bullZone)
+    box.set_bgcolor(bullZone, invalidBull ? color.new(joatCoral, 92) : mitigatedBull ? color.new(joatGold, 90) : color.new(joatCyan, 87))
+if not na(bearZone)
+    mitigatedBear = high >= box.get_bottom(bearZone) and close < box.get_top(bearZone)
+    invalidBear = close > box.get_top(bearZone)
+    box.set_bgcolor(bearZone, invalidBear ? color.new(joatCoral, 92) : mitigatedBear ? color.new(joatGold, 90) : color.new(joatMagenta, 87))
+
+//==============================================================================
+// Execution Rails
+//==============================================================================
+var line entryLine = na
+var line stopLine = na
+var line tp1Line = na
+var line tp2Line = na
+var line tp3Line = na
+var linefill riskFill = na
+var linefill rewardFill = na
+var label entryLabel = na
+var label stopLabel = na
+var label tp1Label = na
+var label tp2Label = na
+var label tp3Label = na
+
+newPlan = showRails and (longSignal or shortSignal)
+if newPlan
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(tp1Line)
+        line.delete(tp1Line)
+    if not na(tp2Line)
+        line.delete(tp2Line)
+    if not na(tp3Line)
+        line.delete(tp3Line)
+    if not na(riskFill)
+        linefill.delete(riskFill)
+    if not na(rewardFill)
+        linefill.delete(rewardFill)
+    if not na(entryLabel)
+        label.delete(entryLabel)
+    if not na(stopLabel)
+        label.delete(stopLabel)
+    if not na(tp1Label)
+        label.delete(tp1Label)
+    if not na(tp2Label)
+        label.delete(tp2Label)
+    if not na(tp3Label)
+        label.delete(tp3Label)
+
+    planDir = longSignal ? 1 : -1
+    entry = close
+    structureStop = planDir == 1 and not na(lastPivotLow) ? lastPivotLow : planDir == -1 and not na(lastPivotHigh) ? lastPivotHigh : na
+    atrStop = planDir == 1 ? close - atr * riskAtr : close + atr * riskAtr
+    stop = na(structureStop) ? atrStop : planDir == 1 ? math.min(atrStop, structureStop) : math.max(atrStop, structureStop)
+    risk = math.max(math.abs(entry - stop), atr * 0.25)
+    tp1 = planDir == 1 ? entry + risk * rr1 : entry - risk * rr1
+    tp2 = planDir == 1 ? entry + risk * rr2 : entry - risk * rr2
+    tp3 = planDir == 1 ? entry + risk * rr3 : entry - risk * rr3
+    x2 = bar_index + railBars
+    railColor = planDir == 1 ? joatCyan : joatMagenta
+    entryLine := line.new(bar_index, entry, x2, entry, color=color.new(joatText, 0), width=2)
+    stopLine := line.new(bar_index, stop, x2, stop, color=color.new(joatCoral, 0), width=2)
+    tp1Line := line.new(bar_index, tp1, x2, tp1, color=color.new(joatGold, 0), width=1)
+    tp2Line := line.new(bar_index, tp2, x2, tp2, color=color.new(railColor, 0), width=1)
+    tp3Line := line.new(bar_index, tp3, x2, tp3, color=color.new(railColor, 10), width=2)
+    riskFill := linefill.new(entryLine, stopLine, color.new(joatCoral, 86))
+    rewardFill := linefill.new(entryLine, tp3Line, color.new(railColor, 88))
+    entryLabel := label.new(x2, entry, "VSL ENTRY", style=label.style_label_left, textcolor=joatText, color=color.new(joatPanel, 0), size=size.tiny)
+    stopLabel := label.new(x2, stop, "SL", style=label.style_label_left, textcolor=joatText, color=color.new(joatCoral, 10), size=size.tiny)
+    tp1Label := label.new(x2, tp1, "TP1", style=label.style_label_left, textcolor=joatInk, color=color.new(joatGold, 0), size=size.tiny)
+    tp2Label := label.new(x2, tp2, "TP2", style=label.style_label_left, textcolor=joatInk, color=color.new(railColor, 0), size=size.tiny)
+    tp3Label := label.new(x2, tp3, "TP3", style=label.style_label_left, textcolor=joatInk, color=color.new(railColor, 10), size=size.tiny)
+
+if showRails and not na(entryLine)
+    nextX = bar_index + railBars
+    line.set_x2(entryLine, nextX)
+    line.set_x2(stopLine, nextX)
+    line.set_x2(tp1Line, nextX)
+    line.set_x2(tp2Line, nextX)
+    line.set_x2(tp3Line, nextX)
+    label.set_x(entryLabel, nextX)
+    label.set_x(stopLabel, nextX)
+    label.set_x(tp1Label, nextX)
+    label.set_x(tp2Label, nextX)
+    label.set_x(tp3Label, nextX)
+
+plotshape(longSignal, title="VSL confirmed long ledger", style=shape.square, location=location.belowbar, color=color.new(joatCyan, 0), size=size.tiny, text="VSL", textcolor=joatInk)
+plotshape(shortSignal, title="VSL confirmed short ledger", style=shape.square, location=location.abovebar, color=color.new(joatMagenta, 0), size=size.tiny, text="VSL", textcolor=joatText)
+
+//==============================================================================
+// Dashboard
+//==============================================================================
+var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(joatPanel, 4), border_color=color.new(joatGrid, 35), border_width=1)
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "VSL [JOAT]", text_color=joatText, bgcolor=color.new(ledgerColor, 72), text_size=size.small)
+    table.cell(dash, 1, 0, dominantDir == 1 ? "BID SHIFT" : dominantDir == -1 ? "ASK SHIFT" : "BALANCED", text_color=joatText, bgcolor=color.new(ledgerColor, 72), text_size=size.small)
+    table.cell(dash, 0, 1, "Long score", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(longScore, "#.0"), text_color=f_scoreColor(longScore, 1), text_size=size.tiny)
+    table.cell(dash, 0, 2, "Short score", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 2, str.tostring(shortScore, "#.0"), text_color=f_scoreColor(shortScore, -1), text_size=size.tiny)
+    table.cell(dash, 0, 3, "Pressure", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 3, str.tostring(pressureOsc, "#.0"), text_color=pressureOsc >= 0 ? joatCyan : joatMagenta, text_size=size.tiny)
+    table.cell(dash, 0, 4, "Auction", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 4, auctionDiscount ? "DISCOUNT" : auctionPremium ? "PREMIUM" : "VALUE", text_color=auctionDiscount ? joatCyan : auctionPremium ? joatMagenta : joatGold, text_size=size.tiny)
+    table.cell(dash, 0, 5, "Structure", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 5, structureBias == 1 ? "BULL" : structureBias == -1 ? "BEAR" : "WAIT", text_color=structureBias == 1 ? joatCyan : structureBias == -1 ? joatMagenta : joatGold, text_size=size.tiny)
+    table.cell(dash, 0, 6, "Volatility", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 6, compression ? "COMPRESS" : expansion ? "EXPAND" : "NORMAL", text_color=compression ? joatGold : expansion ? joatViolet : joatText, text_size=size.tiny)
+    table.cell(dash, 0, 7, "HTF", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 7, htfBull ? "BULL" : htfBear ? "BEAR" : "FLAT", text_color=htfBull ? joatCyan : htfBear ? joatMagenta : joatGold, text_size=size.tiny)
+    table.cell(dash, 0, 8, "Trigger", text_color=joatMute, text_size=size.tiny)
+    table.cell(dash, 1, 8, longSignal ? "LONG" : shortSignal ? "SHORT" : "NONE", text_color=longSignal ? joatCyan : shortSignal ? joatMagenta : joatMute, text_size=size.tiny)
+
+//==============================================================================
+// Alerts
+//==============================================================================
+alertcondition(longSignal, "VSL Long Shift [JOAT]", "Veyra Shift Ledger [JOAT]: close-confirmed long execution shift.")
+alertcondition(shortSignal, "VSL Short Shift [JOAT]", "Veyra Shift Ledger [JOAT]: close-confirmed short execution shift.")
+alertcondition(longExit, "VSL Long Risk-Off [JOAT]", "Veyra Shift Ledger [JOAT]: long ledger risk-off.")
+alertcondition(shortExit, "VSL Short Risk-Off [JOAT]", "Veyra Shift Ledger [JOAT]: short ledger risk-off.")
+alertcondition(bosUp, "VSL Bullish Displacement [JOAT]", "Veyra Shift Ledger [JOAT]: delayed pivot structure broke upward with displacement.")
+alertcondition(bosDown, "VSL Bearish Displacement [JOAT]", "Veyra Shift Ledger [JOAT]: delayed pivot structure broke downward with displacement.")
+alertcondition(absorptionBull, "VSL Demand Absorption [JOAT]", "Veyra Shift Ledger [JOAT]: demand absorption state confirmed.")
+alertcondition(absorptionBear, "VSL Supply Absorption [JOAT]", "Veyra Shift Ledger [JOAT]: supply absorption state confirmed.")

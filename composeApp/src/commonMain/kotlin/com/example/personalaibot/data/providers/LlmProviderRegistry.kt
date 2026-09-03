@@ -29,8 +29,8 @@ class LlmProviderRegistry(private val client: HttpClient) {
 
     /** ลงทะเบียน Gemini provider (เมื่อมี API key) */
     fun registerGemini(apiKey: String) {
-        // Gemini ใช้ GeminiService เดิม — ในอนาคตจะ implement GeminiLlmProvider
-        // ตอนนี้ยังใช้ GeminiService ตรงผ่าน JarvisOrchestrator
+        if (apiKey.isBlank()) return
+        register(GeminiLlmProvider(com.example.personalaibot.data.GeminiService(client, apiKey, com.example.personalaibot.data.ModelConfig.DEFAULT_MAIN_MODEL), client))
     }
 
     /** ลงทะเบียน OpenAI provider */
@@ -153,6 +153,7 @@ class LlmProviderRegistry(private val client: HttpClient) {
     private fun createTempProvider(providerId: String, apiKey: String): LlmProvider? {
         if (apiKey.isBlank()) return null
         return when (providerId.lowercase()) {
+            "gemini" -> GeminiLlmProvider(com.example.personalaibot.data.GeminiService(client, apiKey, com.example.personalaibot.data.ModelConfig.DEFAULT_MAIN_MODEL), client)
             "openai" -> OpenAILlmProvider(client, apiKey)
             "claude", "anthropic" -> ClaudeLlmProvider(client, apiKey)
             "openrouter" -> OpenRouterLlmProvider(client, apiKey)

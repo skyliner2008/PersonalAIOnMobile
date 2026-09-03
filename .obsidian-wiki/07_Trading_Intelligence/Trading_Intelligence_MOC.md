@@ -72,6 +72,10 @@ Map of Content สำหรับสาย `Trading Intelligence` ของ JARV
 - [[60_MultiScale_StrategyDecoupling_V2635]] - V26.35 Multi-scale strategy zone decoupling and HTF trend pullback entry override system
 - [[61_TradingView_SMC_Pine_V83_Hardening]] - TradingView Pine SMC V8.5 M15 multi-TF wall map and MTF liquidity merge hardening
 - [[62_M15_Wall_Scalping_Simplification]] - Simplified runtime: Pipeline/PriceMap only, M15 wall merge, SCALPING only, stable-wall display with stale-anchor execution block, M1/M5 recent-touch reclaim with at least one LTF micro-break confirmation, distance-first gate logging, simple same-day loss guard
+- [[Strategy_Lab_TradingView]] - ⭐ External research harness: 8-strategy forensics → Unified SMC MTF engine (V1–V5), MT5 data pipeline, robust basin พร้อม forward test
+- [[63_Unified_SMC_Watch_Mode_Plan]] - ⭐ WATCH-mode production plan ของ Unified SMC V5 basin (shadow P/L, ไม่แตะ order path)
+- [[64_Unified_SMC_App_Integration]] - ⭐ Unified SMC V5 ฝังใน app มือถือเป็น engine หลัก (Kotlin port) — ตัด TR/DC/52H/E/UT/3BR เก็บ MOM+REV
+- [[65_AI_Strategy_Supervisor]] - ⭐ AI Supervisor (APPROVE/VETO/ADJUST gate) + MarketContextDigest 5TF + M1 confirmation + keyzone watch — ใน app มือถือ
 
 ---
 

@@ -46,13 +46,15 @@ class CameraToolExecutor(
     }
 
     private suspend fun executeSwitchProvider(provider: String?): String {
-        val type = when (provider?.lowercase()) {
-            "gemini_live" -> CameraProviderType.GEMINI_LIVE
-            "gemini_flash" -> CameraProviderType.GEMINI_FLASH
-            "openai_gpt4o" -> CameraProviderType.OPENAI_GPT4O
-            "openai_gpt41" -> CameraProviderType.OPENAI_GPT41
-            "claude_sonnet" -> CameraProviderType.CLAUDE_SONNET
-            "claude_opus" -> CameraProviderType.CLAUDE_OPUS
+        val clean = provider?.lowercase()?.trim()?.replace("-", "_")?.replace(" ", "_")
+        val type = when {
+            clean == null || clean.isEmpty() -> return "❌ กรุณาระบุชื่อ Provider (เช่น gemini_live, gemini_flash, openai_gpt4o, claude_sonnet)"
+            clean.contains("live") -> CameraProviderType.GEMINI_LIVE
+            clean.contains("flash") || clean == "gemini" -> CameraProviderType.GEMINI_FLASH
+            clean.contains("41") -> CameraProviderType.OPENAI_GPT41
+            clean.contains("4o") || clean.contains("openai") || clean.contains("gpt") -> CameraProviderType.OPENAI_GPT4O
+            clean.contains("opus") -> CameraProviderType.CLAUDE_OPUS
+            clean.contains("sonnet") || clean.contains("claude") || clean.contains("anthropic") -> CameraProviderType.CLAUDE_SONNET
             else -> return "❌ ไม่รองรับ Provider '$provider' กรุณาเลือก: gemini_live, gemini_flash, openai_gpt4o, claude_sonnet"
         }
         cameraService.switchProvider(type)
@@ -60,11 +62,13 @@ class CameraToolExecutor(
     }
 
     private suspend fun executeSwitchMode(mode: String?): String {
-        val cameraMode = when (mode?.lowercase()) {
-            "live_stream" -> CameraMode.LIVE_STREAM
-            "snapshot" -> CameraMode.SNAPSHOT
-            "object_detect" -> CameraMode.OBJECT_DETECT
-            "ar_overlay" -> CameraMode.AR_OVERLAY
+        val cleanMode = mode?.lowercase()?.trim()?.replace("-", "_")?.replace(" ", "_")
+        val cameraMode = when {
+            cleanMode == null || cleanMode.isEmpty() -> return "❌ กรุณาระบุโหมดกล้อง (เช่น live_stream, snapshot, object_detect, ar_overlay)"
+            cleanMode.contains("live") || cleanMode.contains("stream") -> CameraMode.LIVE_STREAM
+            cleanMode.contains("snap") || cleanMode.contains("photo") || cleanMode.contains("picture") -> CameraMode.SNAPSHOT
+            cleanMode.contains("object") || cleanMode.contains("detect") -> CameraMode.OBJECT_DETECT
+            cleanMode.contains("ar") || cleanMode.contains("overlay") -> CameraMode.AR_OVERLAY
             else -> return "❌ ไม่รองรับโหมด '$mode' กรุณาเลือก: live_stream, snapshot, object_detect, ar_overlay"
         }
         cameraService.switchMode(cameraMode)

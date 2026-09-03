@@ -1,6 +1,7 @@
 package com.example.personalaibot.tools.trading.auto
 
 import io.ktor.client.HttpClient
+import com.example.personalaibot.tools.trading.Mt5AccountInfo
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -25,6 +27,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+
+
 
 
 class AutoTradingRemoteService(
@@ -362,6 +366,30 @@ class AutoTradingRemoteService(
             url.endsWith("/api", ignoreCase = true) -> "$url/mt5"
             else -> "$url/api/mt5"
         }
+    }
+
+    /** P6.3 — live MT5 account snapshot for the Mobile execution status card. */
+    suspend fun fetchMt5Account(): Mt5AccountInfo {
+        val token = authTokenProvider().trim()
+        if (token.isBlank()) throw Exception("MT5 auth token is empty")
+        val url = "${normalizeMt5ApiBase(bridgeBaseUrlProvider())}/account"
+        val response = client.get(url) { header("X-Client-Token", token) }
+        val text = response.bodyAsText()
+        if (!response.status.isSuccess()) throw Exception("Failed to fetch MT5 account: $text")
+        val root = json.parseToJsonElement(text).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        return Mt5AccountInfo(
+            login = data["login"]?.jsonPrimitive?.contentOrNull ?: data["account"]?.jsonPrimitive?.contentOrNull ?: "",
+            accountName = data["name"]?.jsonPrimitive?.contentOrNull ?: data["accountName"]?.jsonPrimitive?.contentOrNull ?: "",
+            server = data["server"]?.jsonPrimitive?.contentOrNull ?: "",
+            currency = data["currency"]?.jsonPrimitive?.contentOrNull ?: "USD",
+            leverage = data["leverage"]?.jsonPrimitive?.intOrNull ?: 0,
+            balance = data["balance"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            equity = data["equity"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            margin = data["margin"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            freeMargin = data["freeMargin"]?.jsonPrimitive?.doubleOrNull ?: data["free_margin"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            updatedAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+        )
     }
 
     // ─── P4.2 — Quality Metrics fetch (consumes /metrics/quality JSON) ─────

@@ -416,14 +416,10 @@ private fun MiniChart(
             put("interval", config.interval)
             put("layout", config.layout)
             put("overlays", buildJsonObject {
-                put("ema14", "ema14" in config.overlays)
-                put("ema20", "ema20" in config.overlays)
-                put("ema50", "ema50" in config.overlays)
-                put("ema60", "ema60" in config.overlays)
-                put("ema200", "ema200" in config.overlays)
-                put("bb", "bb" in config.overlays)
-                put("donchian", "donchian" in config.overlays)
-                put("signals", "signals" in config.overlays)
+                config.overlays.forEach { put(it, true) }
+                listOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "donchian", "signals").forEach {
+                    if (it !in config.overlays) put(it, false)
+                }
             })
         }
         navigator.evaluateJavaScript(

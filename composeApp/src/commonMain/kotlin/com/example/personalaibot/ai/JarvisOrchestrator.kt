@@ -130,7 +130,8 @@ class JarvisOrchestrator(
         liveService.updateLiveModelChain(
             listOf(
                 newLiveModelName,
-                "gemini-2.5-flash-native-audio-preview-12-2025"
+                "gemini-2.5-flash-native-audio-preview-12-2025",
+                "gemini-2.0-flash-exp"
             )
         )
         // cloud embedding ต้องได้ key ใหม่ด้วย — ไม่งั้น semantic memory เงียบทั้งระบบ
@@ -355,6 +356,7 @@ class JarvisOrchestrator(
             // ใช้ persona กลางตัวเดียวกับทุก path — กัน external providers สับสนตัวตน
             appendLine(JarvisPersona.EXTERNAL_SYSTEM_PROMPT)
             if (prunedCoreContext.isNotBlank()) appendLine("Context: $prunedCoreContext")
+            append(policy.signalAlertSystemPromptAddon())
             append(policy.strictMt5SystemPromptAddon())
             if (policy.isTradingContext && !policy.mt5Mode) {
                 // กัน model ตอบว่า "ไม่มีข้อมูล/ต้องต่อ MT5" ทั้งที่ TV tools ใช้ได้โดยไม่ต้อง MT5
@@ -851,11 +853,27 @@ class JarvisOrchestrator(
                     val keywords = obj["triggerKeywords"]?.jsonArray
                         ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
 
+                    val execType = obj["executionType"]?.jsonPrimitive?.contentOrNull ?: "prompt"
+
+                    // Parse parameters if present in JSON
+                    val paramsObj = obj["parameters"]?.jsonObject
+                    val parsedParams = if (paramsObj != null) {
+                        val propsObj = paramsObj["properties"]?.jsonObject ?: emptyMap()
+                        val reqList = paramsObj["required"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                        val props = propsObj.mapValues { (_, v) ->
+                            val pObj = v.jsonObject
+                            val pType = pObj["type"]?.jsonPrimitive?.contentOrNull ?: "STRING"
+                            val pDesc = pObj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+                            com.example.personalaibot.tools.ParameterProperty(pType, pDesc)
+                        }
+                        com.example.personalaibot.tools.FunctionParameters(type = "OBJECT", properties = props, required = reqList)
+                    } else null
+
                     com.example.personalaibot.tools.ToolRegistry.registerCustomTool(
                         com.example.personalaibot.tools.FunctionDeclaration(
                             name = name,
                             description = "[CUSTOM] $desc",
-                            parameters = null
+                            parameters = parsedParams
                         )
                     )
                     com.example.personalaibot.tools.ToolRegistry.registerSkill(
@@ -864,7 +882,9 @@ class JarvisOrchestrator(
                             description = desc,
                             systemPromptAddon = addon,
                             triggerKeywords = keywords,
-                            author = obj["author"]?.jsonPrimitive?.contentOrNull ?: "Jarvis Agent"
+                            author = obj["author"]?.jsonPrimitive?.contentOrNull ?: "Jarvis Agent",
+                            parameters = parsedParams,
+                            executionType = execType
                         )
                     )
                     loaded++
@@ -903,7 +923,21 @@ class JarvisOrchestrator(
                 }
                 val value = args["condition_value"]?.trim()
                     ?: return "❌ ต้องระบุ condition_value (ค่าเปรียบเทียบ เช่น 4800)"
-                val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 15L
+                val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 1L
+                val rawTimeframe = args["timeframe"]?.trim()?.lowercase()
+                val supportedTimeframes = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
+                val requestedTimeframe = if (rawTimeframe != null && rawTimeframe != "all" && !rawTimeframe.contains("ทุก")) {
+                    com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(rawTimeframe)
+                } else rawTimeframe
+                val timeframeTargets = when {
+                    requestedTimeframe == "all" || requestedTimeframe == "ทุก" || requestedTimeframe == "ทุก timeframe" -> supportedTimeframes
+                    requestedTimeframe.isNullOrBlank() -> listOf(com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol).second.lowercase())
+                    else -> listOf(requestedTimeframe)
+                }.map { com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(it) }
+                 .filter { it in supportedTimeframes }.distinct()
+                if (timeframeTargets.isEmpty()) {
+                    return "❌ timeframe '$rawTimeframe' ไม่รองรับ — ใช้ 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w หรือ all"
+                }
                 val delivery = when (args["delivery"]?.trim()?.lowercase()) {
                     "direct" -> "direct"   // ส่ง notification+แชทโดยตรง ไม่ผ่าน AI (ประหยัดโทเคน)
                     else -> "ai"           // default: alert → AI quick-check → ผู้ใช้
@@ -951,16 +985,46 @@ class JarvisOrchestrator(
                     kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
                 } else value
 
-                automationManager.registerJob(
-                    name = name,
-                    symbol = symbol,
-                    exchange = null,
-                    toolName = toolName,
-                    condition = com.example.personalaibot.automation.AutomationCondition(effField, effOperator, effValue, delivery),
-                    intervalMinutes = interval
-                )
+                val (symbolBase, embeddedTf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol)
+                val effectiveTargets = if (requestedTimeframe.isNullOrBlank()) {
+                    listOf(embeddedTf.lowercase())
+                } else timeframeTargets
+                val created = mutableListOf<String>()
+                val skipped = mutableListOf<String>()
+                effectiveTargets.forEach { tf ->
+                    val targetSymbol = if (toolName == "trading_signal_alert") {
+                        if (tf == "1h") symbolBase else "$symbolBase@$tf"
+                    } else {
+                        if (requestedTimeframe.isNullOrBlank()) symbol else "$symbolBase@$tf"
+                    }
+                    val duplicate = automationManager.activeJobs.value.any { existing ->
+                        existing.tool_name == toolName && existing.symbol.equals(targetSymbol, ignoreCase = true) &&
+                            runCatching {
+                                val c = com.example.personalaibot.automation.automationJson.decodeFromString(
+                                    com.example.personalaibot.automation.AutomationCondition.serializer(), existing.condition_json
+                                )
+                                c.field == effField && c.operator == effOperator
+                            }.getOrDefault(false)
+                    }
+                    if (duplicate) {
+                        skipped += tf
+                    } else {
+                        val targetName = if (effectiveTargets.size == 1) name else "$name [$tf]"
+                        automationManager.registerJob(
+                            name = targetName,
+                            symbol = targetSymbol,
+                            exchange = null,
+                            toolName = toolName,
+                            condition = com.example.personalaibot.automation.AutomationCondition(effField, effOperator, effValue, delivery),
+                            intervalMinutes = interval
+                        )
+                        created += tf
+                    }
+                }
                 val deliveryDesc = if (delivery == "direct") "โหมดส่งตรง (notification+แชท ไม่ผ่าน AI)" else "โหมด AI วิเคราะห์ก่อนแจ้ง"
-                "✅ สร้างการแจ้งเตือน '$name' แล้ว — เฝ้าดู $symbol ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที | $deliveryDesc"
+                val tfDesc = if (effectiveTargets.size == 1) effectiveTargets.first() else "${effectiveTargets.size} timeframe (${effectiveTargets.joinToString(", ")})"
+                val skipDesc = if (skipped.isNotEmpty()) " | มีอยู่แล้ว: ${skipped.joinToString(", ")}" else ""
+                "✅ ตั้งการแจ้งเตือน '$name' แล้ว — $symbolBase/$tfDesc ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที | สร้างใหม่ ${created.size} รายการ$skipDesc | $deliveryDesc"
             }
             "delete" -> {
                 val id = args["alert_id"]?.toLongOrNull()

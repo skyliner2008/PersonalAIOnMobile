@@ -477,12 +477,17 @@ class TradingApiService(private val client: HttpClient) {
     suspend fun getTechnicalAnalysis(symbol: String, exchange: String, interval: String = "1h"): Map<String, String> {
         return try {
             val fullSymbol = if (":" in symbol) symbol else "${exchange.uppercase()}:${symbol.uppercase()}"
-            // TradingView scanner เลือก timeframe ผ่าน suffix ท้ายชื่อคอลัมน์ เช่น RSI|15, close|240
-            // (plain = 1h) — ก่อนหน้านี้ param interval ไม่ได้ถูกใช้ ทำให้ alert ติดที่ TF 1h เสมอ
-            val tfSuffix = when (interval.lowercase()) {
-                "1m" -> "|1"; "3m" -> "|3"; "5m" -> "|5"; "15m" -> "|15"; "30m" -> "|30"; "45m" -> "|45"
-                "4h" -> "|240"; "1d" -> "|1D"; "1w" -> "|1W"
-                else -> ""
+            val normalized = TaIndicators.normalizeTimeframe(interval)
+            val tfSuffix = when (normalized) {
+                "1m" -> "|1"
+                "3m" -> "|3"
+                "5m" -> "|5"
+                "15m" -> "|15"
+                "30m" -> "|30"
+                "4h" -> "|240"
+                "1D" -> "|1D"
+                "1W" -> "|1W"
+                else -> "" // 1h is default / plain
             }
             val requestCols = taColumns.map { it + tfSuffix }
             val url = "https://scanner.tradingview.com/symbol"
@@ -596,23 +601,163 @@ class TradingApiService(private val client: HttpClient) {
     }
 
     /**
-     * ดึงปฏิทินเศรษฐกิจรายสัปดาห์จาก ForexFactory (ฟรี ไม่ต้องใช้ API Key)
-     * แหล่งเดิม FXStreet API ตายแล้ว (401) — เปลี่ยนมาใช้ ff_calendar_thisweek.xml
-     * เวลาใน feed เป็น ET (New York) — แปลงเป็นเวลาไทยให้พร้อมกัน
+     * ดึงปฏิทินเศรษฐกิจจาก ForexFactory
+     * - Primary: ff_calendar_thisweek.json (มี timezone offset ชัดเจนใน ISO-8601 เช่น 2026-09-03T10:00:00-04:00)
+     * - Fallback: ff_calendar_thisweek.xml (เวลาใน feed เป็น UTC — แปลงเป็นเวลาไทย Asia/Bangkok ได้ถูกต้อง)
+     * - รองรับการระบุ filter: "upcoming" (เฉพาะที่ยังไม่ประกาศ), "today" (เฉพาะวันนี้), "all" (ทั้งหมด)
+     * - รองรับการกรองตาม currency เช่น "USD", "EUR", "GBP"
      */
-    suspend fun getEconomicCalendar(limit: Int = 10): List<Map<String, String>> {
+    suspend fun getEconomicCalendar(
+        limit: Int = 15,
+        filter: String? = null,
+        currency: String? = null
+    ): List<Map<String, String>> {
+        val rawEvents = fetchCalendarEventsJson() ?: fetchCalendarEventsXml()
+        if (rawEvents.isEmpty()) return emptyList()
+
+        val now = Clock.System.now()
+        val requestedCurrency = currency?.trim()?.uppercase()
+        val filterMode = filter?.trim()?.lowercase()
+
+        val filtered = rawEvents.filter { e ->
+            if (!requestedCurrency.isNullOrBlank() && requestedCurrency != "ALL") {
+                val c = e.country.uppercase()
+                if (c != requestedCurrency && c != "ALL") return@filter false
+            }
+            // ไม่เอา Low / Holiday ยกเว้นผู้ใช้ขอ limit มากเป็นพิเศษ
+            if (limit <= 20 && (e.impact.equals("Low", ignoreCase = true) || e.impact.equals("Holiday", ignoreCase = true))) {
+                return@filter false
+            }
+            true
+        }
+
+        // Partition into upcoming and passed (ให้ buffer 15 นาที สำหรับข่าวที่เพิ่งออก)
+        val (upcoming, passed) = filtered.partition { it.epochSeconds >= now.epochSeconds - 900 }
+
+        // Upcoming: เรียงตามเวลาจากใกล้สุดไปไกลสุด (เหตุการณ์ที่จะเกิดขึ้นก่อนขึ้นก่อน)
+        val sortedUpcoming = upcoming.sortedWith(
+            compareBy<CalendarItem> { it.epochSeconds }
+                .thenByDescending { it.impactScore }
+        )
+        // Passed: เรียงจากเพิ่งผ่านมาล่าสุด ย้อนหลังไป
+        val sortedPassed = passed.sortedWith(
+            compareByDescending<CalendarItem> { it.epochSeconds }
+                .thenByDescending { it.impactScore }
+        )
+
+        val resultList = when (filterMode) {
+            "today" -> {
+                val todayDate = now.toLocalDateTime(TimeZone.of("Asia/Bangkok")).date
+                filtered.filter { it.bkkDate == todayDate }
+                    .sortedBy { it.epochSeconds }
+            }
+            "upcoming" -> {
+                sortedUpcoming.take(limit)
+            }
+            "all" -> {
+                (sortedUpcoming + sortedPassed).take(limit)
+            }
+            else -> {
+                // Default: ให้ความสำคัญกับข่าวที่กำลังจะมาถึง (Upcoming) ก่อนเสมอ
+                // ถ้าข่าวที่เหลือในสัปดาห์มีน้อยกว่า limit ให้เติมข่าวสำคัญที่เพิ่งผ่านมาให้ครบ
+                if (sortedUpcoming.size >= limit) {
+                    sortedUpcoming.take(limit)
+                } else {
+                    val remainingSlots = limit - sortedUpcoming.size
+                    sortedUpcoming + sortedPassed.take(remainingSlots)
+                }
+            }
+        }
+
+        return resultList.map { it.toMap() }
+    }
+
+    private data class CalendarItem(
+        val title: String,
+        val country: String,
+        val impact: String,
+        val forecast: String,
+        val previous: String,
+        val epochSeconds: Long,
+        val bkkDate: LocalDate,
+        val dateTimeFormatted: String,
+        val status: String,
+        val impactScore: Int
+    ) {
+        fun toMap(): Map<String, String> = mapOf(
+            "title" to title,
+            "country" to country,
+            "impact" to impact,
+            "date_time" to dateTimeFormatted,
+            "status" to status,
+            "actual" to "-",
+            "forecast" to forecast.ifBlank { "-" },
+            "previous" to previous.ifBlank { "-" },
+            "impact_score" to impactScore.toString()
+        )
+    }
+
+    private suspend fun fetchCalendarEventsJson(): List<CalendarItem>? {
+        return try {
+            val resp = client.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val body = resp.bodyAsText()
+            val jsonArray = json.parseToJsonElement(body).jsonArray
+            val now = Clock.System.now()
+
+            jsonArray.mapNotNull { el ->
+                val obj = el.jsonObject
+                val title = obj["title"]?.jsonPrimitive?.contentOrNull?.trim() ?: return@mapNotNull null
+                if (title.isBlank()) return@mapNotNull null
+                val country = obj["country"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+                val impact = obj["impact"]?.jsonPrimitive?.contentOrNull?.trim() ?: "Low"
+                val forecast = obj["forecast"]?.jsonPrimitive?.contentOrNull?.trim() ?: "-"
+                val previous = obj["previous"]?.jsonPrimitive?.contentOrNull?.trim() ?: "-"
+                val dateStr = obj["date"]?.jsonPrimitive?.contentOrNull?.trim() ?: return@mapNotNull null
+
+                val instant = try {
+                    Instant.parse(dateStr)
+                } catch (_: Exception) { return@mapNotNull null }
+
+                val (formatted, bkkDate) = formatBkkDateTime(instant)
+                val isPassed = instant < now
+                val impactScore = when (impact.lowercase()) {
+                    "high" -> 3; "medium" -> 2; "low" -> 1; else -> 0
+                }
+
+                CalendarItem(
+                    title = title,
+                    country = country,
+                    impact = impact,
+                    forecast = forecast,
+                    previous = previous,
+                    epochSeconds = instant.epochSeconds,
+                    bkkDate = bkkDate,
+                    dateTimeFormatted = formatted,
+                    status = if (isPassed) "PASSED" else "UPCOMING",
+                    impactScore = impactScore
+                )
+            }
+        } catch (e: Exception) {
+            com.example.personalaibot.logDebug("TradingApi", "FF calendar JSON error: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun fetchCalendarEventsXml(): List<CalendarItem> {
         return try {
             val resp = client.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml") {
                 header("User-Agent", "curl/8.0")
                 timeout { requestTimeoutMillis = 15_000 }
             }
-            if (!resp.status.isSuccess()) {
-                com.example.personalaibot.logDebug("TradingApi", "FF calendar failed: HTTP ${resp.status.value}")
-                return emptyList()
-            }
+            if (!resp.status.isSuccess()) return emptyList()
             val xml = resp.bodyAsText()
+            val now = Clock.System.now()
 
-            val events: List<Map<String, String>> = Regex("<event>(.*?)</event>", RegexOption.DOT_MATCHES_ALL)
+            Regex("<event>(.*?)</event>", RegexOption.DOT_MATCHES_ALL)
                 .findAll(xml).mapNotNull { block ->
                     val c = block.groupValues[1]
                     fun tag(name: String): String {
@@ -625,67 +770,85 @@ class TradingApiService(private val client: HttpClient) {
                     val title = tag("title")
                     if (title.isBlank()) return@mapNotNull null
                     val impact = tag("impact")
-                    val date = tag("date"); val time = tag("time")
-                    mapOf(
-                        "title" to title,
-                        "country" to tag("country"),
-                        "impact" to impact,
-                        "date_time" to formatEventTimeThai(date, time),
-                        "date_sort" to eventSortKey(date, time),
-                        "actual" to "-",
-                        "forecast" to tag("forecast").ifBlank { "-" },
-                        "previous" to tag("previous").ifBlank { "-" },
-                        "impact_score" to when (impact.lowercase()) {
-                            "high" -> "3"; "medium" -> "2"; "low" -> "1"; else -> "0"
-                        }
+                    val date = tag("date")
+                    val time = tag("time")
+
+                    val instant = parseXmlDateTimeToInstant(date, time) ?: return@mapNotNull null
+                    val (formatted, bkkDate) = formatBkkDateTime(instant)
+                    val isPassed = instant < now
+                    val impactScore = when (impact.lowercase()) {
+                        "high" -> 3; "medium" -> 2; "low" -> 1; else -> 0
+                    }
+
+                    CalendarItem(
+                        title = title,
+                        country = tag("country"),
+                        impact = impact,
+                        forecast = tag("forecast").ifBlank { "-" },
+                        previous = tag("previous").ifBlank { "-" },
+                        epochSeconds = instant.epochSeconds,
+                        bkkDate = bkkDate,
+                        dateTimeFormatted = formatted,
+                        status = if (isPassed) "PASSED" else "UPCOMING",
+                        impactScore = impactScore
                     )
-                }
-                .sortedWith(
-                    compareByDescending<Map<String, String>> { it["impact_score"]?.toInt() ?: 0 }
-                        .thenBy { it["date_sort"] ?: "" }
-                )
-                .take(limit)
-                .toList()
-            events
+                }.toList()
         } catch (e: Exception) {
-            com.example.personalaibot.logDebug("TradingApi", "FF calendar error: ${e.message}")
-            emptyList<Map<String, String>>()
+            com.example.personalaibot.logDebug("TradingApi", "FF calendar XML error: ${e.message}")
+            emptyList()
         }
     }
 
-    /** แปลงเวลา ET (New York) ของ ForexFactory เป็นเวลาไทย — input: date "MM-dd-yyyy", time "h:mmam/pm" */
-    private fun formatEventTimeThai(date: String, time: String): String {
+    /**
+     * แปลง Instant จาก ForexFactory เป็นเวลาไทย พร้อมระบุวันในสัปดาห์ (จ., อ., พ., พฤ., ศ., ส., อา.)
+     * ตัวอย่างผลลัพธ์: "พฤ. 03 ก.ย. 21:00 น. (ไทย) | 10:00 ET"
+     */
+    private fun formatBkkDateTime(instant: Instant): Pair<String, LocalDate> {
+        val bkk = instant.toLocalDateTime(TimeZone.of("Asia/Bangkok"))
+        val dayShort = when (bkk.dayOfWeek) {
+            DayOfWeek.MONDAY -> "จ."
+            DayOfWeek.TUESDAY -> "อ."
+            DayOfWeek.WEDNESDAY -> "พ."
+            DayOfWeek.THURSDAY -> "พฤ."
+            DayOfWeek.FRIDAY -> "ศ."
+            DayOfWeek.SATURDAY -> "ส."
+            DayOfWeek.SUNDAY -> "อา."
+        }
+        val monthTh = when (bkk.monthNumber) {
+            1 -> "ม.ค."; 2 -> "ก.พ."; 3 -> "มี.ค."; 4 -> "เม.ย."
+            5 -> "พ.ค."; 6 -> "มิ.ย."; 7 -> "ก.ค."; 8 -> "ส.ค."
+            9 -> "ก.ย."; 10 -> "ต.ค."; 11 -> "พ.ย."; 12 -> "ธ.ค."
+            else -> ""
+        }
+        val timeStr = "${bkk.hour.toString().padStart(2, '0')}:${bkk.minute.toString().padStart(2, '0')} น."
+        val usEt = instant.toLocalDateTime(TimeZone.of("America/New_York"))
+        val usEtStr = "${usEt.hour.toString().padStart(2, '0')}:${usEt.minute.toString().padStart(2, '0')} ET"
+        val formatted = "$dayShort ${bkk.dayOfMonth.toString().padStart(2, '0')} $monthTh $timeStr (ไทย) | $usEtStr"
+        return formatted to bkk.date
+    }
+
+    /**
+     * แปลง date และ time ของ feed XML (ForexFactory feed เวลาเป็น UTC) เข้าสู่ Instant
+     * input: date "MM-dd-yyyy", time "h:mmam/pm" (UTC)
+     */
+    private fun parseXmlDateTimeToInstant(date: String, time: String): Instant? {
         return try {
             val dp = date.split("-")
-            if (dp.size != 3) return "$date $time".trim()
+            if (dp.size != 3) return null
             val iso = "${dp[2]}-${dp[0]}-${dp[1]}"
             val t = time.lowercase().trim()
             val m = Regex("(\\d+):(\\d+)(am|pm)").find(t)
-                ?: return "$iso ($time)"
-            var h = m.groupValues[1].toInt()
-            val min = m.groupValues[2]
-            if (m.groupValues[3] == "pm" && h != 12) h += 12
-            if (m.groupValues[3] == "am" && h == 12) h = 0
+            val h = if (m != null) {
+                var hour = m.groupValues[1].toInt()
+                if (m.groupValues[3] == "pm" && hour != 12) hour += 12
+                if (m.groupValues[3] == "am" && hour == 12) hour = 0
+                hour
+            } else 0
+            val min = m?.groupValues?.get(2) ?: "00"
             val ldt = LocalDateTime.parse("${iso}T${h.toString().padStart(2, '0')}:$min:00")
-            val instant = ldt.toInstant(TimeZone.of("America/New_York"))
-            val bkk = instant.toLocalDateTime(TimeZone.of("Asia/Bangkok"))
-            "${bkk.date} ${bkk.hour.toString().padStart(2, '0')}:${bkk.minute.toString().padStart(2, '0')} น. (ไทย) | $iso $time ET"
-        } catch (_: Exception) { "$date $time".trim() }
-    }
-
-    private fun eventSortKey(date: String, time: String): String {
-        return try {
-            val dp = date.split("-")
-            val iso = if (dp.size == 3) "${dp[2]}-${dp[0]}-${dp[1]}" else date
-            val t = time.lowercase().trim()
-            val m = Regex("(\\d+):(\\d+)(am|pm)").find(t)
-            if (m != null) {
-                var h = m.groupValues[1].toInt()
-                if (m.groupValues[3] == "pm" && h != 12) h += 12
-                if (m.groupValues[3] == "am" && h == 12) h = 0
-                "$iso ${h.toString().padStart(2, '0')}:${m.groupValues[2]}"
-            } else "$iso 99"
-        } catch (_: Exception) { date }
+            // เวลาใน XML feed ของ ForexFactory คือ UTC
+            ldt.toInstant(TimeZone.UTC)
+        } catch (_: Exception) { null }
     }
 
     /**

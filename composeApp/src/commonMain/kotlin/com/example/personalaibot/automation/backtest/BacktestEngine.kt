@@ -7,10 +7,37 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
+
+
+
+/** Stable identifiers for reproducible backtest runs. No wall-clock data is used. */
+internal object BacktestReproducibility {
+    const val ENGINE_VERSION = "backtest-engine-1"
+    const val ENGINE_STRATEGY_VERSION = "strategy-engine-1"
+
+    fun datasetId(symbol: String, interval: String, source: String, candles: List<Candle>): String =
+        stableHash(listOf(symbol.uppercase(), interval.lowercase(), source, candles.size.toString(), candles.firstOrNull()?.timestamp?.toString().orEmpty(), candles.lastOrNull()?.timestamp?.toString().orEmpty()))
+
+    fun parameterHash(config: BacktestConfig): String = stableHash(
+        listOf(config.initialBalance, config.riskPerTradePct, config.maxLeverage, config.includeCosts, config.spreadPrice, config.commissionPct, config.maxEquityPoints)
+    )
+
+    fun runId(symbol: String, interval: String, source: String, candles: List<Candle>, config: BacktestConfig, strategyVersion: String): String =
+        stableHash(listOf(datasetId(symbol, interval, source, candles), strategyVersion, parameterHash(config), ENGINE_VERSION))
+
+    private fun stableHash(parts: List<Any?>): String {
+        var hash = 0xcbf29ce484222325UL
+        for (part in parts.joinToString("|").encodeToByteArray()) {
+            hash = (hash xor part.toUByte().toULong()) * 0x100000001b3UL
+        }
+        return hash.toString(16).padStart(16, '0')
+    }
+}
+
 /**
  * BacktestEngine — จำลองเทรด bar-by-bar (port จาก OLD_Code/ai-trading-agent backtest/engine.py)
  * ปรับให้เข้ากับระบบ Signal ของแอป:
- *  - สัญญาณจาก SignalMarkerProvider.compute() (8 กลยุทธ์ edge-triggered)
+ *  - สัญญาณจาก SignalMarkerProvider.compute() (edge-triggered; live default = MOM/REV ตาม ENABLED_KINDS)
  *  - SL/TP จาก SignalAlertProvider.computeTpSl() (สูตรเฉพาะกลยุทธ์ ตัวเดียวกับ live alert)
  *  - กติกาสอดคล้อง fetchStats เดิม: เข้าที่ราคาปิดแท่งสัญญาณ, แท่งชนทั้ง SL+TP ถือว่าแพ้ (SL ก่อน),
  *    ค้างถึงแท่งสุดท้าย = TIMEOUT ปิดที่ราคาปิดสุดท้าย
@@ -50,6 +77,9 @@ class BacktestEngine {
     ): BacktestResult {
         val n = candles.size
         require(n >= 62) { "แท่งเทียนไม่พอ ($n < 62)" }
+        require(candles.zipWithNext().all { (a, b) -> b.timestamp > a.timestamp }) {
+            "candles must be strictly chronological; duplicate/out-of-order timestamps are not allowed"
+        }
         val startBar = startIndex.coerceIn(1, n - 2)
 
         // ── เตรียมสัญญาณ: map เวลา → index ──
@@ -239,9 +269,15 @@ class BacktestEngine {
             sharpe = sharpe,
             perStrategy = perStrategy,
             trades = trades,
-            equityCurve = curve
+            equityCurve = curve,
+            runId = BacktestReproducibility.runId(symbol, interval, source, candles, config, BacktestReproducibility.ENGINE_STRATEGY_VERSION),
+            datasetId = BacktestReproducibility.datasetId(symbol, interval, source, candles),
+            strategyVersion = BacktestReproducibility.ENGINE_STRATEGY_VERSION,
+            parameterHash = BacktestReproducibility.parameterHash(config),
+            engineVersion = BacktestReproducibility.ENGINE_VERSION
         )
     }
+
 
     // ─── ATR (สูตรเดียวกับ SignalMarkerProvider/SignalAlertProvider — คงผลให้ตรงกัน) ───
 

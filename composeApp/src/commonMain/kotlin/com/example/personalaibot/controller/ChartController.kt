@@ -104,7 +104,7 @@ class ChartController(
         }?.takeIf { it in setOf("single", "rsi", "macd", "rsi_macd", "volume", "full") } ?: "rsi_macd"
         _chartOverlays.value = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("chart_overlays").executeAsOneOrNull()
-        }?.split(",")?.map { it.trim() }?.filter { it in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals") }?.toSet()
+        }?.split(",")?.map { it.trim().lowercase() }?.filter { isValidOverlay(it) }?.toSet()
             ?: setOf("ema50")
     }
 
@@ -175,10 +175,10 @@ class ChartController(
     }
 
     fun toggleChartOverlay(name: String) {
-        val valid = setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")
-        if (name !in valid) return
+        val trimmed = name.trim().lowercase()
+        if (!isValidOverlay(trimmed)) return
         val current = _chartOverlays.value
-        _chartOverlays.value = if (name in current) current - name else current + name
+        _chartOverlays.value = if (trimmed in current) current - trimmed else current + trimmed
         scope.launch(Dispatchers.IO) {
             database.jarvisDatabaseQueries.insertSetting("chart_overlays", _chartOverlays.value.joinToString(","))
         }
@@ -275,7 +275,7 @@ class ChartController(
         updateChartSymbol(symbol)
         updateChartInterval(interval)
         setChartLayout(layout)
-        val validOverlays = overlays.filter { it in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals") }.toSet()
+        val validOverlays = overlays.map { it.trim().lowercase() }.filter { isValidOverlay(it) }.toSet()
         _chartOverlays.value = validOverlays
         scope.launch(Dispatchers.IO) {
             database.jarvisDatabaseQueries.insertSetting("chart_overlays", validOverlays.joinToString(","))
@@ -304,10 +304,9 @@ class ChartController(
                 // รีเซ็ต dashboard ทั้งจอทุกครั้งที่ "เปิดกราฟ" — กัน indicator เก่าค้างเต็มจอ
                 // ไม่ระบุ layout = กลับไป single (กราฟเปล่า), ไม่ระบุ overlays = ปิดทั้งหมด
                 setChartLayout(args["layout"]?.takeIf { it.isNotBlank() } ?: "single")
-                val validOverlayNames = setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")
                 val wantOverlays = (args["overlays"] ?: args["overlay"])
                     ?.split(",")?.map { it.trim().lowercase() }
-                    ?.filter { it in validOverlayNames }?.toSet()
+                    ?.filter { isValidOverlay(it) }?.toSet()
                     ?: emptySet()
                 if (wantOverlays != _chartOverlays.value) {
                     _chartOverlays.value = wantOverlays
@@ -346,9 +345,9 @@ class ChartController(
                 "✅ เปลี่ยน timeframe เป็น ${_chartInterval.value} แล้ว"
             }
             "set_overlay" -> {
-                val name = args["overlay"] ?: return "⚠️ ต้องระบุ overlay (ema14/ema20/ema50/ema60/ema200/bb/smc)"
-                if (name !in setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")) {
-                    return "⚠️ overlay '$name' ไม่ถูกต้อง — เลือกจาก ema14, ema20, ema50, ema60, ema200, bb, smc"
+                val name = args["overlay"]?.trim()?.lowercase() ?: return "⚠️ ต้องระบุ overlay (เช่น ema8, ema20, ema50, ema200, bb, smc)"
+                if (!isValidOverlay(name)) {
+                    return "⚠️ overlay '$name' ไม่ถูกต้อง — รองรับ EMA/SMA ทุกคาบ (เช่น ema8, ema14, ema20, ema50, ema200, sma50, sma200), bb, donchian, smc, signals"
                 }
                 val visible = args["visible"]?.lowercase() != "false"
                 val current = _chartOverlays.value
@@ -374,10 +373,9 @@ class ChartController(
     }
 
     private fun normalizeChartInterval(interval: String): String {
-        val normalized = interval.trim().lowercase()
-        return when (normalized) {
-            "1m", "5m", "15m", "30m", "1h", "4h", "1d" -> normalized
-            "d" -> "1d"
+        val norm = com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(interval).lowercase()
+        return when (norm) {
+            "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w" -> norm
             else -> "1h"
         }
     }
@@ -387,5 +385,18 @@ class ChartController(
             .trim()
             .uppercase()
             .replace(" ", "")
+    }
+
+    companion object {
+        fun isValidOverlay(name: String): Boolean {
+            val n = name.trim().lowercase()
+            if (n in setOf("bb", "smc", "donchian", "signals", "supertrend", "st", "vwap")) return true
+            if (Regex("^ema\\d+$").matches(n)) return true
+            if (Regex("^(sma|ma)\\d+$").matches(n)) return true
+            if (Regex("^(wma|hma)\\d+$").matches(n)) return true
+            if (Regex("^dc\\d+$").matches(n)) return true
+            if (Regex("^bb_?\\d+(_?\\d+(\\.\\d+)?)?$").matches(n)) return true
+            return false
+        }
     }
 }

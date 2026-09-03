@@ -39,6 +39,7 @@ object ToolRegistry {
         "trading_smc_structure",
         "trading_smc_flow",
         "trading_strategy_signal",
+        "trading_signal_alert",
         "trading_signal_stats",
         "trading_backtest",
         "trading_backtest_optimize",
@@ -190,16 +191,22 @@ object ToolRegistry {
         ))
         put("system_create_agent_tool", FunctionDeclaration(
             name = "system_create_agent_tool",
-            description = "Creates a new custom tool/skill for the Agent by generating a JSON definition. Use this when the user asks you to create a new indicator, strategy, or capability. The tool will be saved locally and become available in the mobile app.",
+            description = """สร้าง custom tool / skill ใหม่ให้กับ Agent แบบยืดหยุ่น ไร้ขีดจำกัด
+                |สามารถกำหนดชื่อ tool, คำอธิบาย, trigger keywords, parameters (JSON schema หรือชื่อคั่นด้วย comma),
+                |executionType (prompt: ทำตามขั้นตอนและใช้ tool อื่นประกอบได้, formula: คำนวณสูตรคณิตศาสตร์, chain: เรียกหลาย tool ต่อเนื่อง),
+                |และ logic การทำงาน (systemPromptAddon รองรับ placeholder {{param}} อัตโนมัติ)
+                |Tool ที่สร้างจะถูกบันทึกและพร้อมใช้งานทันทีในแอปพลิเคชัน""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "name" to ParameterProperty("STRING", "The unique name of the tool, starting with 'custom_' (e.g., 'custom_rsi_divergence')."),
-                    "description" to ParameterProperty("STRING", "A short description of what the tool does."),
-                    "triggerKeywords" to ParameterProperty("STRING", "Comma-separated keywords that trigger this tool (e.g., 'rsi, divergence, วิเคราะห์ rsi')."),
-                    "systemPromptAddon" to ParameterProperty("STRING", "The step-by-step logic, prompt, or instructions the agent should follow when executing this tool. Be extremely detailed.")
+                    "name" to ParameterProperty("STRING", "ชื่อเฉพาะของ tool เช่น 'custom_fibonacci_pivot', 'risk_calculator', 'gold_scalp_radar'"),
+                    "description" to ParameterProperty("STRING", "คำอธิบายว่าเครื่องมือนี้ทำอะไรและควรเรียกใช้เมื่อใด"),
+                    "triggerKeywords" to ParameterProperty("STRING", "คำสำคัญที่ใช้เรียก tool คั่นด้วย comma เช่น 'fibonacci, pivot, คำนวณจุดกลับตัว'"),
+                    "systemPromptAddon" to ParameterProperty("STRING", "ตรรกะ/ขั้นตอน/สูตรคำนวณ รองรับการแทนที่ค่าพารามิเตอร์ผ่าน {{ชื่อพารามิเตอร์}}"),
+                    "parameters" to ParameterProperty("STRING", "พารามิเตอร์ที่เครื่องมือนี้รับ (JSON schema หรือชื่อพารามิเตอร์คั่นด้วย comma เช่น 'symbol, timeframe, risk_percent')"),
+                    "executionType" to ParameterProperty("STRING", "ประเภทการทำงาน: 'prompt' (คำแนะนำ/กลยุทธ์), 'formula' (คำนวณตัวเลข/สูตรคณิตศาสตร์), 'chain' (ร้อยเรียงหลายเครื่องมือ)", enum = listOf("prompt", "formula", "chain"))
                 ),
-                required = listOf("name", "description", "triggerKeywords", "systemPromptAddon")
+                required = listOf("name", "description", "systemPromptAddon")
             )
         ))
         put("system_list_agent_tools", FunctionDeclaration(
@@ -235,19 +242,19 @@ object ToolRegistry {
         ))
         put("chart_dashboard_control", FunctionDeclaration(
             name = "chart_dashboard_control",
-            description = """Controls the on-screen chart dashboard (Lightweight Charts multi-pane). Use when the user asks to open/show/close a chart, change chart symbol or timeframe, change the pane layout, or toggle indicators — e.g. 'เปิดกราฟทองคำ', 'เปลี่ยนเป็น 4h', 'เพิ่ม RSI กับ MACD', 'เปิด EMA200', 'เอา Bollinger Bands ออก', 'สลับไปกราฟ TradingView'.
+            description = """Controls the on-screen chart dashboard (Lightweight Charts multi-pane). Use when the user asks to open/show/close a chart, change chart symbol or timeframe, change the pane layout, or toggle indicators — e.g. 'เปิดกราฟทองคำ', 'เปลี่ยนเป็น 4h', 'เพิ่ม RSI กับ MACD', 'เปิด EMA8 หรือ EMA200', 'เอา Bollinger Bands ออก', 'สลับไปกราฟ TradingView'.
                 |Layouts: single (chart only), rsi, macd, rsi_macd, volume, full (volume+rsi+macd subpanes).
-                |Overlays on main pane: ema14, ema20, ema50, ema60, ema200, bb (Bollinger Bands), smc (SMC zones: Order Block / FVG / Liquidity / Premium-Discount — เปิดเมื่อผู้ใช้ขอ SMC เท่านั้น ไม่เปิดอัตโนมัติ).
+                |Overlays on main pane: รองรับ EMA และ SMA ทุกคาบตามที่ผู้ใช้ต้องการ (เช่น ema8, ema9, ema12, ema14, ema20, ema21, ema50, ema60, ema89, ema100, ema200, sma20, sma50, sma200), bb (Bollinger Bands), donchian, smc (SMC zones: Order Block / FVG / Liquidity / Premium-Discount — เปิดเมื่อผู้ใช้ขอ SMC เท่านั้น ไม่เปิดอัตโนมัติ), signals (ลูกศร BUY/SELL).
                 |open จะรีเซ็ต overlay ทั้งหมดตามพารามิเตอร์ overlays (ไม่ระบุ = ปิดทั้งหมด).""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "action" to ParameterProperty("STRING", "What to do", enum = listOf("open", "close", "set_layout", "set_symbol", "set_interval", "set_overlay", "set_view")),
                     "symbol" to ParameterProperty("STRING", "Symbol for set_symbol/open, e.g. XAUUSD, BTCUSDT, EURUSD"),
-                    "interval" to ParameterProperty("STRING", "Timeframe for set_interval/open: 1m 5m 15m 30m 1h 4h 1d"),
+                    "interval" to ParameterProperty("STRING", "Timeframe for set_interval/open: 1m 5m 15m 30m 1h 4h 1d (or m1, m5, m15, h1, h4, d1, w1)"),
                     "layout" to ParameterProperty("STRING", "Layout for set_layout", enum = listOf("single", "rsi", "macd", "rsi_macd", "volume", "full")),
-                    "overlay" to ParameterProperty("STRING", "Indicator for set_overlay", enum = listOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "smc", "donchian", "signals")),
-                    "overlays" to ParameterProperty("STRING", "Comma-separated overlays for open (e.g. 'ema14,ema60' — replaces all; omit = none)"),
+                    "overlay" to ParameterProperty("STRING", "Indicator for set_overlay — supports ANY EMA/SMA period (e.g. ema8, ema14, ema20, ema50, ema200, sma50, sma200), bb, donchian, smc, signals"),
+                    "overlays" to ParameterProperty("STRING", "Comma-separated overlays for open (e.g. 'ema8', 'ema14,ema50', 'ema20,bb,smc' — supports ANY EMA/SMA period; replaces all; omit = none)"),
                     "visible" to ParameterProperty("BOOLEAN", "true=show overlay, false=hide (set_overlay only, default true)"),
                     "view" to ParameterProperty("STRING", "set_view: dashboard (offline multi-pane) or tradingview (online TV widget)", enum = listOf("dashboard", "tradingview"))
                 ),
@@ -338,6 +345,7 @@ object ToolRegistry {
         "trading_elliot_modern_analysis",
         "trading_smc_flow",
         "trading_strategy_signal",
+        "trading_signal_alert",
         "trading_signal_stats",
         "trading_backtest",
         "trading_backtest_optimize",

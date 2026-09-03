@@ -100,11 +100,11 @@ object TradingToolDefinitions {
                     "exchange" to ParameterProperty("STRING", "Exchange: BINANCE (Crypto), NASDAQ (US), SET (หุ้นไทย), OANDA (บังคับสำหรับ Gold/Forex เสมอ)"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 15m, 1h, 4h, 1D, 1W",
-                        enum = listOf("15m", "1h", "4h", "1D", "1W")
+                        description = "Timeframe: m1, m5, m15, h1, h4, D1, W1 (หรือ 1m, 5m, 15m, 1h, 4h, 1D, 1W)",
+                        enum = listOf("m1", "m5", "m15", "h1", "h4", "D1", "W1", "1m", "5m", "15m", "1h", "4h", "1D", "1W")
                     )
                 ),
-                required = listOf("symbol", "exchange")
+                required = listOf("symbol")
             )
         ),
 
@@ -120,7 +120,7 @@ object TradingToolDefinitions {
                     "symbol"   to ParameterProperty("STRING", "Symbol เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
                     "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA (สำหรับ XAU/FX) เสมอ")
                 ),
-                required = listOf("symbol", "exchange")
+                required = listOf("symbol")
             )
         ),
 
@@ -231,11 +231,11 @@ object TradingToolDefinitions {
                     "exchange" to ParameterProperty("STRING", "Exchange: BINANCE, NASDAQ, OANDA, TVC"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 15m, 1h, 4h, 1D",
-                        enum = listOf("15m", "1h", "4h", "1D")
+                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1D, 1W (หรือ m1, m5, m15, h1, h4, d1, w1)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
                     )
                 ),
-                required = listOf("symbol", "exchange")
+                required = listOf("symbol")
             )
         ),
 
@@ -275,14 +275,15 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_macro_calendar",
-            description = """ดึงปฏิทินเศรษฐกิจ (Economic Calendar) และเหตุการณ์สำคัญ
-                |แสดงผลกระทบ (High/Medium/Low Impact) พร้อมการวิเคราะห์ความเสี่ยงจาก AI
-                |AI จะแนะนำให้สร้างระบบติดตาม (Tracking) หากเป็นเหตุการณ์ที่มีนัยสำคัญสูง
-                |ใช้เมื่อผู้ใช้ถาม: "สัปดาห์นี้มีข่าวเศรษฐกิจอะไรบ้าง", "CPI ออกวันไหน" """.trimMargin(),
+            description = """ดึงปฏิทินเศรษฐกิจ (Economic Calendar) จาก ForexFactory แบบ Real-time แปลงเป็นเวลาไทยที่ถูกต้อง
+                |แสดงผลกระทบ (High/Medium Impact) และสถานะ [รอประกาศ] หรือ [ประกาศแล้ว]
+                |ใช้เมื่อผู้ใช้ถาม: "สัปดาห์นี้มีข่าวเศรษฐกิจอะไรบ้าง", "ตัวเลขเศรษฐกิจที่เหลือ", "CPI ออกวันไหน", "คืนนี้มีข่าวอะไร" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "limit" to ParameterProperty("NUMBER", "จำนวนเหตุการณ์ (Default 10)")
+                    "limit" to ParameterProperty("NUMBER", "จำนวนเหตุการณ์ (Default 15)"),
+                    "filter" to ParameterProperty("STRING", "ตัวกรองเหตุการณ์: upcoming (เฉพาะที่ยังไม่ประกาศ), today (เฉพาะวันนี้), all (ทั้งหมดของสัปดาห์)"),
+                    "currency" to ParameterProperty("STRING", "กรองตามสกุลเงิน เช่น USD, EUR, GBP, CAD, JPY, AUD, NZD, CHF")
                 ),
                 required = emptyList()
             )
@@ -347,11 +348,11 @@ object TradingToolDefinitions {
                 |
                 |[สำคัญ] ตั้งเงื่อนไขได้เฉพาะ tool_name/field ที่ background ดึงค่าได้จริงต่อไปนี้เท่านั้น (ห้ามตั้งมั่ว เช่น EMA cross ที่ไม่มีในรายการ):
                 |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction (ใช้กับ ==)
-                |- trading_indicators ⭐ แนะนำ (คำนวณจากแท่งเทียนเอง แม่นกว่า scanner — เลือก TF ได้ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH ใช้กับ ==), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
+                |- trading_indicators ⭐ USER QUERY / ALERT DATA (TradingView — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): รองรับค่ารายละเอียดสำหรับตอบคำถามผู้ใช้และสร้าง Alert เช่น close, open, high, low, ema7, ema9, ema20, ema21, ema50, ema100, ema200, sma20, sma50, sma100, sma200, ema_cross_state, ema50_200_spread, ema20_50_spread, rsi7, rsi9, rsi14, rsi21, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, mfi14, bb_upper, bb_basis, bb_lower, bb_percent_b, bb_width, atr7, atr14, atr21, atr_pct, adx14, di_plus, di_minus, vwap, vwap_distance_pct, volume, volume_sma20, volume_ratio20, obv, obv_slope20, ichimoku_tenkan, ichimoku_kijun, ichimoku_cloud_top, ichimoku_cloud_bottom, pivot, resistance1, resistance2, support1, support2, supertrend, donchian_upper, donchian_mid, donchian_lower, roc, williams_r, fibonacci_levels
                 |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM ใช้กับ ==), smc_zone_pct (>=80 พรีเมียม, <=20 ดิสเคาน์), smc_trend, smc_last_event (BOS_UP/BOS_DOWN/CHOCH_UP/CHOCH_DOWN), smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
                 |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal (BUY/SELL/NONE ใช้กับ == — confluence ครบ: trigger+structure+zone), smc_recipes (A=OB, B=FVG+OB, C=Fib golden ใช้กับ contains), ema14_60_signal (BUY/SELL/NONE ใช้กับ ==), ema14_60_cross (GOLDEN_CROSS/DEATH_CROSS/NONE ใช้กับ ==), ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal (BUY/SELL/NONE), utbot_trend (BULL/BEAR), utbot_stop, structure_bias, in_fib_golden (0/1), fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
-                |- trading_strategy_signal ⭐ (กลยุทธ์เชิงวิชาการจาก Strategy Library — เลือก TF ด้วย symbol@TF): consensus_signal (STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL ใช้กับ ==), consensus_score (ตัวเลข -5 ถึง 5), tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal (BUY/SELL/NONE ใช้กับ ==), trend_state (UPTREND/DOWNTREND/RANGE), tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
-                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก 8 กลยุทธ์: Momentum / Trend EMA50-200 / Reversal / Donchian / 52W High / EMA14-60 / UT Bot / 3-Bar Reversal — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 หรือ signal_sell >= 1 (สร้าง 2 job ถ้าต้องการทั้งสองฝั่ง) — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผลเงื่อนไข, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
+                |- trading_strategy_signal ⭐ (กลยุทธ์เชิงวิชาการจาก Strategy Library — เลือก TF ด้วย symbol@TF): decision (BUY/SELL/WAIT), gate (PASS/NO_CONFLUENCE/MTF_MISALIGNMENT/DATA_QUALITY), confidence_pct, data_quality_pct, mtf_alignment, consensus_signal (STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL ใช้กับ ==), consensus_score (ตัวเลข -5 ถึง 5), tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal (BUY/SELL/NONE ใช้กับ ==), trend_state (UPTREND/DOWNTREND/RANGE), tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
+                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก Unified SMC Multi-TF (engine หลัก ประเมินบน 15m) + Momentum / Reversal (classic ที่ forensics 2026-08-27 พิสูจน์ว่ามี edge) + SMC Engine — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 หรือ signal_sell >= 1 (สร้าง 2 job ถ้าต้องการทั้งสองฝั่ง) — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผลเงื่อนไข, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
                 |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal (STRONG BUY/SELL ใช้กับ ==), volume
                 |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore (0-100), lsdState (BULLISH/BEARISH/NEUTRAL ใช้กับ ==/contains), lsdConfluenceTF (1-4), deltaLabel (ใช้กับ ==/contains), deltaValue, fiboScore (0-10), momentum (EXPANSION/SQUEEZE/REVERSAL ใช้กับ ==/contains), isSqueeze (0/1), close
                 |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label (ใช้กับ ==) ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
@@ -374,7 +375,7 @@ object TradingToolDefinitions {
                     "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <, contains)"),
                     "condition_value"    to ParameterProperty("STRING", "ค่าเปรียบเทียบ (เช่น 4800, 30, bullish)"),
                     "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
-                    "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการดึงข้อมูล (1-1440 นาที, default 15)")
+                    "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการตรวจสอบสัญญาณ (1-1440 นาที, default 1 นาที)")
                 ),
                 required = listOf("action")
             )
@@ -417,8 +418,8 @@ object TradingToolDefinitions {
                     "symbol"   to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT, EURUSD"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 15m, 1h, 4h, 1D",
-                        enum = listOf("15m", "1h", "4h", "1D")
+                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1D, 1W (หรือ m1, m5, m15, h1, h4, d1, w1)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
                     )
                 ),
                 required = listOf("symbol")
@@ -479,7 +480,7 @@ object TradingToolDefinitions {
         // ── 14d. Signal Stats (backtest win-rate ของสัญญาณย้อนหลัง) ─────────
         FunctionDeclaration(
             name = "trading_signal_stats",
-            description = """สถิติสัญญาณเทรด 8 กลยุทธ์ (Momentum/Trend/Reversal/Donchian/52W High/EMA14-60/UT Bot/3-Bar Reversal) 2 แหล่ง:
+            description = """สถิติสัญญาณเทรด (default: Momentum/Reversal — 2 ตัวที่ forensics 2026-08-27 พิสูจน์ว่ามี edge; ระบุ kind เองเพื่อวัดตัวที่ถูกตัดได้) 2 แหล่ง:
                 |source=backtest (default): จำลอง win-rate/avg R ย้อนหลังจากชุดแท่งเทียน — ใช้เมื่อถาม "กลยุทธ์ไหนแม่นสุด", "backtest สัญญาณ"
                 |source=live: สถิติจาก Signal Alert ที่ยิงจริง (ระบบบันทึกทุก signal + ติดตามผล TP/SL อัตโนมัติ) — ใช้เมื่อถาม "วันนี้มี signal อะไรบ้าง", "signal ที่แจ้งไปโดน TP หรือ SL", "สถิติ signal จริง"
                 |รองรับ TF 1m/5m/15m/30m/1h/4h/1D (เฉพาะ backtest)""".trimMargin(),
@@ -539,7 +540,7 @@ object TradingToolDefinitions {
                     ),
                     "mix_strategies" to ParameterProperty(
                         type = "STRING",
-                        description = "เฉพาะ strategy=mix — รายชื่อกลยุทธ์ที่จะโหวต คั่นด้วย comma เช่น \"tsmom,trend,donchian,utbot\" (เลือกจาก tsmom,trend,reversal,donchian,w52high,ema1460,utbot,threebar; ต้อง ≥2 ตัว; default = tsmom,trend,ema1460,utbot)"
+                        description = "เฉพาะ strategy=mix — รายชื่อกลยุทธ์ที่จะโหวต คั่นด้วย comma เช่น \"tsmom,trend,donchian,utbot\" (เลือกจาก tsmom,trend,reversal,donchian,w52high,ema1460,utbot,threebar; ต้อง ≥2 ตัว; default = tsmom,reversal)"
                     ),
                     "mix_min_votes" to ParameterProperty(
                         type = "STRING",
@@ -555,12 +556,12 @@ object TradingToolDefinitions {
             )
         ),
 
-        // ── 14f. Backtest Optimize (ADAPTIVE: เรียนรู้จากประวัติ + auto-apply) ──
+        // ── 14f. Backtest Optimize (ADAPTIVE discovery-only) ──
         FunctionDeclaration(
             name = "trading_backtest_optimize",
             description = """หา params ที่ดีที่สุดของกลยุทธ์สัญญาณแบบ ADAPTIVE 2 scope: (1) sltp = จูน SL/TP: grid 25 combos + mutation รอบ params ปัจจุบันและรอบ params ที่เคยดีในประวัติ (ขยายได้ถึง SL 0.3-6×, TP 0.5-10×) (2) entry = จูน params จุดเข้าของกลยุทธ์ (ROC lookback, EMA fast/slow, RSI threshold, Donchian period, W52 proximity, UT Bot key/ATR) — edge ของกลยุทธ์อยู่ที่จุดเข้า (3) both = จูนจุดเข้าก่อนแล้วจูน SL/TP ต่อบนจุดเข้าใหม่
                 |ทุก scope: เรียนรู้จากประวัติการจูน (OptimizationTrial memory) + พิสูจน์ด้วย walk-forward, permutation test, Monte Carlo → คะแนน overfitting + เกรด
-                |AUTO-APPLY อัตโนมัติ: ถ้า params ใหม่ดีกว่าค่าเดิมและไม่ overfit → บันทึกใช้จริงทันที (signal alert ใช้ params ใหม่ตั้งแต่สัญญาณถัดไป); apply=off = dry-run ดูผลอย่างเดียว
+                |DISCOVERY-ONLY: หา candidate + validation evidence เท่านั้น ไม่บันทึก production params; หากต้องการ promote ให้ใช้ trading_backtest_evolve แล้วสั่ง apply=on อย่างชัดเจน
                 |ใช้เมื่อผู้ใช้ถาม: "หา params ที่ดีที่สุด", "optimize กลยุทธ์", "จูน SL/TP", "จูนจุดเข้า", "จูน entry params", "กลยุทธ์นี้ overfit ไหม", "adaptive optimize"
                 |⚡ MULTI-SESSION: tool นี้ตอบ ack ทันทีแล้วรันงานจริงในเบื้องหลัง — เมื่อเสร็จระบบจะส่งผลให้ผู้ใช้เอง ห้ามสรุปผลจาก tool result นี้
                 |อาจใช้เวลา 30 วิ-2 นาที (strategy=all หรือ scope=both นานสุด)""".trimMargin(),
@@ -580,8 +581,8 @@ object TradingToolDefinitions {
                     ),
                     "apply" to ParameterProperty(
                         type = "STRING",
-                        description = "auto = auto-apply เมื่อ params ใหม่ดีกว่าและไม่ overfit (default), off = dry-run ดูผลอย่างเดียว",
-                        enum = listOf("auto", "off")
+                        description = "discovery-only: ไม่บันทึก production params (ค่า apply ถูก ignore เพื่อความปลอดภัย)",
+                        enum = listOf("off")
                     ),
                     "scope" to ParameterProperty(
                         type = "STRING",
@@ -670,7 +671,11 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol"   to ParameterProperty("STRING", "Symbol"),
-                    "interval" to ParameterProperty("STRING", "Timeframe (default 1h)", enum = listOf("15m", "1h", "4h", "1D"))
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h): 1m, 5m, 15m, 30m, 1h, 4h, 1D, 1W",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
+                    )
                 ),
                 required = listOf("symbol")
             )
@@ -686,7 +691,11 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol"   to ParameterProperty("STRING", "Symbol"),
-                    "interval" to ParameterProperty("STRING", "Timeframe (default 1h)", enum = listOf("15m", "1h", "4h", "1D"))
+                    "interval" to ParameterProperty(
+                        type = "STRING",
+                        description = "Timeframe (default 1h): 1m, 5m, 15m, 30m, 1h, 4h, 1D, 1W",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
+                    )
                 ),
                 required = listOf("symbol")
             )
@@ -853,8 +862,8 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol"    to ParameterProperty("STRING", "Trading symbol เช่น XAUUSD, EURUSD, BTCUSD"),
-                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1,M5,M15,M30,H1,H4,D1",
-                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1")),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1, M5, M15, M30, H1, H4, D1, W1",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")),
                     "count"     to ParameterProperty("NUMBER", "จำนวน candle ที่ใช้วิเคราะห์ (default 180, min 60, max 500)"),
                     "endpoint"  to ParameterProperty("STRING", "Optional bridge URL override")
                 ),
@@ -888,7 +897,8 @@ object TradingToolDefinitions {
                 |ปัญหาที่แก้: แต่ละโบรกมีชื่อ symbol ต่างกัน เช่น BTCUSD อาจชื่อ XBTUSD ในบางโบรก
                 |ค้นหาได้ทั้ง ชื่อ symbol (เช่น btc, gold, xau) และ คำอธิบาย (description) เช่น "bitcoin", "dollar index"
                 |ผลลัพธ์บอกว่า: exact=true ถ้ามีชื่อนั้นจริง, suggested=ชื่อที่ใกล้เคียงที่สุด
-                |⚡ ควรเรียกก่อนเสมอ ถ้าไม่แน่ใจว่าโบรกใช้ชื่อ symbol อะไร
+                |⚡ ควรเรียกเมื่อผู้ใช้ถามเรื่อง symbol ของโบรกเกอร์โดยตรง
+                |🚫 ห้ามเรียกเพื่อเตรียม trading_signal_alert — Signal Alert ไม่ต้อง probe MT5 ก่อน เพราะ TradingSignalMarketDataRouter จะเลือกแหล่งแท่งเทียนเอง: DEMO/PAPER=TradingView, LIVE+connected=MT5, LIVE+offline=TradingView
                 |ใช้เมื่อ: "ค้นหา symbol bitcoin", "โบรกนี้มี BTCUSD ไหม", "gold ชื่อว่าอะไรในโบรก" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
@@ -983,8 +993,8 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbols" to ParameterProperty("STRING", "Comma-separated symbols to scan, e.g., XAUUSD,EURUSD,GBPUSD (blank = use broker's available symbols)"),
-                    "timeframe" to ParameterProperty("STRING", "Timeframe: M15, H1, H4, D1",
-                        enum = listOf("M15", "H1", "H4", "D1")),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1, M5, M15, M30, H1, H4, D1, W1",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")),
                     "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
                 ),
                 required = emptyList()
@@ -1003,8 +1013,8 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbols" to ParameterProperty("STRING", "Comma-separated symbols, e.g., XAUUSD,EURUSD,GBPUSD,USDJPY"),
-                    "timeframe" to ParameterProperty("STRING", "Timeframe: H1, H4, D1 (default H1)",
-                        enum = listOf("H1", "H4", "D1")),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1, M5, M15, M30, H1, H4, D1, W1 (default H1)",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")),
                     "bars" to ParameterProperty("NUMBER", "จำนวนแท่งเทียน (default 200)"),
                     "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
                 ),
@@ -1041,8 +1051,8 @@ object TradingToolDefinitions {
                 type = "OBJECT",
                 properties = mapOf(
                     "symbol" to ParameterProperty("STRING", "Symbol to analyze, e.g., XAUUSD"),
-                    "timeframe" to ParameterProperty("STRING", "Timeframe: M15, H1, H4, D1",
-                        enum = listOf("M15", "H1", "H4", "D1")),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe: M1, M5, M15, M30, H1, H4, D1, W1",
+                        enum = listOf("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")),
                     "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
                 ),
                 required = listOf("symbol")
@@ -1096,7 +1106,7 @@ object TradingToolDefinitions {
                 |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM), smc_zone_pct, smc_trend, smc_last_event, smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
                 |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal, smc_recipes, ema14_60_signal, ema14_60_cross, ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal, utbot_trend, utbot_stop, structure_bias, in_fib_golden, fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
                 |- trading_strategy_signal ⭐ (กลยุทธ์จาก Strategy Library — เลือก TF ด้วย symbol@TF): consensus_signal, consensus_score, tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal, trend_state, tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
-                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" จาก 8 กลยุทธ์: Momentum/Trend/Reversal/Donchian/52W High/EMA14-60/UT Bot/3-Bar Reversal — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 (แจ้งเมื่อมีสัญญาณ BUY ใหม่) หรือ signal_sell >= 1 — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผล, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
+                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" จาก Unified SMC Multi-TF (15m) + Momentum/Reversal + SMC Engine — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 (แจ้งเมื่อมีสัญญาณ BUY ใหม่) หรือ signal_sell >= 1 — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผล, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
                 |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal, volume
                 |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore, lsdState, lsdConfluenceTF, deltaLabel, deltaValue, fiboScore, momentum, isSqueeze, close
                 |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
@@ -1109,7 +1119,8 @@ object TradingToolDefinitions {
                 properties = mapOf(
                     "action" to ParameterProperty("STRING", "create | update | rename | delete | list", enum = listOf("create", "update", "rename", "delete", "list")),
                     "name" to ParameterProperty("STRING", "ชื่อ alert (สำหรับ create) — rename ใช้เป็นชื่อใหม่"),
-                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTC-USD (สำหรับ create)"),
+                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTC-USD (สำหรับ create) — รองรับ suffix @TF เช่น XAUUSD@15m"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe ที่ต้องการเฝ้า: m1 | m5 | m15 | 30m | h1 | h4 | D1 | W1 | all (หรือ 1m, 5m, 15m, 1h, 4h, 1D, 1W)"),
                     "tool_name" to ParameterProperty("STRING", "trading_price | trading_indicators | trading_smc | trading_smc_flow | trading_strategy_signal | trading_signal_alert | trading_technical_analysis | trading_sentiment | trading_fear_greed | trading_crypto_overview | trading_deep_analysis_suite (default: trading_price)"),
                     "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่ตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้น (default: price)"),
                     "condition_operator" to ParameterProperty("STRING", "> | < | >= | <= | == | contains (default: >=)"),

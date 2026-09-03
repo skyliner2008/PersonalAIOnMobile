@@ -91,6 +91,7 @@ fun App(
     val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
     val isFrontCamera by viewModel.isFrontCamera.collectAsStateWithLifecycle()
     val isMuted by viewModel.isMuted.collectAsStateWithLifecycle()
+    val liveConnectionState by viewModel.liveConnectionState.collectAsStateWithLifecycle()
     val isAiVisionRequested by viewModel.isAiVisionRequested.collectAsStateWithLifecycle()
     val voiceError by viewModel.voiceError.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
@@ -283,6 +284,7 @@ fun App(
                             isFrontCamera = isFrontCamera,
                             isMuted = isMuted,
                             isAiVisionRequested = isAiVisionRequested,
+                            liveConnectionState = liveConnectionState,
                             activeToolName = activeToolName,
                             onToggleCamera = { viewModel.toggleCamera() },
                             onSwitchCamera = { viewModel.switchCamera() },

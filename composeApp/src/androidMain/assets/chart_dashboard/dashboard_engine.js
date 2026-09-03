@@ -44,15 +44,106 @@
         full:     { subpanes: ['volume', 'rsi', 'macd'] },
     };
 
-    const OVERLAY_DEFS = {
-        ema14:  { color: '#F6C343', title: 'EMA 14',  period: 14 },
-        ema20:  { color: '#2962FF', title: 'EMA 20',  period: 20 },
-        ema50:  { color: '#FF6D00', title: 'EMA 50',  period: 50 },
-        ema60:  { color: '#26C6DA', title: 'EMA 60',  period: 60 },
-        ema200: { color: '#AB47BC', title: 'EMA 200', period: 200 },
-        bb:     { color: '#78909C', title: 'BB 20,2', period: 20, mult: 2 },
-        donchian: { color: '#8D6E63', title: 'DC 20', period: 20 },
+    const STATIC_OVERLAY_DEFS = {
+        ema8:   { type: 'ema', color: '#E91E63', title: 'EMA 8',   period: 8 },
+        ema9:   { type: 'ema', color: '#00E676', title: 'EMA 9',   period: 9 },
+        ema12:  { type: 'ema', color: '#00BCD4', title: 'EMA 12',  period: 12 },
+        ema14:  { type: 'ema', color: '#F6C343', title: 'EMA 14',  period: 14 },
+        ema20:  { type: 'ema', color: '#2962FF', title: 'EMA 20',  period: 20 },
+        ema21:  { type: 'ema', color: '#3D5AFE', title: 'EMA 21',  period: 21 },
+        ema26:  { type: 'ema', color: '#FF9100', title: 'EMA 26',  period: 26 },
+        ema34:  { type: 'ema', color: '#00B0FF', title: 'EMA 34',  period: 34 },
+        ema50:  { type: 'ema', color: '#FF6D00', title: 'EMA 50',  period: 50 },
+        ema60:  { type: 'ema', color: '#26C6DA', title: 'EMA 60',  period: 60 },
+        ema89:  { type: 'ema', color: '#E040FB', title: 'EMA 89',  period: 89 },
+        ema100: { type: 'ema', color: '#7C4DFF', title: 'EMA 100', period: 100 },
+        ema200: { type: 'ema', color: '#AB47BC', title: 'EMA 200', period: 200 },
+        sma20:  { type: 'sma', color: '#4CAF50', title: 'SMA 20',  period: 20 },
+        sma50:  { type: 'sma', color: '#FF9800', title: 'SMA 50',  period: 50 },
+        sma100: { type: 'sma', color: '#9C27B0', title: 'SMA 100', period: 100 },
+        sma200: { type: 'sma', color: '#3F51B5', title: 'SMA 200', period: 200 },
+        bb:     { type: 'bb',  color: '#78909C', title: 'BB 20,2', period: 20, mult: 2 },
+        donchian: { type: 'donchian', color: '#8D6E63', title: 'DC 20', period: 20 },
     };
+
+    function pickColorForPeriod(period, isSma) {
+        if (isSma) {
+            const hue = (period * 53 + 120) % 360;
+            return `hsl(${hue}, 80%, 55%)`;
+        }
+        const hue = (period * 47) % 360;
+        return `hsl(${hue}, 85%, 60%)`;
+    }
+
+    function getOverlayDef(key) {
+        if (!key) return null;
+        const k = key.toLowerCase().trim();
+        if (STATIC_OVERLAY_DEFS[k]) return STATIC_OVERLAY_DEFS[k];
+
+        // Dynamic EMA: emaX where X is integer period
+        const emaMatch = k.match(/^ema(\d+)$/);
+        if (emaMatch) {
+            const period = parseInt(emaMatch[1], 10);
+            return {
+                type: 'ema',
+                period: period,
+                title: `EMA ${period}`,
+                color: pickColorForPeriod(period, false)
+            };
+        }
+
+        // Dynamic SMA: smaX or maX where X is integer period
+        const smaMatch = k.match(/^(?:sma|ma)(\d+)$/);
+        if (smaMatch) {
+            const period = parseInt(smaMatch[1], 10);
+            return {
+                type: 'sma',
+                period: period,
+                title: `SMA ${period}`,
+                color: pickColorForPeriod(period, true)
+            };
+        }
+
+        // Dynamic WMA / HMA
+        const wmaMatch = k.match(/^(?:wma|hma)(\d+)$/);
+        if (wmaMatch) {
+            const period = parseInt(wmaMatch[1], 10);
+            return {
+                type: 'sma',
+                period: period,
+                title: `MA ${period}`,
+                color: pickColorForPeriod(period, true)
+            };
+        }
+
+        // Dynamic Donchian: dcX
+        const dcMatch = k.match(/^dc(\d+)$/);
+        if (dcMatch) {
+            const period = parseInt(dcMatch[1], 10);
+            return {
+                type: 'donchian',
+                period: period,
+                title: `DC ${period}`,
+                color: '#8D6E63'
+            };
+        }
+
+        // Dynamic Bollinger Bands: bb_20_2, bb20
+        const bbMatch = k.match(/^bb(?:_?(\d+))?(?:_?(\d+(?:\.\d+)?))?$/);
+        if (bbMatch && (bbMatch[1] || bbMatch[2])) {
+            const period = bbMatch[1] ? parseInt(bbMatch[1], 10) : 20;
+            const mult = bbMatch[2] ? parseFloat(bbMatch[2]) : 2.0;
+            return {
+                type: 'bb',
+                period: period,
+                mult: mult,
+                title: `BB ${period},${mult}`,
+                color: '#78909C'
+            };
+        }
+
+        return null;
+    }
 
     // ─── Indicator math ──────────────────────────────────────────────────────
     function ema(values, period) {
@@ -242,7 +333,7 @@
         });
 
         // Overlays on main pane
-        Object.keys(OVERLAY_DEFS).forEach((key) => {
+        Object.keys(state.overlays).forEach((key) => {
             if (!state.overlays[key]) return;
             addOverlaySeries(key);
         });
@@ -260,49 +351,59 @@
     }
 
     function addOverlaySeries(key) {
-        const def = OVERLAY_DEFS[key];
+        const def = getOverlayDef(key);
         if (!def) return;
-        if (key === 'bb') {
-            overlayRefs.bb_upper = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(120,144,156,0.9)', lineWidth: 1, title: 'BB Upper',
+        if (def.type === 'bb' || key === 'bb') {
+            const upKey = `${key}_upper`;
+            const basisKey = `${key}_basis`;
+            const lowerKey = `${key}_lower`;
+            if (overlayRefs[upKey]) return;
+            overlayRefs[upKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(120,144,156,0.9)', lineWidth: 1, title: `${def.title} Upper`,
                 priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
             }, 0);
-            overlayRefs.bb_basis = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(120,144,156,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'BB Basis',
+            overlayRefs[basisKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(120,144,156,0.7)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: `${def.title} Basis`,
                 priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
             }, 0);
-            overlayRefs.bb_lower = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(120,144,156,0.9)', lineWidth: 1, title: 'BB Lower',
+            overlayRefs[lowerKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(120,144,156,0.9)', lineWidth: 1, title: `${def.title} Lower`,
                 priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
             }, 0);
-        } else if (key === 'donchian') {
-            overlayRefs.dc_upper = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(141,110,99,0.95)', lineWidth: 1, title: 'DC Upper',
+        } else if (def.type === 'donchian' || key === 'donchian') {
+            const upKey = `${key}_upper`;
+            const midKey = `${key}_mid`;
+            const lowerKey = `${key}_lower`;
+            if (overlayRefs[upKey]) return;
+            overlayRefs[upKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(141,110,99,0.95)', lineWidth: 1, title: `${def.title} Upper`,
                 priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
             }, 0);
-            overlayRefs.dc_mid = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(141,110,99,0.6)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: 'DC Mid',
+            overlayRefs[midKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(141,110,99,0.6)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: `${def.title} Mid`,
                 priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
             }, 0);
-            overlayRefs.dc_lower = chart.addSeries(LightweightCharts.LineSeries, {
-                color: 'rgba(141,110,99,0.95)', lineWidth: 1, title: 'DC Lower',
+            overlayRefs[lowerKey] = chart.addSeries(LightweightCharts.LineSeries, {
+                color: 'rgba(141,110,99,0.95)', lineWidth: 1, title: `${def.title} Lower`,
                 priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
             }, 0);
         } else {
+            if (overlayRefs[key]) return;
             overlayRefs[key] = chart.addSeries(LightweightCharts.LineSeries, {
-                color: def.color, lineWidth: 1, title: def.title,
-                priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+                color: def.color, lineWidth: 1.5, title: def.title,
+                priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true,
             }, 0);
         }
     }
 
     function removeOverlaySeries(key) {
-        if (key === 'bb') {
-            ['bb_upper', 'bb_basis', 'bb_lower'].forEach((k) => {
+        const def = getOverlayDef(key);
+        if (def && (def.type === 'bb' || key === 'bb')) {
+            [`${key}_upper`, `${key}_basis`, `${key}_lower`].forEach((k) => {
                 if (overlayRefs[k]) { try { chart.removeSeries(overlayRefs[k]); } catch (_e) {} delete overlayRefs[k]; }
             });
-        } else if (key === 'donchian') {
-            ['dc_upper', 'dc_mid', 'dc_lower'].forEach((k) => {
+        } else if (def && (def.type === 'donchian' || key === 'donchian')) {
+            [`${key}_upper`, `${key}_mid`, `${key}_lower`].forEach((k) => {
                 if (overlayRefs[k]) { try { chart.removeSeries(overlayRefs[k]); } catch (_e) {} delete overlayRefs[k]; }
             });
         } else if (overlayRefs[key]) {
@@ -359,19 +460,25 @@
         }
 
         // Overlays
-        Object.keys(OVERLAY_DEFS).forEach((key) => {
+        Object.keys(state.overlays).forEach((key) => {
             if (!state.overlays[key]) return;
-            if (key === 'bb') {
-                const basis = sma(closes, 20);
-                const sd = stdev(closes, 20, basis);
-                const upper = closes.map((_, i) => basis[i] !== null ? basis[i] + 2 * sd[i] : null);
-                const lower = closes.map((_, i) => basis[i] !== null ? basis[i] - 2 * sd[i] : null);
-                overlayRefs.bb_upper && overlayRefs.bb_upper.setData(toSeriesData(times, upper));
-                overlayRefs.bb_basis && overlayRefs.bb_basis.setData(toSeriesData(times, basis));
-                overlayRefs.bb_lower && overlayRefs.bb_lower.setData(toSeriesData(times, lower));
-            } else if (key === 'donchian') {
-                // Donchian channel 20 แท่ง (ไม่รวมแท่งปัจจุบัน — ตรงกับ StrategySignalProvider)
-                const p = 20;
+            const def = getOverlayDef(key);
+            if (!def) return;
+            if (def.type === 'bb' || key === 'bb') {
+                const p = def.period || 20;
+                const m = def.mult || 2.0;
+                const basis = sma(closes, p);
+                const sd = stdev(closes, p, basis);
+                const upper = closes.map((_, i) => basis[i] !== null ? basis[i] + m * sd[i] : null);
+                const lower = closes.map((_, i) => basis[i] !== null ? basis[i] - m * sd[i] : null);
+                const upKey = `${key}_upper`;
+                const basisKey = `${key}_basis`;
+                const lowerKey = `${key}_lower`;
+                overlayRefs[upKey] && overlayRefs[upKey].setData(toSeriesData(times, upper));
+                overlayRefs[basisKey] && overlayRefs[basisKey].setData(toSeriesData(times, basis));
+                overlayRefs[lowerKey] && overlayRefs[lowerKey].setData(toSeriesData(times, lower));
+            } else if (def.type === 'donchian' || key === 'donchian') {
+                const p = def.period || 20;
                 const up = new Array(candles.length).fill(null);
                 const lo = new Array(candles.length).fill(null);
                 const mid = new Array(candles.length).fill(null);
@@ -380,11 +487,15 @@
                     for (let j = i - p; j < i; j++) { if (candles[j].high > hh) hh = candles[j].high; if (candles[j].low < ll) ll = candles[j].low; }
                     up[i] = hh; lo[i] = ll; mid[i] = (hh + ll) / 2;
                 }
-                overlayRefs.dc_upper && overlayRefs.dc_upper.setData(toSeriesData(times, up));
-                overlayRefs.dc_mid && overlayRefs.dc_mid.setData(toSeriesData(times, mid));
-                overlayRefs.dc_lower && overlayRefs.dc_lower.setData(toSeriesData(times, lo));
+                const upKey = `${key}_upper`;
+                const midKey = `${key}_mid`;
+                const lowerKey = `${key}_lower`;
+                overlayRefs[upKey] && overlayRefs[upKey].setData(toSeriesData(times, up));
+                overlayRefs[midKey] && overlayRefs[midKey].setData(toSeriesData(times, mid));
+                overlayRefs[lowerKey] && overlayRefs[lowerKey].setData(toSeriesData(times, lo));
+            } else if (def.type === 'sma') {
+                overlayRefs[key] && overlayRefs[key].setData(toSeriesData(times, sma(closes, def.period)));
             } else {
-                const def = OVERLAY_DEFS[key];
                 overlayRefs[key] && overlayRefs[key].setData(toSeriesData(times, ema(closes, def.period)));
             }
         });
@@ -518,9 +629,12 @@
         const el = document.getElementById('legend');
         if (!el) return;
         const parts = [];
-        Object.keys(OVERLAY_DEFS).forEach((key) => {
+        Object.keys(state.overlays).forEach((key) => {
             if (state.overlays[key]) {
-                parts.push(`<span style="color:${OVERLAY_DEFS[key].color}">● ${OVERLAY_DEFS[key].title}</span>`);
+                const def = getOverlayDef(key);
+                if (def) {
+                    parts.push(`<span style="color:${def.color}">● ${def.title}</span>`);
+                }
             }
         });
         if (state.smcZones.length) parts.push(`<span style="color:#00bcd4">▮ SMC ${state.smcZones.length} zones</span>`);
@@ -551,7 +665,12 @@
             state.interval = cfg.interval || state.interval;
             state.layout = LAYOUTS[cfg.layout] ? cfg.layout : state.layout;
             if (cfg.overlays) {
-                Object.keys(state.overlays).forEach((k) => { state.overlays[k] = !!cfg.overlays[k]; });
+                Object.keys(state.overlays).forEach((k) => { state.overlays[k] = false; });
+                Object.keys(cfg.overlays).forEach((k) => {
+                    if (cfg.overlays[k]) {
+                        state.overlays[k] = true;
+                    }
+                });
             }
             const symEl = document.getElementById('symLabel');
             if (symEl) symEl.textContent = `${state.symbol} · ${state.interval}`;
@@ -581,7 +700,8 @@
             return true;
         },
         setOverlay(name, visible) {
-            if (!(name in state.overlays)) return false;
+            const def = getOverlayDef(name);
+            if (!def && name !== 'smc' && name !== 'signals') return false;
             state.overlays[name] = !!visible;
             if (chartReady) {
                 if (visible) { addOverlaySeries(name); } else { removeOverlaySeries(name); }

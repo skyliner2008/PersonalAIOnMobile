@@ -10,9 +10,12 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * SignalAlertProvider — ตรวจ "สัญญาณที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก 8 กลยุทธ์คลาสสิก
- * (MOM / TR / REV / DC / 52H / E14-60 / UT Bot / 3BR) + SMC Engine (port จาก mt5-core-server:
- * OB Bounce / CHoCH / SMS-BMS / FVG Fill / Liquidity Sweep / RSI Divergence)
+ * SignalAlertProvider — ตรวจ "สัญญาณที่เพิ่งเกิด" ในแท่งปิดล่าสุด
+ * Engine หลัก: Unified SMC Multi-TF V5 (smc/UnifiedSmcSignals.kt — H4/H1 context, M30/H1 trend,
+ * M15 setup, M5 confirmation; ประเมินเฉพาะ job 15m; สถานะ research/forward-test)
+ * คลาสสิกที่เหลือ: MOM / REV เท่านั้น (TR/DC/52H/E/UT/3BR ถูกตัดตาม cross-TF forensics 2026-08-27
+ * — ดู SignalMarkerProvider.ENABLED_KINDS; re-enable/forensics ได้ผ่าน kindsOverride)
+ * + SMC Engine (port จาก mt5-core-server: OB Bounce / CHoCH / SMS-BMS / FVG Fill / Liquidity Sweep / RSI Divergence)
  * สำหรับ background job `trading_signal_alert`
  *
  * จุดต่างจาก SignalMarkerProvider (ที่คำนวณย้อนหลังทั้งชุดเพื่อวาดกราฟ):
@@ -28,6 +31,9 @@ import kotlin.math.sqrt
  *  - signal_event             : "BUY" / "SELL" / "NONE" (ใช้กับ ==)
  *  - signal_strategy / signal_side / signal_reason / signal_context : ข้อความ payload
  *  - signal_entry / signal_sl / signal_tp / signal_rr : ตัวเลขของสัญญาณหลัก
+ *  - signal_keyzone           : "1" = ราคาปิด M15 ล่าสุดอยู่ที่จุดสำคัญ (swing/EQ/FVG/OB ใน 0.3×ATR)
+ *  - signal_keyzone_desc      : คำอธิบายจุดสำคัญที่ราคาแตะ (ไทย)
+ *  - signal_mtf_context       : โครงสร้างตลาด 5TF (MarketContextDigest) — AI Supervisor ใช้ตัดสิน
  */
 /**
  * แปลง marker label → kind กลยุทธ์มาตรฐาน
@@ -39,15 +45,73 @@ internal fun signalKindOf(label: String): String {
     return if (base.startsWith("E")) "E" else base
 }
 
+/** Runtime source policy for signal alerts.
+ * DEMO/PAPER always uses TradingView. MT5 candles are permitted only when the
+ * confirmed execution mode is LIVE and the MT5 bridge is actually connected.
+ */
+object TradingSignalMarketDataRouter {
+    private var liveModeProvider: (() -> Boolean)? = null
+    private var mt5ConnectedProvider: (() -> Boolean)? = null
+    private var mt5CandleProvider: (suspend (String, String, Int) -> List<Candle>)? = null
+
+    fun configure(
+        liveModeProvider: () -> Boolean,
+        mt5ConnectedProvider: () -> Boolean,
+        mt5CandleProvider: suspend (String, String, Int) -> List<Candle>
+    ) {
+        this.liveModeProvider = liveModeProvider
+        this.mt5ConnectedProvider = mt5ConnectedProvider
+        this.mt5CandleProvider = mt5CandleProvider
+    }
+
+    suspend fun fetch(
+        symbol: String,
+        timeframe: String,
+        count: Int,
+        tvProvider: suspend () -> List<Candle>
+    ): Triple<List<Candle>, String, String> {
+        val live = liveModeProvider?.invoke() == true
+        val connected = mt5ConnectedProvider?.invoke() == true
+        if (live && connected) {
+            val mt5 = runCatching { mt5CandleProvider?.invoke(symbol, timeframe, count).orEmpty() }.getOrElse { emptyList() }
+            if (mt5.size >= 62) {
+                logDebug("SignalDataSource", "accountMode=LIVE mt5Connected=true selectedSource=MT5_LIVE reason=MT5_LIVE_CONNECTED symbol=$symbol/$timeframe bars=${mt5.size}")
+                return Triple(mt5, "MT5_LIVE", "MT5_LIVE_CONNECTED")
+            }
+            logDebug("SignalDataSource", "accountMode=LIVE mt5Connected=true selectedSource=TRADINGVIEW reason=MT5_CANDLE_UNAVAILABLE symbol=$symbol/$timeframe bars=${mt5.size}")
+        } else {
+            val reason = if (live) "MT5_LIVE_OFFLINE" else "DEMO_FORCES_TV"
+            logDebug("SignalDataSource", "accountMode=${if (live) "LIVE" else "DEMO"} mt5Connected=$connected selectedSource=TRADINGVIEW reason=$reason symbol=$symbol/$timeframe")
+        }
+        val reason = if (live && connected) "MT5_CANDLE_UNAVAILABLE" else if (live) "MT5_LIVE_OFFLINE" else "DEMO_FORCES_TV"
+        return Triple(tvProvider(), "TRADINGVIEW", reason)
+    }
+}
+
 class SignalAlertProvider(private val smcApi: SmcApiService) {
+    // Observability dedup: a closed-bar signal is recomputed on every automation cycle,
+    // but should be logged as NEW only when its signal bar timestamp changes.
+    private val lastLoggedSignalBar = mutableMapOf<String, Long>()
+    private val lastLoggedGateBar = mutableMapOf<String, Long>()
+    private val lastLoggedTunedEntryBar = mutableMapOf<String, Long>()
 
     private val markerProvider = SignalMarkerProvider(smcApi)
 
     suspend fun fetch(rawSymbol: String): Map<String, String> {
         val (symbol, tf) = IndicatorAlertProvider.splitSymbolAndTf(rawSymbol)
-        val candles = runCatching { smcApi.fetchCandlesWithSource(symbol, tf, 300).candles }
-            .getOrElse { return mapOf("error" to (it.message ?: "fetch failed")) }
-        if (candles.size < 62) return mapOf("error" to "bars=${candles.size} < 62")
+        val (candles, candleSource, candleSourceReason) = runCatching {
+            TradingSignalMarketDataRouter.fetch(
+                symbol = symbol,
+                timeframe = tf,
+                count = 300,
+                tvProvider = { smcApi.fetchCandlesWithSource(symbol, tf, 300).candles }
+            )
+        }.getOrElse { return mapOf("error" to (it.message ?: "fetch failed")) }
+        if (candles.size < 62) return mapOf(
+            "error" to "bars=${candles.size} < 62",
+            "signal_data_source" to candleSource,
+            "signal_data_source_reason" to candleSourceReason
+        )
 
         val n = candles.size
         val sigIdx = n - 2 // แท่งปิดล่าสุด (แท่ง n-1 อาจกำลังวิ่ง)
@@ -59,7 +123,11 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 .getTunedEntryParams(symbol, tf)
         }.getOrElse { emptyMap() }
         if (tunedEntry.isNotEmpty()) {
-            logDebug("SignalAlert", "$symbol/$tf ใช้ tuned entry params: ${tunedEntry.keys.joinToString(",")}")
+            val tunedEntryKey = "$symbol/$tf"
+            if (lastLoggedTunedEntryBar[tunedEntryKey] != sigTime) {
+                lastLoggedTunedEntryBar[tunedEntryKey] = sigTime
+                logDebug("SignalAlert", "$symbol/$tf ใช้ tuned entry params: ${tunedEntry.keys.joinToString(",")} bar=$sigTime")
+            }
         }
         val edges = markerProvider.compute(candles, entryParams = tunedEntry).filter { it.time == sigTime }.toMutableList()
 
@@ -67,6 +135,55 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         var smcNew = runCatching {
             com.example.personalaibot.automation.smc.SmcSignals.newSignalsAt(candles, sigIdx, symbol, tf)
         }.getOrElse { emptyList() }
+
+        // ── Unified SMC (Multi-TF V5) — engine หลักตัวเดียว: H4/H1 context, M30/H1 trend,
+        //    M15 setup (FVG/EQL/IDM + BOS/CHoCH), M5 confirmation — ประเมินเฉพาะ job 15m
+        //    (base timeline ของ research) ⚠️ สถานะ research/forward-test (promotion_ready=false)
+        var unified: com.example.personalaibot.automation.smc.UnifiedSmcSignals.UnifiedSignal? = null
+        var uniBarTime = 0L
+        var mtfDigest: com.example.personalaibot.automation.smc.MarketContextDigest.Digest? = null
+        // Unified SMC ประเมินทุก job ไม่ว่า TF ไหน (base timeline = M15 เสมอ) — เดิม lock เฉพาะ job 15m
+        // ทำให้ engine หลักเงียบสนิทถ้าผู้ใช้ไม่มี job 15m (candle DB cache ทำให้ fetch ซ้ำถูกมาก)
+        // ดึง 5TF เสมอ: H1(→resample H4) context, M15 setup, M5+M1 confirmation — ตามสเปก 2026-08-28
+        run {
+            var m15c: List<Candle> = emptyList()
+            val ures = runCatching {
+                m15c = if (tf == "15m") candles else TradingSignalMarketDataRouter.fetch(symbol, "15m", 300) {
+                    smcApi.fetchCandlesWithSource(symbol, "15m", 300).candles
+                }.first
+                val h1 = TradingSignalMarketDataRouter.fetch(symbol, "1h", 500) {
+                    smcApi.fetchCandlesWithSource(symbol, "1h", 500).candles
+                }.first
+                val m5 = TradingSignalMarketDataRouter.fetch(symbol, "5m", 500) {
+                    smcApi.fetchCandlesWithSource(symbol, "5m", 500).candles
+                }.first
+                val m1 = TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
+                    smcApi.fetchCandlesWithSource(symbol, "1m", 500).candles
+                }.first
+                val r = com.example.personalaibot.automation.smc.UnifiedSmcSignals.evaluate(h1, m15c, m5, m1)
+                // โครงสร้างตลาด 5TF (deterministic — AI อ่าน digest แทนการเดาเอง)
+                mtfDigest = runCatching {
+                    com.example.personalaibot.automation.smc.MarketContextDigest.build(
+                        symbol,
+                        com.example.personalaibot.automation.smc.UnifiedSmcSignals.resample(h1, 240),
+                        h1, m15c, m5, m1
+                    )
+                }.onFailure { logDebug("SignalAlert", "$symbol/$tf digest error: ${it.message}") }.getOrNull()
+                r
+            }.onFailure { logDebug("SignalAlert", "$symbol/$tf UnifiedSMC error: ${it.message}") }
+                .getOrNull()
+            unified = ures?.signal
+            uniBarTime = if (m15c.size >= 2) m15c[m15c.size - 2].timestamp else 0L
+            // heartbeat: log ครั้งเดียวต่อแท่ง M15 ปิด — พิสูจน์ว่า evaluator มีชีวิต + เห็นเหตุผลที่ HOLD
+            val hbKey = "$symbol/UNIFIED_SMC"
+            if (ures != null && uniBarTime != 0L && lastLoggedSignalBar[hbKey] != uniBarTime) {
+                lastLoggedSignalBar[hbKey] = uniBarTime
+                logDebug("SignalAlert", if (unified != null)
+                    "$symbol/$tf UNIFIED_SMC ${unified!!.side} score=${"%.2f".format(unified!!.score)} entry=${unified!!.entry} (${unified!!.entryMode}) SL=${unified!!.sl} TP=${unified!!.tp} m15bar=$uniBarTime"
+                else
+                    "$symbol/$tf UNIFIED_SMC HOLD: ${ures.reason} m15bar=$uniBarTime")
+            }
+        }
 
         // ── MIX voting — ถ้าผู้ใช้ตั้ง mix config ไว้: โหวตรวม state ของกลยุทธ์ที่เลือก ──
         val mixCfg = runCatching {
@@ -92,7 +209,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         var gatedKinds = emptyList<String>()
         var weakKinds = emptyList<String>()
         val gateMgr = runCatching { com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager() }.getOrNull()
-        if (gateMgr != null && (edges.isNotEmpty() || smcNew.isNotEmpty())) {
+        if (gateMgr != null && (edges.isNotEmpty() || smcNew.isNotEmpty() || unified != null)) {
             edges.removeAll { e ->
                 val k = signalKindOf(e.label)
                 val level = gateMgr.strategyGateLevel(symbol, tf, k)
@@ -108,11 +225,26 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                     weakKinds = weakKinds + "SMC"
                 }
             }
-            if (gatedKinds.isNotEmpty()) {
-                logDebug("JarvisVM", "⛔ Gate บล็อก $symbol/$tf: ${gatedKinds.joinToString(",")} (backtest ล่าสุด PF<1/expectancy≤0) — ไม่ยิง alert")
+            if (unified != null) {
+                val uLevel = gateMgr.strategyGateLevel(symbol, tf, "UNIFIED_SMC")
+                if (uLevel == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.BLOCK) {
+                    gatedKinds = gatedKinds + "UNIFIED_SMC"
+                    unified = null
+                } else if (uLevel == com.example.personalaibot.automation.AutomationManager.StrategyGateLevel.WEAK) {
+                    weakKinds = weakKinds + "UNIFIED_SMC"
+                }
             }
-            if (weakKinds.isNotEmpty()) {
-                logDebug("JarvisVM", "⚠️ Gate WEAK $symbol/$tf: ${weakKinds.joinToString(",")} (ผ่านแบบหวุดหวิด — PF<1.25/avgR<0.1/WR<35%)")
+            // Gate evaluation itself remains on every cycle so BLOCK/WEAK state is always current.
+            // Only the diagnostic log is deduplicated per closed candle.
+            val gateLogKey = "$symbol/$tf/gated=${gatedKinds.distinct().sorted().joinToString(",")}|weak=${weakKinds.distinct().sorted().joinToString(",")}"
+            if ((gatedKinds.isNotEmpty() || weakKinds.isNotEmpty()) && lastLoggedGateBar[gateLogKey] != sigTime) {
+                lastLoggedGateBar[gateLogKey] = sigTime
+                if (gatedKinds.isNotEmpty()) {
+                    logDebug("JarvisVM", "⛔ Gate บล็อก $symbol/$tf: ${gatedKinds.joinToString(",")} (backtest ล่าสุด PF<1/expectancy≤0) — ไม่ยิง alert bar=$sigTime")
+                }
+                if (weakKinds.isNotEmpty()) {
+                    logDebug("JarvisVM", "⚠️ Gate WEAK $symbol/$tf: ${weakKinds.joinToString(",")} (ผ่านแบบหวุดหวิด — PF<1.25/avgR<0.1/WR<35%) bar=$sigTime")
+                }
             }
         }
 
@@ -137,7 +269,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         fun fmt(v: Double) = if (abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
         val context = "trend=$trend | RSI=${"%.1f".format(rsi)} | vsBB=${if (close > bbBasis + 2 * bbSd) "เหนือUpper" else if (close < bbBasis - 2 * bbSd) "ใต้Lower" else if (close > bbBasis) "โซนบน" else "โซนล่าง"} | ATR14=${fmt(atr14)} | DC20[${fmt(dcL)}-${fmt(dcU)}]"
 
-        if (edges.isEmpty() && smcNew.isEmpty()) {
+        if (edges.isEmpty() && smcNew.isEmpty() && unified == null) {
             return mapOf(
                 "signal_buy" to "0",
                 "signal_sell" to "0",
@@ -148,13 +280,19 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 "signal_mix_votes" to mixVoteDetail,
                 "signal_gated" to gatedKinds.joinToString(","),
                 "signal_weak" to weakKinds.joinToString(","),
+                "signal_keyzone" to if (mtfDigest?.keyZoneHit != null) "1" else "0",
+                "signal_keyzone_desc" to (mtfDigest?.keyZoneHit ?: ""),
+                "signal_mtf_context" to (mtfDigest?.text ?: ""),
                 "close" to fmt(close),
-                "signal_context" to context
+                "signal_context" to context,
+                "signal_data_source" to candleSource,
+                "signal_data_source_reason" to candleSourceReason
             )
         }
 
-        // ── มีสัญญาณใหม่: รวมทุก edge ของแท่งนี้ (คลาสสิก + SMC) ──
-        val sides = (edges.map { it.side } + smcNew.map { it.side }).distinct()
+        // ── มีสัญญาณใหม่: รวมทุก edge ของแท่งนี้ (Unified SMC + คลาสสิก + SMC) ──
+        //    Unified SMC เป็น engine หลัก — ถ้ามี ให้เป็น primary เสมอ
+        val sides = (listOfNotNull(unified?.side) + edges.map { it.side } + smcNew.map { it.side }).distinct()
         val side = sides.first() // สัญญาณหลัก (ถ้ามีหลายฝั่งพร้อมกัน — หายาก — ใช้ตัวแรก)
         val primaryClassic = edges.firstOrNull { it.side == side }
         val primarySmc = smcNew.firstOrNull { it.side == side }
@@ -162,16 +300,27 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         val kind: String
         val sl: Double
         val tp: Double
-        if (primaryClassic != null) {
+        val entryPrice: Double
+        if (unified != null && unified!!.side == side) {
+            // Unified SMC — entry = LIMIT @ FVG mid (หรือ MARKET @ next open), SL/TP จากโครงสร้าง
+            kind = "UNIFIED_SMC"
+            sl = unified!!.sl
+            tp = unified!!.tp
+            entryPrice = unified!!.entry
+        } else if (primaryClassic != null) {
             kind = signalKindOf(primaryClassic.label) // MOM/TR/REV/DC/52H/E/UT/3BR
 
             // ใช้ tuned params จาก backtest (StrategyTuning) ถ้ามีและไม่ overfit — ไม่งั้นใช้สูตร default
             val tuning = runCatching {
                 com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
                     .getStrategyTuning(symbol, tf, kind)
-            }.getOrNull()?.takeIf { it.grade != "overfit" }
+            }.getOrNull()?.takeIf { it.risk_gate_eligible != 0L && it.source == "evolve" && it.grade != "overfit" }
             val pair = if (tuning != null) {
-                logDebug("SignalAlert", "$symbol/$tf/$kind ใช้ tuned params sl=${tuning.sl_mult} tp=${tuning.tp_mult} (${tuning.source}, grade=${tuning.grade})")
+                val tuningLogKey = "$symbol/$tf/$kind"
+                if (lastLoggedTunedEntryBar[tuningLogKey] != sigTime) {
+                    lastLoggedTunedEntryBar[tuningLogKey] = sigTime
+                    logDebug("SignalAlert", "$symbol/$tf/$kind ใช้ tuned params sl=${tuning.sl_mult} tp=${tuning.tp_mult} (${tuning.source}, grade=${tuning.grade}) bar=$sigTime")
+                }
                 com.example.personalaibot.automation.backtest.parameterizedTpSl(
                     kind, side, candles, sigIdx, atr14, atr6,
                     com.example.personalaibot.automation.backtest.TpSlParams(tuning.sl_mult, tuning.tp_mult)
@@ -180,43 +329,59 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 computeTpSl(kind, side, candles, sigIdx, atr14, atr6)
             }
             sl = pair.first; tp = pair.second
+            entryPrice = close
         } else {
             // สัญญาณ SMC (MT5 Engine) — SL/TP มาจากโครงสร้างตลาดของตัวเอง (ไม่ใช่ ATR multiple)
             kind = "SMC"
             sl = primarySmc!!.sl
             tp = primarySmc.tp
+            entryPrice = close
         }
-        val risk = abs(close - sl)
-        val rr = if (risk > 0) abs(tp - close) / risk else 0.0
+        val risk = abs(entryPrice - sl)
+        val rr = if (risk > 0) abs(tp - entryPrice) / risk else 0.0
+        // สัญญาณ Unified ผูกกับแท่ง M15 (ไม่ใช่แท่งของ job TF) — signal id ต้องเป็นเวลาแท่ง M15
+        val effSigTime = if (kind == "UNIFIED_SMC" && uniBarTime != 0L) uniBarTime else sigTime
 
-        val strategies = (edges.map { strategyName(signalKindOf(it.label)) } +
+        val strategies = (listOfNotNull(unified?.let { strategyName("UNIFIED_SMC") }) +
+            edges.map { strategyName(signalKindOf(it.label)) } +
             smcNew.map { smcStrategyName(it.strategy) }).joinToString(" + ")
-        val reasons = (edges.map { reasonFor(signalKindOf(it.label), it.side, tunedEntry[signalKindOf(it.label)]) } +
+        val reasons = (listOfNotNull(unified?.triggers?.joinToString(" ; ")) +
+            edges.map { reasonFor(signalKindOf(it.label), it.side, tunedEntry[signalKindOf(it.label)]) } +
             smcNew.flatMap { it.triggers }).joinToString(" ; ")
 
-        logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)}")
+        val signalLogKey = "$symbol/$tf/$side"
+        val previousLoggedBar = lastLoggedSignalBar[signalLogKey]
+        if (previousLoggedBar != sigTime) {
+            lastLoggedSignalBar[signalLogKey] = sigTime
+            logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)} source=$candleSource reason=$candleSourceReason bar=$sigTime")
+        }
 
         return mapOf(
             "signal_buy" to if (side == "BUY") "1" else "0",
             "signal_sell" to if (side == "SELL") "1" else "0",
-            "signal_buy_id" to if (side == "BUY") sigTime.toString() else "0",
-            "signal_sell_id" to if (side == "SELL") sigTime.toString() else "0",
+            "signal_buy_id" to if (side == "BUY") effSigTime.toString() else "0",
+            "signal_sell_id" to if (side == "SELL") effSigTime.toString() else "0",
             "signal_event" to side,
             "signal_strategy" to strategies,
             "signal_side" to side,
-            "signal_entry" to fmt(close),
+            "signal_entry" to fmt(entryPrice),
             "signal_sl" to fmt(sl),
             "signal_tp" to fmt(tp),
             "signal_rr" to "%.2f".format(rr),
             "signal_atr" to fmt(atr14),
             "signal_reason" to reasons,
-            "signal_stars" to (primarySmc?.confluenceStars?.toString() ?: "0"),
+            "signal_stars" to (unified?.stars?.toString() ?: primarySmc?.confluenceStars?.toString() ?: "0"),
             "signal_mix_score" to mixScore.toString(),
             "signal_mix_votes" to mixVoteDetail,
             "signal_gated" to gatedKinds.joinToString(","),
             "signal_weak" to weakKinds.joinToString(","),
+            "signal_keyzone" to if (mtfDigest?.keyZoneHit != null) "1" else "0",
+            "signal_keyzone_desc" to (mtfDigest?.keyZoneHit ?: ""),
+            "signal_mtf_context" to (mtfDigest?.text ?: ""),
             "signal_context" to context,
-            "signal_bar_time" to sigTime.toString(),
+            "signal_data_source" to candleSource,
+            "signal_data_source_reason" to candleSourceReason,
+            "signal_bar_time" to effSigTime.toString(),
             "close" to fmt(close)
         )
     }
@@ -236,6 +401,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
     )
 
     internal fun strategyName(kind: String): String = when (kind) {
+        "UNIFIED_SMC" -> "Unified SMC (Multi-TF V5 · research)"
         "MOM" -> "Time-Series Momentum"
         "TR" -> "Trend Following (EMA Cross)"
         "REV" -> "Short-Term Reversal"
@@ -309,14 +475,14 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "tsmom" -> setOf("MOM"); "trend" -> setOf("TR"); "reversal" -> setOf("REV")
             "donchian" -> setOf("DC"); "w52high" -> setOf("52H"); "ema1460", "ema14_60" -> setOf("E")
             "utbot", "ut" -> setOf("UT"); "threebar", "3br" -> setOf("3BR")
-            else -> setOf("MOM", "TR", "REV", "DC", "52H", "E", "UT", "3BR")
+            else -> SignalMarkerProvider.ENABLED_KINDS  // default = ตัวที่มี edge เท่านั้น (MOM/REV)
         }
 
         val tunedEntry = runCatching {
             com.example.personalaibot.db.JarvisDatabaseHolder.getAutomationManager()
                 .getTunedEntryParams(symbol, tf)
         }.getOrElse { emptyMap() }
-        val markers = markerProvider.compute(candles, maxPerKind = Int.MAX_VALUE, entryParams = tunedEntry)
+        val markers = markerProvider.compute(candles, maxPerKind = Int.MAX_VALUE, entryParams = tunedEntry, kindsOverride = kindFilter)
             .filter { signalKindOf(it.label) in kindFilter }
         if (markers.isEmpty()) return "📭 ไม่พบสัญญาณย้อนหลังของกลยุทธ์ที่เลือกใน $symbol $tf"
 

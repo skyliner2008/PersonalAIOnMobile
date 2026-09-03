@@ -35,37 +35,34 @@ object ModelConfig {
     )
 
     /**
-     * Checks if a model name is intended for Live mode.
+     * Checks if a model name is intended for Live mode (bidirectional WebSocket).
      */
     fun isLiveModel(modelName: String): Boolean {
         val m = modelName.lowercase().removePrefix("models/")
-        return m.contains("live") || m.contains("flash-live")
+        return m.contains("live") || m.contains("flash-live") || m.contains("native-audio") || m.contains("realtime")
     }
 
     /**
      * Checks if a model supports native function calling (Bidi or Tool use).
-     * Supports: Gemini 2.x/3.x, OpenAI GPT/o-series, Claude, OpenRouter models
+     * Automatically supports all modern Gemini 1.5, 2.x, 3.x+ models, OpenAI GPT/o-series,
+     * Claude, and major open weights on OpenRouter/Groq/NVIDIA NIM.
      */
     fun supportsNativeTools(modelName: String): Boolean {
         val m = modelName.lowercase().removePrefix("models/")
-        // Gemini
-        return m.contains("3.1-flash") ||
-               m.contains("3.1-pro") ||
-               m.contains("2.5-flash") ||
-               m.contains("2.5-pro") ||
-               m.contains("native-audio") ||
-               m.contains("live") ||
-               m.contains("3.5-flash") ||
-               // OpenAI
-               m.startsWith("gpt-") ||
-               m.startsWith("o1-") ||
-               m.startsWith("o3-") ||
-               m.startsWith("o4-") ||
-               // Claude (direct or via OpenRouter)
-               m.contains("claude-") ||
-               // OpenRouter prefixed models
-               m.startsWith("openai/gpt") ||
-               m.startsWith("anthropic/claude") ||
-               m.startsWith("google/gemini")
+        // Gemini: All modern multimodal models (except text embeddings, imagen, and legacy 1.0)
+        if (m.contains("gemini")) {
+            return !m.contains("embedding") && !m.contains("imagen") && !m.contains("1.0")
+        }
+        // OpenAI
+        if (m.startsWith("gpt-") || m.startsWith("o1-") || m.startsWith("o3-") || m.startsWith("o4-")) return true
+        // Claude
+        if (m.contains("claude-")) return true
+        // OpenRouter / Groq / NIM providers
+        return m.startsWith("openai/") ||
+               m.startsWith("anthropic/") ||
+               m.startsWith("google/") ||
+               m.startsWith("meta-llama/") ||
+               m.startsWith("qwen/") ||
+               m.startsWith("deepseek/")
     }
 }

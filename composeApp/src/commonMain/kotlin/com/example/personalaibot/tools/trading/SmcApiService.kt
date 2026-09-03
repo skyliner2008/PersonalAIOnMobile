@@ -205,7 +205,6 @@ class SmcApiService(private val client: HttpClient) {
         if (dbCandles.size >= minBars) {
             val missingBars = estimateMissingBars(dbCandles, interval)
             if (missingBars <= 0) {
-                logDebug("SmcApiService", "TV cache fresh $sym/$interval: DB ${dbCandles.size} แท่งทันปัจจุบัน (missing=0) — ไม่ต้องดึง รอ bucket ใหม่")
                 val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
                 return result
@@ -217,7 +216,6 @@ class SmcApiService(private val client: HttpClient) {
             val noNewKey = "$sym|$interval"
             val skipUntilBucket = tvNoNewDataSkipUntil[noNewKey]
             if (skipUntilBucket != null && bucketStart < skipUntilBucket) {
-                logDebug("SmcApiService", "TV incremental skip $sym/$interval: ไม่มีแท่งใหม่ (ตลาดปิด?) — ใช้ DB ${dbCandles.size} แท่งต่อ")
                 val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
                 return result
@@ -225,10 +223,6 @@ class SmcApiService(private val client: HttpClient) {
 
             // Incremental refresh: fetch only missing buckets with TF-specific baseline.
             val deltaBars = computeDeltaFetchBars(interval, missingBars, targetBars)
-            logDebug(
-                "SmcApiService",
-                "TV incremental refresh $sym/$interval: missingBars=$missingBars fetchDelta=$deltaBars dbBars=${dbCandles.size}"
-            )
             val tvDelta = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = deltaBars)
             if (tvDelta.candles.isNotEmpty()) {
                 val latestBefore = dbCandles.maxOf { it.timestamp }
@@ -239,12 +233,13 @@ class SmcApiService(private val client: HttpClient) {
                     tvNoNewDataStreak[noNewKey] = streak
                     val waitBuckets = streak.coerceAtMost(4)
                     tvNoNewDataSkipUntil[noNewKey] = bucketStart + tfMs * waitBuckets
-                    logDebug("SmcApiService", "TV no-new-bars $sym/$interval: streak=$streak → ข้าม $waitBuckets bucket(s) ถัดไป")
                 } else {
                     tvNoNewDataStreak.remove(noNewKey)
                     tvNoNewDataSkipUntil.remove(noNewKey)
                     saveTvCandlesToDb(sym, interval, tvDelta.source, merged)
                     trimTvCandlesByWindow(sym, interval, merged)
+                    val newBars = tvDelta.candles.count { it.timestamp > latestBefore }
+                    logDebug("SmcApiService", "TV new candles $sym/$interval: +$newBars bar(s) → DB ${merged.size} แท่ง")
                 }
                 val result = CandleFetchResult(merged, "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
@@ -268,6 +263,7 @@ class SmcApiService(private val client: HttpClient) {
         val tvResult = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = targetBars)
         if (tvResult.candles.size >= minBars) {
             saveTvCandlesToDb(sym, interval, tvResult.source, tvResult.candles)
+            logDebug("SmcApiService", "TV new candles $sym/$interval: +${tvResult.candles.size} bar(s) → DB ${tvResult.candles.size} แท่ง")
             val result = CandleFetchResult(tvResult.candles.takeLast(targetBars), tvResult.source)
             OhlcvCentralStore.put(sym, interval, result.source, result.candles)
             return result
@@ -459,6 +455,10 @@ class SmcApiService(private val client: HttpClient) {
         return CandleFetchResult(emptyList(), "NONE")
     }
 
+    suspend fun fetchTradingViewCandlesOnly(symbol: String, interval: String, limit: Int = 300): CandleFetchResult {
+        return fetchCandlesFromTradingView(symbol, interval, limit)
+    }
+
     private suspend fun fetchCandlesFromTradingView(symbol: String, interval: String, limit: Int): CandleFetchResult {
         val resolution = tvResolution(interval)
         val symbolsToTry = tvSymbolsFor(symbol)
@@ -502,17 +502,17 @@ class SmcApiService(private val client: HttpClient) {
     }
 
     private fun tvResolution(interval: String): String {
-        return when (interval.lowercase()) {
-            "1m" -> "1"
-            "3m" -> "3"
-            "5m" -> "5"
-            "15m" -> "15"
-            "30m" -> "30"
-            "1h" -> "60"
-            "2h" -> "120"
-            "4h" -> "240"
-            "1d" -> "D"
-            "1w" -> "W"
+        return when (interval.trim().lowercase()) {
+            "1m", "m1", "1" -> "1"
+            "3m", "m3", "3" -> "3"
+            "5m", "m5", "5" -> "5"
+            "15m", "m15", "15" -> "15"
+            "30m", "m30", "30" -> "30"
+            "1h", "h1", "60" -> "60"
+            "2h", "h2", "120" -> "120"
+            "4h", "h4", "240" -> "240"
+            "1d", "d1", "d" -> "D"
+            "1w", "w1", "w" -> "W"
             else -> "60"
         }
     }
@@ -708,7 +708,6 @@ class SmcApiService(private val client: HttpClient) {
 
                 val deadline = Clock.System.now().toEpochMilliseconds() + 9_000L
                 var incomingBuffer = ""
-                var debugPackets = 0
                 while (Clock.System.now().toEpochMilliseconds() < deadline) {
                     val frame = incoming.receive()
                     val text = when (frame) {
@@ -727,10 +726,6 @@ class SmcApiService(private val client: HttpClient) {
                         }
                         val root = runCatching { json.parseToJsonElement(packet).jsonObject }.getOrNull() ?: continue
                         val methodName = root["m"]?.jsonPrimitive?.contentOrNull ?: continue
-                        if (debugPackets < 8) {
-                            logDebug("SmcApiService", "TV packet[$tvSymbol/$resolution]: m=$methodName")
-                            debugPackets++
-                        }
                         if (methodName != "timescale_update") continue
                         val payload = root["p"]?.jsonArray ?: continue
                         if (payload.size < 2) continue
@@ -744,27 +739,12 @@ class SmcApiService(private val client: HttpClient) {
                         }
                         val seriesNode = findTvSeriesNode(body, seriesName)
                         if (seriesNode == null) {
-                            if (debugPackets < 12) {
-                                logDebug(
-                                    "SmcApiService",
-                                    "TV timescale_update has no series node for $tvSymbol/$resolution; keys=${body.keys.joinToString(",")}"
-                                )
-                                debugPackets++
-                            }
                             continue
                         }
                         collected.clear()
                         collected.addAll(extractTvBarsFromSeriesNode(seriesNode))
                         if (collected.isNotEmpty()) {
-                            logDebug("SmcApiService", "TV bars loaded: ${collected.size} for $tvSymbol/$resolution")
                             return@webSocket
-                        }
-                        if (debugPackets < 12) {
-                            logDebug(
-                                "SmcApiService",
-                                "TV series parsed but 0 bars for $tvSymbol/$resolution; nodeKeys=${seriesNode.keys.joinToString(",")}"
-                            )
-                            debugPackets++
                         }
                     }
                 }
@@ -1006,15 +986,19 @@ class SmcApiService(private val client: HttpClient) {
      * ATR (Average True Range) — ใช้ period=14 เหมือน indicator ต้นฉบับ
      */
     fun calcATR(candles: List<Candle>, period: Int = 14): Double {
-        if (candles.size < 15) return 0.0
-        val trs = candles.zipWithNext { prev, curr ->
-            maxOf(
-                curr.high - curr.low,
-                abs(curr.high - prev.close),
-                abs(curr.low - prev.close)
-            )
+        if (candles.size < period + 1) return 0.0
+        val trs = ArrayList<Double>(candles.size - 1)
+        for (i in 1 until candles.size) {
+            val h = candles[i].high
+            val l = candles[i].low
+            val pc = candles[i - 1].close
+            trs.add(maxOf(h - l, abs(h - pc), abs(l - pc)))
         }
-        return trs.takeLast(period).average()
+        var atr = trs.take(period).average()
+        for (i in period until trs.size) {
+            atr = (atr * (period - 1) + trs[i]) / period
+        }
+        return atr
     }
 
     /**
@@ -1254,64 +1238,37 @@ class SmcApiService(private val client: HttpClient) {
         premiumBot: Double = 0.0,
         discountTop: Double = 0.0,
         structureDir: String = "NEUTRAL"
-    ): List<SmcLiquidityZone> {
-        val zones = mutableListOf<SmcLiquidityZone>()
-        val recent = candles.takeLast(lookback + 1)
-        val lastClose = candles.last().close
+    ): List<SmcLiquidityZone> = detectPineLiquidityZones(candles, lookback, threshold).map { z ->
+        z.copy(confluenceScore = calcConfluenceScore(z.price, z.isHigh, structureHigh, structureLow, atr, bullishOBs, bearishOBs, premiumBot, discountTop, structureDir))
+    }
 
-        for (i in 1 until recent.size) {
-            val curHigh = recent[i].high
-            val curLow  = recent[i].low
-            val thrH = curHigh * (threshold / 100.0)
-            val thrL = curLow  * (threshold / 100.0)
-
-            // Count equal highs
-            var eqH = 0
-            for (j in i + 1 until recent.size) {
-                if (abs(recent[j].high - curHigh) <= thrH) eqH++
+    /** Deterministic replay of Pine V11.29 tfLegacyLiqSnapshot lifecycle. */
+    fun detectPineLiquidityZones(candles: List<Candle>, lookback: Int = 10, threshold: Double = 0.1, swingLen: Int = 10, maxZones: Int = 50, maxN: Int = 5): List<SmcLiquidityZone> {
+        if (candles.size < 3 || lookback < 2) return emptyList()
+        data class Z(var price: Double, var bar: Int, var high: Boolean, var swept: Boolean, var strength: Int)
+        val zones = mutableListOf<Z>()
+        fun pivotH(i: Int): Boolean { if (i-swingLen < 0 || i+swingLen >= candles.size) return false; val p=candles[i].high; return (i-swingLen..i+swingLen).all { it==i || candles[it].high<=p } }
+        fun pivotL(i: Int): Boolean { if (i-swingLen < 0 || i+swingLen >= candles.size) return false; val p=candles[i].low; return (i-swingLen..i+swingLen).all { it==i || candles[it].low>=p } }
+        for (bar in candles.indices) {
+            val lb=minOf(lookback,bar)
+            if (lb>1) for (i in 1..lb) {
+                val idx=bar-i; val h=candles[idx].high; val th=h*threshold/100.0; val end=minOf(idx+lb,bar); var eq=0
+                if(end>=idx+1) for(j in idx+1..end) if(abs(candles[j].high-h)<=th){eq++;break}
+                if(eq>=1 && zones.none{it.high && abs(it.price-h)<=th}) zones.add(0,Z(h,idx,true,false,eq))
             }
-            if (eqH >= 1 && curHigh > lastClose) {
-                val dup = zones.any { it.isHigh && abs(it.price - curHigh) <= thrH }
-                if (!dup) {
-                    val score = calcConfluenceScore(curHigh, true, structureHigh, structureLow,
-                        atr, bullishOBs, bearishOBs, premiumBot, discountTop, structureDir)
-                    zones.add(SmcLiquidityZone(curHigh, true, eqH, score))
-                }
+            if (lb>1) for (i in 1..lb) {
+                val idx=bar-i; val l=candles[idx].low; val th=l*threshold/100.0; val end=minOf(idx+lb,bar); var eq=0
+                if(end>=idx+1) for(j in idx+1..end) if(abs(candles[j].low-l)<=th){eq++;break}
+                if(eq>=1 && zones.none{!it.high && abs(it.price-l)<=th}) zones.add(0,Z(l,idx,false,false,eq))
             }
-
-            // Count equal lows
-            var eqL = 0
-            for (j in i + 1 until recent.size) {
-                if (abs(recent[j].low - curLow) <= thrL) eqL++
-            }
-            if (eqL >= 1 && curLow < lastClose) {
-                val dup = zones.any { !it.isHigh && abs(it.price - curLow) <= thrL }
-                if (!dup) {
-                    val score = calcConfluenceScore(curLow, false, structureHigh, structureLow,
-                        atr, bullishOBs, bearishOBs, premiumBot, discountTop, structureDir)
-                    zones.add(SmcLiquidityZone(curLow, false, eqL, score))
-                }
-            }
+            val pi=bar-swingLen
+            if(pi>=0){ if(pivotH(pi)) zones.add(0,Z(candles[pi].high,pi,true,false,2)); if(pivotL(pi)) zones.add(0,Z(candles[pi].low,pi,false,false,2)) }
+            for(z in zones){ if(!z.swept && z.high && candles[bar].high>z.price){z.swept=true;z.bar=bar}; if(!z.swept && !z.high && candles[bar].low<z.price){z.swept=true;z.bar=bar} }
+            zones.removeAll{it.swept && bar-it.bar>lookback*2}; while(zones.size>maxZones) zones.removeAt(zones.lastIndex)
         }
-
-        // Add Swing Liquidity (major pivots)
-        val (swingHighs, swingLows) = detectSwings(candles, 10)
-        swingHighs.lastOrNull()?.let { (_, h) ->
-            if (h > lastClose && zones.none { it.isHigh && abs(it.price - h) < h * 0.001 }) {
-                val score = calcConfluenceScore(h, true, structureHigh, structureLow,
-                    atr, bullishOBs, bearishOBs, premiumBot, discountTop, structureDir)
-                zones.add(SmcLiquidityZone(h, true, 2, score))
-            }
-        }
-        swingLows.lastOrNull()?.let { (_, l) ->
-            if (l < lastClose && zones.none { !it.isHigh && abs(it.price - l) < l * 0.001 }) {
-                val score = calcConfluenceScore(l, false, structureHigh, structureLow,
-                    atr, bullishOBs, bearishOBs, premiumBot, discountTop, structureDir)
-                zones.add(SmcLiquidityZone(l, false, 2, score))
-            }
-        }
-
-        return zones.sortedByDescending { it.confluenceScore }.take(10)
+        val out=mutableListOf<SmcLiquidityZone>(); var hc=0; var lc=0
+        for(z in zones) { if(z.swept) continue; if(z.high && hc<maxN){out+=SmcLiquidityZone(z.price,true,z.strength);hc++} else if(!z.high && lc<maxN){out+=SmcLiquidityZone(z.price,false,z.strength);lc++}; if(hc>=maxN&&lc>=maxN) break }
+        return out
     }
 
     /**
@@ -1664,59 +1621,17 @@ class SmcApiService(private val client: HttpClient) {
      * MTF Liquidity Levels — Equal Highs/Lows จากหลาย timeframe (M5, M15, M30, H1, H4)
      */
     suspend fun getMTFLiquidityDetailed(
-        symbol: String,
-        strictSource: Boolean = false,
-        strictTvSource: Boolean = true
+        symbol: String, strictSource: Boolean = false, strictTvSource: Boolean = true
     ): List<SmcMtfLiquidityFrame> {
-        val expectedSources = expectedSourceSet(symbol)
-        val timeframes = mapOf(
-            "M5"  to "5m",
-            "M15" to "15m",
-            "M30" to "30m",
-            "H1"  to "1h",
-            "H4"  to "4h"
-        )
-        val results = coroutineScope {
-            timeframes.map { (label, tf) ->
-                async {
-                    val startedAt = Clock.System.now().toEpochMilliseconds()
-                    logDebug("SmcApiService", "MTF liquidity[$label/$tf] start")
-                    val fetch = fetchCandlesWithSource(symbol, tf, 150)
-                    val candles = fetch.candles
-                    if (strictSource && fetch.source !in expectedSources) {
-                        val duration = Clock.System.now().toEpochMilliseconds() - startedAt
-                        logDebug("SmcApiService", "MTF liquidity[$label/$tf] skip(strict_source) source=${fetch.source} duration=${duration}ms")
-                        return@async null
-                    }
-                    if (strictTvSource && !isTvSource(fetch.source)) {
-                        val duration = Clock.System.now().toEpochMilliseconds() - startedAt
-                        logDebug("SmcApiService", "MTF liquidity[$label/$tf] fail(strict_tv) source=${fetch.source} duration=${duration}ms")
-                        throw StrictSourceMismatchException(
-                            "Strict TV candle source violation: expected=TV:*, actual=${fetch.source}, symbol=${symbol.uppercase()}, tf=$tf"
-                        )
-                    }
-                    if (candles.isEmpty()) {
-                        val duration = Clock.System.now().toEpochMilliseconds() - startedAt
-                        logDebug("SmcApiService", "MTF liquidity[$label/$tf] done(empty) source=${fetch.source} duration=${duration}ms")
-                        return@async null
-                    }
-                    val zones = detectLiquidityZones(candles, lookback = 10)
-                    val duration = Clock.System.now().toEpochMilliseconds() - startedAt
-                    if (zones.isEmpty()) {
-                        logDebug("SmcApiService", "MTF liquidity[$label/$tf] done(no_zone) bars=${candles.size} source=${fetch.source} duration=${duration}ms")
-                        return@async null
-                    }
-                    logDebug("SmcApiService", "MTF liquidity[$label/$tf] done(zones=${zones.size}) bars=${candles.size} source=${fetch.source} duration=${duration}ms")
-                    SmcMtfLiquidityFrame(
-                        timeframe = label,
-                        source = fetch.source,
-                        barsCount = candles.size,
-                        zones = zones
-                    )
-                }
-            }.awaitAll().filterNotNull()
-        }
-        return results.sortedBy { tfOrder(it.timeframe) }
+        val expectedSources=expectedSourceSet(symbol)
+        val timeframes=linkedMapOf("M1" to "1m","M5" to "5m","M15" to "15m","M30" to "30m","H1" to "1h","H4" to "4h","D1" to "1d","W1" to "1w")
+        return coroutineScope { timeframes.map { (label,tf) -> async {
+            val fetch=fetchCandlesWithSource(symbol,tf,150); if(strictSource && fetch.source !in expectedSources) return@async null
+            if(strictTvSource && !isTvSource(fetch.source)) throw StrictSourceMismatchException("Strict TV candle source violation: expected=TV:*, actual=${fetch.source}, symbol=${symbol.uppercase()}, tf=$tf")
+            if(fetch.candles.isEmpty()) return@async null
+            val zones=detectPineLiquidityZones(fetch.candles)
+            SmcMtfLiquidityFrame(label,fetch.source,fetch.candles.size,zones)
+        }}.awaitAll().filterNotNull().sortedBy{tfOrder(it.timeframe)} }
     }
 
     suspend fun getMTFLiquidity(
@@ -1729,13 +1644,19 @@ class SmcApiService(private val client: HttpClient) {
     }
 
     private fun tfOrder(tf: String): Int = when (tf.uppercase()) {
-        "M1" -> 0
-        "M5" -> 1
-        "M15" -> 2
-        "M30" -> 3
-        "H1" -> 4
-        "H4" -> 5
-        else -> 99
+        "M1" -> 0; "M5" -> 1; "M15" -> 2; "M30" -> 3; "H1" -> 4; "H4" -> 5; "D1" -> 6; "W1" -> 7; else -> 99
+    }
+
+    /** Pine f_mergeLevels-style clustering with nearest-to-price cap semantics. */
+    fun mergeMtfLiquidityWall(frames: List<SmcMtfLiquidityFrame>, currentPrice: Double, maxOutPerSide: Int = 30): List<SmcLiquidityZone> {
+        fun merge(sideHigh: Boolean): List<SmcLiquidityZone> {
+            val input=frames.flatMap{f->f.zones.filter{it.isHigh==sideHigh}.map{Triple(it.price,it.strength,f.timeframe)}}.sortedBy{it.first}
+            val clusters=mutableListOf<MutableList<Triple<Double,Int,String>>>(); var anchor=Double.NaN
+            for(c in input){ val tol=c.first*(if(c.third=="D1"||c.third=="W1")0.05 else 0.02)/100.0; if(clusters.isEmpty()||abs(c.first-anchor)>tol){clusters.add(mutableListOf(c));anchor=c.first}else clusters.last().add(c)}
+            val out=clusters.map{cl->SmcLiquidityZone(cl.map{it.first}.average(),sideHigh,cl.maxOf{it.second},cl.map{it.third}.distinct().size.coerceIn(0,5))}.toMutableList()
+            while(out.size>maxOutPerSide){ val idx=out.indices.maxByOrNull{abs(out[it].price-currentPrice)}?:break;out.removeAt(idx) }; return out
+        }
+        return (merge(true).filter{it.price>currentPrice}+merge(false).filter{it.price<currentPrice}).sortedBy{it.price}
     }
 }
 

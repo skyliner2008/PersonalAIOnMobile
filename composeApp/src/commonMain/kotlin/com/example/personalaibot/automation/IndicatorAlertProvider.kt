@@ -19,122 +19,88 @@ import kotlin.math.sqrt
 class IndicatorAlertProvider(private val smcApi: SmcApiService) {
 
     companion object {
-        private val SUPPORTED_TF = setOf("1m", "5m", "15m", "30m", "1h", "4h", "1D")
+        val SUPPORTED_TF = setOf("1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W")
 
-        /** แยก "XAUUSD@15m" → ("XAUUSD", "15m"); ไม่มี suffix → default "1h" */
+        fun normalizeTf(tf: String): String = com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(tf)
+
+        /** แยก "XAUUSD@15m" หรือ "XAUUSD@H4" → ("XAUUSD", "4h"); ไม่มี suffix → default "1h" */
         fun splitSymbolAndTf(raw: String): Pair<String, String> {
             val parts = raw.split("@")
             val sym = parts[0].uppercase().trim()
-            val tf = parts.getOrNull(1)?.trim()?.lowercase()?.let { t ->
-                SUPPORTED_TF.firstOrNull { it.lowercase() == t }
-            } ?: "1h"
+            val tf = parts.getOrNull(1)?.let { normalizeTf(it) } ?: "1h"
             return sym to tf
         }
     }
 
-    /** ดึงแท่งเทียนแล้วคำนวณอินดิเคเตอร์ทั้งหมด → map พร้อม evaluate */
     suspend fun fetch(rawSymbol: String): Map<String, String> {
         val (symbol, tf) = splitSymbolAndTf(rawSymbol)
-        val result = smcApi.fetchCandlesWithSource(symbol, tf, 300)
+        val result = smcApi.fetchTradingViewCandlesOnly(symbol, tf, 500)
         val candles = result.candles
-        if (candles.size < 60) {
-            return mapOf("error" to "candles ${candles.size} < 60 (${result.source})")
+        val minCandles = when (tf) {
+            "1D", "1W" -> 35
+            else -> 60
         }
-        logDebug("IndicatorProvider", "$symbol/$tf: ${candles.size} candles from ${result.source}")
+        if (candles.size < minCandles) return mapOf("error" to "TV candles ${candles.size} < $minCandles (${result.source})")
 
         val closes = candles.map { it.close }
         val highs = candles.map { it.high }
         val lows = candles.map { it.low }
+        val volumes = candles.map { it.volume.coerceAtLeast(0.0) }
         val last = candles.last()
+        fun value(series: List<Double>) = series.lastOrNull()?.takeIf { it.isFinite() }
+        fun smaValues(values: List<Double>, period: Int): Double? = if (values.size < period) null else values.takeLast(period).average()
+        fun pct(v: Double): Double = if (last.close != 0.0) v / last.close * 100.0 else 0.0
 
-        // ── EMA ──
-        val ema20 = ema(closes, 20).last()
-        val ema50 = ema(closes, 50).last()
-        val ema200 = if (closes.size >= 200) ema(closes, 200).last() else null
-        val ema50Series = ema(closes, 50)
-        val ema200Series = if (closes.size >= 200) ema(closes, 200) else null
+        val ema20 = value(ema(closes, 20)); val ema50 = value(ema(closes, 50)); val ema200 = value(ema(closes, 200))
+        val ema7 = value(ema(closes, 7)); val ema9 = value(ema(closes, 9)); val ema14 = value(ema(closes, 14)); val ema21 = value(ema(closes, 21)); val ema100 = value(ema(closes, 100))
+        val sma20 = smaValues(closes, 20); val sma50 = smaValues(closes, 50); val sma100 = smaValues(closes, 100); val sma200 = smaValues(closes, 200)
 
-        // cross state: เทียบ ema50 vs ema200 แท่งปัจจุบัน vs แท่งก่อน
-        val crossState = if (ema200Series != null && ema200 != null) {
-            val cur = ema50Series.last() - ema200Series.last()
-            val prev = ema50Series[ema50Series.lastIndex - 1] - ema200Series[ema200Series.lastIndex - 1]
-            when {
-                prev <= 0 && cur > 0 -> "GOLDEN_CROSS"   // เพิ่งตัดขึ้นแท่งนี้
-                prev >= 0 && cur < 0 -> "DEATH_CROSS"    // เพิ่งตัดลงแท่งนี้
-                cur > 0 -> "BULLISH"                     // อยู่โซนบวก
-                else -> "BEARISH"
-            }
-        } else "N/A"
+        val ema50Series = ema(closes, 50); val ema200Series = ema(closes, 200)
+        val crossState = when {
+            ema50Series.size >= 2 && ema200Series.size >= 2 && ema50Series[ema50Series.lastIndex - 1] <= ema200Series[ema200Series.lastIndex - 1] && ema50Series.last() > ema200Series.last() -> "GOLDEN_CROSS"
+            ema50Series.size >= 2 && ema200Series.size >= 2 && ema50Series[ema50Series.lastIndex - 1] >= ema200Series[ema200Series.lastIndex - 1] && ema50Series.last() < ema200Series.last() -> "DEATH_CROSS"
+            ema50 != null && ema200 != null && ema50 > ema200 -> "BULLISH"
+            ema50 != null && ema200 != null -> "BEARISH"
+            else -> "N/A"
+        }
 
-        // ── MACD (12,26,9) ──
-        val ema12 = ema(closes, 12)
-        val ema26 = ema(closes, 26)
-        // macd valid ตั้งแต่ index 25 (ema26 ต้องการ 26 จุด) — ตัด NaN ช่วงต้นออก
-        // ก่อนคำนวณ signal ไม่งั้น NaN จะ propagate ตลอด series
-        val macdFull = ema12.mapIndexed { i, v -> v - ema26[i] }
-        val macdSeries = macdFull.drop(25)
-        val signalSeries = ema(macdSeries, 9)
-        val macd = macdSeries.last()
-        val macdSignal = signalSeries.last()
-        val macdHist = macd - macdSignal
-
-        // ── RSI (14, Wilder) ──
-        val rsi = rsi(closes, 14)
-        val rsiPrev = rsi(closes.dropLast(1), 14)
-
-        // ── Stochastic (14,3,3) ──
-        val stochK = stochK(closes, highs, lows, 14)
-        val stochD = sma(stochK.filterNotNull().mapIndexed { i, v -> i to v }, 3)
-
-        // ── CCI (20) ──
-        val cci = cci(candles, 20)
-
-        // ── Awesome Oscillator (median price, SMA5 - SMA34) ──
-        val medians = candles.map { (it.high + it.low) / 2.0 }
-        val ao = if (medians.size >= 34) medians.takeLast(5).average() - medians.takeLast(34).average() else null
-
-        // ── ADX + DI (14, Wilder) ──
+        val ema12 = ema(closes, 12); val ema26 = ema(closes, 26)
+        val macdSeries = ema12.mapIndexed { i, v -> v - ema26[i] }.filter { it.isFinite() }
+        val macd = macdSeries.lastOrNull()?.takeIf { it.isFinite() }
+        val signalSeries = if (macdSeries.size >= 9) ema(macdSeries, 9) else emptyList()
+        val macdSignal = signalSeries.lastOrNull()?.takeIf { it.isFinite() }
+        val macdHist = if (macd != null && macdSignal != null) macd - macdSignal else null
+        val rsi7 = rsi(closes, 7); val rsi14 = rsi(closes, 14); val rsi21 = rsi(closes, 21)
+        val rsi14Prev = rsi(closes.dropLast(1), 14)
+        val stochK = stochK(closes, highs, lows, 14, 3); val stochD = sma(stochK.filterNotNull(), 3)
+        val cci20 = cci(candles, 20)
+        val medians = candles.map { (it.high + it.low) / 2.0 }; val ao = if (medians.size >= 34) medians.takeLast(5).average() - medians.takeLast(34).average() else null
         val adxPack = adx(candles, 14)
-
-        // ── Bollinger Bands (20, 2) ──
         val bb = bollinger(closes, 20, 2.0)
-
-        // ── ATR (14, Wilder) ──
-        val atr = atr(candles, 14)
+        val atr7 = atr(candles, 7); val atr14 = atr(candles, 14); val atr21 = atr(candles, 21)
+        val supertrend = com.example.personalaibot.tools.trading.TaIndicators.supertrend(highs, lows, closes)
+        val typical = candles.map { (it.high + it.low + it.close) / 3.0 }
+        val vwapDen = volumes.sum().coerceAtLeast(1e-9); val vwap = typical.zip(volumes).sumOf { it.first * it.second } / vwapDen
+        val volumeAvg20 = smaValues(volumes, 20)?.coerceAtLeast(1e-9) ?: 1.0; val volumeRatio20 = volumes.last() / volumeAvg20
+        val prior = candles[candles.lastIndex - 1]
+        val pivot = (prior.high + prior.low + prior.close) / 3.0
+        val r1 = 2 * pivot - prior.low; val s1 = 2 * pivot - prior.high; val r2 = pivot + prior.high - prior.low; val s2 = pivot - prior.high + prior.low
+        val donchian20High = highs.takeLast(20).maxOrNull(); val donchian20Low = lows.takeLast(20).minOrNull()
 
         return buildMap {
-            put("symbol", symbol)
-            put("timeframe", tf)
-            put("source", result.source)
-            put("close", fmt(last.close))
-            put("ema20", fmt(ema20))
-            put("ema50", fmt(ema50))
-            ema200?.let { put("ema200", fmt(it)) }
-            // spread เป็นตัวเลข — ตั้ง alert แบบ "ema50_200_spread >= 0" = โซน golden
-            put("ema20_50_spread", fmt(ema20 - ema50))
-            ema200?.let { put("ema50_200_spread", fmt(ema50 - it)) }
+            put("symbol", symbol); put("timeframe", tf); put("source", result.source); put("close", fmt(last.close))
+            listOf("ema7" to ema7, "ema9" to ema9, "ema14" to ema14, "ema20" to ema20, "ema21" to ema21, "ema50" to ema50, "ema100" to ema100, "ema200" to ema200,
+                "sma20" to sma20, "sma50" to sma50, "sma100" to sma100, "sma200" to sma200,
+                "rsi7" to rsi7, "rsi14" to rsi14, "rsi21" to rsi21, "macd" to macd, "macd_signal" to macdSignal, "macd_hist" to macdHist,
+                "stoch_k" to stochK.lastOrNull(), "stoch_d" to stochD, "cci20" to cci20, "ao" to ao,
+                "atr7" to atr7, "atr14" to atr14, "atr21" to atr21, "vwap" to vwap, "vwap_distance_pct" to pct(last.close - vwap),
+                "volume_ratio20" to volumeRatio20, "pivot" to pivot, "r1" to r1, "r2" to r2, "s1" to s1, "s2" to s2,
+                "donchian20_high" to donchian20High, "donchian20_low" to donchian20Low).forEach { (k, v) -> if (v != null && v.isFinite()) put(k, fmt(v)) }
             put("ema_cross_state", crossState)
-            put("macd", fmt(macd))
-            put("macd_signal", fmt(macdSignal))
-            put("macd_hist", fmt(macdHist))
-            rsi?.let { put("rsi14", fmt(it)) }
-            rsiPrev?.let { put("rsi14_prev", fmt(it)) }
-            stochK.lastOrNull()?.let { put("stoch_k", fmt(it)) }
-            stochD?.let { put("stoch_d", fmt(it)) }
-            cci?.let { put("cci20", fmt(it)) }
-            ao?.let { put("ao", fmt(it)) }
-            adxPack?.let { (adxV, diPlus, diMinus) ->
-                put("adx", fmt(adxV))
-                put("di_plus", fmt(diPlus))
-                put("di_minus", fmt(diMinus))
-            }
-            bb?.let { (basis, upper, lower) ->
-                put("bb_basis", fmt(basis))
-                put("bb_upper", fmt(upper))
-                put("bb_lower", fmt(lower))
-                if (basis != 0.0) put("bb_width", fmt((upper - lower) / basis * 100.0))
-            }
-            atr?.let { put("atr14", fmt(it)) }
+            rsi14Prev?.let { put("rsi14_prev", fmt(it)) }
+            adxPack?.let { (a, p, m) -> put("adx", fmt(a)); put("di_plus", fmt(p)); put("di_minus", fmt(m)) }
+            supertrend?.let { st -> put("supertrend", fmt(st.value)); put("supertrend_direction", if (st.isBullish) "BULLISH" else "BEARISH") }
+            bb?.let { (basis, upper, lower) -> put("bb_basis", fmt(basis)); put("bb_upper", fmt(upper)); put("bb_lower", fmt(lower)); if (basis != 0.0) put("bb_width", fmt((upper - lower) / basis * 100.0)); put("bb_percent_b", fmt((last.close - lower) / (upper - lower).coerceAtLeast(1e-9) * 100.0)) }
         }
     }
 
@@ -156,9 +122,9 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
         return out
     }
 
-    private fun sma(indexed: List<Pair<Int, Double>>, period: Int): Double? {
-        if (indexed.size < period) return null
-        return indexed.takeLast(period).map { it.second }.average()
+    private fun sma(values: List<Double>, period: Int): Double? {
+        if (values.size < period) return null
+        return values.takeLast(period).average()
     }
 
     private fun rsi(closes: List<Double>, period: Int): Double? {
@@ -181,13 +147,20 @@ class IndicatorAlertProvider(private val smcApi: SmcApiService) {
         return 100.0 - 100.0 / (1.0 + rs)
     }
 
-    private fun stochK(closes: List<Double>, highs: List<Double>, lows: List<Double>, period: Int): List<Double?> {
-        val out = ArrayList<Double?>(closes.size)
+    private fun stochK(closes: List<Double>, highs: List<Double>, lows: List<Double>, period: Int = 14, smooth: Int = 3): List<Double?> {
+        val raw = ArrayList<Double?>()
         for (i in closes.indices) {
-            if (i < period - 1) { out.add(null); continue }
+            if (i < period - 1) { raw.add(null); continue }
             val hh = highs.subList(i - period + 1, i + 1).max()
             val ll = lows.subList(i - period + 1, i + 1).min()
-            out.add(if (hh == ll) 50.0 else (closes[i] - ll) / (hh - ll) * 100.0)
+            raw.add(if (hh == ll) 50.0 else (closes[i] - ll) / (hh - ll) * 100.0)
+        }
+        if (smooth <= 1) return raw
+        val out = ArrayList<Double?>()
+        for (i in raw.indices) {
+            if (i < period - 1 + smooth - 1) { out.add(null); continue }
+            val window = (i - smooth + 1..i).mapNotNull { raw[it] }
+            out.add(if (window.size == smooth) window.average() else null)
         }
         return out
     }

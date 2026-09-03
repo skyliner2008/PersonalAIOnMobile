@@ -21,7 +21,9 @@ internal object LiquidityZones {
         val zones = mutableListOf<LiquidityZone>()
         val n = candles.size
 
-        // 1. Equal Highs
+        // Pine V11.29 semantics: a liquidity level's strength/touches includes
+        // the anchor bar itself.  The old port reported only matching older bars,
+        // making a 3-touch EQH appear as strength=2.
         for (i in 1..min(lookback, n - 1)) {
             val ch = candles[n - 1 - i].high
             val thr = ch * (equalThresholdPct / 100.0)
@@ -31,11 +33,10 @@ internal object LiquidityZones {
                 if (abs(other - ch) <= thr) eqCount++
             }
             if (eqCount >= 1 && zones.none { it.isHigh && abs(it.price - ch) <= thr }) {
-                zones += LiquidityZone(ch, n - 1 - i, isHigh = true, strength = eqCount, source = "EQUAL_HL")
+                zones += LiquidityZone(ch, n - 1 - i, isHigh = true, strength = eqCount + 1, source = "EQUAL_HL")
             }
         }
 
-        // 2. Equal Lows
         for (i in 1..min(lookback, n - 1)) {
             val cl = candles[n - 1 - i].low
             val thr = cl * (equalThresholdPct / 100.0)
@@ -45,11 +46,12 @@ internal object LiquidityZones {
                 if (abs(other - cl) <= thr) eqCount++
             }
             if (eqCount >= 1 && zones.none { !it.isHigh && abs(it.price - cl) <= thr }) {
-                zones += LiquidityZone(cl, n - 1 - i, isHigh = false, strength = eqCount, source = "EQUAL_HL")
+                zones += LiquidityZone(cl, n - 1 - i, isHigh = false, strength = eqCount + 1, source = "EQUAL_HL")
             }
         }
 
-        // 3. Swing H/L liquidity (5 จุดล่าสุด)
+        // Swing liquidity remains a separate source and is weaker than a
+        // multi-touch equal-high/equal-low wall by default.
         val (highs, lows) = detectSwings(candles, swingLength)
         for (sh in highs.takeLast(5)) {
             if (zones.none { it.isHigh && abs(it.price - sh.price) < sh.price * 0.001 }) {
@@ -62,7 +64,7 @@ internal object LiquidityZones {
             }
         }
 
-        // 4. mark swept ด้วยแท่งล่าสุด แล้วตัดทิ้ง
+        // A level is pending only while the latest completed bar has not swept it.
         val last = candles[n - 1]
         for (z in zones) {
             if (z.isHigh && last.high > z.price) z.swept = true

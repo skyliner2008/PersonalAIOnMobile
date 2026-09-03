@@ -1,0 +1,25 @@
+-- P6.2b/P6.2d: persistent mobile demo broker and quote/recovery support
+CREATE TABLE IF NOT EXISTS DemoAccount (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'USD',
+    initial_balance REAL NOT NULL, balance REAL NOT NULL, leverage REAL NOT NULL DEFAULT 100.0,
+    max_daily_loss_pct REAL NOT NULL DEFAULT 5.0, max_drawdown_pct REAL NOT NULL DEFAULT 10.0,
+    spread_mode TEXT NOT NULL DEFAULT 'FIXED', spread_price REAL NOT NULL DEFAULT 0.20,
+    commission_per_lot_round_turn REAL NOT NULL DEFAULT 0.0, commission_pct_per_side REAL NOT NULL DEFAULT 0.0,
+    rebate_per_lot_round_turn REAL NOT NULL DEFAULT 0.0, swap_long_per_lot_per_day REAL NOT NULL DEFAULT 0.0,
+    swap_short_per_lot_per_day REAL NOT NULL DEFAULT 0.0, contract_size REAL NOT NULL DEFAULT 1.0,
+    tick_size REAL NOT NULL DEFAULT 0.01, tick_value_per_lot REAL NOT NULL DEFAULT 0.01,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoPosition (
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES DemoAccount(id), symbol TEXT NOT NULL,
+    side TEXT NOT NULL, volume REAL NOT NULL, entry_price REAL NOT NULL, current_price REAL NOT NULL,
+    stop_loss REAL, take_profit REAL, opened_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoDeal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL REFERENCES DemoAccount(id), position_id TEXT,
+    symbol TEXT NOT NULL, side TEXT NOT NULL, volume REAL NOT NULL, price REAL NOT NULL,
+    gross_pnl REAL NOT NULL DEFAULT 0.0, spread_cost REAL NOT NULL DEFAULT 0.0,
+    commission REAL NOT NULL DEFAULT 0.0, rebate REAL NOT NULL DEFAULT 0.0, swap REAL NOT NULL DEFAULT 0.0,
+    net_pnl REAL NOT NULL DEFAULT 0.0, timestamp INTEGER NOT NULL
+);
+

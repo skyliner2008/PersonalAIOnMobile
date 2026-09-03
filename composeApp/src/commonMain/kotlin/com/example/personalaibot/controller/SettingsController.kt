@@ -320,13 +320,35 @@ class SettingsController(
      */
     suspend fun getLiveCapableModels(providerId: String = "gemini", apiKeyOverride: String? = null): List<com.example.personalaibot.data.providers.LlmModelInfo> {
         val all = getModelsForProvider(providerId, freeOnly = false, apiKeyOverride)
-        val liveByCapability = all.filter { it.supportsVision }
+        val liveByCapability = all.filter { it.supportsLive }
         if (liveByCapability.isNotEmpty()) return liveByCapability
         // Fallback heuristic for providers that don't expose capability flags
-        return all.filter { m ->
+        val fallback = all.filter { m ->
             val n = (m.id + " " + m.displayName).lowercase()
-            n.contains("live") || n.contains("realtime") || n.contains("flash") || n.contains("vision") || n.contains("multimodal")
+            n.contains("live") || n.contains("realtime") || n.contains("native-audio")
         }
+        if (fallback.isNotEmpty()) return fallback
+        // Default safe live models if nothing matched
+        return listOf(
+            com.example.personalaibot.data.providers.LlmModelInfo(
+                id = com.example.personalaibot.data.ModelConfig.DEFAULT_LIVE_MODEL,
+                displayName = "Gemini 3.1 Flash Live Preview",
+                supportsLive = true,
+                supportsVision = true
+            ),
+            com.example.personalaibot.data.providers.LlmModelInfo(
+                id = "gemini-2.5-flash-native-audio-preview-12-2025",
+                displayName = "Gemini 2.5 Flash Native Audio",
+                supportsLive = true,
+                supportsVision = true
+            ),
+            com.example.personalaibot.data.providers.LlmModelInfo(
+                id = "gemini-2.0-flash-exp",
+                displayName = "Gemini 2.0 Flash Experimental (Realtime)",
+                supportsLive = true,
+                supportsVision = true
+            )
+        )
     }
 
     /**

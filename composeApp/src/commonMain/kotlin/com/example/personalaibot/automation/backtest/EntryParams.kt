@@ -41,8 +41,9 @@ data class EntryParams(
     val utAtrPeriod: Int = 6
 ) {
     companion object {
-        /** kind ที่มี entry params จูนได้ (3BR เป็น pattern ล้วน / SMC ใช้โครงสร้างตลาด — ไม่มีอะไรจูนตรงนี้) */
-        val TUNABLE_KINDS = setOf("MOM", "TR", "REV", "DC", "52H", "E", "UT")
+        /** kind ที่มี entry params จูนได้ (3BR เป็น pattern ล้วน / SMC ใช้โครงสร้างตลาด — ไม่มีอะไรจูนตรงนี้)
+         *  2026-08-27: ตัด TR/DC/52H/E/UT ตาม cross-TF forensics — เหลือเฉพาะตัวที่มี edge */
+        val TUNABLE_KINDS = setOf("MOM", "REV")
 
         fun defaultsFor(kind: String): EntryParams = EntryParams()
 

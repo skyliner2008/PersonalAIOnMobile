@@ -108,6 +108,37 @@ class Mt5TerminalService(private val client: HttpClient) {
         return fetchSnapshotLegacy(baseUrl, authToken, historyLimit)
     }
 
+    /** Signal-analysis candle source. Used only when the confirmed execution environment is MT5 LIVE. */
+    suspend fun fetchCandlesForAnalysis(
+        baseUrl: String,
+        authToken: String = "",
+        symbol: String,
+        timeframe: String,
+        count: Int = 300
+    ): List<Candle> {
+        val base = baseUrl.trimEnd('/').let { if (it.endsWith("/api/mt5")) it else "$it/api/mt5" }
+        val result = getJson("$base/candles", mapOf("symbol" to symbol, "timeframe" to timeframe, "count" to count.toString()), authToken)
+        if (!result.ok || result.element == null) return emptyList()
+        val root = result.element
+        val array = when {
+            root is kotlinx.serialization.json.JsonArray -> root
+            root.jsonObject["candles"] is kotlinx.serialization.json.JsonArray -> root.jsonObject["candles"]!!.jsonArray
+            root.jsonObject["data"] is kotlinx.serialization.json.JsonArray -> root.jsonObject["data"]!!.jsonArray
+            else -> kotlinx.serialization.json.JsonArray(emptyList())
+        }
+        return array.mapNotNull { item ->
+            val o = item.jsonObject
+            fun d(vararg keys: String): Double? = keys.asSequence().mapNotNull { o[it]?.toString()?.trim('"')?.toDoubleOrNull() }.firstOrNull()
+            fun l(vararg keys: String): Long? = keys.asSequence().mapNotNull { o[it]?.toString()?.trim('"')?.toLongOrNull() }.firstOrNull()
+            val open = d("open", "o") ?: return@mapNotNull null
+            val high = d("high", "h") ?: return@mapNotNull null
+            val low = d("low", "l") ?: return@mapNotNull null
+            val close = d("close", "c") ?: return@mapNotNull null
+            val ts = l("timestamp", "time", "t") ?: return@mapNotNull null
+            Candle(open, high, low, close, d("volume", "v") ?: 0.0, if (ts < 10_000_000_000L) ts * 1000L else ts)
+        }.sortedBy { it.timestamp }
+    }
+
     suspend fun fetchSnapshotDelta(
         baseUrl: String,
         authToken: String = "",

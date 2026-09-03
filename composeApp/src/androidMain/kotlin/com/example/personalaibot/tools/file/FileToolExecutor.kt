@@ -26,6 +26,7 @@ class FileToolExecutor(private val context: Context) {
             "txt", "md", "log", "json", "csv", "yaml", "yml", "xml",
             "html", "htm", "css", "ini", "cfg", "conf", "properties", "toml",
             "kt", "kts", "py", "js", "ts", "java", "sql", "sh", "bat", "pine",
+            "c", "cpp", "h", "hpp", "dart", "go", "rs", "swift", "php", "svg", "env",
             "xlsx"
         )
     }

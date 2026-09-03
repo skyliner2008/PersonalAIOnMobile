@@ -69,5 +69,11 @@ data class BacktestResult(
     // รายละเอียด
     val perStrategy: List<StrategyBacktestStats>,
     val trades: List<BacktestTrade>,
-    val equityCurve: List<Double>
+    val equityCurve: List<Double>,
+    // Reproducibility metadata. Optional defaults preserve existing call sites.
+    val runId: String = "",
+    val datasetId: String = "",
+    val strategyVersion: String = "",
+    val parameterHash: String = "",
+    val engineVersion: String = ""
 )

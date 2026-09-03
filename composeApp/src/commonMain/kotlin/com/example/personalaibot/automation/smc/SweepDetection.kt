@@ -57,6 +57,24 @@ internal object SweepDetection {
         return bull to bear
     }
 
+    /** Candle-confirmed liquidity event: sweep = pierce + reclaim; run = decisive close beyond liquidity. */
+    fun detectLiquidityEvents(candles: List<Candle>, zones: List<LiquidityZone>): Pair<SmcSignalConfirmation, SmcSignalConfirmation> {
+        if (candles.size < 2 || zones.isEmpty()) return SmcSignalConfirmation.NONE to SmcSignalConfirmation.NONE
+        val c = candles.last()
+        val atr = computeAtr(candles)
+        val tol = max(atr * 0.10, (c.high - c.low) * 0.05)
+        val above = zones.filter { it.isHigh && it.price > 0 }.minByOrNull { abs(it.price - c.high) }
+        val below = zones.filter { !it.isHigh && it.price > 0 }.minByOrNull { abs(it.price - c.low) }
+        fun event(level: Double, highSide: Boolean): SmcSignalConfirmation {
+            val pierced = if (highSide) c.high > level + tol else c.low < level - tol
+            if (!pierced) return SmcSignalConfirmation.NONE
+            val reclaimed = if (highSide) c.close < level else c.close > level
+            return if (reclaimed) SmcSignalConfirmation.LIQUIDITY_SWEEP else SmcSignalConfirmation.LIQUIDITY_RUN
+        }
+        return (below?.let { event(it.price, false) } ?: SmcSignalConfirmation.NONE) to
+            (above?.let { event(it.price, true) } ?: SmcSignalConfirmation.NONE)
+    }
+
     /** Attack Force — แท่งโมเมนตัมแรงผิดปกติ (body > 2×ATR และ > 2×ค่าเฉลี่ย + volume ยืนยัน) 5 แท่งล่าสุด */
     fun detectAttackForce(
         candles: List<Candle>,

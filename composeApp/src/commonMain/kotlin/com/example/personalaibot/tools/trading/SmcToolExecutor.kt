@@ -11,6 +11,7 @@ import io.ktor.client.*
 class SmcToolExecutor(private val client: HttpClient) {
 
     private val api = SmcApiService(client)
+    private val priceApi = TradingApiService(client)
 
     /**
      * Execute SMC tool call
@@ -33,8 +34,11 @@ class SmcToolExecutor(private val client: HttpClient) {
     // ─── 1. Full SMC Analysis Dashboard ──────────────────────────────────────
 
     private suspend fun executeSmcAnalysis(args: Map<String, String>): String {
-        val symbol   = args["symbol"]   ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
-        val interval = args["interval"] ?: "1h"
+        val symbol   = args["symbol"] ?: return "กรุณาระบุ symbol เช่น BTCUSDT"
+        // Pine SMC V11.29 is designed around M15 as the primary chart/use-case TF.
+        // Keep explicit caller overrides intact, but make the implicit analysis path use M15
+        // instead of silently falling back to H1.
+        val interval = args["interval"]?.trim()?.takeIf { it.isNotEmpty() } ?: "15m"
         val strictTv = args["strict_tv"]?.toBooleanStrictOrNull() ?: true
 
         val result = api.getSmcAnalysis(symbol, interval, strictTvSource = strictTv)
@@ -50,17 +54,17 @@ class SmcToolExecutor(private val client: HttpClient) {
         }
 
         val eventStr = when (result.lastStructureEvent) {
-            "BOS_UP"    -> "📈 BOS ขึ้น (ฺBoS Bullish)"
-            "BOS_DOWN"  -> "📉 BOS ลง (BoS Bearish)"
-            "CHOCH_UP"  -> "🔄 CHoCH ขึ้น (CHoCH → Bullish)"
-            "CHOCH_DOWN"-> "🔄 CHoCH ลง (CHoCH → Bearish)"
-            else        -> "— ไม่มี event ล่าสุด"
+            "BOS_UP"     -> "📈 BOS ขึ้น (BoS Bullish)"
+            "BOS_DOWN"   -> "📉 BOS ลง (BoS Bearish)"
+            "CHOCH_UP"   -> "🔄 CHoCH ขึ้น (CHoCH → Bullish)"
+            "CHOCH_DOWN" -> "🔄 CHoCH ลง (CHoCH → Bearish)"
+            else          -> "— ไม่มี event ล่าสุด"
         }
 
         val zoneEmoji = when (result.priceZone) {
-            "PREMIUM"     -> "🔴 PREMIUM (แพง — บริเวณ Short)"
-            "DISCOUNT"    -> "🟢 DISCOUNT (ถูก — บริเวณ Long)"
-            else          -> "🟡 EQUILIBRIUM (กลาง)"
+            "PREMIUM"  -> "🔴 PREMIUM (แพง — บริเวณ Short)"
+            "DISCOUNT" -> "🟢 DISCOUNT (ถูก — บริเวณ Long)"
+            else       -> "🟡 EQUILIBRIUM (กลาง)"
         }
 
         return buildString {
@@ -70,7 +74,6 @@ class SmcToolExecutor(private val client: HttpClient) {
             if (result.attackForce) appendLine("⚡ **Attack Force!** — Momentum สูงผิดปกติ (>2x ATR)")
             appendLine("")
 
-            // Market Structure
             appendLine("**📐 Market Structure**")
             appendLine("  $dirEmoji Trend: **${result.structureDirection}**")
             appendLine("  Structure High: ${formatPrice(result.structureHigh)}")
@@ -78,7 +81,6 @@ class SmcToolExecutor(private val client: HttpClient) {
             appendLine("  Last Event: $eventStr")
             appendLine("")
 
-            // Premium / Discount
             appendLine("**📊 Premium / Discount Zones**")
             appendLine("  Zone ปัจจุบัน: $zoneEmoji")
             appendLine("  Premium  ≥ ${formatPrice(result.premiumBot)}")
@@ -86,7 +88,6 @@ class SmcToolExecutor(private val client: HttpClient) {
             appendLine("  Discount ≤ ${formatPrice(result.discountTop)}")
             appendLine("")
 
-            // Order Blocks
             appendLine("**🟢 Bullish OB (Demand Zones)**")
             if (result.bullishOBs.isEmpty()) {
                 appendLine("  — ไม่พบ Active Bullish OB")
@@ -106,7 +107,6 @@ class SmcToolExecutor(private val client: HttpClient) {
                 }
             }
 
-            // Fair Value Gaps
             appendLine("")
             appendLine("**⬛ Fair Value Gaps (FVG)**")
             val recentFVGs = result.fvgs.takeLast(5)
@@ -119,22 +119,41 @@ class SmcToolExecutor(private val client: HttpClient) {
                 }
             }
 
-            // Liquidity Zones
             appendLine("")
             appendLine("**💧 Liquidity Zones (Pending Sweeps)**")
-            val topZones = result.liquidityZones.sortedByDescending { it.confluenceScore }.take(6)
-            if (topZones.isEmpty()) {
-                appendLine("  — ไม่พบ Liquidity Zone")
+            // Liquidity is spatial information: classify by semantic type AND position
+            // relative to current price, never by strength score alone.
+            val eqhAbove = result.liquidityZones
+                .filter { it.isHigh && it.price > result.currentPrice }
+                .sortedBy { it.price }
+            val eqlBelow = result.liquidityZones
+                .filter { !it.isHigh && it.price < result.currentPrice }
+                .sortedByDescending { it.price }
+            val invalidHighs = result.liquidityZones.count { it.isHigh && it.price <= result.currentPrice }
+            val invalidLows = result.liquidityZones.count { !it.isHigh && it.price >= result.currentPrice }
+
+            appendLine("  🔻 **Buy-side Liquidity / EQH เหนือราคา**")
+            if (eqhAbove.isEmpty()) {
+                appendLine("    — ไม่พบ EQH เหนือราคาปัจจุบัน")
             } else {
-                topZones.forEach { z ->
-                    val icon = if (z.isHigh) "🔺 EQH" else "🔻 EQL"
-                    val stars = starsStr(z.confluenceScore)
-                    appendLine("  $icon ${formatPrice(z.price)}  $stars (touches: ${z.strength})")
+                eqhAbove.take(6).forEach { z ->
+                    appendLine("    🔻 EQH ${formatPrice(z.price)}  ${starsStr(z.confluenceScore)} (touches: ${z.strength})")
                 }
+            }
+            appendLine("  ───────── ${formatPrice(result.currentPrice)} CURRENT PRICE")
+            appendLine("  🔺 **Sell-side Liquidity / EQL ใต้ราคา**")
+            if (eqlBelow.isEmpty()) {
+                appendLine("    — ไม่พบ EQL ใต้ราคาปัจจุบัน")
+            } else {
+                eqlBelow.take(6).forEach { z ->
+                    appendLine("    🔺 EQL ${formatPrice(z.price)}  ${starsStr(z.confluenceScore)} (touches: ${z.strength})")
+                }
+            }
+            if (invalidHighs + invalidLows > 0) {
+                appendLine("  ⚠️ ตรวจพบ liquidity ที่อยู่ผิดฝั่งราคา: ${invalidHighs + invalidLows} ระดับ")
             }
             appendLine("=".repeat(29))
 
-            // Trading Bias Summary
             val bullOBNearPrice = result.bullishOBs.any {
                 result.currentPrice >= it.bottom * 0.995 && result.currentPrice <= it.top * 1.005
             }
@@ -230,37 +249,40 @@ class SmcToolExecutor(private val client: HttpClient) {
             }
         }
 
-        // Merge nearby levels (within 0.2%)
-        val mergedHighs = mergeLevels(allHighs, 0.2)
-        val mergedLows  = mergeLevels(allLows, 0.2)
+        // Pine V11.29: base merge tolerance is 0.02%; D1/W1 use 2.5x (0.05%).
+        val mergedHighs = mergeLevels(allHighs, 0.02)
+        val mergedLows  = mergeLevels(allLows, 0.02)
+
+        val currentPrice = priceApi.getBestEffortPrice(symbol)["price"]?.toDoubleOrNull()
+        val highs = mergedHighs.sortedByDescending { it.first }
+        val lows = mergedLows.sortedByDescending { it.first }
 
         return buildString {
             appendLine("💧 **MTF Liquidity Zones — ${symbol.uppercase()}**")
             appendLine("=".repeat(29))
-            appendLine("★★★★★ = OB + Structure + Premium/Discount + Trend")
-            appendLine("EQH = Equal High (Sell-side Liquidity)")
-            appendLine("EQL = Equal Low  (Buy-side Liquidity)")
+            if (currentPrice != null) appendLine("💰 ราคาปัจจุบัน: ${formatPrice(currentPrice)}")
+            appendLine("EQH = Buy-side Liquidity (เหนือราคา)")
+            appendLine("EQL = Sell-side Liquidity (ใต้ราคา)")
             appendLine("=".repeat(29))
-            appendLine("")
-            appendLine("**🔺 Equal Highs (Resistance / Sell Liquidity):**")
-            if (mergedHighs.isEmpty()) {
-                appendLine("  — ไม่พบ Equal Highs ที่มีนัยสำคัญ")
-            } else {
-                mergedHighs.sortedByDescending { it.first }.take(8).forEach { (price, tags) ->
-                    appendLine("  🔺 ${formatPrice(price)}  [$tags]")
-                }
+
+            val above = if (currentPrice != null) highs.filter { it.first > currentPrice } else highs
+            val below = if (currentPrice != null) lows.filter { it.first < currentPrice } else lows
+
+            appendLine("**🔻 Liquidity เหนือราคา — Buy-side / EQH:**")
+            if (above.isEmpty()) appendLine("  — ไม่พบ EQH เหนือราคาปัจจุบัน")
+            else above.take(8).forEach { (price, tags) ->
+                appendLine("  🔻 EQH ${formatPrice(price)}  [$tags]")
+            }
+
+            if (currentPrice != null) appendLine("--- ${formatPrice(currentPrice)}")
+
+            appendLine("**🔺 Liquidity ใต้ราคา — Sell-side / EQL:**")
+            if (below.isEmpty()) appendLine("  — ไม่พบ EQL ใต้ราคาปัจจุบัน")
+            else below.take(8).forEach { (price, tags) ->
+                appendLine("  🔺 EQL ${formatPrice(price)}  [$tags]")
             }
             appendLine("")
-            appendLine("**🔻 Equal Lows (Support / Buy Liquidity):**")
-            if (mergedLows.isEmpty()) {
-                appendLine("  — ไม่พบ Equal Lows ที่มีนัยสำคัญ")
-            } else {
-                mergedLows.sortedBy { it.first }.take(8).forEach { (price, tags) ->
-                    appendLine("  🔻 ${formatPrice(price)}  [$tags]")
-                }
-            }
-            appendLine("")
-            appendLine("📌 Liquidity ที่ถูก tag หลาย TF = Strong level — มีโอกาสสูงที่ราคาจะไป sweep ก่อนกลับทิศ")
+            appendLine("📌 Wall ถูก merge ตาม Pine V11.29: 0.02% และ D1/W1 ใช้ 0.05%")
         }
     }
 
@@ -414,34 +436,42 @@ class SmcToolExecutor(private val client: HttpClient) {
     }
 
     /**
-     * Merge nearby price levels within threshold%, combine their tags
+     * Merge nearby price levels using Pine V11.29 wall tolerances.
+     *
+     * The wider tolerance applies when either side of a candidate cluster comes
+     * from D1/W1. Using only the incoming tag made the previous implementation
+     * order-dependent (D1 could merge differently depending on iteration order).
      */
     private fun mergeLevels(
         levels: List<Pair<Double, String>>,
         thresholdPct: Double
     ): List<Pair<Double, String>> {
         if (levels.isEmpty()) return emptyList()
+
         val sorted = levels.sortedBy { it.first }
         val merged = mutableListOf<Pair<Double, String>>()
-        var clusterPrices = mutableListOf(sorted[0].first)
-        var clusterTags   = mutableSetOf(sorted[0].second)
+        var clusterPrices = mutableListOf(sorted.first().first)
+        var clusterTags = mutableSetOf(sorted.first().second)
 
         for (i in 1 until sorted.size) {
             val (price, tag) = sorted[i]
             val clusterAvg = clusterPrices.average()
-            val tol = clusterAvg * (thresholdPct / 100.0)
+            val candidateTags = clusterTags + tag
+            val effectiveThresholdPct =
+                if (candidateTags.any { it == "D1" || it == "W1" }) thresholdPct * 2.5 else thresholdPct
+            val tol = clusterAvg * (effectiveThresholdPct / 100.0)
+
             if (kotlin.math.abs(price - clusterAvg) <= tol) {
                 clusterPrices.add(price)
                 clusterTags.add(tag)
             } else {
                 merged.add(clusterPrices.average() to clusterTags.sorted().joinToString("+"))
                 clusterPrices = mutableListOf(price)
-                clusterTags   = mutableSetOf(tag)
+                clusterTags = mutableSetOf(tag)
             }
         }
-        if (clusterPrices.isNotEmpty()) {
-            merged.add(clusterPrices.average() to clusterTags.sorted().joinToString("+"))
-        }
+
+        merged.add(clusterPrices.average() to clusterTags.sorted().joinToString("+"))
         return merged
     }
 }

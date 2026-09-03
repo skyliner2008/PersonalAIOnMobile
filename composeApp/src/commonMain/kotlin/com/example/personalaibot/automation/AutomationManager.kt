@@ -247,12 +247,14 @@ class AutomationManager(private val database: JarvisDatabase) {
 
     fun saveStrategyTuning(
         symbol: String, interval: String, kind: String,
-        slMult: Double, tpMult: Double, score: Double?, grade: String?, source: String
+        slMult: Double, tpMult: Double, score: Double?, grade: String?, source: String,
+        riskGateEligible: Boolean = false
     ): Boolean {
         return try {
             database.jarvisDatabaseQueries.upsertStrategyTuning(
                 symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
                 sl_mult = slMult, tp_mult = tpMult, score = score, grade = grade, source = source,
+                risk_gate_eligible = if (riskGateEligible) 1L else 0L,
                 updated_at = Clock.System.now().toEpochMilliseconds()
             )
             logDebug("AutomationManager", "Tuning saved: $symbol/$interval/$kind sl=$slMult tp=$tpMult ($grade, $source)")
@@ -279,13 +281,14 @@ class AutomationManager(private val database: JarvisDatabase) {
     fun saveEntryTuning(
         symbol: String, interval: String, kind: String, paramsJson: String,
         score: Double?, expectancyR: Double?, profitFactor: Double?, trades: Int?,
-        grade: String?, source: String
+        grade: String?, source: String, riskGateEligible: Boolean = false
     ): Boolean {
         return try {
             database.jarvisDatabaseQueries.upsertEntryTuning(
                 symbol = symbol.uppercase(), interval = interval.lowercase(), kind = kind,
                 params_json = paramsJson, score = score, expectancy_r = expectancyR,
                 profit_factor = profitFactor, trades = trades?.toLong(), grade = grade, source = source,
+                risk_gate_eligible = if (riskGateEligible) 1L else 0L,
                 updated_at = Clock.System.now().toEpochMilliseconds()
             )
             logDebug("AutomationManager", "EntryTuning saved: $symbol/$interval/$kind $paramsJson ($grade, $source)")
@@ -313,7 +316,7 @@ class AutomationManager(private val database: JarvisDatabase) {
     /** โหลด entry params ที่จูนแล้วทั้งหมดของ symbol/tf → Map<kind, EntryParams> (ข้าม grade=overfit และ parse ไม่ได้) */
     fun getTunedEntryParams(symbol: String, interval: String): Map<String, com.example.personalaibot.automation.backtest.EntryParams> =
         getEntryTunings(symbol, interval)
-            .filter { it.grade != "overfit" }
+            .filter { it.risk_gate_eligible != 0L && it.source == "evolve" && it.grade != "overfit" }
             .mapNotNull { t ->
                 com.example.personalaibot.automation.backtest.EntryParams.deserialize(t.kind, t.params_json)
                     ?.let { t.kind to it }

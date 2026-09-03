@@ -20,6 +20,8 @@ data class TradingToolPolicy(
     val mt5Mode: Boolean,
     val smcMode: Boolean,
     val deepAnalysis: Boolean,
+    val signalAlertMode: Boolean,
+    val analysisProfile: TradingIntentUtility.TradingAnalysisProfile = TradingIntentUtility.TradingAnalysisProfile.AI,
     val allowedTradingToolNames: Set<String>?,
     val policyLabel: String?
 ) {
@@ -46,6 +48,15 @@ data class TradingToolPolicy(
         "Please use trading_mt5_analyze for broker-specific analysis."
 
     /** System prompt addon สำหรับ strict MT5 mode (external provider path) */
+    fun signalAlertSystemPromptAddon(): String = if (signalAlertMode) buildString {
+        appendLine("\n[IMPORTANT: TRADINGVIEW SIGNAL ALERT MODE ACTIVE]")
+        appendLine("- User is asking to create/modify a trading signal alert, not to query an MT5 broker.")
+        appendLine("- Use automation_manage_alerts with tool_name='trading_signal_alert'.")
+        appendLine("- Use TradingView-derived market data for the signal alert path.")
+        appendLine("- DO NOT call trading_mt5_symbol_search, trading_mt5_candles, or other MT5 broker discovery tools.")
+        appendLine("- If the user says all timeframes, create alerts for the configured canonical timeframes rather than asking for MT5 symbol names.")
+    } else ""
+
     fun strictMt5SystemPromptAddon(): String = if (mt5Mode && !deepAnalysis) buildString {
         appendLine("\n[IMPORTANT: STRICT MT5 MODE ACTIVE]")
         appendLine("- User explicitly asked for MT5/Broker data.")
@@ -60,18 +71,26 @@ data class TradingToolPolicy(
             val smc     = TradingIntentUtility.isSmcPrompt(text, intentAddon)
             val mt5     = TradingIntentUtility.isMt5Prompt(text, intentAddon)
             val deep    = TradingIntentUtility.isDeepAnalysisPrompt(text, intentAddon)
+            val signalAlert = TradingIntentUtility.isSignalAlertPrompt(text, intentAddon)
+            val profile = TradingIntentUtility.tradingAnalysisProfile(text, intentAddon)
 
             val isTradingContext = trading || smc || mt5 || deep
             val allowed = if (isTradingContext) {
-                // ส่งทั้ง TV และ MT5 ให้ model ตัดสินใจเอง
-                // (กันกรณี keyword filter พลาดแล้ว tool หาย)
-                ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
+                when {
+                    signalAlert -> ToolRegistry.tvOnlyTradingFunctionNames
+                    mt5 -> ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
+                    (profile == TradingIntentUtility.TradingAnalysisProfile.USER_QUERY || profile == TradingIntentUtility.TradingAnalysisProfile.COMPOSITE) -> ToolRegistry.tvOnlyTradingFunctionNames
+                    else -> ToolRegistry.tvOnlyTradingFunctionNames + ToolRegistry.mt5OnlyTradingFunctionNames
+                }
             } else null
 
             val label = when {
+                signalAlert -> "TradingView Signal Alert mode"
                 deep -> "Deep Confluence Suite mode"
                 mt5  -> "MT5-only broker mode"
-                isTradingContext -> "TV+MT5 trading mode"
+                profile == TradingIntentUtility.TradingAnalysisProfile.COMPOSITE -> "TradingView Composite Analysis + User Query mode"
+                profile == TradingIntentUtility.TradingAnalysisProfile.USER_QUERY -> "TradingView User Query mode"
+                isTradingContext -> "TradingView AI Analysis mode"
                 else -> null
             }
 
@@ -80,6 +99,8 @@ data class TradingToolPolicy(
                 mt5Mode = mt5,
                 smcMode = smc,
                 deepAnalysis = deep,
+                signalAlertMode = signalAlert,
+                analysisProfile = profile,
                 allowedTradingToolNames = allowed,
                 policyLabel = label
             )

@@ -6965,3 +6965,15 @@
 ── SUPPORT ────────────────────────
 [2026-06-02 14:00:29]: [SimpleScalping] Cycle #25092 completed: 0 executed | 1 skipped (1 blocked | 0 no-signal)
 [2026-06-02 14:00:29]:    XAUUSD | SKIP | [SimpleScalping] BUY: anchor wall lacks core TF (needs M15/M30/H1/H4): 4531.99 2star M1+M5 | SELL: missing M1/M5 confirmation at 4537.07 4star M1+M5+M30+H1+H4 (M1: SELL confirm touch=true body=false reclaim=true breakLow=false | M5: SELL confirm touch=true body=false reclaim=true breakLow=false | LTF combined: reaction=false anyBreak=false) (Gate: LTF_CONFIRMATION_MISSING: BUY: anchor wall lacks core TF (needs M15/M30/H1/H4): 4531.99 2star M1+M5 | SELL: missing M1/M5 confirmation at 4537.07 4star M1+M5+M30+H1+H4 (M1: SELL confirm touch=true body=false reclaim=true breakLow=false | M5: SELL confirm touch=true body=false reclaim=true breakLow=false | LTF combined: reaction=false anyBreak=false))
+2026-08-25 | P7.1 | DEMO Baseline verification: DemoTradingEngine is local-only, environment fixed to DEMO, uses broker-aware spread/cost/margin/risk logic, marks positions locally and triggers SL/TP locally without MT5. Existing DemoTradingEngineTest covers independent account, local execution, SL, risk sizing, risk enforcement, floating P/L and kill switch. :composeApp:testDebugUnitTest + :composeApp:compileDebugKotlinAndroid BUILD SUCCESSFUL.
+[2026-08-25] Signal Alert Data-Source Hardening: TradingSignalMarketDataRouter enforces DEMO/PAPER=TradingView, LIVE+MT5 connected=MT5, LIVE+offline/unavailable=TradingView; signal_data_source provenance added; premature MT5 symbol search guarded; Live tool-response logs include callId. compileDebugKotlinAndroid PASS. Full unit suite: 86 tests, 3 pre-existing Android Log-not-mocked failures in ComposeAppCommonTest.
+2026-08-25 | Alert System V2 | Multi-timeframe Signal Alert hardening: automation_manage_alerts ????? timeframe (1m/5m/15m/30m/1h/4h/1D/all), all ????? alert ?????? TF, symbol ??? @TF, deduplicate alert ???? ??? Persona ???????????? ??? timeframe ???? timeframe=all. compileDebugKotlinAndroid PASS.
+
+2026-08-25 �� Signal Alert logging hardening
+- AutomationService: ????? triggered + action (FIRE/SUPPRESS_ALREADY_TRIGGERED/WAIT/RESET)
+- Signal source provenance: explicit reason DEMO_FORCES_TV / MT5_LIVE_CONNECTED / MT5_LIVE_OFFLINE / MT5_CANDLE_UNAVAILABLE
+- SmcApiService: ?? normal cache log; ?????????????????????????? (TV new candles)
+- ?????????? strategy/dedup semantics
+- SignalAlertProvider: ?? NEW signal log ????? closed bar ????; log ????? signal_bar_time ??????? ????? source/reason
+
+2026-08-25 | Alert System V2 | Full log review + Live voice concurrency: root logcat reviewed; signal FIRE/RESET/dedup/routing/risk behavior OK; Live voice serialized with Mutex while detection/AI/notifications remain concurrent; Android logger hardened for JVM tests; compileDebugKotlinAndroid PASS; testDebugUnitTest 86/86 PASS.\n

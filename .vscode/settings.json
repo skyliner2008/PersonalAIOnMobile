@@ -1,4 +1,5 @@
 {
+    "java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
     "java.jdt.ls.java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
     "java.import.gradle.java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
     "java.import.gradle.wrapper.enabled": true,
@@ -10,5 +11,9 @@
             "path": "C:\\Program Files\\Android\\Android Studio\\jbr",
             "default": true
         }
-    ]
+    ],
+    "terminal.integrated.env.windows": {
+        "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr",
+        "PATH": "C:\\Program Files\\Android\\Android Studio\\jbr\\bin;${env:PATH}"
+    }
 }

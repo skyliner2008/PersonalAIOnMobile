@@ -79,7 +79,14 @@ data class LiveSystemInstruction(
 @Serializable
 data class LiveGenerationConfig(
     @SerialName("response_modalities") val responseModalities: List<String>? = null,
-    @SerialName("speech_config") val speechConfig: LiveSpeechConfig? = null
+    @SerialName("speech_config") val speechConfig: LiveSpeechConfig? = null,
+    @SerialName("thinking_config") val thinkingConfig: LiveThinkingConfig? = null
+)
+
+@Serializable
+data class LiveThinkingConfig(
+    @SerialName("thinking_level") val thinkingLevel: String? = null,
+    @SerialName("include_thoughts") val includeThoughts: Boolean? = null
 )
 
 @Serializable
@@ -331,7 +338,8 @@ class LiveGeminiService(
     private var liveApiKeys: List<String> = listOf(apiKey).filter { it.isNotBlank() }
     private var liveModelChain: List<String> = listOf(
         liveModelName,
-        "gemini-2.5-flash-native-audio-preview-12-2025"
+        "gemini-2.5-flash-native-audio-preview-12-2025",
+        "gemini-2.0-flash-exp"
     ).map { it.removePrefix("models/") }.distinct()
     private var liveKeyIndex: Int = 0
     private var liveModelIndex: Int = 0
@@ -352,8 +360,13 @@ class LiveGeminiService(
     // คลังความจำระยะสั้น: เก็บประโยคสุดท้ายที่ผู้ใช้พูด เพื่อใช้เตือนสมาธิ AI ตอนเปิดเครื่องมือ
     var lastUserText: String = ""
 
-    /** ข้อความที่จะส่งให้ model พูดทันทีหลัง session READY (เช่นทักยืนยันเสียงใหม่หลังเปลี่ยนเสียง) — ใช้ครั้งเดียวแล้วล้าง */
+    /** ข้อความที่จะส่งให้ model พูดทันทีหลัง session READY (เช่นทักยืนยันเสียงใหม่หลังเปลี่ยนเสียง). */
     var pendingGreetingOnReady: String? = null
+
+    // Monotonically increasing WebSocket lifecycle id. A READY coroutine must never send
+    // through a newer socket after the socket that produced READY has been replaced.
+    private var liveSessionGeneration: Long = 0L
+    private var greetingSentForReady: Boolean = false
 
     // buffer 128 chunks — แยกการอ่าน WebSocket ออกจาก AudioTrack.write() ที่ blocking
     // (เดิมไม่มี buffer → emit suspend รอ playback → เฟรมถัดไปค้างทั้ง turn/transcript/tool)
@@ -487,6 +500,35 @@ class LiveGeminiService(
         return false
     }
 
+    /**
+     * Ktor's WebSocket Frame.Text UTF-8 encoder rejects unpaired UTF-16 surrogates.
+     * Conversation/memory text can contain such code units after external text ingestion,
+     * so normalize them at the WebSocket boundary instead of killing the Live session.
+     */
+    private fun sanitizeForWebSocketText(value: String): String {
+        if (value.isEmpty()) return value
+        val out = StringBuilder(value.length)
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            when {
+                c.isHighSurrogate() && i + 1 < value.length && value[i + 1].isLowSurrogate() -> {
+                    out.append(c).append(value[i + 1])
+                    i += 2
+                }
+                c.isHighSurrogate() || c.isLowSurrogate() -> {
+                    out.append('\uFFFD')
+                    i++
+                }
+                else -> {
+                    out.append(c)
+                    i++
+                }
+            }
+        }
+        return out.toString()
+    }
+
     suspend fun connectAndListen(tools: GeminiTool? = null, historyContext: String = "", coreContext: String = "") {
         if (apiKey.isBlank()) {
             logError("LiveGemini", "API key is blank — aborting connection")
@@ -506,6 +548,8 @@ class LiveGeminiService(
             isSetupComplete = false
             sessionWasReady = false
             goAwayReceived = false
+            greetingSentForReady = false
+            val sessionGeneration = ++liveSessionGeneration
 
             if (attempt == 0) {
                 _connectionState.value = ConnectionState.Connecting
@@ -574,7 +618,7 @@ class LiveGeminiService(
                         )
                     )
 
-                    val setupJson = json.encodeToString(setup)
+                    val setupJson = sanitizeForWebSocketText(json.encodeToString(setup))
                     send(Frame.Text(setupJson))
 
                     for (frame in incoming) {
@@ -722,10 +766,29 @@ class LiveGeminiService(
                     logDebug("LiveGemini", "🧹 Dropped $preReadyCount pre-READY audio chunks (dropped oldest=$droppedPreReadyChunks) — starting with fresh realtime PCM")
                 }
                 droppedPreReadyChunks = 0
-                // Do not inject an automatic greeting into a fresh/reconnected audio stream.
-                // It can race with the first microphone turn and makes protocol failures harder to isolate.
-                // The user can speak immediately; normal model response will confirm the session.
-                pendingGreetingOnReady = null
+                // READY is the single trigger for the queued greeting. Consume it only once,
+                // and bind the coroutine to the exact WebSocket lifecycle that produced READY.
+                if (!greetingSentForReady) {
+                    val readyGeneration = liveSessionGeneration
+                    pendingGreetingOnReady?.takeIf { it.isNotBlank() }?.let { greeting ->
+                        scope.launch {
+                            val waitMs = realtimeInputReadyAtMs - System.currentTimeMillis()
+                            if (waitMs > 0) delay(waitMs)
+
+                            val sameSession = liveSessionGeneration == readyGeneration
+                            val activeSocket = webSocketSession?.isActive == true
+                            if (!isSetupComplete || !sessionWasReady || !sameSession || !activeSocket) {
+                                logDebug("LiveGemini", "⚠️ READY greeting cancelled — session lifecycle changed")
+                                return@launch
+                            }
+
+                            greetingSentForReady = true
+                            pendingGreetingOnReady = null
+                            logDebug("LiveGemini", "🗣️ LIVE_READY — sending one-time session greeting")
+                            sendRealtimeText(greeting)
+                        }
+                    }
+                }
                 return
             }
 
@@ -990,7 +1053,7 @@ class LiveGeminiService(
             )
             json.encodeToString(msg)
         }
-        logDebug("LiveGemini", "✅ Tool response sent: $toolName → $result")
+        logDebug("LiveGemini", "✅ Tool response sent: $toolName callId=$callId → $result")
     }
 
     suspend fun disconnect() {

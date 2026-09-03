@@ -274,8 +274,11 @@ updateAlertJobInterval:
 UPDATE AlertJob SET interval_minutes = ? WHERE id = ?;
 
 updateAlertJobCheckResult:
-UPDATE AlertJob SET last_value = ?, last_run_at = ? WHERE id = ?;
-
+UPDATE AlertJob SET last_value = ?, last_run_at = ? WHERE id = ?;
+
+
+
+
 -- แก้ไขเงื่อนไข (เช่น ค่าราคาเป้าหมาย) และรีเซ็ตสถานะ trigger ให้เริ่มเฝ้าดูใหม่
 updateAlertJobCondition:
 UPDATE AlertJob SET condition_json = ?, is_triggered = 0, last_value = NULL WHERE id = ?;
@@ -602,14 +605,15 @@ CREATE TABLE IF NOT EXISTS StrategyTuning (
     tp_mult REAL NOT NULL,
     score REAL,                      -- overfitting % หรือ evolved gain
     grade TEXT,                      -- healthy | moderate | overfit
-    source TEXT NOT NULL DEFAULT 'optimize',  -- optimize | evolve
+    source TEXT NOT NULL DEFAULT 'evolve',  -- evolve only: production promotion owner
+    risk_gate_eligible INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     UNIQUE(symbol, interval, kind)
 );
 
 upsertStrategyTuning:
-INSERT OR REPLACE INTO StrategyTuning(symbol, interval, kind, sl_mult, tp_mult, score, grade, source, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO StrategyTuning(symbol, interval, kind, sl_mult, tp_mult, score, grade, source, risk_gate_eligible, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getStrategyTuning:
 SELECT * FROM StrategyTuning WHERE symbol = ? AND interval = ? AND kind = ?;
@@ -711,14 +715,15 @@ CREATE TABLE IF NOT EXISTS EntryTuning (
     profit_factor REAL,
     trades INTEGER,
     grade TEXT,                      -- healthy | moderate | overfit (null = ยังไม่ validate)
-    source TEXT NOT NULL DEFAULT 'entry-optimize',
+    source TEXT NOT NULL DEFAULT 'evolve',
+    risk_gate_eligible INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     UNIQUE(symbol, interval, kind)
 );
 
 upsertEntryTuning:
-INSERT OR REPLACE INTO EntryTuning(symbol, interval, kind, params_json, score, expectancy_r, profit_factor, trades, grade, source, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO EntryTuning(symbol, interval, kind, params_json, score, expectancy_r, profit_factor, trades, grade, source, risk_gate_eligible, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getEntryTuning:
 SELECT * FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;
@@ -731,3 +736,82 @@ SELECT * FROM EntryTuning ORDER BY updated_at DESC;
 
 deleteEntryTuning:
 DELETE FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- P6.2b/c: Mobile Demo Broker
+CREATE TABLE IF NOT EXISTS DemoAccount (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    initial_balance REAL NOT NULL,
+    balance REAL NOT NULL,
+    leverage REAL NOT NULL DEFAULT 100.0,
+    max_daily_loss_pct REAL NOT NULL DEFAULT 5.0,
+    max_drawdown_pct REAL NOT NULL DEFAULT 10.0,
+    spread_mode TEXT NOT NULL DEFAULT 'FIXED',
+    spread_price REAL NOT NULL DEFAULT 0.20,
+    commission_per_lot_round_turn REAL NOT NULL DEFAULT 0.0,
+    commission_pct_per_side REAL NOT NULL DEFAULT 0.0,
+    rebate_per_lot_round_turn REAL NOT NULL DEFAULT 0.0,
+    swap_long_per_lot_per_day REAL NOT NULL DEFAULT 0.0,
+    swap_short_per_lot_per_day REAL NOT NULL DEFAULT 0.0,
+    contract_size REAL NOT NULL DEFAULT 1.0,
+    tick_size REAL NOT NULL DEFAULT 0.01,
+    tick_value_per_lot REAL NOT NULL DEFAULT 0.01,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoPosition (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES DemoAccount(id),
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    volume REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    current_price REAL NOT NULL,
+    stop_loss REAL,
+    take_profit REAL,
+    opened_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoDeal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL REFERENCES DemoAccount(id),
+    position_id TEXT,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    volume REAL NOT NULL,
+    price REAL NOT NULL,
+    gross_pnl REAL NOT NULL DEFAULT 0.0,
+    spread_cost REAL NOT NULL DEFAULT 0.0,
+    commission REAL NOT NULL DEFAULT 0.0,
+    rebate REAL NOT NULL DEFAULT 0.0,
+    swap REAL NOT NULL DEFAULT 0.0,
+    net_pnl REAL NOT NULL DEFAULT 0.0,
+    timestamp INTEGER NOT NULL
+);
+
+selectDemoAccount:
+SELECT * FROM DemoAccount WHERE id = ?;
+selectDemoAccounts:
+SELECT * FROM DemoAccount ORDER BY updated_at DESC;
+selectDemoBalance:
+SELECT balance FROM DemoAccount WHERE id = ?;
+upsertDemoAccount:
+INSERT OR REPLACE INTO DemoAccount (id,name,currency,initial_balance,balance,leverage,max_daily_loss_pct,max_drawdown_pct,spread_mode,spread_price,commission_per_lot_round_turn,commission_pct_per_side,rebate_per_lot_round_turn,swap_long_per_lot_per_day,swap_short_per_lot_per_day,contract_size,tick_size,tick_value_per_lot,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+updateDemoBalance:
+UPDATE DemoAccount SET balance = ?, updated_at = ? WHERE id = ?;
+selectDemoPositions:
+SELECT * FROM DemoPosition WHERE account_id = ? ORDER BY opened_at ASC;
+upsertDemoPosition:
+INSERT OR REPLACE INTO DemoPosition (id,account_id,symbol,side,volume,entry_price,current_price,stop_loss,take_profit,opened_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?);
+deleteDemoPosition:
+DELETE FROM DemoPosition WHERE id = ?;
+insertDemoDeal:
+INSERT INTO DemoDeal (account_id,position_id,symbol,side,volume,price,gross_pnl,spread_cost,commission,rebate,swap,net_pnl,timestamp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);
+selectDemoDeals:
+SELECT * FROM DemoDeal WHERE account_id = ? ORDER BY timestamp ASC;
+deleteDemoPositions:
+DELETE FROM DemoPosition WHERE account_id = ?;
+deleteDemoDeals:
+DELETE FROM DemoDeal WHERE account_id = ?;

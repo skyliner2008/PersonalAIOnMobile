@@ -195,15 +195,7 @@ Task Type: ANALYSIS — วิเคราะห์เชิงลึก
 - แสดงการคิด ไม่ใช่แค่ผลลัพธ์
 - เปรียบเทียบ tradeoffs อย่างสมดุล
 
-[Trading Analysis Protocol (TV-first)]:
-เมื่อวิเคราะห์ symbol ใดๆ ให้ใช้ข้อมูล TradingView เป็นหลัก:
-1. เรียก trading_deep_analysis_suite (หรือ trading_technical_analysis / trading_smc_analysis) พร้อมกันหลาย TF: 4h, 1h, 15m ในรอบเดียวกัน
-2. สรุปผลเป็นตารางเปรียบเทียบ: Trend/Bias | Momentum | Score ของทุก TF
-3. หา Confluence ข้าม TF — ถ้า Bias ตรงกันทุก TF = สัญญาณแข็ง
-4. ระบุแนวรับ-แนวต้าน / zone สำคัญ จากข้อมูลจริงที่ดึงมา
-5. แนะนำ Entry zone, SL, TP ที่ชัดเจน พร้อม Risk:Reward ratio
-6. สรุป Risk Assessment: ปลอดภัย/ระวัง/อันตราย
-หมายเหตุ: ใช้ trading_mt5_analyze เฉพาะเมื่อผู้ใช้ระบุชัดว่าต้องการข้อมูลจาก MT5/broker เท่านั้น"""
+[Trading Analysis Protocol (TV-first / PROFILE-LOCK)]:\nเมื่อวิเคราะห์ symbol ใดๆ ให้ใช้ข้อมูล TradingView เป็นหลัก และปฏิบัติตาม AI Profile ที่กำหนดไว้ ห้ามขยาย scope เอง:\n1. สำหรับคำสั่งวิเคราะห์ทั่วไป/ภาพรวม/5 มิติ ให้ใช้ trading_deep_analysis_suite เป็นเครื่องมือหลักเท่านั้น ใน 3 TF ตาม canonical profile: M15, H1, H4\n2. ห้ามเรียก trading_technical_analysis หรือ trading_smc_analysis เพิ่มเติมสำหรับ AI Profile เดียวกัน เพราะ Deep Analysis เป็น consolidated analysis path แล้ว\n3. ห้ามเรียก D1/1D สำหรับ GOLD overview เว้นแต่ผู้ใช้ระบุ D1 โดยตรง\n4. รอผลครบ M15 + H1 + H4 แล้วสรุป Confluence ข้าม TF ในคำตอบเดียว\n5. ระบุแนวรับ-แนวต้าน / zone สำคัญจากข้อมูลจริงที่ดึงมา และแสดง Entry/SL/TP เฉพาะเมื่อข้อมูลเพียงพอ\n6. สรุป Risk Assessment และ Data Quality\n7. ถ้าผู้ใช้ถามค่าเฉพาะ เช่น RSI7 M15, EMA14 H1, S/R H1 ให้ใช้ USER_QUERY profile แทน full analysis\n8. ถ้าผู้ใช้ขอทั้งวิเคราะห์และค่าที่ระบุ ให้ทำ COMPOSITE: AI Profile + explicit User Query\nหมายเหตุ: ใช้ trading_mt5_analyze เฉพาะเมื่อผู้ใช้ระบุชัดว่าต้องการข้อมูลจาก MT5/broker เท่านั้น"""
 
             TaskType.CREATIVE -> """
 

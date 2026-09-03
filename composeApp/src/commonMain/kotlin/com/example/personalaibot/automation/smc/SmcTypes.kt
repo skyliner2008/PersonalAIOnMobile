@@ -77,10 +77,8 @@ data class PremiumDiscount(
 
 data class SmcSnapshot(
     val activeFvgs: List<Fvg>,
-    /** เรียงใหม่สุดก่อน (index 0 = ล่าสุด) — ตรงกับ TS ที่ใช้ unshift */
     val bullObs: List<SmcOrderBlock>,
     val bearObs: List<SmcOrderBlock>,
-    /** เรียงตาม confluenceStars มากสุดก่อน */
     val liquidityZones: List<LiquidityZone>,
     val structure: MarketStructure,
     val attackForces: List<AttackForce>,
@@ -89,7 +87,9 @@ data class SmcSnapshot(
     val swingLows: List<Double>,
     val symbol: String,
     val timeframe: String,
-    val lastPrice: Double
+    val lastPrice: Double,
+    val walls: List<SmcWall> = emptyList(),
+    val confluence: List<SmcConfluence> = emptyList()
 )
 
 internal fun emptyStructure(): MarketStructure = MarketStructure(

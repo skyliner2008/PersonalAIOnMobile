@@ -2,16 +2,26 @@ package com.example.personalaibot.tools.system
 
 import com.example.personalaibot.diagnostic.DiagnosticManager
 import com.example.personalaibot.tools.FunctionDeclaration
+import com.example.personalaibot.tools.FunctionParameters
+import com.example.personalaibot.tools.ParameterProperty
 import com.example.personalaibot.tools.SideEffectDelegate
 import com.example.personalaibot.tools.SkillDescriptor
 import com.example.personalaibot.tools.ToolRegistry
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import personalaibot.composeapp.generated.resources.Res
 
@@ -19,7 +29,7 @@ import personalaibot.composeapp.generated.resources.Res
  * SystemToolExecutor — จัดการคำสั่งตรวจสอบสุขภาพและรันการทดสอบระบบอัตโนมัติ
  */
 class SystemToolExecutor(
-    private val diagnosticManager: DiagnosticManager,
+    private val diagnosticManager: DiagnosticManager? = null,
     private val delegate: SideEffectDelegate?
 ) {
 
@@ -50,23 +60,40 @@ class SystemToolExecutor(
         val description = args["description"]?.trim() ?: return "Error: Missing 'description' parameter."
         val triggerKeywords = args["triggerKeywords"] ?: ""
         val systemPromptAddon = args["systemPromptAddon"] ?: return "Error: Missing 'systemPromptAddon' parameter."
+        val rawParams = args["parameters"] ?: args["parametersJson"]
+        val executionType = args["executionType"]?.trim()?.lowercase() ?: "prompt"
 
-        // Sanitize ชื่อ tool — ต้องเป็น identifier ที่ปลอดภัยสำหรับ function calling
-        val name = rawName.lowercase()
-            .replace(Regex("[^a-z0-9_]+"), "_")
-            .trim('_')
-        if (name.isBlank()) return "Error: ชื่อ tool '$rawName' ใช้ไม่ได้ — ใช้ตัวอักษร a-z, 0-9, _ เท่านั้น"
-        val finalName = if (name.startsWith("custom_")) name else "custom_$name"
+        // Sanitize ชื่อ tool — ยืดหยุ่น ไม่บังคับกรอบ custom_ ถ้าชื่อไม่ชนกับ builtin tool
+        val finalName = sanitizeToolName(rawName)
+        if (finalName.isBlank()) return "Error: ชื่อ tool '$rawName' ใช้ไม่ได้ — ใช้ตัวอักษร a-z, 0-9, _ เท่านั้น"
 
         val keywords = triggerKeywords.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val parsedParams = parseParameters(rawParams)
 
-        // สร้าง JSON ด้วย kotlinx.serialization — ปลอดภัยจาก quote/newline injection
+        // สร้าง JSON ด้วย kotlinx.serialization บันทึกพารามิเตอร์และประเภทการทำงานอย่างสมบูรณ์
         val jsonContent = buildJsonObject {
             put("name", finalName)
             put("description", description)
             putJsonArray("triggerKeywords") { keywords.forEach { add(it) } }
             put("author", "Jarvis Agent")
+            put("executionType", executionType)
             put("systemPromptAddon", systemPromptAddon)
+            parsedParams?.let { fp ->
+                putJsonObject("parameters") {
+                    put("type", "OBJECT")
+                    putJsonObject("properties") {
+                        fp.properties.forEach { (pName, pProp) ->
+                            putJsonObject(pName) {
+                                put("type", pProp.type)
+                                put("description", pProp.description)
+                            }
+                        }
+                    }
+                    if (fp.required.isNotEmpty()) {
+                        putJsonArray("required") { fp.required.forEach { add(it) } }
+                    }
+                }
+            }
         }.toString()
 
         val filename = "$finalName.json"
@@ -74,30 +101,88 @@ class SystemToolExecutor(
         // 1) บันทึกลงไฟล์ผ่าน delegate (persist ข้าม session)
         delegate?.onSaveAgentTool(filename, jsonContent)
 
-        // 2) ลงทะเบียนเข้า ToolRegistry ทันที — ใช้งานได้เลยโดยไม่ต้อง restart
+        // 2) ลงทะเบียนเข้า ToolRegistry ทันทีพร้อม Parameter Schema — ใช้งาน function calling ได้เต็มประสิทธิภาพ
         ToolRegistry.registerCustomTool(FunctionDeclaration(
             name = finalName,
             description = "[CUSTOM] $description",
-            parameters = null
+            parameters = parsedParams
         ))
         ToolRegistry.registerSkill(SkillDescriptor(
             name = finalName,
             description = description,
             systemPromptAddon = systemPromptAddon,
             triggerKeywords = keywords,
-            author = "Jarvis Agent"
+            author = "Jarvis Agent",
+            parameters = parsedParams,
+            executionType = executionType
         ))
 
-        return "✅ สร้างเครื่องมือใหม่ '$finalName' สำเร็จและลงทะเบียนเข้าระบบแล้ว " +
-               "— ใช้งานได้ทันทีในแชทนี้ และจะถูกโหลดอัตโนมัติทุกครั้งที่เปิดแอป " +
+        val paramSummary = if (parsedParams != null && parsedParams.properties.isNotEmpty()) {
+            " (พารามิเตอร์: ${parsedParams.properties.keys.joinToString(", ")})"
+        } else ""
+
+        return "✅ สร้างเครื่องมือใหม่ '$finalName' [$executionType]$paramSummary สำเร็จและลงทะเบียนเข้าระบบแล้ว " +
+               "— รองรับการส่ง Arguments และประมวลผลทันทีในแชทนี้ " +
                "(ไฟล์: custom_agent_tools/$filename)"
+    }
+
+    private fun parseParameters(paramsRaw: String?): FunctionParameters? {
+        if (paramsRaw.isNullOrBlank()) return null
+        val trimmed = paramsRaw.trim()
+        return try {
+            if (trimmed.startsWith("{")) {
+                val element = Json.parseToJsonElement(trimmed)
+                val obj = if (element is JsonObject && element.containsKey("properties")) {
+                    element["properties"]?.jsonObject ?: element
+                } else if (element is JsonObject) {
+                    element
+                } else return null
+
+                val props = mutableMapOf<String, ParameterProperty>()
+                val required = mutableListOf<String>()
+
+                obj.forEach { (key, valEl) ->
+                    when (valEl) {
+                        is JsonObject -> {
+                            val type = valEl["type"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "STRING"
+                            val desc = valEl["description"]?.jsonPrimitive?.contentOrNull ?: key
+                            val isReq = valEl["required"]?.jsonPrimitive?.booleanOrNull ?: false
+                            if (isReq) required.add(key)
+                            props[key] = ParameterProperty(type, desc)
+                        }
+                        is JsonPrimitive -> {
+                            props[key] = ParameterProperty("STRING", valEl.content)
+                        }
+                        else -> {
+                            props[key] = ParameterProperty("STRING", key)
+                        }
+                    }
+                }
+                FunctionParameters(type = "OBJECT", properties = props, required = required)
+            } else {
+                val keys = trimmed.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                if (keys.isEmpty()) return null
+                val props = keys.associateWith { key ->
+                    ParameterProperty("STRING", "พารามิเตอร์ $key")
+                }
+                FunctionParameters(type = "OBJECT", properties = props, required = emptyList<String>())
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun sanitizeToolName(rawName: String): String {
         val name = rawName.trim().lowercase()
             .replace(Regex("[^a-z0-9_]+"), "_")
             .trim('_')
-        return if (name.startsWith("custom_")) name else "custom_$name"
+        if (name.isBlank()) return "custom_tool"
+        // ยืดหยุ่น: ไม่บังคับ prefix custom_ เว้นแต่ชื่อจะไปซ้ำกับ builtin tool ที่มีอยู่เดิม
+        val builtinCollides = ToolRegistry.isTradingTool(name) ||
+                ToolRegistry.isFileTool(name) ||
+                ToolRegistry.isCameraTool(name) ||
+                ToolRegistry.isStrategyTool(name)
+        return if (builtinCollides && !name.startsWith("custom_")) "custom_$name" else name
     }
 
     private suspend fun listAgentTools(): String {
@@ -115,7 +200,12 @@ class SystemToolExecutor(
             if (!skill?.triggerKeywords.isNullOrEmpty()) {
                 sb.appendLine("  - keywords: ${skill!!.triggerKeywords.joinToString(", ")}")
             }
-            // อ่าน logic ข้างใน (systemPromptAddon) ให้ AI เห็นด้วย — ใช้ตอนอยากแก้ไข
+            if (skill?.parameters != null && skill.parameters.properties.isNotEmpty()) {
+                sb.appendLine("  - parameters: ${skill.parameters.properties.keys.joinToString(", ")}")
+            }
+            if (skill?.executionType != null && skill.executionType != "prompt") {
+                sb.appendLine("  - type: ${skill.executionType}")
+            }
             val fileContent = delegate?.onReadAgentTool("$name.json") ?: ""
             val addonMatch = Regex("\"systemPromptAddon\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(fileContent)
             if (addonMatch != null) {
@@ -153,7 +243,7 @@ class SystemToolExecutor(
     }
 
     private suspend fun runDiagnostics(): String {
-        val results = diagnosticManager.runFullDiagnostic()
+        val results = diagnosticManager?.runFullDiagnostic() ?: return "⚠️ DiagnosticManager ยังไม่ถูกติดตั้ง"
         val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
         
         val report = buildString {
@@ -186,7 +276,8 @@ class SystemToolExecutor(
     }
 
     private suspend fun checkConnectivity(): String {
-        val results = diagnosticManager.runFullDiagnostic().filter { it.category == "Network" }
+        val results = diagnosticManager?.runFullDiagnostic()?.filter { it.category == "Network" }
+            ?: return "⚠️ DiagnosticManager ยังไม่ถูกติดตั้ง"
         return results.joinToString("\n") { "${it.status}: ${it.message}" }
     }
 }

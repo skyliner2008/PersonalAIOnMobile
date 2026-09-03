@@ -226,10 +226,26 @@ object ToolExecutor {
 
     private fun executeDateTime(): String {
         val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        val thaiDay = when (now.dayOfWeek) {
+            DayOfWeek.MONDAY -> "วันจันทร์"
+            DayOfWeek.TUESDAY -> "วันอังคาร"
+            DayOfWeek.WEDNESDAY -> "วันพุธ"
+            DayOfWeek.THURSDAY -> "วันพฤหัสบดี"
+            DayOfWeek.FRIDAY -> "วันศุกร์"
+            DayOfWeek.SATURDAY -> "วันเสาร์"
+            DayOfWeek.SUNDAY -> "วันอาทิตย์"
+        }
+        val thaiMonths = listOf(
+            "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+            "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+        )
+        val monthName = thaiMonths.getOrElse(now.monthNumber) { now.month.name }
+        val beYear = now.year + 543
+        val timeStr = "${now.hour.toString().padStart(2, '0')}:${now.minute.toString().padStart(2, '0')}:${now.second.toString().padStart(2, '0')}"
         return buildString {
-            append("วันที่: ${now.date}\n")
-            append("เวลา: ${now.hour.toString().padStart(2,'0')}:${now.minute.toString().padStart(2,'0')}\n")
-            append("วันใน week: ${now.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}")
+            append("📅 วันที่: $thaiDay ที่ ${now.dayOfMonth} $monthName ค.ศ. ${now.year} (พ.ศ. $beYear)\n")
+            append("⏰ เวลา: $timeStr น. (เขตเวลา: ${TimeZone.currentSystemDefault().id})\n")
+            append("ISO: ${now.date}T${now.hour.toString().padStart(2, '0')}:${now.minute.toString().padStart(2, '0')}")
         }
     }
 
@@ -284,13 +300,16 @@ object ToolExecutor {
     }
 
     private fun executeConvertUnits(args: Map<String, String>): String {
-        val valueStr = args["value"] ?: return "ต้องระบุค่าตัวเลข"
-        val fromUnit = args["from_unit"]?.lowercase() ?: return "ต้องระบุหน่วยต้นทาง"
-        val toUnit = args["to_unit"]?.lowercase() ?: return "ต้องระบุหน่วยปลายทาง"
+        val valueStr = args["value"] ?: args["amount"] ?: return "ต้องระบุค่าตัวเลข"
+        val fromUnit = args["from_unit"] ?: args["from"] ?: return "ต้องระบุหน่วยต้นทาง"
+        val toUnit = args["to_unit"] ?: args["to"] ?: return "ต้องระบุหน่วยปลายทาง"
 
         val value = valueStr.toDoubleOrNull() ?: return "ค่าตัวเลขไม่ถูกต้อง: $valueStr"
 
-        val result = convertUnit(value, fromUnit, toUnit)
+        val normFrom = normalizeUnitName(fromUnit)
+        val normTo = normalizeUnitName(toUnit)
+
+        val result = convertUnit(value, normFrom, normTo)
             ?: return "ไม่รองรับการแปลงจาก '$fromUnit' เป็น '$toUnit'"
 
         val formatted = if (result == result.toLong().toDouble()) result.toLong().toString()
@@ -299,9 +318,9 @@ object ToolExecutor {
     }
 
     private suspend fun executeSetReminder(args: Map<String, String>): String {
-        val title = args["title"] ?: return "ต้องระบุหัวข้อ"
-        val detail = args["detail"] ?: ""
-        val whenStr = args["when"] ?: "ตามที่สะดวก"
+        val title = args["title"] ?: args["task"] ?: args["reminder"] ?: args["name"] ?: return "ต้องระบุหัวข้อ"
+        val detail = args["detail"] ?: args["note"] ?: ""
+        val whenStr = args["when"] ?: args["time"] ?: args["due"] ?: "ตามที่สะดวก"
         val timestamp = Clock.System.now().toEpochMilliseconds()
         
         _sideEffectDelegate?.onSetReminder(title, detail, whenStr, timestamp)
@@ -364,15 +383,38 @@ object ToolExecutor {
         val skill = ToolRegistry.getSkill(call.name)
             ?: return "❌ ไม่พบเครื่องมือ '${call.name}' ในระบบ — หากผู้ใช้ต้องการเครื่องมือนี้ " +
                     "ให้สร้างใหม่ด้วย system_create_agent_tool"
+
+        // 1. แทนที่ค่าตัวแปรใน Template (รองรับทั้ง {{param}}, {param}, และชื่อตัวแปรเดี่ยวในสูตรคำนวณ)
+        var prompt = skill.systemPromptAddon
+        call.args.forEach { (k, v) ->
+            prompt = prompt.replace("{{$k}}", v)
+            prompt = prompt.replace("{$k}", v)
+            if (skill.executionType.equals("formula", ignoreCase = true)) {
+                prompt = prompt.replace(Regex("\\b${Regex.escape(k)}\\b"), v)
+            }
+        }
+
+        // 2. ถ้าเป็น formula ให้คำนวณสูตรคณิตศาสตร์ด้วย evalMath ทันที
+        if (skill.executionType.equals("formula", ignoreCase = true)) {
+            return try {
+                val evalResult = evalMath(prompt.trim())
+                val formatted = if (evalResult == evalResult.toLong().toDouble()) evalResult.toLong().toString()
+                                else "%.4f".format(evalResult).trimEnd('0').trimEnd('.')
+                "🔢 ผลลัพธ์การคำนวณจากสูตร '${skill.name}':\nสูตร: ${skill.systemPromptAddon}\nแทนค่า: $prompt\n= $formatted"
+            } catch (e: Exception) {
+                "⚠️ คำนวณสูตรไม่สำเร็จ: ${e.message}\n(นิพจน์ที่แทนค่า: $prompt)"
+            }
+        }
+
+        // 3. โหมด Prompt / Chain: ส่งต่อไปให้โมเดลทำตามขั้นตอนพร้อม arguments ครบถ้วน
         return buildString {
-            append("🛠️ เปิดใช้งานเครื่องมือ '${skill.name}' แล้ว\n")
-            append("ให้ทำตามคำสั่งของเครื่องมือนี้เพื่อประมวลผลคำขอของผู้ใช้ต่อทันที ")
-            append("(เรียกใช้ tool อื่นประกอบได้ตามความเหมาะสม แล้วสรุปผลให้ผู้ใช้):\n\n")
-            append(skill.systemPromptAddon)
-            append("\n\n[STRICT - สำคัญที่สุด]: ห้ามพูดตอบผู้ใช้ ห้ามบอกว่า \"รอสักครู่/กำลังประมวลผล\" ")
-            append("และห้ามจบ turn ก่อนที่จะเรียก tool ตามขั้นตอนข้างต้นครบแล้วเด็ดขาด — ")
-            append("ให้เรียก tool ทันทีใน turn นี้ (เรียกหลาย tool พร้อมกันได้) ")
-            append("เมื่อได้ข้อมูลครบแล้วเท่านั้นจึงค่อยพูดสรุปให้ผู้ใช้ฟัง")
+            append("🛠️ เปิดใช้งานเครื่องมือ '${skill.name}' สำเร็จ\n")
+            if (call.args.isNotEmpty()) {
+                append("📥 ค่า Arguments ที่ได้รับ: ${call.args}\n")
+            }
+            append("📋 ขั้นตอน/ตรรกะการทำงานของเครื่องมือนี้:\n")
+            append(prompt)
+            append("\n\n[STRICT - สำคัญที่สุด]: ให้ทำตามขั้นตอนข้างต้นทันที (สามารถเรียก tool อื่นประกอบได้ตามที่ระบุ) เมื่อได้ผลลัพธ์ครบถ้วนแล้วจึงสรุปผลให้ผู้ใช้")
         }
     }
 
@@ -583,6 +625,45 @@ object ToolExecutor {
         else -> null
     }
 
+    private fun normalizeUnitName(unit: String): String {
+        val u = unit.lowercase().trim()
+            .replace("°", "")
+            .replace(" ", "_")
+        return when (u) {
+            // Thai Length
+            "ม.", "เมตร", "meter", "meters" -> "m"
+            "กม.", "กม", "กิโลเมตร", "กิโล", "kilometer", "kilometers" -> "km"
+            "ซม.", "ซม", "เซนติเมตร", "เซนต์", "centimeter", "centimeters" -> "cm"
+            "มม.", "มิลลิเมตร", "millimeter", "millimeters" -> "mm"
+            "ไมล์", "mile", "miles" -> "mile"
+            "ฟุต", "foot", "feet", "ft" -> "foot"
+            "นิ้ว", "inch", "inches", "in" -> "inch"
+            "หลา", "yard", "yards" -> "yard"
+            "วา", "wa" -> "wa"
+            // Thai Mass
+            "กก.", "กก", "กิโลกรัม", "kilogram", "kilograms" -> "kg"
+            "กรัม", "ก.", "gram", "grams" -> "g"
+            "มก.", "มิลลิกรัม", "milligram", "milligrams" -> "mg"
+            "ปอนด์", "pound", "pounds", "lb", "lbs" -> "lb"
+            "ออนซ์", "ounce", "ounces", "oz" -> "oz"
+            "ตัน", "tonne", "ton", "tons" -> "ton"
+            // Thai Temp
+            "เซลเซียส", "องศาเซลเซียส", "องศา", "c", "celsius" -> "celsius"
+            "ฟาเรนไฮต์", "องศาฟาเรนไฮต์", "f", "fahrenheit" -> "fahrenheit"
+            "เคลวิน", "k", "kelvin" -> "kelvin"
+            // Thai Area
+            "ไร่", "rai" -> "rai"
+            "งาน", "ngan" -> "ngan"
+            "ตร.ว.", "ตร.วา", "ตารางวา", "sqwa" -> "sqwa"
+            "ตร.ม.", "ตารางเมตร", "sqm", "m2" -> "sqm"
+            "ตร.กม.", "ตารางกิโลเมตร", "sqkm", "km2" -> "km2"
+            // Thai Speed
+            "กม./ชม.", "กิโลเมตรต่อชั่วโมง", "กม/ชม", "km/h", "kph", "kmh" -> "km/h"
+            "ไมล์ต่อชั่วโมง", "mph" -> "mph"
+            else -> u
+        }
+    }
+
     private val lengthToMeter = mapOf(
         "m" to 1.0, "meter" to 1.0, "meters" to 1.0,
         "km" to 1000.0, "kilometer" to 1000.0, "kilometers" to 1000.0,
@@ -591,6 +672,7 @@ object ToolExecutor {
         "yard" to 0.9144, "yards" to 0.9144,
         "foot" to 0.3048, "feet" to 0.3048, "ft" to 0.3048,
         "inch" to 0.0254, "inches" to 0.0254, "in" to 0.0254,
+        "wa" to 2.0, // วา = 2 เมตร
         "nautical_mile" to 1852.0
     )
 
@@ -612,7 +694,9 @@ object ToolExecutor {
         "yard2" to 0.836127, "sqyard" to 0.836127,
         "acre" to 4046.86, "acres" to 4046.86,
         "hectare" to 10000.0, "hectares" to 10000.0, "ha" to 10000.0,
-        "rai" to 1600.0  // Thai unit
+        "rai" to 1600.0,  // ไร่ = 1600 ตร.ม.
+        "ngan" to 400.0,  // งาน = 400 ตร.ม.
+        "sqwa" to 4.0     // ตารางวา = 4 ตร.ม.
     )
 
     private val speedToMs = mapOf(

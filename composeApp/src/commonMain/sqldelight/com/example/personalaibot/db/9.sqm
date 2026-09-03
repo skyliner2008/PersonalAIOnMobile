@@ -1,0 +1,4 @@
+-- P6.4: separate promotion eligibility from persisted StrategyTuning params.
+-- Existing rows are not eligible because they were written before the promotion gate was authoritative.
+ALTER TABLE StrategyTuning ADD COLUMN risk_gate_eligible INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE EntryTuning ADD COLUMN risk_gate_eligible INTEGER NOT NULL DEFAULT 0;

@@ -113,7 +113,9 @@ class GeminiLlmProvider(
             // (models ที่ถูก deprecate จะยังโผล่ใน list แต่เรียกใช้จริงไม่ได้)
             val knownPreviews = listOf(
                 LlmModelInfo("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live Preview", supportsVision = true, supportsLive = true),
-                LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio", supportsVision = true, supportsLive = true),
+                LlmModelInfo("gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio (12-2025)", supportsVision = true, supportsLive = true),
+                LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio (09-2025)", supportsVision = true, supportsLive = true),
+                LlmModelInfo("gemini-2.0-flash-exp", "Gemini 2.0 Flash Experimental (Realtime)", supportsVision = true, supportsLive = true),
                 LlmModelInfo("gemini-3.5-live-translate-preview", "Gemini 3.5 Live Translate Preview", supportsVision = false, supportsLive = true)
             )
             val existingIds = mappedList.map { it.id }.toSet()

@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.personalaibot.camera.CameraPreviewView
+import com.example.personalaibot.automation.backtest.TradingAccount
 import com.example.personalaibot.ui.theme.JarvisTheme
 
 @Composable
@@ -28,12 +29,16 @@ fun LiveModePanel(
     isFrontCamera: Boolean,
     isMuted: Boolean,
     isAiVisionRequested: Boolean,
+    liveConnectionState: com.example.personalaibot.data.ConnectionState,
     activeToolName: String?,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
     onToggleMute: () -> Unit,
     onEndLive: () -> Unit,
-    onFrameCapture: (String, ByteArray) -> Unit
+    onFrameCapture: (String, ByteArray) -> Unit,
+    riskAccount: TradingAccount? = null,
+    riskPct: Double? = null,
+    riskKillSwitchActive: Boolean = false
 ) {
     val infinite = rememberInfiniteTransition(label = "live_ui")
     
@@ -75,6 +80,37 @@ fun LiveModePanel(
                     modifier = Modifier.align(Alignment.Center),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val liveStatusText = when (liveConnectionState) {
+                        is com.example.personalaibot.data.ConnectionState.Connected -> "● READY"
+                        is com.example.personalaibot.data.ConnectionState.Error -> "● ERROR"
+                        is com.example.personalaibot.data.ConnectionState.Disconnected -> "● OFFLINE"
+                        is com.example.personalaibot.data.ConnectionState.Connecting,
+                        is com.example.personalaibot.data.ConnectionState.Reconnecting -> "● CONNECTING"
+                    }
+                    val liveStatusColor = when (liveConnectionState) {
+                        is com.example.personalaibot.data.ConnectionState.Connected -> Color(0xFF69F0AE)
+                        is com.example.personalaibot.data.ConnectionState.Error -> Color(0xFFFF8A80)
+                        else -> Color.White.copy(alpha = 0.55f)
+                    }
+                    Surface(
+                        color = when (liveConnectionState) {
+                            is com.example.personalaibot.data.ConnectionState.Connected -> Color(0xFF1B5E20).copy(alpha = 0.9f)
+                            is com.example.personalaibot.data.ConnectionState.Error -> Color(0xFF5D1A1A).copy(alpha = 0.9f)
+                            else -> JarvisTheme.Card
+                        },
+                        shape = RoundedCornerShape(50),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, liveStatusColor)
+                    ) {
+                        Text(
+                            liveStatusText,
+                            color = liveStatusColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
                     // Eye Icon (AI Vision Status) - Explicitly shows if AI can see
                     Box(contentAlignment = Alignment.Center) {
                         if (isAiVisionRequested) {
@@ -114,6 +150,11 @@ fun LiveModePanel(
                 ) {
                     Icon(Icons.Default.Close, "Exit", tint = Color.White.copy(0.4f), modifier = Modifier.size(20.dp))
                 }
+            }
+
+            riskAccount?.let { account ->
+                RiskStatusCard(account = account, riskPct = riskPct, killSwitchActive = riskKillSwitchActive, modifier = Modifier.padding(horizontal = 16.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
             // ─── Content: Optional Camera Preview ───────────────────────────

@@ -235,6 +235,16 @@ class Mt5Controller(
         pairingStatus = _mt5PairingStatus.value
     )
 
+    /** Live signal-analysis candles. The caller must independently gate this to confirmed MT5 LIVE. */
+    suspend fun fetchCandlesForSignal(symbol: String, timeframe: String, count: Int = 300) =
+        mt5TerminalService.fetchCandlesForAnalysis(
+            baseUrl = _mt5BridgeBaseUrl.value,
+            authToken = _mt5AuthToken.value,
+            symbol = symbol,
+            timeframe = timeframe,
+            count = count
+        )
+
     /** cleanup — เรียกจาก ViewModel.onCleared */
     fun shutdown() {
         stopAiTracking()

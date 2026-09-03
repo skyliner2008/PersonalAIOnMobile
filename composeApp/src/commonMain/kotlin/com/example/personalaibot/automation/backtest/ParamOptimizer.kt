@@ -49,6 +49,14 @@ object ParamOptimizer {
         return r.expectancyR * pfW * sharpeW * ddW * tradeW
     }
 
+
+    /** Stable guard used by Optimize/Evolve: a candidate must satisfy hard constraints before it can be promoted. */
+    fun isEligible(r: BacktestResult, minTrades: Int = 5): Boolean =
+        r.totalTrades >= minTrades &&
+            r.profitFactor >= HARD_MIN_PF &&
+            r.expectancyR > 0.0 &&
+            r.maxDrawdownPct <= HARD_MAX_DD_PCT
+
     /**
      * รัน backtest ทุก combo ใน grid สำหรับ kind เดียว แล้วจัดอันดับจาก score
      * markers ต้องคำนวณมาแล้ว (ชุดเดียวกับ candles) — engine จะ filter เฉพาะ kind นี้
@@ -86,6 +94,10 @@ object ParamOptimizer {
                 expectancyR = r.expectancyR
             )
         }
-        return results.sortedByDescending { it.score }
+        return results
+            .sortedWith(compareByDescending<ComboResult> { it.score }
+                .thenByDescending { it.expectancyR }
+                .thenBy { it.maxDrawdownPct }
+                .thenByDescending { it.totalReturnPct })
     }
 }

@@ -101,6 +101,7 @@ fun TradingChartScreen(
                 DashboardChip("Vol", layout == "volume") { onSetLayout("volume") }
                 DashboardChip("Full", layout == "full") { onSetLayout("full") }
                 Text("│", color = Color.White.copy(alpha = 0.3f))
+                val standardPresets = setOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "donchian", "smc", "signals")
                 DashboardChip("EMA14", "ema14" in overlays) { onToggleOverlay("ema14") }
                 DashboardChip("EMA20", "ema20" in overlays) { onToggleOverlay("ema20") }
                 DashboardChip("EMA50", "ema50" in overlays) { onToggleOverlay("ema50") }
@@ -110,6 +111,10 @@ fun TradingChartScreen(
                 DashboardChip("DC20", "donchian" in overlays) { onToggleOverlay("donchian") }
                 DashboardChip("SMC", "smc" in overlays) { onToggleOverlay("smc") }
                 DashboardChip("SIG", "signals" in overlays) { onToggleOverlay("signals") }
+                // Render any active custom overlays (e.g. EMA8, SMA200)
+                overlays.filter { it !in standardPresets }.forEach { custom ->
+                    DashboardChip(custom.uppercase(), true) { onToggleOverlay(custom) }
+                }
             }
         }
 
@@ -197,14 +202,10 @@ private fun DashboardWebView(
     LaunchedEffect(pageReady, symbol, interval, layout, overlays) {
         if (!pageReady) return@LaunchedEffect
         val overlaysJson = buildJsonObject {
-            put("ema14", "ema14" in overlays)
-            put("ema20", "ema20" in overlays)
-            put("ema50", "ema50" in overlays)
-            put("ema60", "ema60" in overlays)
-            put("ema200", "ema200" in overlays)
-            put("bb", "bb" in overlays)
-            put("donchian", "donchian" in overlays)
-            put("signals", "signals" in overlays)
+            overlays.forEach { put(it, true) }
+            listOf("ema14", "ema20", "ema50", "ema60", "ema200", "bb", "donchian", "signals").forEach {
+                if (it !in overlays) put(it, false)
+            }
         }
         val cfg = buildJsonObject {
             put("symbol", symbol)

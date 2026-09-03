@@ -40,6 +40,9 @@ class VoiceController(
     private val _isMuted = MutableStateFlow(false)
     val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
 
+    /** Real Live session readiness. Connected is emitted only after the Live setup handshake completes. */
+    val liveConnectionState: StateFlow<com.example.personalaibot.data.ConnectionState> = orchestrator.liveConnectionState
+
     private val pcmAudioEngine = PcmAudioEngine()
     private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
 
@@ -69,12 +72,10 @@ class VoiceController(
         logDebug("JARVIS_VM", "Starting Live Voice Input")
 
         // ทักทายยืนยันความพร้อม: ผู้ใช้จะได้รู้ทันทีว่า session READY แล้วคุยได้
-        // (ก่อนหน้านี้ READY ใช้เวลาหลายวินาที ผู้ใช้พูดไปก่อนแล้ว AI เงียบเพราะยังไม่พร้อม)
-        // ไม่ทับ greeting ที่ระบบอื่นตั้งไว้ก่อน (เช่น ยืนยันเปลี่ยนเสียง)
-        orchestrator.setLiveGreetingOnReadyIfAbsent(
-            "[SYSTEM] Live session เพิ่งพร้อมใช้งาน โปรดพูดทักผู้ใช้สั้นๆ 1 ประโยคเท่านั้น " +
-                "(เช่น 'สวัสดีครับ พร้อมคุยแล้วครับ' หรือทักตามบุคลิกของคุณ) ไม่ต้องทำงานอื่นต่อ"
-        )
+        // ใช้ประโยคทักทายภาษาไทยที่เป็นธรรมชาติ ปราศจาก [SYSTEM] หรือคำภาษาอังกฤษ
+        // เพื่อป้องกันไม่ให้โมเดลเสียงหลุดไปใช้ text-only หรือสำเนียงเพี้ยน (เช่น 'เจ้านาว')
+        val agentName = com.example.personalaibot.ai.JarvisPersona.identity.agentName.ifBlank { "จาวิส" }
+        orchestrator.setLiveGreetingOnReadyIfAbsent("สวัสดี$agentName พร้อมคุยไหม")
 
         // Barge-in: ผู้ใช้พูดแทรก (VAD interrupt) ต้อง flush คิวเสียง AI ที่ค้างเล่นทันที
         // ไม่งั้นเสียงเก่าเล่นต่อทับ turn ใหม่ — handler มีใน LiveGeminiService/orchestrator แต่ไม่เคยถูก wire (review 2026-08-18)
@@ -83,9 +84,14 @@ class VoiceController(
         }
 
         // Turn ที่ model ตอบเป็น text ล้วน (ไม่มีเสียงออกเลย) → ใช้ Android TTS พูดแทน กัน AI เงียบเฉย
-        // (handler มีพร้อมใน orchestrator แต่ไม่เคยถูก wire เช่นกัน)
+        // สำคัญ: ต้อง mute mic ชั่วคราวขณะ TTS พูด เพื่อป้องกันไมค์อัดเสียงลำโพงตัวเองแล้วส่งกลับไปหา AI ทำให้เกิดลูปพูดซ้ำ 2 รอบ
         orchestrator.setLiveNoAudioFallback { text ->
-            if (voiceManager.isAvailable()) voiceManager.speak(text, null)
+            if (voiceManager.isAvailable()) {
+                _isMuted.value = true
+                voiceManager.speak(text) {
+                    _isMuted.value = false
+                }
+            }
         }
 
         liveSessionJob?.cancel()
@@ -116,6 +122,22 @@ class VoiceController(
                                 "⏳ กำลังเชื่อมต่อ Live session… เมื่อ AI ทักกลับมาแปลว่าพร้อมแล้ว (เสียงที่พูดระหว่างนี้ถูกเก็บไว้ให้อัตโนมัติ)",
                                 isStatic = true
                             )
+                        }
+                    }
+                }
+
+                // 3c. Observable UI transition: Connected is emitted only by setupComplete,
+                // not by session-resumption handle updates.
+                launch {
+                    orchestrator.liveConnectionState.collect { state ->
+                        if (state is com.example.personalaibot.data.ConnectionState.Connected && _isListening.value) {
+                            withContext(Dispatchers.Main) {
+                                messages.value = messages.value + Message(
+                                    "model",
+                                    "🟢 LIVE READY — พร้อมคุยแล้วค่ะ",
+                                    isStatic = true
+                                )
+                            }
                         }
                     }
                 }

@@ -47,7 +47,12 @@ object SmcEngine {
         }
         zones.sortByDescending { it.confluenceStars }
 
-        // 6. Attack Force
+        // 6. Explicit OB/FVG walls + unified confluence decision layer
+        val (walls, confluence) = SmcWallBuilder.build(
+            candles, bullObs, bearObs, activeFvgs, zones, lastPrice, atr
+        )
+
+        // 7. Attack Force
         val attackForces = SweepDetection.detectAttackForce(candles)
 
         // 7. Swing points (5 จุดล่าสุด)
@@ -63,7 +68,8 @@ object SmcEngine {
             attackForces = attackForces,
             premiumDiscount = premiumDiscount,
             swingHighs = swingHighs, swingLows = swingLows,
-            symbol = symbol, timeframe = timeframe, lastPrice = lastPrice
+            symbol = symbol, timeframe = timeframe, lastPrice = lastPrice,
+            walls = walls, confluence = confluence
         )
     }
 

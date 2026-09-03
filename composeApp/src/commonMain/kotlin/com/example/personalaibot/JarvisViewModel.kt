@@ -146,6 +146,7 @@ class JarvisViewModel(
     // Phase-3 refactor: voice state → VoiceController (forwarders คง API เดิม)
     val isListening: StateFlow<Boolean> get() = voice.isListening
     val voiceError: StateFlow<String?> get() = voice.voiceError
+    val liveConnectionState: StateFlow<com.example.personalaibot.data.ConnectionState> get() = voice.liveConnectionState
 
     private val _isSleeping = MutableStateFlow(false)
     val isSleeping: StateFlow<Boolean> = _isSleeping.asStateFlow()
@@ -321,6 +322,14 @@ class JarvisViewModel(
         // Initialize Camera Tool Executor
         ToolExecutor.initCameraExecutor(CameraToolExecutor(cameraService))
         ToolExecutor.setMt5RuntimeConfigProvider { mt5.currentRuntimeConfig() }
+        com.example.personalaibot.automation.TradingSignalMarketDataRouter.configure(
+            liveModeProvider = { com.example.personalaibot.tools.trading.auto.AutoTradingConfigStore.load().enableLiveTrading },
+            mt5ConnectedProvider = {
+                val runtime = mt5.currentRuntimeConfig()
+                runtime.pairingStatus == "APPROVED" && runtime.authToken.isNotBlank()
+            },
+            mt5CandleProvider = { symbol, timeframe, count -> mt5.fetchCandlesForSignal(symbol, timeframe, count) }
+        )
 
         // Bridge AI vision request to camera service with safety timeout
         orchestrator.setAiVisionToggle { active ->
@@ -364,8 +373,8 @@ class JarvisViewModel(
                 if (voice.isListening.value) {
                     stopVoiceInput()
                     delay(800) // เพิ่ม delay เล็กน้อยเพื่อให้ระบบเคลียร์ resources และบันทึกความจำได้ทัน
-                    // ตั้ง greeting ให้ AI พูดยืนยันเสียงใหม่อัตโนมัติทันทีที่ session READY (ผูกกับ event ไม่ใช่ timer)
-                    orchestrator.setLiveGreetingOnReady("[SYSTEM] คุณเพิ่งเปลี่ยนเสียงเป็น $newVoice เรียบร้อยแล้ว โปรดพูดทักยืนยันเสียงใหม่สั้นๆ 1 ประโยคเท่านั้น (เช่น 'เปลี่ยนเสียงเป็น $newVoice เรียบร้อยแล้วครับ/ค่ะ') ไม่ต้องทำงานอื่นต่อ")
+                    // ตั้ง greeting ให้ AI พูดยืนยันเสียงใหม่อัตโนมัติทันทีที่ session READY (ภาษาไทยล้วน ไม่มี [SYSTEM])
+                    orchestrator.setLiveGreetingOnReady("เปลี่ยนมาใช้เสียง $newVoice แล้ว ลองทักทายสั้นๆ ด้วยเสียงใหม่นี้")
                     startVoiceInput()
                 }
             }

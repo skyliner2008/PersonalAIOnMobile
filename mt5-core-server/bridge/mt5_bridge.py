@@ -417,9 +417,15 @@ def _init_timeframe_map():
         value = getattr(mt5, attr, None)
         if value is not None:
             _TIMEFRAME_MAP[key] = value
-            # accept a common "1m" style alias too
-            if key.startswith(("m", "h")) and len(key) > 1:
+            # accept common "1m", "1d", "1w" style aliases
+            if key.startswith(("m", "h", "d", "w")) and len(key) > 1:
                 _TIMEFRAME_MAP[key[1:] + key[0]] = value
+    if "d1" in _TIMEFRAME_MAP:
+        _TIMEFRAME_MAP["d"] = _TIMEFRAME_MAP["d1"]
+        _TIMEFRAME_MAP["1d"] = _TIMEFRAME_MAP["d1"]
+    if "w1" in _TIMEFRAME_MAP:
+        _TIMEFRAME_MAP["w"] = _TIMEFRAME_MAP["w1"]
+        _TIMEFRAME_MAP["1w"] = _TIMEFRAME_MAP["w1"]
 
 
 def resolve_timeframe(raw):

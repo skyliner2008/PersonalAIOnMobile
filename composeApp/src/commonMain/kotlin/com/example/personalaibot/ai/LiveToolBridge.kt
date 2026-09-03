@@ -39,9 +39,95 @@ class LiveToolBridge(
     private var collectionJob: Job? = null
     private var visionPromptJob: Job? = null
 
+    // Trading AI Profile guard: keep one analysis family per user turn and only M15/H1/H4 by default.
+    private var tradingProfilePromptKey: String = ""
+    private var tradingProfileCallCount: Int = 0
+
+    private fun tradingProfileFor(prompt: String): String {
+        val p = prompt.lowercase()
+        return when {
+            p.contains("smc") || p.contains("smart money") || p.contains("order block") || p.contains("fvg") -> "SMC"
+            p.contains("rsi") || p.contains("ema") || p.contains("sma") || p.contains("atr") ||
+                p.contains("แนวรับ") || p.contains("แนวต้าน") || p.contains("support") || p.contains("resistance") ||
+                p.contains("เท่าไร") || p.contains("เท่าไหร่") -> "USER_QUERY"
+            p.contains("วิเคราะห์") || p.contains("analysis") || p.contains("overview") ||
+                p.contains("ภาพรวม") || p.contains("5 มิติ") || p.contains("5มิติ") || p.contains("confluence") -> "AI"
+            else -> "NONE"
+        }
+    }
+
+    private fun isTradingAnalysisTool(name: String): Boolean = name in setOf(
+        "trading_deep_analysis_suite",
+        "trading_technical_analysis",
+        "trading_smc_analysis"
+    )
+
+    private fun allowedTradingTimeframe(args: Map<String, String>): Boolean {
+        val raw = args["symbol"] ?: args["timeframe"] ?: ""
+        val tf = raw.substringAfter("@", "").lowercase().ifBlank { "1h" }
+        return tf in setOf("15m", "m15", "1h", "h1", "4h", "h4")
+    }
+
+    private fun profileToolAllowed(prompt: String, toolName: String, args: Map<String, String>): Boolean {
+        val profile = tradingProfileFor(prompt)
+        if (profile == "NONE" || !isTradingAnalysisTool(toolName)) return true
+        if (!allowedTradingTimeframe(args)) return false
+        return when (profile) {
+            "SMC" -> toolName == "trading_smc_analysis"
+            "USER_QUERY" -> false
+            else -> toolName == "trading_deep_analysis_suite"
+        }
+    }
+
+    private fun isSignalAlertRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val alertTerms = listOf("แจ้งเตือน", "signal alert", "signal", "สัญญาณ")
+        val tradeTerms = listOf("ทอง", "gold", "xau", "buy", "sell", "ซื้อ", "ขาย")
+        return alertTerms.any { p.contains(it) } && tradeTerms.any { p.contains(it) }
+    }
+
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
-        logDebug("LiveBridge", "▶ Path A: ${event.name}(${event.args})")
+        logDebug("LiveBridge", "▶ Path A: ${event.name} callId=${event.callId} (${event.args})")
+
+        // Enforce the profile selected from the user's actual request before executing tools.
+        // This prevents the Live model from expanding one analysis request into Deep+SMC+TA+D1 chains.
+        val userPrompt = liveService.lastUserText
+        if (userPrompt != tradingProfilePromptKey) {
+            tradingProfilePromptKey = userPrompt
+            tradingProfileCallCount = 0
+        }
+        if (isTradingAnalysisTool(event.name)) {
+            val profile = tradingProfileFor(userPrompt)
+            if (!profileToolAllowed(userPrompt, event.name, event.args)) {
+                val reason = when {
+                    !allowedTradingTimeframe(event.args) -> "AI Profile จำกัด timeframe เริ่มต้นไว้ที่ M15, H1, H4; โปรดไม่เรียก D1/1D เว้นแต่ผู้ใช้ระบุเอง"
+                    profile == "USER_QUERY" -> "คำถามนี้เป็น User Query profile ไม่ใช่ full analysis; ให้ตอบจากค่าที่ผู้ใช้ระบุเท่านั้น"
+                    profile == "SMC" -> "ผู้ใช้เลือก SMC Profile แล้ว ไม่ต้องเรียก Technical/Deep Analysis ซ้ำ"
+                    else -> "AI Profile ใช้ trading_deep_analysis_suite เป็น consolidated analysis path เท่านั้น"
+                }
+                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: $reason แล้วสรุปคำตอบจากข้อมูลที่มีอยู่ทันที")
+                logDebug("LiveBridge", "🛡️ Profile guard blocked ${event.name} for profile=$profile")
+                return
+            }
+            tradingProfileCallCount++
+            if (tradingProfileCallCount > 3) {
+                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: ได้ข้อมูลครบ 3 TF (M15/H1/H4) แล้ว ไม่ต้องเรียก analysis tool เพิ่ม โปรดสังเคราะห์ผลและตอบผู้ใช้ทันที")
+                logDebug("LiveBridge", "🛡️ Profile guard capped analysis chain at 3 calls")
+                return
+            }
+        }
+
         _activeToolName.value = event.name
+
+        // Signal alerts must never probe MT5 symbol discovery first. The alert pipeline owns
+        // source selection: DEMO/PAPER -> TradingView; LIVE+connected -> MT5; LIVE+offline -> TV.
+        if (event.name == "trading_mt5_symbol_search" && isSignalAlertRequest(userPrompt)) {
+            val guard = "SIGNAL_DATA_SOURCE_GUARD: ไม่ต้องค้นหา symbol ผ่าน MT5 สำหรับ Signal Alert — ให้สร้าง trading_signal_alert แล้ว TradingSignalMarketDataRouter จะเลือก MT5 LIVE หรือ TradingView ตาม runtime policy อัตโนมัติ"
+            liveService.sendNativeToolResponse(event.callId, event.name, guard)
+            logDebug("LiveBridge", "🛡️ Signal alert blocked premature MT5 symbol search callId=${event.callId}")
+            _activeToolName.value = null
+            return
+        }
 
         val toolCall = ToolCall(name = event.name, args = event.args)
         val rawResult = try {
@@ -123,7 +209,7 @@ class LiveToolBridge(
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "✅ รายงานถูกส่งเข้าแชทแล้ว โปรดพูดสรุปสั้นๆ และบอกให้ผู้ใช้ดูรายละเอียดในแชท ห้ามอ่านตารางซ้ำ"
+                    result   = "✅ รายงานถูกส่งเข้าแชทแล้ว โปรดอธิบายสาระสำคัญให้ผู้ใช้ฟังเป็นภาษาไทยแบบสนทนาอย่างครบถ้วน โดยครอบคลุมข้อสรุป เหตุผล ตัวเลขสำคัญ และจุดที่ควรระวัง ไม่ต้องอ่านตารางหรือ markdown ตามตัวอักษร และบอกผู้ใช้ว่าสามารถดูรายละเอียดเต็มในแชทได้"
                 )
                 logDebug("LiveBridge", "📊 Report tool executed")
                 return
@@ -153,6 +239,11 @@ class LiveToolBridge(
         // ยกเว้น system_self_review: โหมดเล่ายาว (narration) ผู้ใช้ต้องการฟังรีวิวเต็ม ไม่จำกัดประโยค
         // ยกเว้น long-task ack (backtest/optimize/evolve): แค่รับคำสั่ง งานจริงรันเบื้องหลัง — ตอบสั้นๆ พอ
         val isLongTaskAck = event.name in setOf("trading_backtest", "trading_backtest_optimize", "trading_backtest_evolve")
+        val profileFinalization = if (
+            isTradingAnalysisTool(event.name) && tradingProfileCallCount >= 3
+        ) {
+            "\n\n[PROFILE COMPLETE] ได้ข้อมูลครบ canonical TF แล้ว (M15/H1/H4) โปรดหยุดเรียก Trading analysis tools เพิ่มและสังเคราะห์คำตอบสุดท้ายให้ผู้ใช้ทันที"
+        } else ""
         val voiceRule = when {
             event.name == "system_self_review" -> {
                 "\n\n[VOICE RULE - NARRATION] นี่คือโหมดรีวิวตัวเอง ผู้ใช้ต้องการฟังเนื้อหาทั้งหมด — โปรดเล่าออกเสียงเป็นภาษาไทยแบบสนทนา ไล่ทีละหัวข้อตามเอกสารจนครบทุกส่วน ไม่จำกัดความยาว ห้ามสรุปย่อ ห้ามหยุดกลางทางจนกว่าจะเล่าครบ ห้ามใช้ markdown หรืออ่านสัญลักษณ์ออกเสียง"
@@ -161,13 +252,13 @@ class LiveToolBridge(
                 "\n\n[VOICE RULE - ACK] นี่เป็นเพียงการรับคำสั่งงานเบื้องหลัง — ตอบผู้ใช้สั้นๆ 1-2 ประโยคเท่านั้นว่ากำลังดำเนินการอยู่ (เช่น 'รับทราบครับ กำลังรัน backtest ให้อยู่ เสร็จแล้วจะรายงานครับ') ห้ามสรุปยาว ห้ามชวนคุยยาว ห้ามใช้ markdown"
             }
             else -> {
-                "\n\n[VOICE RULE] ข้อมูลนี้แสดงในแชทของผู้ใช้เรียบร้อยแล้ว โปรดพูดสรุปเป็นภาษาไทยแบบสนทนาให้ครบถ้วน ครอบคลุม: ผลสรุปหลัก + เหตุผลและตัวเลขสำคัญ 3-5 จุด (เล่าเป็นประโยคธรรมชาติ เช่น 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ') + จุดที่ควรระวัง — รวมประมาณ 8-12 ประโยค เล่าให้ครบทุกส่วนสำคัญของข้อมูล ห้ามอ่านตาราง/ลิสต์ยาวๆ ออกเสียง ห้ามใช้ markdown"
+                "\n\n[VOICE PRESENTATION POLICY] รายละเอียดเต็มแสดงในแชทแล้ว โปรดอธิบายให้ผู้ใช้ฟังเป็นภาษาไทยแบบสนทนา ไม่อ่านรายงาน ตาราง หรือลิสต์ตามตัวอักษร และไม่ใช้ markdown ในเสียงพูด ให้เริ่มจากข้อสรุปหลัก แล้วอธิบายเหตุผลพร้อมตัวเลขสำคัญประมาณ 3-5 จุด ความหมายของโซน/สัญญาณที่สำคัญ และจุดที่ควรระวังหรือเงื่อนไขยืนยัน สรุปให้ครบทุกส่วนที่มีนัยสำคัญ โดยทั่วไปประมาณ 8-12 ประโยคสำหรับผลวิเคราะห์ที่ซับซ้อน แต่ลดหรือเพิ่มได้ตามความจำเป็น ห้ามตัดข้อมูลสำคัญเพียงเพื่อให้สั้น"
             }
         }
         liveService.sendNativeToolResponse(
             callId   = event.callId,
             toolName = event.name,
-            result   = finalResultText + voiceRule
+            result   = finalResultText + profileFinalization + voiceRule
         )
         logDebug("LiveBridge", "✅ Path A done: ${event.name} → ${finalResultText.take(80)}")
     }

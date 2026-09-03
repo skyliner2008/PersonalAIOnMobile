@@ -45,3 +45,8 @@ OLD_Code/
 .serena/
 **/GeminiService.HEAD.kt
 logcat*.txt
+scripts/patches/
+strategy_lab_data*/
+strategy_lab_output/
+**/__pycache__/
+*.pyc

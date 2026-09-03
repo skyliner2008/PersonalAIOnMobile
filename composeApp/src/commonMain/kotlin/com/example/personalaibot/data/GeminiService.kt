@@ -827,8 +827,52 @@ class GeminiService(
                                 })
                             }
                         } else {
+                            val effectiveResult = when {
+                                toolResult.result.startsWith("WEB_SEARCH_REQUEST::query=") -> {
+                                    val query = toolResult.result.substringAfter("query=")
+                                    try {
+                                        generateResponse(
+                                            prompt = "ค้นหาข้อมูลล่าสุดเกี่ยวกับ: $query",
+                                            intentAddon = "หาคำตอบที่เจาะจง สรุปสั้นๆ และเน้นข้อมูลตัวเลขหรือข้อเท็จจริงล่าสุด",
+                                            enableGrounding = true
+                                        )
+                                    } catch (e: Exception) {
+                                        "ผลการค้นหาเว็บไม่สำเร็จ: ${e.message}"
+                                    }
+                                }
+                                toolResult.result.startsWith("TRANSLATE_REQUEST::") -> {
+                                    val text = toolResult.result.substringAfter("text=").substringBefore("::to=")
+                                    val to = toolResult.result.substringAfter("::to=")
+                                    try {
+                                        generateResponse(
+                                            prompt = "แปลข้อความต่อไปนี้เป็นภาษา $to:\n\n$text",
+                                            intentAddon = "ให้แปลอย่างเป็นธรรมชาติ ไม่ต้องมีคำอธิบายนำหรือปิดท้าย ตอบเฉพาะข้อความที่แปลแล้วเท่านั้น"
+                                        )
+                                    } catch (e: Exception) {
+                                        "แปลข้อความไม่สำเร็จ: ${e.message}"
+                                    }
+                                }
+                                toolResult.result.startsWith("SUMMARIZE_REQUEST::") -> {
+                                    val length = toolResult.result.substringAfter("length=").substringBefore("::text=")
+                                    val text = toolResult.result.substringAfter("::text=")
+                                    val lengthPrompt = when (length.lowercase()) {
+                                        "short" -> "สรุปให้สั้นกระชับ 1-2 ประโยค"
+                                        "detailed" -> "สรุปเนื้อหาอย่างละเอียดพร้อมประเด็นสำคัญ"
+                                        else -> "สรุปเนื้อหาสำคัญ 3-5 ประโยค"
+                                    }
+                                    try {
+                                        generateResponse(
+                                            prompt = "สรุปเนื้อหาต่อไปนี้ ($lengthPrompt):\n\n$text"
+                                        )
+                                    } catch (e: Exception) {
+                                        "สรุปข้อความไม่สำเร็จ: ${e.message}"
+                                    }
+                                }
+                                else -> toolResult.result
+                            }
+
                             // Truncate large tool results to prevent "Request Entity Too Large"
-                            val truncatedResult = truncateToolResult(toolResult.result)
+                            val truncatedResult = truncateToolResult(effectiveResult)
                             toolResponseParts.add(buildJsonObject {
                                 put("functionResponse", buildJsonObject {
                                     put("name", fc.name)
@@ -964,7 +1008,8 @@ class GeminiService(
         coreContext: String = "",
         enableGrounding: Boolean = false,
         timeoutMs: Long = 20_000,
-        attempt: Int = 0
+        attempt: Int = 0,
+        retryLongerOnTimeout: Boolean = true
     ): String {
         if (apiKey.isBlank()) return "⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน"
 
@@ -1062,9 +1107,18 @@ class GeminiService(
                 return "⚠️ Error $code"
             } catch (e: Exception) {
                 logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)
-                // retry 1 ครั้งด้วย timeout นานขึ้น (transient) แล้วค่อยหมุน key/โมเดล
-                if (!retriedLonger) { retriedLonger = true; timeout = 45_000; continue }
-                if (switchKey() || switchModel()) { retriedLonger = false; timeout = timeoutMs; continue }
+                // Interactive/chat paths may retry once with a longer timeout. Alert paths must
+                // fail fast so one slow Gemini request cannot hold the notification/voice pipeline.
+                if (retryLongerOnTimeout && !retriedLonger) {
+                    retriedLonger = true
+                    timeout = 45_000
+                    continue
+                }
+                if (switchKey() || switchModel()) {
+                    retriedLonger = false
+                    timeout = timeoutMs
+                    continue
+                }
                 return "⚠️ Error: ${com.example.personalaibot.sanitizeSensitive(e.message ?: "unknown").take(300)}"
             }
         }

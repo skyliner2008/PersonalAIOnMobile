@@ -56,5 +56,8 @@ data class SkillDescriptor(
     val systemPromptAddon: String,
     val triggerKeywords: List<String> = emptyList(),
     val author: String = "user",
-    val version: String = "1.0"
+    val version: String = "1.0",
+    val parameters: FunctionParameters? = null,
+    val executionType: String = "prompt"
 )
+

@@ -1,4 +1,4 @@
-package com.example.personalaibot.ui.screen
+﻿package com.example.personalaibot.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,6 +86,8 @@ fun AutoTradingPanel(vm: AutoTradingViewModel) {
     val learn by vm.learnSummary.collectAsState()
     val open by vm.openJournal.collectAsState()
     val quality by vm.qualityMetrics.collectAsState()
+    val mt5Account by vm.mt5Account.collectAsState()
+    val accountStatus by vm.accountStatus.collectAsState()
 
     // P4.1 — seed watchlist from broker's real gold symbol on first launch
     LaunchedEffect(Unit) {
@@ -110,7 +113,16 @@ fun AutoTradingPanel(vm: AutoTradingViewModel) {
     ) {
         item { EngineHeroPanel(state, cfg, onStart = vm::start, onStop = vm::stop, onRunNow = vm::runOnceNow, onLearn = vm::learnNow) }
         item { CycleQualityCard(quality) }
-        item { LiveToggleCard(cfg.enableLiveTrading, vm::updateEnableLive) }
+        item {
+            ExecutionAccountStatusCard(
+                liveMode = cfg.enableLiveTrading,
+                engineRunning = state.running,
+                accountStatus = accountStatus,
+                account = mt5Account,
+                lastRiskGate = decisions.lastOrNull()?.riskGate,
+            )
+        }
+        item { TradingExecutionModeCard(cfg.enableLiveTrading, state.running, vm::updateEnableLive) }
         item { AiModeToggleCard(cfg.enableAiMode, vm::updateEnableAiMode) }  // V23.0
         item { SectionTitle("Watchlist") }
         item { WatchlistEditor(cfg.watchlist, vm::addToWatchlist, vm::removeFromWatchlist) }
@@ -218,43 +230,116 @@ private fun EngineHeroPanel(
     }
 }
 
-// ─── Live toggle ─────────────────────────────────────────────────────────────
+
+/** P6.3 — single source of truth for what the mobile app believes is executable. */
 @Composable
-private fun LiveToggleCard(enableLive: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
+private fun ExecutionAccountStatusCard(
+    liveMode: Boolean,
+    engineRunning: Boolean,
+    accountStatus: String,
+    account: com.example.personalaibot.tools.trading.Mt5AccountInfo?,
+    lastRiskGate: String?,
+) {
+    val modeLabel = if (liveMode) "MT5 LIVE" else "DEMO / PAPER"
+    val modeIcon = if (liveMode) "🔴" else "🟢"
+    val connectionLabel = when {
+        !liveMode -> "LOCAL DEMO"
+        accountStatus == "CONNECTED" -> "MT5 CONNECTED"
+        else -> "MT5 UNAVAILABLE"
+    }
+    val connectionColor = when {
+        !liveMode -> AutoGreen
+        accountStatus == "CONNECTED" -> AutoGreen
+        else -> AutoRed
+    }
+    val marginLevel = account?.let { if (it.margin > 0.0) it.equity / it.margin * 100.0 else null }
+    val riskLabel = when {
+        lastRiskGate.isNullOrBlank() -> "—"
+        lastRiskGate.equals("PASS", true) || lastRiskGate.contains("PASS", true) -> "PASS"
+        else -> lastRiskGate.take(32)
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (enableLive) AutoRed.copy(alpha = 0.1f) else AutoPanel)
-            .border(1.dp, if (enableLive) AutoRed else AutoOutline, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(14.dp))
+            .background(AutoPanel)
+            .border(1.dp, AutoOutline, RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                if (enableLive) "LIVE TRADING — ENABLED" else "PAPER MODE (no real orders)",
-                color = if (enableLive) AutoRed else Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            Text(
-                if (enableLive) "⚠︎ ระบบจะส่งออเดอร์จริงผ่าน MT5 ตาม risk config"
-                else "ระบบวิเคราะห์ + บันทึกทุกรอบ แต่ไม่ส่งออเดอร์จริง",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 10.sp
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("Execution & Account Status", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(modeIcon + " " + modeLabel, color = if (liveMode) AutoRed else AutoGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
-        Switch(
-            checked = enableLive,
-            onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = AutoRed,
-                checkedTrackColor = AutoRed.copy(alpha = 0.4f),
-                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                uncheckedTrackColor = AutoPanelHi
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(connectionColor))
+            Spacer(Modifier.width(7.dp))
+            Text(connectionLabel, color = connectionColor, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text(if (engineRunning) "ENGINE RUNNING" else "ENGINE STOPPED", color = if (engineRunning) AutoYellow else Color.LightGray, fontSize = 11.sp)
+        }
+        if (liveMode && account != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountMetric("Balance", "%.2f %s".format(account.balance, account.currency), Modifier.weight(1f))
+                AccountMetric("Equity", "%.2f %s".format(account.equity, account.currency), Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccountMetric("Free Margin", "%.2f".format(account.freeMargin), Modifier.weight(1f))
+                AccountMetric("Margin", "%.2f".format(account.margin), Modifier.weight(1f))
+                AccountMetric("Margin Level", marginLevel?.let { "%.1f%%".format(it) } ?: "—", Modifier.weight(1f))
+            }
+            Text(
+                "Account ${account.login.ifBlank { "—" }}  •  ${account.server.ifBlank { "server —" }}  •  1:${account.leverage}",
+                color = Color.LightGray,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-        )
+        } else if (!liveMode) {
+            Text("Demo execution is local and uses the P6 broker-aware Risk Engine; MT5 account values are not used for Demo execution.", color = Color.LightGray, fontSize = 11.sp)
+        } else {
+            Text("MT5 account telemetry unavailable — LIVE execution status is not assumed from the UI toggle.", color = AutoRed, fontSize = 11.sp)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Risk Gate", color = Color.LightGray, fontSize = 11.sp)
+            Spacer(Modifier.width(8.dp))
+            Text(riskLabel, color = if (riskLabel == "PASS") AutoGreen else AutoYellow, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun AccountMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, color = Color.Gray, fontSize = 10.sp)
+        Text(value, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    }
+}
+
+// ─── Trading execution mode ──────────────────────────────────────────────────
+@Composable
+private fun TradingExecutionModeCard(enableLive: Boolean, engineRunning: Boolean, onChange: (Boolean) -> Unit) {
+    var confirmLive by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (enableLive) AutoRed.copy(alpha = 0.1f) else AutoPanel).border(1.dp, if (enableLive) AutoRed else AutoGreen.copy(alpha = 0.45f), RoundedCornerShape(12.dp)).padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("TRADING EXECUTION MODE", color = JarvisTheme.Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(if (enableLive) "MT5 LIVE" else "DEMO / PAPER", color = if (enableLive) AutoRed else AutoGreen, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Switch(checked = enableLive, enabled = !engineRunning, onCheckedChange = { next -> if (next) confirmLive = true else onChange(false) }, colors = SwitchDefaults.colors(checkedThumbColor = AutoRed, checkedTrackColor = AutoRed.copy(alpha = 0.4f), uncheckedThumbColor = AutoGreen, uncheckedTrackColor = AutoGreen.copy(alpha = 0.25f)))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(when { engineRunning -> "หยุด Auto-Trading ก่อนจึงจะสลับบัญชี/โหมดได้"; enableLive -> "คำสั่งสามารถส่งไปยัง MT5 จริงได้ — Risk Gate และ live_execution_enabled ยังเป็นเงื่อนไขบังคับ"; else -> "โหมดปลอดภัย: วิเคราะห์และจำลองคำสั่งโดยไม่ส่งออเดอร์จริง" }, color = Color.White.copy(alpha = 0.72f), fontSize = 10.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("DEMO", color = if (!enableLive) AutoGreen else Color.White.copy(alpha = 0.4f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (!enableLive) AutoGreen.copy(alpha = 0.12f) else AutoPanelHi).padding(horizontal = 10.dp, vertical = 6.dp))
+            Text("MT5 LIVE", color = if (enableLive) AutoRed else Color.White.copy(alpha = 0.4f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (enableLive) AutoRed.copy(alpha = 0.12f) else AutoPanelHi).padding(horizontal = 10.dp, vertical = 6.dp))
+        }
+    }
+    if (confirmLive) {
+        AlertDialog(onDismissRequest = { confirmLive = false }, title = { Text("เปิด MT5 LIVE Trading?") }, text = { Text("โหมดนี้อนุญาตให้ Auto-Trading ส่งคำสั่งไปยัง MT5 จริงได้เมื่อผ่านเงื่อนไข live execution และ Risk Gate ทั้งหมด\n\nหากต้องการทดสอบระบบ ให้ใช้ DEMO / PAPER เป็นค่าเริ่มต้น") }, confirmButton = { Button(onClick = { confirmLive = false; onChange(true) }, colors = ButtonDefaults.buttonColors(containerColor = AutoRed)) { Text("ยืนยัน MT5 LIVE") } }, dismissButton = { Button(onClick = { confirmLive = false }) { Text("ยกเลิก") } })
     }
 }
 
@@ -1138,3 +1223,5 @@ private fun DistributionRow(map: Map<String, Int>) {
         }
     }
 }
+
+

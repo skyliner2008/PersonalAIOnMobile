@@ -34,6 +34,14 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
         private const val MAX_MARKERS_PER_KIND = 12
         private const val BUY_COLOR = "#26A69A"
         private const val SELL_COLOR = "#EF5350"
+
+        /**
+         * Strategy consolidation (2026-08-27): cross-TF forensics (XAUUSD, MT5, 60/20/20 split)
+         * พบว่าเฉพาะ MOM และ REV ที่ expectancy บวกครบทุก phase — TR/DC/52H/E/UT/3BR ถูกตัด
+         * ออกจาก pipeline สัญญาณ (โค้ดยังเก็บไว้ re-enable ได้) ส่วน engine หลักคือ UNIFIED_SMC
+         * (automation/smc/UnifiedSmcSignals.kt) ที่รวมทุก TF เป็น setup เดียว
+         */
+        val ENABLED_KINDS = setOf("MOM", "REV")
     }
 
     /** คำนวณ markers ทั้งหมดของ symbol@tf (เรียงตามเวลา) — คืน emptyList ถ้าข้อมูลไม่พอ */
@@ -54,11 +62,13 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
     /**
      * คำนวณ markers จากแท่งเทียนที่มีอยู่แล้ว (ใช้ร่วมกับ SignalAlertProvider — ไม่ต้องดึงซ้ำ)
      * entryParams: params จุดเข้าที่จูนแล้วต่อ kind (จาก EntryTuning / grid search) — ว่าง = ใช้ default เดิมทุก kind
+     * kindsOverride: null = ใช้ ENABLED_KINDS (เฉพาะตัวที่มี edge); ส่งชุด kind เองเพื่อ forensics/backtest ย้อนหลัง
      */
     fun compute(
         candles: List<Candle>,
         maxPerKind: Int = MAX_MARKERS_PER_KIND,
-        entryParams: Map<String, com.example.personalaibot.automation.backtest.EntryParams> = emptyMap()
+        entryParams: Map<String, com.example.personalaibot.automation.backtest.EntryParams> = emptyMap(),
+        kindsOverride: Set<String>? = null
     ): List<SignalMarker> {
         if (candles.size < 60) return emptyList()
 
@@ -238,7 +248,19 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
             out += marks.takeLast(maxPerKind)
         }
 
-        return out.sortedBy { it.time }
+        // Closed-bar confirmation: strategy markers remain visible only when the
+        // signal candle itself shows enough directional intent. This is deliberately
+        // applied after edge-trigger detection so we do not alter the strategy state machine.
+        val timeToIndex = candles.withIndex().associate { it.value.timestamp to it.index }
+        val confirmed = out.filter { marker ->
+            val index = timeToIndex[marker.time] ?: return@filter false
+            StrategyConfirmationGate.evaluate(candles, index, marker.side, marker.label).accepted
+        }
+        // ตัด strategy ที่ forensics พิสูจน์ว่าไม่มี edge (ดู ENABLED_KINDS) — กรองหลังสุด
+        // เพื่อไม่แตะ state machine ของแต่ละกลยุทธ์ (re-enable ได้โดยแก้ ENABLED_KINDS ที่เดียว)
+        // kindsOverride != null → วิเคราะห์ย้อนหลังแบบระบุ kind เอง (forensics/backtest tools)
+        val allowedKinds = kindsOverride ?: ENABLED_KINDS
+        return confirmed.filter { signalKindOf(it.label) in allowedKinds }.sortedBy { it.time }
     }
 
     // ─── Math helpers ──────────────────────────────────────────────────────

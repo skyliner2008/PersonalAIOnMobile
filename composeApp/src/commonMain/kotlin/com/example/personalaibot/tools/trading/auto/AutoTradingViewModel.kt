@@ -1,6 +1,7 @@
 package com.example.personalaibot.tools.trading.auto
 
 import io.ktor.client.HttpClient
+import com.example.personalaibot.tools.trading.Mt5AccountInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,6 +56,17 @@ class AutoTradingViewModel(
     private val _qualityMetrics = MutableStateFlow(QualityMetrics())
     val qualityMetrics: StateFlow<QualityMetrics> = _qualityMetrics.asStateFlow()
 
+    // P6.3 — broker/account telemetry used by the execution status card.
+    private val _mt5Account = MutableStateFlow<Mt5AccountInfo?>(null)
+    val mt5Account: StateFlow<Mt5AccountInfo?> = _mt5Account.asStateFlow()
+
+    private val _accountStatus = MutableStateFlow("NOT_CONNECTED")
+    val accountStatus: StateFlow<String> = _accountStatus.asStateFlow()
+
+    // P6.4 mobile safety: serialize DEMO ↔ MT5 LIVE mode changes so rapid taps
+    // cannot race two remote config writes and leave the UI on a stale state.
+    private var executionModeUpdateInFlight = false
+
     init {
         scope.launch {
             var retryDelay = 5_000L
@@ -76,9 +88,49 @@ class AutoTradingViewModel(
     fun runOnceNow() = submit { remote.runOnce() }
     fun learnNow() = submit { remote.learn() }
 
+    /** P6.4: atomically guard the remote execution-mode transition from rapid UI taps. */
     fun updateWatchlist(list: List<String>) = persist { it.copy(watchlist = list.distinct()) }
     fun updateTimeframe(tf: String) = persist { it.copy(timeframe = tf) }
-    fun updateEnableLive(on: Boolean) = persist { it.copy(enableLiveTrading = on) }
+
+    /**
+     * Live execution is a safety-critical setting: do not leave the mobile UI in
+     * a state that differs from the server if the config update fails.
+     */
+    fun updateEnableLive(on: Boolean) {
+        if (_state.value.running) {
+            _state.value = _state.value.copy(message = "หยุด Auto-Trading ก่อนจึงจะเปลี่ยน Execution Mode ได้")
+            return
+        }
+        if (!isApproved()) {
+            _state.value = _state.value.copy(message = "MT5 server is not approved yet — Execution Mode unchanged")
+            return
+        }
+        if (executionModeUpdateInFlight) {
+            _state.value = _state.value.copy(message = "กำลังยืนยัน Execution Mode กับ MT5 server…")
+            return
+        }
+
+        val previous = _config.value
+        val next = previous.copy(enableLiveTrading = on)
+        executionModeUpdateInFlight = true
+        scope.launch {
+            try {
+                runCatching { remote.updateConfig(next) }
+                    .onSuccess(::applySnapshot)
+                    .onFailure { error ->
+                        // Keep the last confirmed server state. Never show LIVE merely
+                        // because the local optimistic update succeeded.
+                        _config.value = previous
+                        val confirmedMode = if (previous.enableLiveTrading) "MT5 LIVE" else "DEMO / PAPER"
+                        _state.value = _state.value.copy(
+                            message = "Execution Mode update failed — kept $confirmedMode: ${error.message ?: "unknown error"}"
+                        )
+                    }
+            } finally {
+                executionModeUpdateInFlight = false
+            }
+        }
+    }
     fun updateEnableAiMode(on: Boolean) = persist { it.copy(enableAiMode = on) }  // V23.0
     fun updateMinConfluence(v: Double) = persist { it.copy(minConfluence = v.coerceIn(20.0, 95.0)) }
     fun updateMinRRR(v: Double) = persist { it.copy(minRRR = v.coerceIn(0.5, 5.0)) }
@@ -183,6 +235,16 @@ class AutoTradingViewModel(
         // P4.2: refresh Smart-Upgrade quality metrics each cycle
         runCatching { remote.fetchQualityMetrics() }
             .onSuccess { _qualityMetrics.value = it }
+
+        // P6.3 — account telemetry is best-effort and must never block the auto engine.
+        runCatching { remote.fetchMt5Account() }
+            .onSuccess {
+                _mt5Account.value = it
+                _accountStatus.value = "CONNECTED"
+            }
+            .onFailure {
+                _accountStatus.value = "UNAVAILABLE"
+            }
     }
 
     private fun applySnapshot(snapshot: AutoTradingRemoteService.Snapshot) {

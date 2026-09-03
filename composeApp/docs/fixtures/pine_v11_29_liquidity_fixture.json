@@ -1,0 +1,28 @@
+{
+  "name": "REPLACE_WITH_TRADINGVIEW_EXPORT",
+  "symbol": "XAUUSD",
+  "timeframe": "M15",
+  "params": {
+    "lookback": 10,
+    "thresholdPercent": 0.1,
+    "swingLen": 10,
+    "maxZones": 50,
+    "maxVisiblePerSide": 5
+  },
+  "candles": [
+    {
+      "timestamp": 0,
+      "open": 0.0,
+      "high": 0.0,
+      "low": 0.0,
+      "close": 0.0,
+      "volume": 0.0
+    }
+  ],
+  "referenceSnapshots": [
+    {
+      "barIndex": 0,
+      "zones": []
+    }
+  ]
+}

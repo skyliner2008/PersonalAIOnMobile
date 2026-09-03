@@ -28,8 +28,8 @@ object SmcToolDefinitions {
                 |[SMC DASHBOARD] วิเคราะห์ครบทุก Smart Money Concept สำหรับ symbol ที่กำหนด
                 |แสดง: Market Structure (BOS/CHoCH), Order Blocks + FVG, Liquidity Zones, Premium/Discount Zone
                 |พร้อม Confluence Stars (★★★★★) บอก strength ของแต่ละ zone
-                |ใช้เมื่อ: "วิเคราะห์ SMC BTC", "Order blocks ETH", "Smart money BTCUSDT 1h"
-                |ใช้เมื่อ: "zone ไหน strong ที่สุด", "BOS ล่าสุดเป็นอะไร", "Premium Discount ETHUSDT"
+                |ใช้เมื่อ: "วิเคราะห์ SMC BTC", "Order blocks ETH", "Smart money BTCUSDT M15"
+                |ใช้เมื่อ: "zone ไหน strong ที่สุด", "BOS ล่าสุดเป็นอะไร", "Premium Discount ETHUSDT\"\n                |Main TF = M15 ตาม Pine V11.29; ถ้าผู้ใช้ไม่ระบุ timeframe ให้เว้น interval เพื่อให้ระบบใช้ M15 อัตโนมัติ\n                |ห้ามเลือก 1h/4h เองเพียงเพราะเป็นค่าเริ่มต้นของโมเดล; ใช้ TF อื่นเมื่อผู้ใช้ระบุชัดเจนเท่านั้น"
             """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
@@ -38,8 +38,8 @@ object SmcToolDefinitions {
                         "Symbol ที่ต้องการวิเคราะห์ เช่น BTCUSDT, XAUUSD (Gold), EURUSD, AAPL"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1d",
-                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d")
+                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w (หรือ m1, m5, m15, h1, h4, d1, w1)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
                     )
                 ),
                 required = listOf("symbol")
@@ -71,8 +71,8 @@ object SmcToolDefinitions {
             name = "trading_smc_liquidity",
             description = """
                 |[MTF LIQUIDITY] แสดง Liquidity Zones ข้ามหลาย Timeframe พร้อม Confluence Stars
-                |Equal Highs = แหล่ง Sell-side Liquidity (ราคาจะไป sweep ก่อนลง)
-                |Equal Lows  = แหล่ง Buy-side Liquidity  (ราคาจะไป sweep ก่อนขึ้น)
+                |Equal Highs = Buy-side Liquidity (ราคามีโอกาส sweep เหนือ EQH ก่อนกลับลง)
+                |Equal Lows  = Sell-side Liquidity (ราคามีโอกาส sweep ใต้ EQL ก่อนกลับขึ้น)
                 |Stars ★★★★★ = OB Confluence + Structure + Premium/Discount + Trend alignment
                 |ใช้เมื่อ: "liquidity BTC ทุก TF", "Equal highs ETH", "แหล่ง liquidity SOLUSDT"
                 |ใช้เมื่อ: "ราคาจะไป sweep ที่ไหน", "MTF liquidity zones"
@@ -105,8 +105,8 @@ object SmcToolDefinitions {
                         "Symbol ที่ต้องการวิเคราะห์ เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 5m, 15m, 1h, 4h, 1d",
-                        enum = listOf("5m", "15m", "30m", "1h", "4h", "1d")
+                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w (หรือ m1, m5, m15, h1, h4, d1, w1)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
                     )
                 ),
                 required = listOf("symbol")
@@ -133,8 +133,8 @@ object SmcToolDefinitions {
                         "Symbol ที่ต้องการวิเคราะห์ เช่น BTCUSDT, XAUUSD, EURUSD, AAPL"),
                     "interval" to ParameterProperty(
                         type = "STRING",
-                        description = "Timeframe: 15m, 1h, 4h, 1d",
-                        enum = listOf("15m", "1h", "4h", "1d")
+                        description = "Timeframe: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w (หรือ m1, m5, m15, h1, h4, d1, w1)",
+                        enum = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1")
                     )
                 ),
                 required = listOf("symbol")
