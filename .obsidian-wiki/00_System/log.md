@@ -1,4 +1,232 @@
-## 2026-09-04 (ล่าสุด) — Full Non-Trading Tools Audit & Flexibility Upgrades (การตรวจสอบและยกระดับ Tools หมวดอื่นๆ นอกเหนือจากการเทรด)
+## 2026-09-09 — Gemini 3.1 Flash Live Primary Model & Spontaneous Model Switch Fix
+- **Establish `gemini-3.1-flash-live-preview` as Primary Live Model (`ModelConfig.kt`, `SettingsController.kt`, `LiveGeminiService.kt`, `JarvisViewModel.kt`)**:
+  - **ปัญหาที่พบ**: ผู้ใช้ทดสอบพบว่า `gemini-3.1-flash-live-preview` ทำงานได้เร็วที่สุด (~835ms), สำเนียงไทยเป็นธรรมชาติ และเรียก Native Tools แม่นยำ แต่ในบางครั้งระบบกลับสลับไปใช้ `gemini-2.5-flash-native-audio-preview-09-2025` เองโดยอัตโนมัติ ทั้งที่ผู้ใช้เลือก 3.1 ไว้
+  - **สาเหตุเชิงลึก**:
+    1. `"gemini-3.1-flash-live-preview"` เคยถูกบันทึกไว้ใน `deprecatedLiveModels` ของ `SettingsController.kt` ทำให้ทุกครั้งที่เปิดแอปใหม่ (`loadPersistedSettings`) โค้ดจะมองว่า 3.1 ตกยุค และ migrate กลับไปเป็น `09-2025` ใน SQLite
+    2. `JarvisViewModel.kt` มีการเชื่อมต่อ `orchestrator.onLiveModelChanged` ไปยัง `settings.updateLiveModelSilently(winningModel)` ซึ่งเมื่อเกิด runtime fallback ชั่วคราว (เช่น เกิดความล่าช้าบนเครือข่าย) จะนำโมเดล fallback ไปเซฟทับฐานข้อมูลจริงอย่างถาวร
+    3. `LiveGeminiService.kt` ไม่ได้รีเซ็ตตัวแปร `liveModelName` กลับไปเป็นโมเดลที่ผู้ใช้เลือกไว้เมื่อเริ่ม session ใหม่ ทำให้โมเดล fallback ค้างข้ามรอบการสนทนา
+    4. `setupWatchdog` ตั้งเวลา timeout ไว้เพียง 3500ms ซึ่งสั้นเกินไปสำหรับเครือข่ายมือถือบางช่วงเวลา เมื่อเกิด timeout จะติด penalty นานถึง 15 นาที และข้าม 3.1 ไปใช้ fallback ตัวอื่นทันที
+  - **แนวทางการแก้ไข**:
+    1. ตั้ง `DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"` และจัดให้อยู่อันดับ 1 ใน `liveCandidates` และ `SEED_LIVE_MODELS`
+    2. ลบ 3.1 ออกจาก `deprecatedLiveModels` และใส่ `09-2025` เข้าไปแทนเพื่อ auto-migrate ฐานข้อมูลเก่าที่เคยถูกเขียนทับกลับมาเป็น 3.1 ทันที
+    3. ยกเลิกการเขียนทับฐานข้อมูลใน `JarvisViewModel.kt` ตอน runtime fallback
+    4. รีเซ็ต `liveModelName = configuredLiveModelName` เสมอใน `LiveGeminiService.kt` ทุกครั้งที่เริ่มคุยรอบใหม่
+    5. เพิ่ม watchdog timeout เป็น 6000ms และลดเวลา penalty เหลือ 60 วินาที
+    6. อัปเดต Unit Test `DynamicModelTest.kt` ให้รองรับและผ่านทั้งหมด 100%
+
+## 2026-09-08 — Keyguard Lockscreen Overlay & Normal Mode Screen Sleep Fix
+- **Fix MainActivity Displaying over Lockscreen in Normal Mode (`AndroidManifest.xml`, `MainActivity.kt`, `AlwaysLiveManager.kt`, `FloatingWidgetService.kt`)**:
+  - **ปัญหาที่พบ**: เมื่อเปิดแอปค้างไว้ในโหมดปกติ และปล่อยให้มือถือดับหน้าจอ/ล็อกหน้าจอ เมื่อกดปุ่ม Power ให้หน้าจอสว่างขึ้นมา แทนที่จะติดหน้าล็อก (ใส่รหัส PIN/สแกนนิ้ว) กลับแสดงหน้าแอปทับหน้าล็อก ทำให้ใช้งานแอปได้แต่ไปหน้าโฮมหรือแอปอื่นไม่ได้ จนกว่าจะกดปิดแอปจึงจะโผล่ไปยังหน้าปลดล็อก
+  - **สาเหตุเชิงลึก**:
+    1. `AndroidManifest.xml` ประกาศ `android:turnScreenOn="true"` และ `android:showWhenLocked="true"` แบบ Static บนแท็ก `<activity android:name=".MainActivity">` ส่งผลให้ Window Manager ของระบบบังคับเรนเดอร์ Activity เหนือ Keyguard เสมอ
+    2. `AlwaysLiveManager.wakeScreen()` สั่ง `turnScreenOnTemporarily()` โดยไม่ตรวจสอบสถานะ ทำให้มีการเซ็ต `setShowWhenLocked(true)` และ `FLAG_SHOW_WHEN_LOCKED` แม้ผู้ใช้อยู่ในโหมดปกติ
+    3. ขาดการล้าง Flag ใน Lifecycle ของ `MainActivity.kt` (`onCreate`, `onResume`, `onStop`) เมื่ออยู่ในสถานะ `AlwaysLiveState.OFF`
+    4. `FloatingWidgetService.kt` มีการใส่ `FLAG_KEEP_SCREEN_ON` ใน WindowParams ของ Overlay
+  - **แนวทางการแก้ไข**:
+    1. ลบ `android:turnScreenOn="true"` และ `android:showWhenLocked="true"` ออกจาก `AndroidManifest.xml` อย่างถาวร และเปลี่ยนไปใช้ Dynamic Runtime API ควบคุมเฉพาะโหมด Always Live เท่านั้น
+    2. ใส่เงื่อนไข `if (_state.value == AlwaysLiveState.FULL_SCREEN)` ใน `AlwaysLiveManager.wakeScreen()` ก่อนเรียก `turnScreenOnTemporarily()`
+    3. เพิ่ม `clearScreenFlags()` ใน `onCreate()`, `onResume()`, และ `onStop()` ใน `MainActivity.kt` เพื่อล้าง `FLAG_SHOW_WHEN_LOCKED`, `FLAG_TURN_SCREEN_ON`, และ `FLAG_KEEP_SCREEN_ON` ออกจาก Window
+    4. ลบ `FLAG_KEEP_SCREEN_ON` ออกจาก `FloatingWidgetService.kt`
+
+## 2026-09-08 — Screen Wakeup Lifecycle & Normal Mode Auto-Sleep Enforcement
+- **Enforce Screen Sleep in Normal Mode (`App.kt`, `MainActivity.kt`, `AlwaysLiveManager.kt`)**:
+  - **ปัญหาที่พบ**: เมื่อเข้าโหมดควบคุม (Always Live) แล้วสั่งปิด (`disable() → OFF`) หน้าจอยังคงติดสว่างค้างตลอดเวลา ไม่พักหน้าจอตามเวลา Display Timeout ของระบบ จนกว่าผู้ใช้จะกดปิดแอป (Kill task)
+  - **สาเหตุเชิงลึก**:
+    1. `MainActivity.wakeAndTurnScreenOn()` เรียก `window.addFlags(FLAG_KEEP_SCREEN_ON)` ค้างไว้บน Activity Window โดยไม่มีการ Clear Flags เมื่อออกจากโหมด Always Live
+    2. `AlwaysLiveManager.wakeScreen()` เรียก `acquireScreenBrightLock()` ซึ่งถือ `SCREEN_BRIGHT_WAKE_LOCK` นานถึง 4 ชั่วโมง ส่งผลให้หน้าจอติดสว่างค้างแม้จะไม่ได้อยู่ในโหมดควบคุม
+    3. `App.kt` ผูก `onKeepScreenOn(isListening || showAlwaysLive)` ทำให้เมื่อมีการฟังเสียงค้างอยู่ หน้าจอจะไม่ยอมพัก
+    4. เมื่อ `closeAlwaysLive()` ถูกเรียก ไม่ได้สั่งหยุด `viewModel.stopVoiceInput()`
+  - **แนวทางการแก้ไข**:
+    1. เพิ่มฟังก์ชัน `clearScreenFlags()` ใน `MainActivity.kt` เพื่อล้าง `FLAG_KEEP_SCREEN_ON`, `FLAG_TURN_SCREEN_ON`, `FLAG_SHOW_WHEN_LOCKED`, `setShowWhenLocked(false)`, และ `setTurnScreenOn(false)` ทุกครั้งที่ออกจากโหมด Always Live
+    2. ปรับปรุง `AlwaysLiveManager.wakeScreen()` ให้ใช้ Temporary WakeLock (10 วินาที) สำหรับปลุกหน้าจอชั่วคราวเท่านั้น และจะไม่ถือ `SCREEN_BRIGHT_WAKE_LOCK` หากไม่ได้อยู่ในสถานะ `FULL_SCREEN` หรือ `MINI_FLOATING`
+    3. ปรับ `App.kt` ให้ `onKeepScreenOn(showAlwaysLive)` เท่านั้น แยก `isListening` ออกจากการเปิดหน้าจอค้าง เพื่อให้ในโหมดปกติหน้าจอดับพักได้ตามปกติ 100%
+    4. ผูก `viewModel.stopVoiceInput()` เมื่อปิด Always Live ผ่าน `registerCloseAlwaysLive`
+
+## 2026-09-08 — Anticipation Alert Card UI Refinement (Confidence & Price Clean Row, Redundancy Elimination)
+- **AnticipationAlertCard3D UI Layout & Text Squeezing Fix (`MessageBubble.kt`)**:
+  - **แก้ไขปัญหาตัวเลข % เบียดตกขอบแนวตั้ง**: นำตัวเลขความเชื่อมั่น (`${meta.confidence}%`) ออกจากแถว Header (บรรทัดที่ 1) ทำให้ส่วนแสดงผล Badge คาดการณ์ `⚡ คาดการณ์ SELL/BUY`, ชื่อคู่เงิน `XAUUSD`, และ Badge Timeframe `15M` มีพื้นที่กว้างขวางเต็มที่ ไม่ถูกบีบตัวอักษรแนวตั้งอีกต่อไป
+  - **บรรทัดที่ 2: แสดงเฉพาะ % ความเชื่อมั่น และราคาปัจจุบัน**: จัดวางให้อยู่ในแถวที่ 2 โดยเฉพาะ (`ความเชื่อมั่น 76%` และ `ราคา 4405.06`) ด้วยระยะห่างซ้าย-ขวาอย่างสมดุล (SpaceBetween) ตัวหนังสืออ่านง่ายชัดเจน
+  - **กำจัดการแสดงผลซ้ำซ้อน (Redundancy Elimination)**: ตัดการแสดงผล `meta.zone` (เช่น `EMA Convergence: 4409.31 → 4408.98`) ออกจากบรรทัดที่ 2 ซึ่งเดิมข้อความมีความยาวจนถูกตัดท้าย `....` และซ้ำซ้อนกับรายการ `ปัจจัยที่เกิด` ด้านล่าง ช่วยให้การ์ดกระชับ สะอาดตา และไม่อึดอัด
+- **Fallback Markdown Card Synchronization (`JarvisAutomationService.kt`)**:
+  - ปรับปรุง `buildAnticipationChatCard` ให้บรรทัดที่ 2 แสดงผล `ความเชื่อมั่น: $conf% • ราคา: $close` ตรงกันกับการ์ด 3D ไม่ให้มีข้อความโซนซ้ำซ้อนกับปัจจัยที่เกิด
+
+## 2026-09-07 — Gemini Live Voice & Connection Stability Optimization
+- **Multi-Tier Automated Fallback Chain (`ModelConfig.kt`, `LiveGeminiService.kt`)**:
+  - รองรับการสลับโมเดล Live อัตโนมัติ: `gemini-3.1-flash-live-preview` -> `gemini-2.5-flash-native-audio-preview-12-2025` -> `gemini-2.5-flash-native-audio-latest` เมื่อเกิดข้อผิดพลาดในการ Setup หรือการเชื่อมต่อ โดยไม่ต้องให้ผู้ใช้เข้าไปกดเปลี่ยนโมเดลเอง
+  - ระบบคัดกรอง Blacklisted / Dead models ออกจาก Chain อัตโนมัติ
+- **7-Second Setup Watchdog (`LiveGeminiService.kt`)**:
+  - Coroutine watchdog คอยจับเวลาการตอบกลับ `setupComplete` จาก Server ภายใน 7 วินาที หากเกินเวลาจะปิด socket และ rotate ไปยัง fallback model ถัดไปทันที ป้องกันการค้างรอนาน 15–30 วินาที
+- **Acoustic Synthesizer Purity & Native Thai Accent Shield (`VoiceController.kt`, `JarvisPersona.kt`)**:
+  - เปลี่ยน Realtime Greeting Input จาก `"สวัสดีJARVIS พร้อมคุยไหม"` เป็นภาษาไทยล้วน `"สวัสดีจาวิส พร้อมคุยไหม"` ป้องกัน Acoustic Decoder ของ Gemini สลับไปใช้สำเนียงและ Prosody ภาษาอังกฤษ
+  - ล็อกประโยคทักทายตายตัว (Fixed Greeting): `"สวัสดีค่ะนายท่าน จาวิสพร้อมคุยแล้วค่ะ มีอะไรให้จาวิสช่วยวันนี้ดีคะ"` (ผูกกับ `userCallName` และ gender particle) คำต่อคำ
+  - ลบ Vibe บัตเลอร์อังกฤษออกจากค่าตั้งต้น และห้ามแต่งประโยคเรื่องตลาดหุ้น/การเทรดในคำทักทายเริ่มต้น เพื่อให้น้ำเสียง อารมณ์ และสำเนียงนุ่มนวล ชัดเจน เหมือนกันทุกครั้ง
+
+## 2026-09-06 — Always AI Live Mode (Full-Screen, Mini Robot Overlay & Background Wake-on-Voice)
+- **Always AI Live Mode Architecture (`AlwaysLiveManager.kt`, `AlwaysLiveScreen.kt`, `FloatingWidgetService.kt`, `HotwordDetector.kt`, `JarvisAvatar.kt`)**:
+  - **Full-Screen Live Mode**: หน้าจอแสดงผล JARVIS Robot Avatar 3D-styled แบบเต็มจอ พร้อมวงแหวน Audio Visualizer 36 แท่งที่ตอบสนองต่อระดับเสียงไมโครโฟน, แสงพื้นหลัง Dynamic Ambient Gradient ที่เปลี่ยนโทนสีตามอารมณ์ของ AI, ป้ายแสดงสถานะ Live, และแถบควบคุม (ไมค์, กล้องสลับเลนส์หน้า-หลัง, ย่อเป็น Floating Widget, วางสาย)
+  - **Mini Robot Overlay (`FloatingWidgetService.kt`)**: อัปเกรดจาก Text Bubble เดิม สู่ Animated Mini Robot Avatar (~80dp) ที่ลอยทับแอปอื่นผ่าน ComposeView บน Foreground Service (พร้อม `ServiceLifecycleOwner`), รองรับการลากย้ายและ Snap to Edge อัตโนมัติ, แตะเพื่อเข้าแอป, แตะสองครั้ง (Double-tap) เพื่อขยายเต็มจอ (Expand), และแตะค้างเพื่อเปิด/ปิดเสียง
+  - **Background Wake-on-Call / Hotword (`HotwordDetector.kt`)**: โหมดรับฟังคำสั่งเสียงแม้ขณะจอดับหรือพักหน้าจอ โดยใช้ low-power AudioRecord 8 kHz Mono แบบ Duty-cycle (ฟัง 2 วิ พัก 1 วิ) ร่วมกับ RMS energy VAD ปลุกเครื่องอัตโนมัติ (`ACQUIRE_CAUSES_WAKEUP`, `turnScreenOn`, `showWhenLocked`) และเปิดหน้าจอ Always Live ทับ Lockscreen
+  - **JARVIS 3D-Styled Robot Canvas Avatar (`JarvisAvatar.kt`)**: วาดหุ่นยนต์แอนิเมชันด้วย Compose Canvas แสดงอารมณ์ 10 สถานะ (`IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `HAPPY`, `EXCITED`, `SAD`, `ANGRY`, `LOVE`, `SLEEPING`) พร้อมระบบ micro-animations (การหายใจ, กะพริบตา, โยกหัว, คลื่นปากพูด, แสงเสาอากาศ, หัวใจลอย, ตัวอักษร Zzz)
+  - **State Machine Central Coordinator (`AlwaysLiveManager.kt`)**: บริหารสถานะระหว่าง `OFF`, `FULL_SCREEN`, `MINI_FLOATING`, `BACKGROUND_LISTEN`, จัดการ WakeLock และ BroadcastReceiver สลับโหมดอัตโนมัติตามสถานะหน้าจอเปิด/ปิด
+  - **Unit Test Coverage (`AlwaysLiveTest.kt`)**: ทดสอบครอบคลุม Enum ทั้ง 10 อารมณ์, State Machine transitions, Keyword Sentiment Analysis, ค่าตั้งต้น และ Immutability ผ่าน 100%
+
+## 2026-09-06 — JARVIS Full Mobile Device Control via Voice & Accessibility Service
+- **Full Mobile Device Control Architecture (`JarvisAccessibilityService.kt`, `DeviceControlExecutor.kt`, `DeviceControlHandler.kt`, `DeviceToolDefinitions.kt`)**:
+  - **ยกระดับ JARVIS สู่การควบคุมมือถือทั้งเครื่อง**: รองรับการสั่งงานด้วยเสียงแบบ Real-time (Gemini Live) หรือ Text Chat ในการควบคุมระบบและแอปพลิเคชันอื่นบนมือถือแบบไร้สัมผัส (Hands-free Full Device Automation)
+  - **17 เครื่องมือใหม่ในหมวด `📱 Device Control` (`DeviceToolDefinitions.kt`)**:
+    - **Hardware**: `device_flashlight` (เปิด/ปิดไฟฉาย), `device_volume` (ปรับระดับเสียงทุก stream), `device_brightness` (ปรับความสว่างจอ/Auto), `device_media_control` (เล่น/หยุด/ข้ามเพลง)
+    - **App Launcher**: `device_open_app` (เปิดแอป 40+ ตัวหรือค้นหาในเครื่อง), `device_navigate` (นำทาง Google Maps), `device_send_email` (ร่างอีเมล), `device_add_calendar` (เพิ่มนัดในปฏิทิน), `device_make_call` (โทรศัพท์), `device_send_sms` (ร่างข้อความ), `device_set_alarm` (ตั้งปลุก), `device_open_url` / `device_search_web` (เบราว์เซอร์และการค้นหา)
+    - **Screen Interaction & Accessibility**: `device_read_screen` (สแกนองค์ประกอบ UI และข้อความบนจอ), `device_tap` (คลิกปุ่มตามข้อความหรือพิกัด), `device_type_text` (พิมพ์ข้อความลงในช่องที่โฟกัส), `device_scroll` (เลื่อนจอขึ้น/ลง), `device_press_button` (ปุ่ม Back/Home/Recents/Notifications/Quick Settings/Screenshot/Lock), `device_get_app_info` (ดูแอปที่กำลังเปิดอยู่)
+    - **System Info**: `device_battery_status` (เช็คแบตเตอรี่และการชาร์จ), `device_wifi_status` (เช็คสถานะ WiFi และ SSID)
+  - **KMP Pure Kotlin Decoupling**: สร้าง `DeviceControlHandler` ใน `commonMain` เพื่อให้ `ToolExecutor` สามารถ route คำสั่งไปยัง `DeviceControlExecutor` ใน `androidMain` ได้อย่างสมบูรณ์โดยไม่มีปัญหา Kotlin Multiplatform dependency
+  - **Accessibility Setup Integration (`MainActivity.kt`, `AndroidManifest.xml`, `accessibility_service_config.xml`)**:
+    - ลงทะเบียน `JarvisAccessibilityService` ใน Manifest พร้อมสิทธิ์ `CALL_PHONE`, `SEND_SMS`, `READ_CALENDAR`, `WRITE_CALENDAR`, `SET_ALARM`, `WRITE_SETTINGS`
+    - เพิ่มรายการเปิดใช้งาน Accessibility ใน Setup Checklist ของ Settings Dialog ให้ผู้ใช้แตะเปิดได้ในคลิกเดียว
+  - **Persona Rules (`JarvisPersona.kt`)**: เพิ่ม `DEVICE_CONTROL_RULES` ในทั้ง `CHAT_SYSTEM_PROMPT` และ `LIVE_SYSTEM_PROMPT` กำชับ AI ให้ตอบสนองและเรียกใช้ Tool ควบคุมอุปกรณ์ทันที
+  - **Unit Test Coverage (`DeviceControlTest.kt`)**: ทดสอบความครบถ้วนของนิยามเครื่องมือ, การลงทะเบียนใน ToolRegistry, และการส่งคำสั่งผ่าน ToolExecutor ผ่าน 100%
+
+## 2026-09-05 — Anticipation Card UI Text Squeezing Fix, Timeframe Display Badge & Model Fallback Optimization
+- **AnticipationAlertCard3D UI Layout & Price Squeezing Fix (`MessageBubble.kt`)**:
+  - **ปัญหาที่ตรวจพบจาก Screenshot**: ในการ์ดคาดการณ์ 3D แถบ `📍 EMA Convergence: 4438.38 → 4436.73` กินพื้นที่เกือบเต็มความกว้างของ Row ทำให้ข้อความราคา `@ 4424.04` ทางขวาสุดเหลือพื้นที่กว้างเพียงไม่กี่พิกเซล และถูก Compose บีบตัวอักษร wrap แนวตั้งทีละ 1 ตัวอักษรลงมาตามขอบการ์ด (`.`, `@`, `4`, `4`, `2`, `4`, `.`, `0`, `4`) ดูคล้ายข้อความเสียหาย
+  - **การแก้ไข (Layout Constraints)**:
+    - นำ `TextOverflow` มาใช้งานร่วมกับ `Modifier.weight(1f, fill = false)`, `maxLines = 1`, `overflow = TextOverflow.Ellipsis` สำหรับ `meta.zone`
+    - กำหนดให้ราคา `@ ${meta.price}` เป็น `softWrap = false`, `maxLines = 1` และจัดวางแบบ `Arrangement.SpaceBetween`
+    - ทำให้ราคาคำนวณขนาดกว้างเต็มที่ก่อนเสมอ และส่วนชื่อโซนจะย่อหรือตัดท้ายด้วย `...` อย่างสวยงาม ไม่มีการบีบตัวอักษรเป็นแถวแนวตั้งอีกต่อไป
+- **Timeframe Chip Display & Lifecycle Consistency (`MessageBubble.kt`, `JarvisOrchestrator.kt`, `ToolExecutor.kt`, `JarvisAutomationService.kt`)**:
+  - **ปัญหาความสับสน**: ใน Log และเสียง AI แจ้งว่า *"ตั้งแจ้งเตือนที่ไทม์เฟรม 1 ชั่วโมง เรียบร้อย"* แต่บนการ์ดแชทเดิมแสดงเพียงชื่อ `XAUUSD` โดดๆ ไม่มี Timeframe ทำให้ผู้ใช้ตรวจสอบไม่ได้ว่าการ์ดที่เด้งขึ้นมาเป็นการคาดการณ์ของ TF ใด
+  - **การแก้ไข**:
+    - เพิ่ม Badge Timeframe แบบโปร่งแสง (`[1H]`, `[15M]`, `[4H]` ฯลฯ) ใน Header ของทั้ง `AnticipationAlertCard3D` และ `SignalAlertCard3D` ติดข้างชื่อคู่เงิน
+    - ใช้ `IndicatorAlertProvider.splitSymbolAndTf` ในการแยก Symbol และ Timeframe (หากไม่มี suffix จะแสดง `1H` อัตโนมัติ)
+    - ปรับ `ToolExecutor.kt` และ `JarvisOrchestrator.kt` ให้เก็บ Symbol ในรูปแบบ `XAUUSD@1h` และชื่อ Alert `Anticipation XAUUSD [1H]` สำหรับ Anticipation Alerts
+    - ปรับ `buildAnticipationSpeech` และ `buildAnticipationChatCard` ใน `JarvisAutomationService.kt` ให้ระบุและพูด Timeframe เช่น *"คาดการณ์ ทองคำ ไทม์เฟรม 1 ชั่วโมง..."*
+    - เพิ่มการตรวจจับ Edge-triggered bar timestamp สำหรับ `signal_anticipation` และ `signal_anticipation_id` ใน `JarvisAutomationService.kt`
+- **Gemini Model Fallback & Latency Optimization (`ModelConfig.kt`)**:
+  - **ปัญหาจาก Log**: โมเดลหลักเดิม `gemini-3.1-pro` คืนค่า 404 (not found in v1beta), `gemini-2.5-flash` คืนค่า 404 (deprecated for new users), `gemini-3.5-flash-lite` ติด timeout 8s ส่งผลให้ AI summary เสียเวลารอ cascade fallback นานถึง 13.9 วินาที
+  - **การแก้ไข**: ปรับ `DEFAULT_MAIN_MODEL = "gemini-3.6-flash"` ตามคำแนะนำของ Google API และเรียง `GEMINI_FALLBACK_MODELS` นำโมเดลที่เสถียรและเร็ว (`gemini-3.6-flash`, `gemini-3.1-flash-lite`) ขึ้นลำดับแรก
+- **Unit Test Coverage (`SignalAnticipationTest.kt`)**:
+  - เพิ่มการทดสอบ `testAnticipationTimeframeDisplayAndParsing` ยืนยันการแยกและแสดง Timeframe ถูกต้อง 100%
+
+## 2026-09-05 — Dedicated Signal Anticipation Tool (`trading_signal_anticipation`), 10 Curated Factors & Multi-Factor Confluence
+- **Dedicated Signal Anticipation Tool Architecture (`TradingToolDefinitions.kt`, `ToolRegistry.kt`, `ToolExecutor.kt`, `JarvisPersona.kt`)**:
+  - **ความยืดหยุ่นที่เพิ่มขึ้นตามคำขอของผู้ใช้**:
+    - สร้าง Tool ใหม่ `trading_signal_anticipation` โดยตรงสำหรับ AI (ทั้งในโหมด Text Chat และ Live Voice)
+    - รองรับคำสั่งเสียง/ข้อความ เช่น *"ใช้ tool คาดการณ์ล่วงหน้า ทองคำ"* หรือ *"ตั้งแจ้งเตือนคาดการณ์ XAUUSD"*
+    - ฟังก์ชันภายในผูกกับการสร้าง Alert อัตโนมัติ (`trading_signal_alert`, `field = signal_anticipation`, `op = >=`, `value = 1`) โดย AI ดำเนินการให้ทันทีโดยไม่ถามย้อนให้ผู้ใช้สับสน
+    - **ป้องกันความสับสนใน UI**: นำ Preset การตั้งค่า Anticipation ด้วยตนเองออกจาก UI (`AutomationScreen.kt`) ให้การตั้งค่าคาดการณ์ล่วงหน้าถูกจัดการผ่าน AI Tool เท่านั้นตามความต้องการของผู้ใช้
+- **Curated 10-Factor Whitelist & Dynamic Configuration (`AnticipationConfigManager.kt`)**:
+  - สร้างคลังปัจจัยมาตรฐาน 10 ปัจจัยที่ผ่านการพิสูจน์ทางคณิตศาสตร์/เทคนิคอล ป้องกันผู้ใช้หรือ AI ระบุปัจจัยมั่ว/ผิดพลาด:
+    1. `KEYZONE_PROXIMITY` (Core Default): แตะโซน Demand/Supply OB, FVG, Swing Liquidity (0.3x ATR)
+    2. `WICK_SWEEP_REJECTION` (Core Default): กวาด Low/High 10 แท่งแล้วทิ้งไส้เทียนปฏิเสธราคา (Wick >= 1.5x Body)
+    3. `RSI_EXTREME` (Core Default): RSI14 Oversold (<=28) หรือ Overbought (>=72)
+    4. `EMA_NEAR_CROSS` (Core Default): EMA 14/60 Dynamic Convergence บีบตัวเข้าหากันในระยะกระชั้นชิด
+    5. `BOLLINGER_SQUEEZE` (Extended): Bollinger Bandwidth แคบผิดปกติ (<= 2.2x ATR) สะสมพลังเตรียม Breakout
+    6. `MACD_HISTOGRAM_TURN` (Extended): MACD Histogram หดตัวกลับทิศใกล้เส้น 0
+    7. `VOLUME_ABSORPTION` (Extended): ปริมาณ Volume สูง 1.8x แต่ Spread แคบ (ซุ่มเก็บของหรือรับแรงเทขาย)
+    8. `FIBONACCI_GOLDEN_POCKET` (Extended): แตะระดับ Golden Pocket 0.618 - 0.650
+    9. `STOCHASTIC_OVERSOLD_TURN` (Extended): Stochastic %K/%D ตัดขึ้นจาก <20 หรือตัดลงจาก >80
+    10. `SESSION_OPEN_SWEEP` (Extended): กวาด High/Low ของ Session ก่อนหน้า (เช่น Asia High/Low Sweep)
+  - AI สามารถดึงดูรายการ (`list_factors`), แก้ไขเพิ่ม/ลดปัจจัย (`config`), รีเซ็ต (`reset`), และแนะนำปัจจัยที่เหมาะสมตามประเภทสินทรัพย์ (`recommend`) ได้
+- **Multi-Factor Confluence Synthesis & Confidence Boosting (`SignalAlertProvider.kt`)**:
+  - เมื่อราคาเข้าเงื่อนไขหลายปัจจัยในทิศทางเดียวกัน ระบบจะรวม Confluence เข้าด้วยกัน (เช่น Keyzone + Wick Sweep + RSI + EMA)
+  - ปรับสเกลความเชื่อมั่นแบบไดนามิก: 1 ปัจจัย = ค่าเริ่มต้น, 2 ปัจจัย = 80-85%, 3 ปัจจัย = 88-92%, 4+ ปัจจัย = 95-96%
+  - สรุปเหตุผลรวมในการ์ดแชท 3D และส่งเสียงสรุปผ่าน Live Voice ชัดเจน
+- **Compact 3D Card Layout & Triggered-Factors-Only Display (`MessageBubble.kt`, `JarvisAutomationService.kt`)**:
+  - ปรับการ์ด 3D คาดการณ์ในแชท (`AnticipationAlertCard3D`) ให้กะทัดรัด ไม่กินพื้นที่หน้าจอมือถือ
+  - **แสดงเฉพาะปัจจัยที่เกิด (Triggered Factors Only)**: ตัดแถวข้อมูลซ้ำซ้อน (ทิศทาง, โครงสร้างตลาด 5TF กล่องใหญ่) ออก เหลือเพียง Badge หัวการ์ด, โซนสำคัญ/ราคา และรายการปัจจัยที่ตรวจพบจริงในสไตล์ Bullet/Tag ชัดเจน
+  - ปรับปรุง `buildAnticipationChatCard` ใน fallback Markdown ให้แสดงเฉพาะข้อมูลกระชับและปัจจัยที่เกิด
+- **AI Live Voice Summary Optimization — Bias & Key Watch Points (`JarvisPersona.kt`, `JarvisAutomationService.kt`)**:
+  - **ไม่ต้องบอกค่าทางเทคนิคมากมาย**: ห้ามอ่านตัวเลขทศนิยมยิบย่อย, ค่า RSI ละเอียด, สเปรด หรือสูตรคำนวณออกเสียง
+  - **เน้นสรุปแนวโน้มทิศทาง และสิ่งที่ต้องจับตามองเป็นหลัก**: สรุปว่ากำลังลุ้นกลับตัวขึ้นหรือลงที่แนวรับ/ต้าน และเตือนให้ผู้ใช้จับตาดูการปิดแท่งเทียนยืนยันก่อนเข้าออเดอร์
+  - เพิ่มกฎข้อ 11 ใน `LIVE_RULES` ของ `JarvisPersona.kt` กำชับ AI ให้พูดสั้น กระชับ ชัดเจน 1-2 ประโยค จบสมบูรณ์ ลงท้ายด้วย 'ค่ะ' เสมอ
+- **Unit Test Verification (`AnticipationConfigManagerTest.kt`, `SignalAnticipationTest.kt`)**:
+  - ทดสอบการจัดการ Whitelist, การเพิ่ม/ลดปัจจัย, การบล็อกปัจจัยที่ไม่ได้อยู่ในคลัง, การคำนวณ Confluence และการตรวจสอบความพร้อมของ Tool ผ่าน 100%
+
+## 2026-09-04 — SignalTracker Duplication Fix & TradingView WebSocket Timeout Optimization
+- **SignalOutcomeTracker Deduplication & Lifecycle Fix (`SignalAlertProvider.kt`, `SignalOutcomeTracker.kt`, `JarvisDatabase.sq`)**:
+  - **Verified in Production Log**: ใน Log ล่าสุด (18:53:04 - 19:29:48) เมื่อเกิดสัญญาณใหม่ `XAUUSD_1h_SELL_1788519600000` ที่เวลา 19:08:12 ระบบบันทึก `SignalTracker: Recorded signal ...` **เพียงครั้งเดียวถ้วน** และไม่พ่นซ้ำหรือบันทึกทับในรอบถัดไปอีกเลยตลอด 21+ นาทีที่เหลือ
+- **TradingView WebSocket Host-Level Circuit Breaker & Cascade Abort (`SmcApiService.kt`)**:
+  - **Root Cause Identified**: เดิมการตั้ง backoff เป็นระดับ Symbol + Interval (`"$sym|$interval"`) ทำให้เมื่อเกิดเน็ตเวิร์ก timeout ไปยัง `data.tradingview.com` แต่ละ Timeframe (1h, 15m, 5m, 1m) ต่างคนต่างรอ timeout 7s ทีละตัว (รวม 28 วินาทีในรอบเดียว)
+  - **Remediation & Host-Level Circuit Breaker**:
+    - เพิ่ม `tvHostFailureSkipUntil` ใน Companion Object: เมื่อเกิด Connection Timeout หรือล้มเหลวที่ระดับ Host จะตั้ง Circuit Breaker พักทั้ง Host 60 วินาที
+    - ทำให้ Timeframe อื่นๆ (15m, 5m, 1m) ในรอบนั้นดึงจาก SQLite DB Cache (`TV:DB`) ที่มีอยู่แล้ว 300-500 แท่งทันทีใน 1ms โดยไม่ต้องเสียเวลารอ timeout 7s ซ้ำๆ
+    - เมื่อเชื่อมต่อสำเร็จจะ reset `tvHostFailureSkipUntil = 0L` ทันที
+
+## 2026-09-04 — EMA 14/60 Near-Cross (Convergence) & Confirmed Cross Detection System
+- **EMA 14 / EMA 60 Dynamic Convergence & Cross Engine (`SignalAlertProvider.kt`, `SmcFlowAlertProvider.kt`, `AutomationModels.kt`, `AutomationScreen.kt`)**:
+  - **ความสามารถที่พัฒนาขึ้นตามคำขอของผู้ใช้**:
+    1. **การตรวจจับระยะเกือบตัดกัน (Near-Cross / Convergence)**:
+       - คำนวณระยะห่าง (Spread) แบบไดนามิกเทียบความผันผวนของราคา: `nearCrossThreshold = max(atr14 * 0.35, close * 0.0012)` ร่วมกับการตรวจสอบว่าเส้นกำลังบีบตัวแคบลงจริง (`spreadNow < spreadPrev`)
+       - ตรวจทิศทางการพุ่งเข้าหากัน (Directional Velocity):
+         - `BUY Anticipation`: เมื่อ EMA14 < EMA60 แต่วิ่งเงยหัวขึ้นเข้าหา EMA60 (`efNow >= efPrev`) $\to$ คาดการณ์ล่วงหน้าเตรียมเกิด Golden Cross (Confidence 76%)
+         - `SELL Anticipation`: เมื่อ EMA14 > EMA60 แต่วิ่งปักหัวลงเข้าหา EMA60 (`efNow <= efPrev`) $\to$ คาดการณ์ล่วงหน้าเตรียมเกิด Death Cross (Confidence 76%)
+       - ส่งออกฟิลด์ `ema14_60_near_cross` ("1"/"0"), `ema14_60_near_cross_side` ("BUY"/"SELL"/"NONE") และบรรจุลงใน Setup 4 ของ `detectAnticipation`
+    2. **การตรวจจับการตัดกันยืนยัน (Confirmed Cross)**:
+       - ตรวจสอบ `GOLDEN_CROSS` (`e14Prev <= e60Prev && e14 > e60`) และ `DEATH_CROSS` (`e14Prev >= e60Prev && e14 < e60`)
+       - ส่งออกฟิลด์ `ema14_60_cross` (`GOLDEN_CROSS`/`DEATH_CROSS`/`NONE`), `ema14_60_spread`, `ema14_60_state` (`BULLISH`/`BEARISH`), `ema14`, `ema60`
+       - ปล่อยสัญญาณซื้อขายยืนยัน (Confirmed Signal Event) ฝั่ง BUY/SELL ผ่าน marker edge `E14/60▲` และ `E14/60▼` ทันทีเมื่อแท่งปิดยืนยันการตัด
+    3. **Alert Catalog & One-Click Presets**:
+       - เพิ่มฟิลด์ใหม่ทั้งหมดใน `AlertFieldCatalog.SIGNAL_ALERT` และ `AlertFieldCatalog.SMC_FLOW`
+       - เพิ่ม 3 Presets สำเร็จรูปใน `AutomationScreen.kt`:
+         - `⚡ EMA 14/60 เกือบตัดกัน (เตือนก่อนตัด)` (`ema14_60_near_cross == 1`)
+         - `🎯 EMA 14/60 Golden Cross (ตัดขึ้น)` (`ema14_60_cross == GOLDEN_CROSS`)
+         - `🎯 EMA 14/60 Death Cross (ตัดลง)` (`ema14_60_cross == DEATH_CROSS`)
+  - **Unit Test Verification (`SignalAnticipationTest.kt`, `SignalAlertProviderTest.kt`)**:
+    - เพิ่มการทดสอบ `testDetectAnticipation_emaNearGoldenCrossProducesBuyAnticipation`, `testDetectAnticipation_emaNearDeathCrossProducesSellAnticipation` และ `testAlertCatalogAndPresets_supportEma14_60FieldsAndPresets` ผ่าน 100%
+
+## 2026-09-04 — Anticipation & Keyzone 3D Chat Alert Card Architecture & Content Fallback
+- **Anticipation & Keyzone Alert Card Incompleteness Fix (`JarvisAutomationService.kt`, `MessageBubble.kt`)**:
+  - **Root Cause Identified**: การ์ดแจ้งเตือนในแชทแสดงผลเฉพาะข้อความ "signal_anticipation >= 1" และค่าปัจจุบัน "1" โดยไม่แสดงรายละเอียด เกิดจาก 3 สาเหตุ:
+    1. ฟิลด์ทิศทางของ Anticipation อยู่ใน `signal_anticipation_side` (ยังไม่ใช่ `signal_side` เนื่องจากเป็น pre-signal ก่อนแท่งปิดยืนยัน) ทำให้ `JarvisAutomationService` ตีความเป็น Alert ทั่วไป (`kind = "alert"`) แทนที่จะเป็นการ์ด Signal
+    2. เมทาดาทาของ Alert ทั่วไปเดิมบันทึกเฉพาะ `name`, `symbol`, `condition`, `current` ขาดฟิลด์เชิงโครงสร้าง (`side`, `zone`, `desc`, `confidence`, `price`, `mtf`)
+    3. `MessageBubble.kt` มีเฉพาะ `SignalAlertCard3D` และ `GenericAlertCard` ซึ่งเมื่อเป็น `GenericAlertCard` จะแสดงเฉพาะเงื่อนไขและค่าปัจจุบัน โดยละทิ้งข้อความเนื้อหาทั้งหมดใน `message.content` ทิ้งไป
+  - **Remediation & Architecture**:
+    - **`JarvisAutomationService.kt`**:
+      - แยก Routing เฉพาะสำหรับ Anticipation Alert (`isAnticipationAlert`) และ Keyzone Watch (`isKeyzoneOnly`)
+      - สร้าง `anticipationChatMeta` และ `keyzoneChatMeta` บรรจุข้อมูลครบถ้วน: `side`, `zone`, `desc`, `confidence`, `price`, `mtf`, `summary`, `voice`
+      - สร้าง `buildAnticipationChatCard` และ `buildAnticipationSpeech`
+    - **`MessageBubble.kt`**:
+      - เพิ่ม `AlertCardMeta.Anticipation` และ `AlertCardMeta.Keyzone` ใน Sealed Class
+      - พัฒนา Composable `AnticipationAlertCard3D`: การ์ด 3D สวยงามสไตล์ Glassmorphism พร้อม Badge ไฟฟ้า `⚡ คาดการณ์ BUY` (เขียว) หรือ `⚡ คาดการณ์ SELL` (แดง), โซนสำคัญ, ราคาปัจจุบัน, ความเชื่อมั่น %, เหตุผลการวิเคราะห์ และโครงสร้างตลาด 5TF
+      - พัฒนา Composable `KeyzoneAlertCard3D`: การ์ด 3D ธีม Amber สำหรับจุดสัมผัสโครงสร้างสำคัญ
+      - พัฒนา **Content Fallback**: สำหรับประวัติแชทเดิมในฐานข้อมูลที่บันทึกเป็น `kind = "alert"` และมี `condition` มีคำว่า `signal_anticipation` จะแปลงร่างเป็นการ์ด Anticipation 3D อัตโนมัติ พร้อมดึงข้อมูลจาก `message.content` มาแสดง และปรับ `GenericAlertCard` ให้แสดง `detailText` เสมอ ไม่ปล่อยให้การ์ดว่างเปล่า
+    - **Unit Tests (`SignalAnticipationTest.kt`)**:
+      - เพิ่ม 4 ชุดการทดสอบทดสอบการแปลง `parseAlertCardMeta` ครบทุกประเภท (Anticipation, Keyzone, Legacy Fallback, Generic Content Preservation) รันผ่าน 100%
+
+## 2026-09-04 — Live Voice Speech Cutoff Fix & Signal Observability Optimization
+- **Live Alert Voice Speech Truncation Fix (`JarvisAutomationService.kt`)**:
+  - **Root Cause Identified**: ตรวจพบสาเหตุที่ AI พูดไม่จบประโยคและถูกตัดหยุดกลางคัน เกิดจาก `liveVoiceSummaryCharCap = 120` ทำงานแบบ Hard Guillotine ตัดการเชื่อมต่อ WebSocket ทันทีที่ข้อความสะสมเกิน 120 ตัวอักษร (`RESPONSE_LENGTH_CAP 120 chars → close`) ทำให้ข้อความภาษาไทยที่มีตัวอักษร Unicode และสระ/วรรณยุกต์หนาแน่นถูกตัดขาดช่วงวินาทีที่ 2.7 ก่อนที่โมเดลจะส่ง `turnComplete = true` และก่อนที่จะกล่าวถึง Entry, SL, TP หรือลงท้ายคำว่า "ค่ะ"
+  - **Remediation**:
+    - ปรับ `liveVoiceSummaryCharCap` จาก 120 เป็น **350** ตัวอักษร เพื่อทำหน้าที่เป็น Runaway Circuit Breaker อย่างแท้จริง โดยปล่อยให้การตอบกลับตามปกติ (1-2 ประโยค ~120-180 ตัวอักษร) จบลงอย่างสมบูรณ์และเป็นธรรมชาติด้วยอีเวนต์ `turnComplete == true` จากเซิร์ฟเวอร์
+    - ปรับ `liveVoiceSessionTimeoutMs` จาก 22,000ms เป็น **35,000ms** เพื่อรองรับ Latency การส่งมอบ Audio ก้อนแรก (~8.5 วินาที) ร่วมกับการสตรีมเสียงความยาว 12-18 วินาทีได้อย่างปลอดภัย
+    - ปรับ System Instruction สำหรับ `LIVE SIGNAL ALERT MODE` ให้ออกคำสั่งสรุปกระชับ 1-2 ประโยค พูดให้จบประโยคอย่างสมบูรณ์ และลงท้ายด้วย "ค่ะ" เสมอ
+- **Signal Observability & Multi-TF Deduplication (`SignalAlertProvider.kt`)**:
+  - รวม Logcat `SignalDataSource` เหลือ **1 บรรทัดต่อ Symbol** โดยใช้ State-change Throttling
+  - กำจัดการ Fetch และ Query แท่งเทียน `1h` ซ้ำ 2 ครั้งในรอบเดียวกัน โดยการ Reuse แท่งเทียน Base Candle ของ Job เข้าสู่ Unified SMC ทันที
+
+## 2026-09-04 — Mobile AI Trading Intelligence & Closed-Loop Reinforcement Architecture (ระบบปัญญาประดิษฐ์เทรดบนมือถือ, การเตือนล่วงหน้า และการเรียนรู้ปรับตัวแบบ Closed-Loop)
+- **Architectural Deliverables (ผลการยกระดับ 4 เสาหลักบนระบบมือถือ `composeApp`)**:
+  - **Pillar 1: Real-Time Multi-Timeframe TradingView Fusion (`TradingViewSignalIntelligence.kt`)**:
+    - ผสานการวิเคราะห์ข้อมูล Multi-Timeframe (15m, 30m, 1h, 4h) ร่วมกับ SMC Score และ Dynamic Technical Indicators บนมือถือโดยตรง ปราศจากการพึ่งพา Vendor ภายนอก
+  - **Pillar 2: Predictive Pre-Signal & Signal Anticipation Engine (`SignalAlertProvider.kt`)**:
+    - เพิ่ม `detectAnticipation`: วิเคราะห์ Intra-bar dynamics ตรวจสอบ Keyzone Proximity (0.3×ATR จาก Order Blocks, Fair Value Gaps, Swing Liquidity ใน 5TF Market Context Digest), ตรวจจับ Intra-bar Wick Sweep Rejection ที่กวาดสภาพคล่องแล้วทิ้งไส้ย้อนกลับ, และ RSI Extreme/Divergence Setups
+    - ระบบ Dual-Stage Signaling: ส่งออก `signal_stage = "ANTICIPATION"` พร้อม `signal_anticipation_desc` และ `signal_anticipation_zone` แจ้งเตือนผู้ใช้ล่วงหน้า โดยล็อกไม่ให้ Auto-Execution บอทยิงออเดอร์ก่อนเวลาจนกว่าจะเกิดแท่งยืนยัน `signal_stage = "CONFIRMED"`
+  - **Pillar 3: Adaptive Self-Learning Backtest Integration (`BacktestToolHandler.kt`, `SignalOutcomeTracker.kt`)**:
+    - รองรับการปรับจูนพารามิเตอร์และจำลองผลย้อนหลังเพื่อวิวัฒนาการกลยุทธ์
+  - **Pillar 4: Closed-Loop Signal Outcome Tracker & Strategy Reinforcement (`SignalOutcomeTracker.kt`, `StrategyConfirmationGate.kt`)**:
+    - พัฒนา SQLite Schema `SignalTrackingRecord` (migration `10.sqm`) บันทึกทุก Signal ที่ปล่อยออกไปสู่ตลาด
+    - ติดตามผลลัพธ์จากแท่งเทียนราคาตลาดจริง คำนวณ MFE (Maximum Favorable Excursion), MAE (Maximum Adverse Excursion), R-multiple Realized PnL, สถานะการปิดไม้ (`WIN`, `LOSS`, `EXPIRED`)
+    - เชื่อมโยงผลลัพธ์เข้ากับ `StrategyConfirmationGate`: เพิ่มฟังก์ชัน Reinforcement Feedback ปรับ Confidence Boost (+0.10 ถึง +0.20) สำหรับกลยุทธ์ที่ชนะต่อเนื่อง และปรับลด (-0.15 ถึง -0.25) พร้อมบล็อกสัญญาณอ่อนแอหากอยู่ในสภาวะตลาดที่ไม่เหมาะสม
+  - **Mobile UI & Alert Integration (`AutomationScreen.kt`, `AutomationModels.kt`, `TerminalEventsTab.kt`, `ResearchToolHandler.kt`)**:
+    - เพิ่ม Preset ลัด `⚡ คาดการณ์ Signal ล่วงหน้า (Anticipation)` ใน `AutomationScreen.kt` ให้ผู้ใช้สร้าง Alert เฝ้าระวังได้ในคลิกเดียว
+    - บรรจุฟิลด์ `signal_anticipation`, `signal_stage`, `signal_anticipation_side`, `signal_anticipation_zone` ลงใน `AlertFieldCatalog.SIGNAL_ALERT`
+    - ฝังการ์ด `🧠 Closed-Loop Signal Outcomes` ในแท็บ Events ของหน้า Trading Terminal แสดงผลลัพธ์ไม้จริง (WIN/LOSS, R-multiple, MFE) แบบ Live
+    - ขยายเครื่องมือ `trading_signal_stats` ใน `ResearchToolHandler.kt` แสดง Closed-Loop Strategy Reinforcement Status (Win Rate, Avg R, MFE, MAE, และ Confidence Boost/Penalty)
+- **Verification & Test Coverage**:
+  - สร้าง `SignalAnticipationTest.kt`: ทดสอบ Demand Keyzone Buy, Supply Keyzone Sell, Wick Sweep Rejection, Normal Candle, และ Alert Catalog / Preset integration
+  - สร้าง `SignalOutcomeTrackerTest.kt`: ทดสอบ Buy/Sell TP/SL Collision, Conservative Dual-hit Resolution, 50-bar Expiry Timeout, และ Dynamic Confidence Reinforcement
+  - รัน `:composeApp:testDebugUnitTest`: **BUILD SUCCESSFUL in 1m 12s** (ผ่าน 100% ครบทั้ง 130 รายการทดสอบ)
+
+## 2026-09-04 — Full Non-Trading Tools Audit & Flexibility Upgrades (การตรวจสอบและยกระดับ Tools หมวดอื่นๆ นอกเหนือจากการเทรด)
 - **Root Cause & Inflexibility Issues Identified (การตรวจสอบข้อจำกัดในหมวดหมู่อื่นๆ)**:
   - **Date & Time Tool (`get_current_datetime`)**:
     - เดิมแสดงเพียงวันที่แบบ ISO (`2026-09-04`) และชื่อวันภาษาอังกฤษ (`Friday`) โดยไม่มีชื่อวันภาษาไทย, ชื่อเดือนภาษาไทย, ปี พ.ศ. และวินาที ส่งผลให้ AI ในโหมดภาษาไทยตอบวัน/เดือน/ปีสับสนในบางบริบท
@@ -298,3 +526,13 @@
 - ปรับ Live Voice ให้แยก queue / setup / first-output / session timeout ชัดเจน และ log latency ของ request→output พร้อม cause classification
 - เพิ่ม RESULT log: AUDIO_SUCCESS, TRANSCRIPT_ONLY, API_ERROR, FIRST_AUDIO_TIMEOUT_* และสถานะ fallback
 - Queue acquisition log แสดงแม้รอ 0ms เพื่อยืนยันว่า queue ไม่ใช่คอขวด
+## 2026-09-05 — ปรับ Timeframe คาดการณ์เริ่มต้นเป็น 15m (m15) และรองรับหลาย Timeframe (m5–h4 / all)
+- **Default Timeframe Policy (15m)**: ปรับแก้เกณฑ์การสร้าง Alert คาดการณ์ล่วงหน้า (`signal_anticipation` / `trading_signal_anticipation`) หากผู้ใช้ไม่ได้ระบุ Timeframe ให้เริ่มต้นที่ **`15m`** (m15) เสมอ (แทนที่ 1h เดิม) ซึ่งสอดคล้องกับหลักการวิเคราะห์ SMC และ Intra-day Confluence
+- **รองรับช่วง Timeframe กว้าง (m5–h4)**: อนุญาตให้คาดการณ์ได้ตั้งแต่ `5m`, `15m`, `30m`, `1h`, ถึง `4h` สอดคล้องกับระบบ Market Structure Ingestion ที่ดึงแท่งเทียน 5 TF (1m, 5m, 15m, 1h, 4h) อยู่ตลอดเวลา
+- **รองรับ Multi-TF & All**: ผู้ใช้สามารถสั่งให้ AI คาดการณ์หลาย TF เช่น `15m,1h` หรือสั่ง *"ทุก TF"* / `"all"` ซึ่งระบบจะขยายเป็น 5 Timeframe หลัก และสร้าง Alert Job แยกอิสระให้ทุก TF อัตโนมัติ
+- **อัปเดตไฟล์ระบบ**:
+  - `JarvisOrchestrator.kt`: แยก logic `isAnticipationAlert` กำหนด default `15m` และขยาย `"all"` เป็น `[5m, 15m, 30m, 1h, 4h]`
+  - `ToolExecutor.kt`: ฟังก์ชัน `executeSignalAnticipation` ใช้ default `15m`
+  - `TradingToolDefinitions.kt`: อัปเดต Parameter Documentation
+  - `JarvisPersona.kt`: อัปเดต AI Prompt Rule 9 และ 10 กำหนดชัดเจนว่า default คือ 15m และช่วง m5-h4
+  - `SignalAnticipationTest.kt`: เพิ่ม Unit Test `testAnticipationDefaultTimeframeIs15mAndSupportsMultiTf` ทดสอบครอบคลุมทั้ง default 15m, explicit 5m, และ all (ผ่าน 100%)

@@ -54,9 +54,8 @@ fun ChatInputBar(
     ) {
         Column(
             modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 12.dp, vertical = 10.dp)
-                .navigationBarsPadding()
-                .imePadding()
         ) {
             // แถว chips ไฟล์แนบที่เลือกไว้ (ลบทีละไฟล์ได้)
             if (attachments.isNotEmpty()) {

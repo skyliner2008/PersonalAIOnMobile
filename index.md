@@ -66,6 +66,11 @@
 ### 08 Charts Hub
 - [[Knowledge_Hub]] - เอกสารอ้างอิง Lightweight Charts
 
+### 09 Roadmap
+- [[08_Mobile_AI_Trading_Intelligence_Plan]] - แผนงานยกระดับ Mobile AI Trading Intelligence (Real-time, Anticipation, Self-Learning, Closed-Loop)
+- [[00_AI_Agent_Trader_Pro_Roadmap]] - แผนยกระดับ AI Agent Trader Pro ภาพรวม
+- [[07_architecture_reform_plan]] - แผนปฏิรูปสถาปัตยกรรม Event-Driven V21-V25
+
 ## Suggested Reading Paths
 
 ### ถ้าต้องการเข้าใจระบบทั้งโปรเจค

@@ -141,6 +141,9 @@ class SmcApiService(private val client: HttpClient) {
         // อยู่ระดับ process (companion) เพราะ SmcApiService มีหลาย instance (service/UI/tester/trading tools)
         private val tvNoNewDataStreak = mutableMapOf<String, Int>()
         private val tvNoNewDataSkipUntil = mutableMapOf<String, Long>()
+        private val tvNetworkFailureSkipUntil = mutableMapOf<String, Long>()
+        private var tvHostFailureSkipUntil: Long = 0L
+
 
         // Backtest dataset cache (ระดับ process — SmcApiService มีหลาย instance):
         // ชุดข้อมูล 5,000 แท่งต้องคง snapshot เดิมระหว่าง backtest → evolve → backtest
@@ -210,12 +213,16 @@ class SmcApiService(private val client: HttpClient) {
                 return result
             }
 
-            // ถ้ารีเฟรชรอบก่อนไม่ได้แท่งใหม่เลย (ตลาดปิด) → ข้ามการดึงตาม backoff ที่ตั้งไว้
+            // ถ้ารีเฟรชรอบก่อนไม่ได้แท่งใหม่เลย (ตลาดปิด) หรือเน็ตเวิร์ก timeout → ข้ามการดึงตาม backoff ที่ตั้งไว้
             val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
             val bucketStart = (Clock.System.now().toEpochMilliseconds() / tfMs) * tfMs
             val noNewKey = "$sym|$interval"
             val skipUntilBucket = tvNoNewDataSkipUntil[noNewKey]
-            if (skipUntilBucket != null && bucketStart < skipUntilBucket) {
+            val netFailUntil = tvNetworkFailureSkipUntil[noNewKey]
+            val nowMs = Clock.System.now().toEpochMilliseconds()
+            if ((skipUntilBucket != null && bucketStart < skipUntilBucket) ||
+                (netFailUntil != null && nowMs < netFailUntil) ||
+                (nowMs < tvHostFailureSkipUntil)) {
                 val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
                 OhlcvCentralStore.put(sym, interval, result.source, result.candles)
                 return result
@@ -225,6 +232,8 @@ class SmcApiService(private val client: HttpClient) {
             val deltaBars = computeDeltaFetchBars(interval, missingBars, targetBars)
             val tvDelta = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = deltaBars)
             if (tvDelta.candles.isNotEmpty()) {
+                tvHostFailureSkipUntil = 0L
+                tvNetworkFailureSkipUntil.remove(noNewKey)
                 val latestBefore = dbCandles.maxOf { it.timestamp }
                 val merged = mergeCandlesByTimestamp(dbCandles, tvDelta.candles).takeLast(targetBars)
                 if (merged.maxOf { it.timestamp } <= latestBefore) {
@@ -246,7 +255,8 @@ class SmcApiService(private val client: HttpClient) {
                 return result
             }
 
-            // TV refresh failed but DB is still usable
+            // TV refresh failed but DB is still usable — backoff network fetch for 60s so background loop doesn't freeze on timeouts
+            tvNetworkFailureSkipUntil[noNewKey] = Clock.System.now().toEpochMilliseconds() + 60_000L
             val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
             OhlcvCentralStore.put(sym, interval, result.source, result.candles)
             return result
@@ -429,7 +439,7 @@ class SmcApiService(private val client: HttpClient) {
 
         val resolution = tvResolution(interval)
         for ((tvSymbol, source) in tvSymbolsFor(sym)) {
-            val candles = fetchTvCandlesViaWebSocket(tvSymbol, resolution, BACKTEST_BARS)
+            val (candles, isConnError) = fetchTvCandlesViaWebSocket(tvSymbol, resolution, BACKTEST_BARS)
             if (candles.size >= 300) {
                 val result = CandleFetchResult(candles.sortedBy { it.timestamp }, source)
                 backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
@@ -438,6 +448,7 @@ class SmcApiService(private val client: HttpClient) {
                 logDebug("SmcApiService", "Backtest candles $key: ${candles.size} แท่ง ($first → $last) จาก $source")
                 return result
             }
+            if (isConnError) break
         }
 
         // fallback: Binance (crypto เท่านั้น — สูงสุด 1,000 แท่ง)
@@ -460,12 +471,23 @@ class SmcApiService(private val client: HttpClient) {
     }
 
     private suspend fun fetchCandlesFromTradingView(symbol: String, interval: String, limit: Int): CandleFetchResult {
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (now < tvHostFailureSkipUntil) {
+            return CandleFetchResult(emptyList(), "NONE")
+        }
         val resolution = tvResolution(interval)
         val symbolsToTry = tvSymbolsFor(symbol)
         for ((tvSymbol, source) in symbolsToTry) {
-            val candles = fetchTvCandlesViaWebSocket(tvSymbol, resolution, limit)
+            val (candles, isConnError) = fetchTvCandlesViaWebSocket(tvSymbol, resolution, limit)
             if (candles.isNotEmpty()) {
+                tvHostFailureSkipUntil = 0L
                 return CandleFetchResult(candles.takeLast(limit), source)
+            }
+            if (isConnError) {
+                // Host data.tradingview.com มีปัญหาการเชื่อมต่อ — พัก 60 วินาทีทั่วทั้ง host
+                // เพื่อไม่ให้ TF อื่นๆ (15m, 5m, 1m) ต้องมาเสียเวลารอ timeout 7s ซ้ำๆ ในรอบเดียวกัน
+                tvHostFailureSkipUntil = Clock.System.now().toEpochMilliseconds() + 60_000L
+                break
             }
         }
         return CandleFetchResult(emptyList(), "NONE")
@@ -644,13 +666,13 @@ class SmcApiService(private val client: HttpClient) {
         return null
     }
 
-    private suspend fun fetchTvCandlesViaWebSocket(tvSymbol: String, resolution: String, limit: Int): List<Candle> {
+    private suspend fun fetchTvCandlesViaWebSocket(tvSymbol: String, resolution: String, limit: Int): Pair<List<Candle>, Boolean> {
         val nativeBars = runCatching {
             fetchTvHistoryBars(symbol = tvSymbol, resolution = resolution, bars = limit.coerceIn(2, 5000), timeoutSec = 12)
         }.getOrElse { emptyList() }
         if (nativeBars.isNotEmpty()) {
             logDebug("SmcApiService", "TV native bridge bars loaded: ${nativeBars.size} for $tvSymbol/$resolution")
-            return nativeBars.sortedBy { it.timestamp }.takeLast(limit)
+            return Pair(nativeBars.sortedBy { it.timestamp }.takeLast(limit), false)
         }
 
         val chartSession = randomSession("cs")
@@ -659,92 +681,94 @@ class SmcApiService(private val client: HttpClient) {
 
         return try {
             val collected = mutableListOf<Candle>()
-            client.webSocket(
-                request = {
-                    val fromParam = tvFromParam(tvSymbol)
-                    url("wss://data.tradingview.com/socket.io/websocket?from=$fromParam")
-                    header("Origin", "https://www.tradingview.com")
-                    header("Referer", "https://www.tradingview.com/")
-                    header("User-Agent", "Mozilla/5.0")
-                }
-            ) {
-                suspend fun sendCommand(methodName: String, params: JsonArray) {
-                    val payload = buildJsonObject {
-                        put("m", methodName)
-                        put("p", params)
-                    }.toString()
-                    send(Frame.Text(tvWrapMessage(payload)))
-                }
-
-                send(Frame.Text(tvWrapMessage(buildJsonObject {
-                    put("m", "set_data_quality")
-                    put("p", buildJsonArray { add("low") })
-                }.toString())))
-                send(Frame.Text(tvWrapMessage(buildJsonObject {
-                    put("m", "set_auth_token")
-                    put("p", buildJsonArray { add("unauthorized_user_token") })
-                }.toString())))
-                sendCommand("chart_create_session", buildJsonArray { add(chartSession); add("") })
-
-                val resolvePayload = buildJsonObject {
-                    put("symbol", tvSymbol)
-                    put("adjustment", "splits")
-                    put("session", "regular")
-                }.toString()
-                sendCommand("resolve_symbol", buildJsonArray {
-                    add(chartSession)
-                    add(symbolAlias)
-                    add("=$resolvePayload")
-                })
-                sendCommand("create_series", buildJsonArray {
-                    add(chartSession)
-                    add(seriesName)
-                    add(seriesName)
-                    add(symbolAlias)
-                    add(resolution)
-                    add(limit.coerceIn(2, 5000))
-                })
-                sendCommand("switch_timezone", buildJsonArray { add(chartSession); add("Etc/UTC") })
-
-                val deadline = Clock.System.now().toEpochMilliseconds() + 9_000L
-                var incomingBuffer = ""
-                while (Clock.System.now().toEpochMilliseconds() < deadline) {
-                    val frame = incoming.receive()
-                    val text = when (frame) {
-                        is Frame.Text -> frame.readText()
-                        is Frame.Binary -> frame.readBytes().decodeToString()
-                        else -> continue
+            kotlinx.coroutines.withTimeout(7_000L) {
+                client.webSocket(
+                    request = {
+                        val fromParam = tvFromParam(tvSymbol)
+                        url("wss://data.tradingview.com/socket.io/websocket?from=$fromParam")
+                        header("Origin", "https://www.tradingview.com")
+                        header("Referer", "https://www.tradingview.com/")
+                        header("User-Agent", "Mozilla/5.0")
                     }
-                    incomingBuffer += text
-                    val extracted = extractTvFrames(incomingBuffer)
-                    val packets = extracted.first
-                    incomingBuffer = extracted.second
-                    for (packet in packets) {
-                        if (packet.startsWith("~h~")) {
-                            send(Frame.Text(tvWrapMessage(packet)))
-                            continue
-                        }
-                        val root = runCatching { json.parseToJsonElement(packet).jsonObject }.getOrNull() ?: continue
-                        val methodName = root["m"]?.jsonPrimitive?.contentOrNull ?: continue
-                        if (methodName != "timescale_update") continue
-                        val payload = root["p"]?.jsonArray ?: continue
-                        if (payload.size < 2) continue
-                        val body = when (val p1 = payload[1]) {
-                            is JsonObject -> p1
-                            is JsonPrimitive -> {
-                                val textBody = p1.contentOrNull ?: ""
-                                runCatching { json.parseToJsonElement(textBody).jsonObject }.getOrNull() ?: continue
-                            }
+                ) {
+                    suspend fun sendCommand(methodName: String, params: JsonArray) {
+                        val payload = buildJsonObject {
+                            put("m", methodName)
+                            put("p", params)
+                        }.toString()
+                        send(Frame.Text(tvWrapMessage(payload)))
+                    }
+
+                    send(Frame.Text(tvWrapMessage(buildJsonObject {
+                        put("m", "set_data_quality")
+                        put("p", buildJsonArray { add("low") })
+                    }.toString())))
+                    send(Frame.Text(tvWrapMessage(buildJsonObject {
+                        put("m", "set_auth_token")
+                        put("p", buildJsonArray { add("unauthorized_user_token") })
+                    }.toString())))
+                    sendCommand("chart_create_session", buildJsonArray { add(chartSession); add("") })
+
+                    val resolvePayload = buildJsonObject {
+                        put("symbol", tvSymbol)
+                        put("adjustment", "splits")
+                        put("session", "regular")
+                    }.toString()
+                    sendCommand("resolve_symbol", buildJsonArray {
+                        add(chartSession)
+                        add(symbolAlias)
+                        add("=$resolvePayload")
+                    })
+                    sendCommand("create_series", buildJsonArray {
+                        add(chartSession)
+                        add(seriesName)
+                        add(seriesName)
+                        add(symbolAlias)
+                        add(resolution)
+                        add(limit.coerceIn(2, 5000))
+                    })
+                    sendCommand("switch_timezone", buildJsonArray { add(chartSession); add("Etc/UTC") })
+
+                    val deadline = Clock.System.now().toEpochMilliseconds() + 9_000L
+                    var incomingBuffer = ""
+                    while (Clock.System.now().toEpochMilliseconds() < deadline) {
+                        val frame = incoming.receive()
+                        val text = when (frame) {
+                            is Frame.Text -> frame.readText()
+                            is Frame.Binary -> frame.readBytes().decodeToString()
                             else -> continue
                         }
-                        val seriesNode = findTvSeriesNode(body, seriesName)
-                        if (seriesNode == null) {
-                            continue
-                        }
-                        collected.clear()
-                        collected.addAll(extractTvBarsFromSeriesNode(seriesNode))
-                        if (collected.isNotEmpty()) {
-                            return@webSocket
+                        incomingBuffer += text
+                        val extracted = extractTvFrames(incomingBuffer)
+                        val packets = extracted.first
+                        incomingBuffer = extracted.second
+                        for (packet in packets) {
+                            if (packet.startsWith("~h~")) {
+                                send(Frame.Text(tvWrapMessage(packet)))
+                                continue
+                            }
+                            val root = runCatching { json.parseToJsonElement(packet).jsonObject }.getOrNull() ?: continue
+                            val methodName = root["m"]?.jsonPrimitive?.contentOrNull ?: continue
+                            if (methodName != "timescale_update") continue
+                            val payload = root["p"]?.jsonArray ?: continue
+                            if (payload.size < 2) continue
+                            val body = when (val p1 = payload[1]) {
+                                is JsonObject -> p1
+                                is JsonPrimitive -> {
+                                    val textBody = p1.contentOrNull ?: ""
+                                    runCatching { json.parseToJsonElement(textBody).jsonObject }.getOrNull() ?: continue
+                                }
+                                else -> continue
+                            }
+                            val seriesNode = findTvSeriesNode(body, seriesName)
+                            if (seriesNode == null) {
+                                continue
+                            }
+                            collected.clear()
+                            collected.addAll(extractTvBarsFromSeriesNode(seriesNode))
+                            if (collected.isNotEmpty()) {
+                                return@webSocket
+                            }
                         }
                     }
                 }
@@ -752,11 +776,23 @@ class SmcApiService(private val client: HttpClient) {
             if (collected.isEmpty()) {
                 logDebug("SmcApiService", "TV websocket returned no bars for $tvSymbol/$resolution")
             }
-            collected.sortedBy { it.timestamp }.takeLast(limit)
-        } catch (e: Exception) {
+            Pair(collected.sortedBy { it.timestamp }.takeLast(limit), false)
+        } catch (e: Throwable) {
+            val isConnError = isConnectionError(e)
             logDebug("SmcApiService", "TV websocket fetch failed for $tvSymbol/$resolution: ${e.message}")
-            emptyList()
+            Pair(emptyList(), isConnError)
         }
+    }
+
+    private fun isConnectionError(e: Throwable): Boolean {
+        if (e is kotlinx.coroutines.TimeoutCancellationException) return true
+        val msg = e.message?.lowercase() ?: ""
+        return msg.contains("failed to connect") ||
+               msg.contains("connect timed out") ||
+               msg.contains("connection refused") ||
+               msg.contains("unreachable") ||
+               e::class.simpleName?.contains("Timeout", ignoreCase = true) == true ||
+               e::class.simpleName?.contains("Connect", ignoreCase = true) == true
     }
 
     private suspend fun fetchCandlesFromBinance(symbol: String, interval: String, limit: Int): List<Candle> {

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Personal AI Bot</string>
+    <string name="accessibility_service_description">JARVIS สามารถควบคุมอุปกรณ์แทนคุณได้ — เปิดแอป, แตะปุ่ม, อ่านหน้าจอ, พิมพ์ข้อความ ผ่านคำสั่งเสียง ทำให้คุณใช้มือถือได้โดยไม่ต้องแตะหน้าจอ</string>
 </resources>

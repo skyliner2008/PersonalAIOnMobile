@@ -24,6 +24,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -106,10 +107,12 @@ fun MessageBubble(
                     )
                 }
                 // ถ้า metadata เป็น alert/signal card → render การ์ด 3D แทนข้อความ markdown
-                val alertCard = remember(message.metadata) { parseAlertCardMeta(message.metadata) }
+                val alertCard = remember(message.metadata, message.content) { parseAlertCardMeta(message.metadata, message.content) }
                 if (alertCard != null) {
                     when (alertCard) {
                         is AlertCardMeta.Signal -> SignalAlertCard3D(alertCard)
+                        is AlertCardMeta.Anticipation -> AnticipationAlertCard3D(alertCard)
+                        is AlertCardMeta.Keyzone -> KeyzoneAlertCard3D(alertCard)
                         is AlertCardMeta.Generic -> GenericAlertCard(alertCard)
                     }
                 } else {
@@ -490,20 +493,32 @@ private fun MiniChart(
 // service แนบ metadata {kind:"signal"|"alert", ...} มากับข้อความ (persist ใน DB ด้วย)
 // UI parse แล้ว render เป็นการ์ดมีมิติ (gradient + เงา + ป้ายสี) แทนข้อความ markdown
 
-private sealed class AlertCardMeta {
+internal sealed class AlertCardMeta {
     data class Signal(
         val side: String, val symbol: String, val strategy: String,
         val entry: String, val tp: String, val sl: String, val rr: String,
         val atr: String?, val reason: String, val summary: String?, val voice: String?
     ) : AlertCardMeta()
 
+    data class Anticipation(
+        val name: String, val symbol: String, val side: String,
+        val zone: String, val desc: String, val confidence: String,
+        val price: String, val mtf: String?, val summary: String?, val voice: String?
+    ) : AlertCardMeta()
+
+    data class Keyzone(
+        val name: String, val symbol: String, val desc: String,
+        val price: String, val mtf: String?, val summary: String?, val voice: String?
+    ) : AlertCardMeta()
+
     data class Generic(
         val name: String, val symbol: String, val condition: String,
-        val current: String, val summary: String?, val voice: String?
+        val current: String, val summary: String?, val voice: String?,
+        val rawContent: String? = null
     ) : AlertCardMeta()
 }
 
-private fun parseAlertCardMeta(metadata: String?): AlertCardMeta? {
+internal fun parseAlertCardMeta(metadata: String?, rawContent: String? = null): AlertCardMeta? {
     if (metadata.isNullOrBlank()) return null
     return try {
         val obj = Json.parseToJsonElement(metadata).jsonObject
@@ -516,11 +531,65 @@ private fun parseAlertCardMeta(metadata: String?): AlertCardMeta? {
                 atr = str("atr"), reason = str("reason") ?: "-",
                 summary = str("summary"), voice = str("voice")
             )
-            "alert" -> AlertCardMeta.Generic(
-                name = str("name") ?: "Alert", symbol = str("symbol") ?: "-",
-                condition = str("condition") ?: "-", current = str("current") ?: "-",
-                summary = str("summary"), voice = str("voice")
+            "anticipation" -> AlertCardMeta.Anticipation(
+                name = str("name") ?: "คาดการณ์สัญญาณ",
+                symbol = str("symbol") ?: "-",
+                side = str("side") ?: "BUY",
+                zone = str("zone") ?: "Keyzone",
+                desc = str("desc") ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ",
+                confidence = str("confidence") ?: "75",
+                price = str("price") ?: "-",
+                mtf = str("mtf"),
+                summary = str("summary"),
+                voice = str("voice")
             )
+            "keyzone" -> AlertCardMeta.Keyzone(
+                name = str("name") ?: "Keyzone Hit",
+                symbol = str("symbol") ?: "-",
+                desc = str("desc") ?: "ราคาแตะจุดสำคัญของโครงสร้างตลาด",
+                price = str("price") ?: "-",
+                mtf = str("mtf"),
+                summary = str("summary"),
+                voice = str("voice")
+            )
+            "alert" -> {
+                val cond = str("condition") ?: "-"
+                // รองรับประวัติแจ้งเตือนเก่าที่ condition คือ signal_anticipation แต่ metadata ถูกบันทึกเป็น alert
+                if (cond.contains("signal_anticipation")) {
+                    val isBuy = rawContent?.contains("BUY", ignoreCase = true) == true ||
+                        rawContent?.contains("ซื้อ") == true ||
+                        rawContent?.contains("🟢") == true
+                    val isSell = rawContent?.contains("SELL", ignoreCase = true) == true ||
+                        rawContent?.contains("ขาย") == true ||
+                        rawContent?.contains("🔴") == true
+                    val side = if (isSell && !isBuy) "SELL" else "BUY"
+                    val desc = rawContent?.lineSequence()
+                        ?.firstOrNull { it.contains("เฝ้าระวัง") || it.contains("โซน") || it.contains("Rejection") }
+                        ?.replace("**", "")?.trim()
+                        ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ"
+                    AlertCardMeta.Anticipation(
+                        name = str("name") ?: "คาดการณ์สัญญาณ",
+                        symbol = str("symbol") ?: "-",
+                        side = side,
+                        zone = if (rawContent?.contains("Demand", ignoreCase = true) == true) "Demand Zone"
+                               else if (rawContent?.contains("Supply", ignoreCase = true) == true) "Supply Zone"
+                               else "Keyzone",
+                        desc = desc,
+                        confidence = "75",
+                        price = "-",
+                        mtf = null,
+                        summary = str("summary"),
+                        voice = str("voice")
+                    )
+                } else {
+                    AlertCardMeta.Generic(
+                        name = str("name") ?: "Alert", symbol = str("symbol") ?: "-",
+                        condition = cond, current = str("current") ?: "-",
+                        summary = str("summary"), voice = str("voice"),
+                        rawContent = rawContent
+                    )
+                }
+            }
             else -> null
         }
     } catch (_: Exception) { null }
@@ -617,7 +686,23 @@ private fun SignalAlertCard3D(meta: AlertCardMeta.Signal) {
             }
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(meta.symbol, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                val (baseSym, tf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(meta.symbol)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(baseSym, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            tf.uppercase(),
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
                 Text("กลยุทธ์: ${meta.strategy}", color = Color.White.copy(0.7f), fontSize = 11.sp)
             }
         }
@@ -635,7 +720,183 @@ private fun SignalAlertCard3D(meta: AlertCardMeta.Signal) {
     }
 }
 
-/** การ์ด alert ทั่วไป (ราคา/indicator/ฯลฯ) — accent cyan, field เฉพาะ เงื่อนไข + ค่าปัจจุบัน */
+/** การ์ดคาดการณ์สัญญาณล่วงหน้า (Pre-Signal) — สไตล์กะทัดรัด แสดงเฉพาะปัจจัยที่เกิด ไม่รกพื้นที่ */
+@Composable
+private fun AnticipationAlertCard3D(meta: AlertCardMeta.Anticipation) {
+    val isBuy = meta.side.equals("BUY", ignoreCase = true)
+    val accent = if (isBuy) JarvisTheme.Green else JarvisTheme.Red
+    AlertCardShell(accent) {
+        // บรรทัดที่ 1: Badge ⚡ + Symbol + Timeframe (ไม่ให้มี % เบียดด้านข้าง)
+        val (baseSym, tf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(meta.symbol)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(accent, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    "⚡ คาดการณ์ ${meta.side.uppercase()}",
+                    color = Color.Black, fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp, letterSpacing = 0.5.sp,
+                    softWrap = false
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(baseSym, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, softWrap = false)
+            Spacer(Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    tf.uppercase(),
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    softWrap = false
+                )
+            }
+        }
+
+        // บรรทัดที่ 2: ความเชื่อมั่น % และ ราคา (อ่านง่าย ชัดเจน ไม่ซ้ำซ้อนกับปัจจัยที่เกิดด้านล่าง)
+        val confVal = meta.confidence.trim().removeSuffix("%")
+        val confDisplay = if (confVal.isNotBlank() && confVal != "-") "$confVal%" else "-"
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "ความเชื่อมั่น",
+                    color = Color.White.copy(0.65f),
+                    fontSize = 11.sp
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    confDisplay,
+                    color = accent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    softWrap = false
+                )
+            }
+            if (meta.price != "-" && meta.price.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "ราคา",
+                        color = Color.White.copy(0.65f),
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        meta.price,
+                        color = JarvisTheme.Cyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // แสดงเฉพาะปัจจัยที่เกิด (Triggered Factors Only)
+        val factorItems = parseAnticipationFactors(meta.desc)
+        Text("ปัจจัยที่เกิด", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        if (factorItems.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                factorItems.forEach { factor ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text("• ", color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(factor, color = Color.White.copy(0.9f), fontSize = 11.sp, lineHeight = 15.sp)
+                    }
+                }
+            }
+        } else {
+            Text(meta.desc, color = Color.White.copy(0.9f), fontSize = 11.sp, lineHeight = 15.sp)
+        }
+
+        meta.summary?.takeIf { it.isNotBlank() }?.let {
+            Spacer(Modifier.height(6.dp))
+            CardSummaryBlock(accent, it)
+        }
+        meta.voice?.let { CardVoiceFooter(accent, it) }
+    }
+}
+
+private fun parseAnticipationFactors(desc: String): List<String> {
+    if (desc.isBlank()) return emptyList()
+    val clean = desc.replace(Regex("^⚡?\\s*\\[Confluence\\s*\\d+\\s*ปัจจัย\\]:?\\s*"), "")
+    return clean.split(Regex("[;\\n]+"))
+        .map { it.trim().removePrefix("-").removePrefix("•").trim() }
+        .filter { it.isNotBlank() }
+}
+
+/** การ์ดแจ้งเตือนราคาแตะโซนสำคัญ (Keyzone Hit) — สไตล์ 3D Amber */
+@Composable
+private fun KeyzoneAlertCard3D(meta: AlertCardMeta.Keyzone) {
+    val accent = JarvisTheme.Amber
+    AlertCardShell(accent) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .background(accent, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📍", fontSize = 12.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "KEYZONE HIT",
+                        color = Color.Black, fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp, letterSpacing = 0.5.sp
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(meta.symbol, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("แตะจุดสำคัญของโครงสร้างตลาด", color = Color.White.copy(0.7f), fontSize = 11.sp)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (meta.price != "-") {
+            CardFieldRow("ราคาปัจจุบัน", meta.price, JarvisTheme.Cyan)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("จุดสำคัญที่แตะ", color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(meta.desc, color = Color.White.copy(0.9f), fontSize = 12.sp, lineHeight = 17.sp)
+        meta.mtf?.takeIf { it.isNotBlank() }?.let { mtfText ->
+            Spacer(Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Column {
+                    Text("โครงสร้างตลาด 5 ไทม์เฟรม", color = Color.White.copy(0.6f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(mtfText, color = Color.White.copy(0.8f), fontSize = 11.sp, lineHeight = 15.sp)
+                }
+            }
+        }
+        meta.summary?.let { CardSummaryBlock(accent, it) }
+        meta.voice?.let { CardVoiceFooter(accent, it) }
+    }
+}
+
+/** การ์ด alert ทั่วไป (ราคา/indicator/ฯลฯ) — accent cyan, field เฉพาะ เงื่อนไข + ค่าปัจจุบัน + รายละเอียด */
 @Composable
 private fun GenericAlertCard(meta: AlertCardMeta.Generic) {
     val accent = JarvisTheme.Cyan
@@ -656,7 +917,21 @@ private fun GenericAlertCard(meta: AlertCardMeta.Generic) {
         Spacer(Modifier.height(10.dp))
         CardFieldRow("เงื่อนไข", meta.condition, accent)
         CardFieldRow("ค่าปัจจุบัน", meta.current, accent)
-        meta.summary?.let { CardSummaryBlock(accent, it) }
+        if (!meta.summary.isNullOrBlank()) {
+            CardSummaryBlock(accent, meta.summary)
+        } else if (!meta.rawContent.isNullOrBlank()) {
+            val trimmed = meta.rawContent.trim()
+            val hasDetails = !trimmed.startsWith("🎯") || trimmed.contains("\n\n") || trimmed.length > 80
+            if (hasDetails) {
+                val detailText = trimmed.replace(Regex("^🎯\\s*\\*\\*[^\n]+\\*\\*\\s*"), "")
+                    .replace(Regex("^.*\\|.*\\|.*(\r?\n)+", RegexOption.MULTILINE), "")
+                    .replace("**JARVIS quick-check:**", "")
+                    .trim()
+                if (detailText.isNotBlank()) {
+                    CardSummaryBlock(accent, detailText)
+                }
+            }
+        }
         meta.voice?.let { CardVoiceFooter(accent, it) }
     }
 }

@@ -4,6 +4,7 @@ import com.example.personalaibot.tools.trading.TradingToolDefinitions
 import com.example.personalaibot.tools.trading.SmcToolDefinitions
 import com.example.personalaibot.tools.file.FileToolDefinitions
 import com.example.personalaibot.tools.strategy.StrategyToolDefinitions
+import com.example.personalaibot.tools.device.DeviceToolDefinitions
 import kotlinx.serialization.json.*
 
 object ToolRegistry {
@@ -40,6 +41,7 @@ object ToolRegistry {
         "trading_smc_flow",
         "trading_strategy_signal",
         "trading_signal_alert",
+        "trading_signal_anticipation",
         "trading_signal_stats",
         "trading_backtest",
         "trading_backtest_optimize",
@@ -346,6 +348,7 @@ object ToolRegistry {
         "trading_smc_flow",
         "trading_strategy_signal",
         "trading_signal_alert",
+        "trading_signal_anticipation",
         "trading_signal_stats",
         "trading_backtest",
         "trading_backtest_optimize",
@@ -414,6 +417,10 @@ object ToolRegistry {
     private val _strategyTools: Map<String, FunctionDeclaration> =
         StrategyToolDefinitions.allDefinitions.associateBy { it.name }
 
+    // ─── Device Control Tools (Hardware / App Launcher / Accessibility) ────
+    private val _deviceTools: Map<String, FunctionDeclaration> =
+        DeviceToolDefinitions.allDefinitions.associateBy { it.name }
+
     fun getGeminiTool(): GeminiTool = GeminiTool(
         functionDeclarations = _builtinTools.values.toList() +
                                _tradingTools.values.toList() +
@@ -422,6 +429,7 @@ object ToolRegistry {
                                _fileTools.values.toList() +
                                _strategyTools.values.toList() +
                                _cameraTools.values.toList() +
+                               _deviceTools.values.toList() +
                                _customTools.values.toList() +
                                // skill ทุกตัวมี custom tool คู่กันอยู่แล้ว (register คู่กัน) —
                                // ส่งเฉพาะ skill ที่ไม่มี custom tool ชื่อซ้ำ กัน Gemini 400 "Duplicate function declaration"
@@ -435,7 +443,7 @@ object ToolRegistry {
     )
 
     fun allToolNames(): Set<String> =
-        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _strategyTools.keys + _cameraTools.keys + _customTools.keys + _skills.keys
+        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _strategyTools.keys + _cameraTools.keys + _deviceTools.keys + _customTools.keys + _skills.keys
 
     fun isTradingTool(name: String): Boolean =
         name in _tradingTools || name in _smcTools || name in _mt5Tools
@@ -454,6 +462,9 @@ object ToolRegistry {
 
     fun isSystemTool(name: String): Boolean =
         name.startsWith("system_")
+
+    fun isDeviceTool(name: String): Boolean =
+        name in _deviceTools
 
     fun registerCustomTool(decl: FunctionDeclaration) {
         _customTools = _customTools + (decl.name to decl)
@@ -611,10 +622,11 @@ object ToolRegistry {
         ToolCategory("📚 Strategy Library", "📚", _strategyTools.values.toList()),
         ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
         ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList()),
+        ToolCategory("📱 Device Control", "📱", _deviceTools.values.toList()),
         ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList()),
         ToolCategory("🛠 Custom Tools", "🛠", _customTools.values.toList())
     )
 
     fun totalToolCount(): Int =
-        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _strategyTools.size + _cameraTools.size + _customTools.size
+        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _strategyTools.size + _cameraTools.size + _deviceTools.size + _customTools.size
 }

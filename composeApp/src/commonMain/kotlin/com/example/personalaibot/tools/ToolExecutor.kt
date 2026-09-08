@@ -4,6 +4,7 @@ import com.example.personalaibot.logDebug
 import com.example.personalaibot.tools.trading.TradingToolExecutor
 import com.example.personalaibot.tools.camera.CameraToolExecutor
 import com.example.personalaibot.tools.system.SystemToolExecutor
+import com.example.personalaibot.tools.device.DeviceControlHandler
 import io.ktor.client.*
 import kotlinx.datetime.*
 import kotlin.math.*
@@ -39,6 +40,9 @@ object ToolExecutor {
     // Executor สำหรับ System tools (diagnostics / connectivity / create custom tool)
     private var _systemExecutor: SystemToolExecutor? = null
 
+    // Executor สำหรับ Device Control (flashlight, volume, app launcher, accessibility)
+    private var _deviceExecutor: DeviceControlHandler? = null
+
     // Delegate สำหรับ Side-effects (Memory, Reminders, UI)
     private var _sideEffectDelegate: SideEffectDelegate? = null
 
@@ -56,6 +60,10 @@ object ToolExecutor {
 
     fun initSystemExecutor(executor: SystemToolExecutor) {
         _systemExecutor = executor
+    }
+
+    fun initDeviceExecutor(executor: DeviceControlHandler) {
+        _deviceExecutor = executor
     }
 
     fun setSideEffectDelegate(delegate: SideEffectDelegate) {
@@ -89,6 +97,7 @@ object ToolExecutor {
             val result = when {
                 // ─── Automation Alerts (intercept ก่อน trading — ใช้ AutomationManager ผ่าน delegate) ──
                 routedToolName == "automation_manage_alerts" -> executeManageAlerts(routedArgs)
+                routedToolName == "trading_signal_anticipation" -> executeSignalAnticipation(routedArgs)
                 // ─── Scheduled Tasks (งานตามเวลา — ปลุก AI เมื่อถึงเวลา) ──
                 routedToolName == "automation_manage_schedule" -> executeManageSchedule(routedArgs)
                 // ─── Live Control (Vision/Voice) — intercept ก่อน camera branch ──
@@ -97,6 +106,11 @@ object ToolExecutor {
                 ToolRegistry.isSystemTool(routedToolName) -> {
                     _systemExecutor?.execute(routedToolName, routedArgs)
                         ?: "⚠️ System module ยังไม่พร้อมใช้งาน (SystemToolExecutor ยังไม่ถูก init)"
+                }
+                // ─── Device Control Tools (Hardware / App Launch / Accessibility) ──
+                ToolRegistry.isDeviceTool(routedToolName) -> {
+                    _deviceExecutor?.execute(routedToolName, routedArgs)
+                        ?: "⚠️ Device Control module ยังไม่พร้อมใช้งาน (DeviceControlExecutor ยังไม่ถูก init)"
                 }
                 // ─── Trading Tools ─────────────────────────────────────────
                 ToolRegistry.isTradingTool(routedToolName) -> {
@@ -472,6 +486,134 @@ object ToolExecutor {
         val delegate = _sideEffectDelegate
             ?: return "⚠️ ระบบ Automation ยังไม่พร้อมใช้งาน"
         return delegate.onManageAlerts(args)
+    }
+
+    private suspend fun executeSignalAnticipation(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim() ?: "create"
+        val symbol = args["symbol"]?.trim()?.uppercase() ?: "XAUUSD"
+        val symbolBase = symbol.substringBefore("@")
+        val tf = args["timeframe"]?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "15m"
+
+        return when (action) {
+            "create" -> {
+                val factorsArg = args["factors"]?.trim()
+                if (!factorsArg.isNullOrBlank()) {
+                    com.example.personalaibot.automation.AnticipationConfigManager.setFactors(symbolBase, factorsArg.split(",").map { it.trim() })
+                }
+                val addFactorsArg = args["add_factors"]?.trim()
+                if (!addFactorsArg.isNullOrBlank()) {
+                    addFactorsArg.split(",").map { it.trim() }.forEach {
+                        com.example.personalaibot.automation.AnticipationConfigManager.addFactor(symbolBase, it)
+                    }
+                }
+                val removeFactorsArg = args["remove_factors"]?.trim()
+                if (!removeFactorsArg.isNullOrBlank()) {
+                    removeFactorsArg.split(",").map { it.trim() }.forEach {
+                        com.example.personalaibot.automation.AnticipationConfigManager.removeFactor(symbolBase, it)
+                    }
+                }
+
+                val alertArgs = mapOf(
+                    "action" to "create",
+                    "name" to "Anticipation $symbolBase",
+                    "symbol" to symbolBase,
+                    "timeframe" to tf,
+                    "tool_name" to "trading_signal_alert",
+                    "condition_field" to "signal_anticipation",
+                    "condition_operator" to ">=",
+                    "condition_value" to "1",
+                    "delivery" to (args["delivery"]?.trim() ?: "ai"),
+                    "interval_minutes" to "1",
+                    "voice" to (args["voice"]?.trim() ?: "true")
+                )
+                val alertRes = executeManageAlerts(alertArgs)
+                val active = com.example.personalaibot.automation.AnticipationConfigManager.getActiveFactors(symbolBase)
+
+                buildString {
+                    appendLine("⚡ **ตั้งค่าแจ้งเตือนคาดการณ์ล่วงหน้า (Signal Anticipation) สำเร็จ!**")
+                    appendLine("• **สินทรัพย์**: $symbolBase (TF: ${tf.uppercase()})")
+                    appendLine("• **เงื่อนไขเฝ้าระวัง**: `trading_signal_alert` ➔ `signal_anticipation >= 1`")
+                    appendLine("• **ปัจจัยที่เปิดใช้งาน (${active.size} ปัจจัย)**:")
+                    active.forEach { fid ->
+                        val def = com.example.personalaibot.automation.AnticipationConfigManager.findFactor(fid)
+                        appendLine("  - **${def?.name ?: fid}** (${def?.category ?: ""}): ${def?.description ?: ""}")
+                    }
+                    appendLine("• **ผลการสร้าง Alert Job**: $alertRes")
+                }.trim()
+            }
+
+            "config" -> {
+                val factorsArg = args["factors"]?.trim()
+                if (!factorsArg.isNullOrBlank()) {
+                    com.example.personalaibot.automation.AnticipationConfigManager.setFactors(symbol, factorsArg.split(",").map { it.trim() })
+                }
+                val addFactorsArg = args["add_factors"]?.trim()
+                if (!addFactorsArg.isNullOrBlank()) {
+                    addFactorsArg.split(",").map { it.trim() }.forEach {
+                        com.example.personalaibot.automation.AnticipationConfigManager.addFactor(symbol, it)
+                    }
+                }
+                val removeFactorsArg = args["remove_factors"]?.trim()
+                if (!removeFactorsArg.isNullOrBlank()) {
+                    removeFactorsArg.split(",").map { it.trim() }.forEach {
+                        com.example.personalaibot.automation.AnticipationConfigManager.removeFactor(symbol, it)
+                    }
+                }
+                val active = com.example.personalaibot.automation.AnticipationConfigManager.getActiveFactors(symbol)
+                buildString {
+                    appendLine("⚙️ **อัปเดตการตั้งค่าปัจจัยคาดการณ์ล่วงหน้าสำหรับ $symbol สำเร็จ!**")
+                    appendLine("• **ปัจจัยที่เปิดใช้งานปัจจุบัน (${active.size} ปัจจัย)**:")
+                    active.forEach { fid ->
+                        val def = com.example.personalaibot.automation.AnticipationConfigManager.findFactor(fid)
+                        appendLine("  - **${def?.name ?: fid}**: ${def?.description ?: ""}")
+                    }
+                }.trim()
+            }
+
+            "list_factors" -> {
+                val active = com.example.personalaibot.automation.AnticipationConfigManager.getActiveFactors(symbol)
+                buildString {
+                    appendLine("📋 **คลัง 10 ปัจจัยมาตรฐานสำหรับการคาดการณ์ล่วงหน้า (Curated Factor Whitelist)**")
+                    appendLine("สินทรัพย์อ้างอิง: $symbol")
+                    appendLine()
+                    com.example.personalaibot.automation.AnticipationConfigManager.ALL_FACTORS.forEachIndexed { i, f ->
+                        val isOn = f.id in active
+                        val icon = if (isOn) "✅ [เปิดอยู่]" else "⚪ [ปิด]"
+                        appendLine("${i + 1}. **${f.name}** (`${f.id}`) — $icon")
+                        appendLine("   - หมวดหมู่: ${f.category} | ความมั่นใจพื้นฐาน: ${f.defaultConfidence}% | Core: ${if (f.isCoreDefault) "ใช่" else "ไม่"}")
+                        appendLine("   - คำอธิบาย: ${f.description}")
+                    }
+                }.trim()
+            }
+
+            "recommend" -> {
+                val rec = com.example.personalaibot.automation.AnticipationConfigManager.getRecommendedFactors(symbol)
+                buildString {
+                    appendLine("💡 **คำแนะนำชุดปัจจัยคาดการณ์ล่วงหน้าที่เหมาะสมสำหรับ $symbol**")
+                    appendLine("จากพฤติกรรมความผันผวนและสถิติของสินทรัพย์ แนะนำให้เปิดใช้งาน ${rec.size} ปัจจัยดังนี้:")
+                    rec.forEach { fid ->
+                        val def = com.example.personalaibot.automation.AnticipationConfigManager.findFactor(fid)
+                        appendLine("• **${def?.name ?: fid}** (`$fid`): ${def?.description ?: ""}")
+                    }
+                    appendLine()
+                    appendLine("👉 สามารถสั่ง: *\"เปิดใช้ปัจจัยตามที่แนะนำสำหรับ $symbol\"* เพื่ออัปเดตการตั้งค่าได้ทันทีครับ")
+                }.trim()
+            }
+
+            "status" -> {
+                val active = com.example.personalaibot.automation.AnticipationConfigManager.getActiveFactors(symbol)
+                buildString {
+                    appendLine("📊 **สถานะการคาดการณ์ล่วงหน้า (Signal Anticipation) — $symbol**")
+                    appendLine("• **จำนวนปัจจัยที่เปิดใช้งาน**: ${active.size} จาก 10 ปัจจัย")
+                    active.forEach { fid ->
+                        val def = com.example.personalaibot.automation.AnticipationConfigManager.findFactor(fid)
+                        appendLine("  - ✅ **${def?.name ?: fid}** (`$fid`)")
+                    }
+                }.trim()
+            }
+
+            else -> "❌ ไม่รองรับ action '$action' — ใช้ create, config, list_factors, recommend, หรือ status"
+        }
     }
 
     private suspend fun executeManageSchedule(args: Map<String, String>): String {

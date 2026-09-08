@@ -34,6 +34,7 @@
 | [[LiveToolBridge]] | Bridge ระหว่าง live interaction กับ tools |
 | [[JarvisViewModel]] | State orchestration ฝั่ง UI |
 | [[LocalEmbeddingSystem]] | Embedding ฝั่ง local สำหรับ vector memory |
+| [[Always_AI_Live_Mode]] | ระบบ Always AI Live (Full-screen, Mini Robot Overlay, Wake-on-voice) |
 
 ### 03 Tools — เครื่องมือ
 | ไฟล์ | หน้าที่ |
@@ -44,6 +45,12 @@
 | ไฟล์ | หน้าที่ |
 |------|--------|
 | [[Current_Tasks]] | งานปัจจุบัน สถานะ และ next steps |
+| [[Changelog_2026-09-09_Gemini_3_1_Live_Model_Primary]] | ตั้ง `gemini-3.1-flash-live-preview` เป็นโมเดลหลัก และแก้ไขบั๊กสลับโมเดลอัตโนมัติ |
+| [[Changelog_2026-09-09_Keyboard_IME_AdjustResize_Fix]] | แก้ปัญหาคีย์บอร์ดดันหน้าจอขึ้นสุดใน Honor/OEM และปรับ Insets กล่องแชท |
+| [[Changelog_2026-09-08_Keyguard_Lockscreen_Overlay_Fix]] | แก้ปัญหาแอปแสดงผลทับหน้าจอล็อก Keyguard และควบคุม Screen Sleep ในโหมดปกติ |
+| [[Changelog_2026-09-08_Live_Voice_Connection_Latency]] | ลด Latency การเชื่อมต่อ Live Voice เหลือ <2s ด้วยโมเดล 09-2025 และ Abort on Timeout |
+| [[Changelog_2026-09-08_Voice_Alert_Delivery]] | เปิดระบบเสียงพูดแจ้งเตือนเป็นค่าเริ่มต้นและปลุกหน้าจอเมื่อเกิด Alert |
+| [[Changelog_2026-09-07_Gemini_Live_Voice_Stability]] | ปรับปรุงเสถียรภาพการเชื่อมต่อและสำเนียงเสียงภาษาไทยของ Gemini Live |
 | [[2026-04-21_Auto_Trading_Engine_Update]] | สรุปอัปเดต MT5 และ auto-trading engine |
 | [[Changelog_2026-05-01_Mobile_App_Complete]] | Changelog มือถือ — Trading Terminal, Dashboard |
 | [[Mobile_App_Improvement_Plan_2026-04-30]] | แผนปรับปรุง Mobile App |

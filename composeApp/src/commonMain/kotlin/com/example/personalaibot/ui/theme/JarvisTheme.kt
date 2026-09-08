@@ -14,6 +14,16 @@ object JarvisTheme {
     val Amber   = Color(0xFFFFB300)   // 2026-04-30 — offline / stale banner
     val Green   = Color(0xFF22C55E)   // 2026-04-30 — success indicators
 
+    // ─── Avatar / Always Live Colors ─────────────────────────────────────
+    val RobotWhite  = Color(0xFFF0F4F8)    // หุ่นยนต์ตัวหลัก
+    val RobotVisor  = Color(0xFF1A1A2E)    // หน้าจอ face visor
+    val RobotEye    = Color(0xFF00E5FF)    // ตา (= Cyan)
+    val RobotGlow   = Color(0xFF00E5FF)    // ambient glow
+    val HeartPink   = Color(0xFFFF69B4)    // love mode
+    val AngryRed    = Color(0xFFFF4444)    // angry mode (= Red)
+    val SleepBlue   = Color(0xFF4A6FA5)    // sleep mode
+    val ExcitedGold = Color(0xFFFFD700)    // excited mode
+
     val ColorScheme = darkColorScheme(
         primary          = Cyan,
         secondary        = Purple,

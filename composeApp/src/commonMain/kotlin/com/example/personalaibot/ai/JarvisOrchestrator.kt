@@ -72,7 +72,15 @@ class JarvisOrchestrator(
 
         // เชื่อมต่อ Side-effect Delegate
         com.example.personalaibot.tools.ToolExecutor.setSideEffectDelegate(this)
+
+        // เชื่อมต่อ live model promotion callback เพื่อจำโมเดลที่ใช้งานได้จริง
+        liveService.onLiveModelPromoted = { winningModel ->
+            liveModelName = winningModel
+            onLiveModelChanged?.invoke(winningModel)
+        }
     }
+
+    var onLiveModelChanged: ((String) -> Unit)? = null
 
     private val toolBridge = LiveToolBridge(
         liveService    = liveService,
@@ -128,11 +136,7 @@ class JarvisOrchestrator(
         // the same multi-key settings used by GeminiService.
         geminiService.apiKeysOverride?.let { liveService.updateLiveApiKeys(it) }
         liveService.updateLiveModelChain(
-            listOf(
-                newLiveModelName,
-                "gemini-2.5-flash-native-audio-preview-12-2025",
-                "gemini-2.0-flash-exp"
-            )
+            com.example.personalaibot.data.ModelConfig.getLiveFallbackChain(newLiveModelName)
         )
         // cloud embedding ต้องได้ key ใหม่ด้วย — ไม่งั้น semantic memory เงียบทั้งระบบ
         embeddingRegistry.updateGeminiKey(newApiKey)
@@ -925,22 +929,37 @@ class JarvisOrchestrator(
                     ?: return "❌ ต้องระบุ condition_value (ค่าเปรียบเทียบ เช่น 4800)"
                 val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 1L
                 val rawTimeframe = args["timeframe"]?.trim()?.lowercase()
-                val supportedTimeframes = listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
-                val requestedTimeframe = if (rawTimeframe != null && rawTimeframe != "all" && !rawTimeframe.contains("ทุก")) {
-                    com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(rawTimeframe)
-                } else rawTimeframe
-                val timeframeTargets = when {
-                    requestedTimeframe == "all" || requestedTimeframe == "ทุก" || requestedTimeframe == "ทุก timeframe" -> supportedTimeframes
-                    requestedTimeframe.isNullOrBlank() -> listOf(com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol).second.lowercase())
-                    else -> listOf(requestedTimeframe)
-                }.map { com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(it) }
-                 .filter { it in supportedTimeframes }.distinct()
+                val isAnticipationAlert = fieldRaw.startsWith("signal_anticipation") || toolNameRaw == "trading_signal_anticipation"
+                val supportedTimeframes = if (isAnticipationAlert) {
+                    listOf("5m", "15m", "30m", "1h", "4h")
+                } else {
+                    listOf("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
+                }
+                val isAllTf = rawTimeframe == "all" || rawTimeframe?.contains("ทุก") == true
+                val requestedTfList = when {
+                    isAllTf -> supportedTimeframes
+                    rawTimeframe.isNullOrBlank() -> {
+                        val (_, embedded) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol)
+                        if (isAnticipationAlert && !symbol.contains("@")) listOf("15m") else listOf(embedded.lowercase())
+                    }
+                    rawTimeframe.contains(",") || rawTimeframe.contains(";") -> {
+                        rawTimeframe.split(",", ";").map { it.trim() }
+                    }
+                    else -> listOf(rawTimeframe)
+                }
+                val timeframeTargets = requestedTfList.map { com.example.personalaibot.tools.trading.TaIndicators.normalizeTimeframe(it) }
+                    .filter { it in supportedTimeframes }.distinct()
                 if (timeframeTargets.isEmpty()) {
-                    return "❌ timeframe '$rawTimeframe' ไม่รองรับ — ใช้ 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w หรือ all"
+                    val validTfs = supportedTimeframes.joinToString(", ")
+                    return "❌ timeframe '$rawTimeframe' ไม่รองรับ — ใช้ $validTfs หรือ all"
                 }
                 val delivery = when (args["delivery"]?.trim()?.lowercase()) {
                     "direct" -> "direct"   // ส่ง notification+แชทโดยตรง ไม่ผ่าน AI (ประหยัดโทเคน)
                     else -> "ai"           // default: alert → AI quick-check → ผู้ใช้
+                }
+                val voiceArg = args["voice"]?.trim()?.lowercase()
+                if (voiceArg != "false") {
+                    automationManager.setAlertVoiceEnabled(true)
                 }
 
                 // Normalize: AI บางเครื่อง/บางโมเดลเลือก trading_technical_analysis.signal (STRONG BUY/SELL)
@@ -985,17 +1004,16 @@ class JarvisOrchestrator(
                     kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
                 } else value
 
-                val (symbolBase, embeddedTf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol)
-                val effectiveTargets = if (requestedTimeframe.isNullOrBlank()) {
-                    listOf(embeddedTf.lowercase())
-                } else timeframeTargets
+                val (symbolBase, _) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol)
+                val effectiveTargets = timeframeTargets
                 val created = mutableListOf<String>()
                 val skipped = mutableListOf<String>()
                 effectiveTargets.forEach { tf ->
                     val targetSymbol = if (toolName == "trading_signal_alert") {
-                        if (tf == "1h") symbolBase else "$symbolBase@$tf"
+                        if (effField.startsWith("signal_anticipation")) "$symbolBase@$tf"
+                        else if (tf == "1h") symbolBase else "$symbolBase@$tf"
                     } else {
-                        if (requestedTimeframe.isNullOrBlank()) symbol else "$symbolBase@$tf"
+                        if (effectiveTargets.size == 1 && rawTimeframe.isNullOrBlank() && !symbol.contains("@")) symbol else "$symbolBase@$tf"
                     }
                     val duplicate = automationManager.activeJobs.value.any { existing ->
                         existing.tool_name == toolName && existing.symbol.equals(targetSymbol, ignoreCase = true) &&
@@ -1009,7 +1027,7 @@ class JarvisOrchestrator(
                     if (duplicate) {
                         skipped += tf
                     } else {
-                        val targetName = if (effectiveTargets.size == 1) name else "$name [$tf]"
+                        val targetName = if (name.contains("[") || name.contains("@")) name else "$name [${tf.uppercase()}]"
                         automationManager.registerJob(
                             name = targetName,
                             symbol = targetSymbol,
@@ -1022,9 +1040,10 @@ class JarvisOrchestrator(
                     }
                 }
                 val deliveryDesc = if (delivery == "direct") "โหมดส่งตรง (notification+แชท ไม่ผ่าน AI)" else "โหมด AI วิเคราะห์ก่อนแจ้ง"
+                val voiceDesc = if (voiceArg == "false") " (ปิดเสียงพูด)" else " (เปิดเสียงพูดเตือน)"
                 val tfDesc = if (effectiveTargets.size == 1) effectiveTargets.first() else "${effectiveTargets.size} timeframe (${effectiveTargets.joinToString(", ")})"
                 val skipDesc = if (skipped.isNotEmpty()) " | มีอยู่แล้ว: ${skipped.joinToString(", ")}" else ""
-                "✅ ตั้งการแจ้งเตือน '$name' แล้ว — $symbolBase/$tfDesc ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที | สร้างใหม่ ${created.size} รายการ$skipDesc | $deliveryDesc"
+                "✅ ตั้งการแจ้งเตือน '$name' แล้ว — $symbolBase/$tfDesc ($field ${args["condition_operator"] ?: ">="} $value) ทุก $interval นาที | สร้างใหม่ ${created.size} รายการ$skipDesc | $deliveryDesc$voiceDesc"
             }
             "delete" -> {
                 val id = args["alert_id"]?.toLongOrNull()

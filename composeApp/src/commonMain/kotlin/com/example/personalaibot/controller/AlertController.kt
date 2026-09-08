@@ -25,7 +25,7 @@ class AlertController(
     private val _alertAiSummaryEnabled = MutableStateFlow(true)
     val alertAiSummaryEnabled: StateFlow<Boolean> = _alertAiSummaryEnabled.asStateFlow()
 
-    private val _alertVoiceEnabled = MutableStateFlow(false)
+    private val _alertVoiceEnabled = MutableStateFlow(true)
     val alertVoiceEnabled: StateFlow<Boolean> = _alertVoiceEnabled.asStateFlow()
 
     /** Engine เสียงแจ้งเตือน: "device" = Android TTS (ทันที ไม่จำกัด — default) | "live" = Gemini Live chain */
@@ -67,7 +67,7 @@ class AlertController(
             database.jarvisDatabaseQueries.getSetting("alert_ai_summary").executeAsOneOrNull()?.let { it == "true" } ?: true
         }
         _alertVoiceEnabled.value = withContext(Dispatchers.IO) {
-            database.jarvisDatabaseQueries.getSetting("alert_voice").executeAsOneOrNull()?.let { it == "true" } ?: false
+            database.jarvisDatabaseQueries.getSetting("alert_voice").executeAsOneOrNull()?.let { it == "true" } ?: true
         }
         _alertVoiceEngine.value = withContext(Dispatchers.IO) {
             normalizeAlertVoiceEngine(database.jarvisDatabaseQueries.getSetting("alert_voice_engine").executeAsOneOrNull())

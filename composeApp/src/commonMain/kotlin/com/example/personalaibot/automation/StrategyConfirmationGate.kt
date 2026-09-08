@@ -29,7 +29,7 @@ object StrategyConfirmationGate {
         val closeLocation = if (side == "BUY") (c.close - c.low) / range else (c.high - c.close) / range
         val kind = signalKind(label)
 
-        return when (kind) {
+        val rawDecision = when (kind) {
             "REV" -> {
                 // Reversal needs rejection, not merely an oscillator extreme.
                 val wick = if (side == "BUY") minOf(c.open, c.close) - c.low else c.high - maxOf(c.open, c.close)
@@ -50,6 +50,15 @@ object StrategyConfirmationGate {
             "3BR" -> Decision(true, "PATTERN_CONFIRMED", 1.0)
             else -> Decision(true, "UNKNOWN_STRATEGY_UNGATED", 0.0)
         }
+
+        // Closed-loop reinforcement: adjust confidence based on recent outcome performance
+        val adj = runCatching { SignalOutcomeTracker.getStrategyConfidenceAdjustment(kind) }.getOrDefault(0.0)
+        val finalStrength = (rawDecision.strength + adj).coerceIn(0.0, 1.0)
+        val blockedByColdStreak = adj <= -0.20 && rawDecision.strength < 0.55
+        val finalAccepted = rawDecision.accepted && !blockedByColdStreak
+        val finalReason = if (blockedByColdStreak) "COLD_STREAK_REDUCED" else rawDecision.reason
+
+        return Decision(finalAccepted, finalReason, finalStrength)
     }
 
     fun signalKind(label: String): String = when {

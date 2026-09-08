@@ -58,6 +58,9 @@ import com.example.personalaibot.ui.screen.AutomationScreen
 import com.example.personalaibot.ui.screen.BacktestScreen
 import com.example.personalaibot.ui.screen.ChatInputBar
 import com.example.personalaibot.ui.screen.LiveModePanel
+import com.example.personalaibot.ui.screen.AlwaysLiveScreen
+import com.example.personalaibot.ui.component.avatar.AvatarEmotion
+import com.example.personalaibot.ui.component.avatar.AvatarState
 import com.example.personalaibot.ui.screen.SettingsDialog
 import com.example.personalaibot.ui.screen.ToolListScreen
 import com.example.personalaibot.ui.screen.TradingChartScreen
@@ -75,6 +78,11 @@ fun App(
     onSetWidgetListening: (Boolean) -> Unit = {},
     registerToggleLive: (() -> Unit) -> Unit = {},
     registerWidgetClosed: (() -> Unit) -> Unit = {},
+    onStartAlwaysLive: () -> Unit = {},
+    onStopAlwaysLive: () -> Unit = {},
+    registerExpandAlwaysLive: (((() -> Unit) -> Unit))? = null,
+    registerCloseAlwaysLive: (((() -> Unit) -> Unit))? = null,
+    onKeepScreenOn: (Boolean) -> Unit = {},
     requestAllFilesPermission: () -> Unit = {},
     allFilesAccessGranted: Boolean = false,
     setupChecks: List<com.example.personalaibot.ui.screen.SetupCheckItem> = emptyList(),
@@ -98,6 +106,7 @@ fun App(
     val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
 
     var showSettings by remember { mutableStateOf(false) }
+    var showAlwaysLive by remember { mutableStateOf(false) }
     var showToolList by remember { mutableStateOf(false) }
     var showAutomation by remember { mutableStateOf(false) }
     var showTradingTerminal by remember { mutableStateOf(false) }
@@ -192,6 +201,18 @@ fun App(
         registerToggleLive {
             if (viewModel.isListening.value) viewModel.stopVoiceInput() else viewModel.startVoiceInput()
         }
+        registerExpandAlwaysLive?.invoke {
+            showAlwaysLive = true
+            onStartAlwaysLive()
+            if (!viewModel.isListening.value) {
+                viewModel.startVoiceInput()
+            }
+        }
+        registerCloseAlwaysLive?.invoke {
+            showAlwaysLive = false
+            onStopAlwaysLive()
+            viewModel.stopVoiceInput()
+        }
     }
 
     LaunchedEffect(messages.size, hasOverlayScreen) {
@@ -200,8 +221,13 @@ fun App(
         }
     }
 
+    LaunchedEffect(showAlwaysLive) {
+        onKeepScreenOn(showAlwaysLive)
+    }
+
     MaterialTheme(colorScheme = JarvisTheme.ColorScheme) {
-        Scaffold(
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = JarvisTheme.Dark,
             topBar = {
@@ -290,7 +316,11 @@ fun App(
                             onSwitchCamera = { viewModel.switchCamera() },
                             onToggleMute = { viewModel.toggleMute() },
                             onEndLive = { viewModel.stopVoiceInput() },
-                            onFrameCapture = { jpeg, raw -> viewModel.onCameraFrame(jpeg, raw) }
+                            onFrameCapture = { jpeg, raw -> viewModel.onCameraFrame(jpeg, raw) },
+                            onAlwaysLive = {
+                                showAlwaysLive = true
+                                onStartAlwaysLive()
+                            }
                         )
                     } else {
                         ChatInputBar(
@@ -520,6 +550,39 @@ fun App(
             )
         }
     }
+
+    if (showAlwaysLive) {
+        val avatarEmotion = when {
+            isTyping -> AvatarEmotion.THINKING
+            isListening -> AvatarEmotion.LISTENING
+            else -> AvatarEmotion.IDLE
+        }
+        val avatarState = remember(avatarEmotion, isListening, isTyping) {
+            AvatarState(
+                emotion = avatarEmotion,
+                isSpeaking = isTyping,
+                statusText = if (isListening) "JARVIS กำลังฟัง..." else if (isTyping) "JARVIS กำลังคิด..." else "พร้อมรับคำสั่ง"
+            )
+        }
+        AlwaysLiveScreen(
+            avatarState = avatarState,
+            connectionState = liveConnectionState,
+            isMuted = isMuted,
+            isCameraActive = isCameraActive,
+            onToggleMute = { viewModel.toggleMute() },
+            onToggleCamera = { viewModel.toggleCamera() },
+            onMinimize = {
+                showAlwaysLive = false
+                onStartWidget()
+            },
+            onEndLive = {
+                showAlwaysLive = false
+                onStopAlwaysLive()
+                viewModel.stopVoiceInput()
+            }
+        )
+    }
+}
 }
 
 

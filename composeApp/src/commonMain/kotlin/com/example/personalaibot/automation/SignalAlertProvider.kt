@@ -54,6 +54,9 @@ object TradingSignalMarketDataRouter {
     private var mt5ConnectedProvider: (() -> Boolean)? = null
     private var mt5CandleProvider: (suspend (String, String, Int) -> List<Candle>)? = null
 
+    // Observability dedup: รวบเหลือ 1 บรรทัดต่อ symbol ไม่พ่นซ้ำซากทุก TF ในรอบเดียวกัน
+    private val lastLoggedDecisions = mutableMapOf<String, Pair<String, Long>>()
+
     fun configure(
         liveModeProvider: () -> Boolean,
         mt5ConnectedProvider: () -> Boolean,
@@ -72,19 +75,34 @@ object TradingSignalMarketDataRouter {
     ): Triple<List<Candle>, String, String> {
         val live = liveModeProvider?.invoke() == true
         val connected = mt5ConnectedProvider?.invoke() == true
+        val result: Triple<List<Candle>, String, String>
+
         if (live && connected) {
             val mt5 = runCatching { mt5CandleProvider?.invoke(symbol, timeframe, count).orEmpty() }.getOrElse { emptyList() }
             if (mt5.size >= 62) {
-                logDebug("SignalDataSource", "accountMode=LIVE mt5Connected=true selectedSource=MT5_LIVE reason=MT5_LIVE_CONNECTED symbol=$symbol/$timeframe bars=${mt5.size}")
-                return Triple(mt5, "MT5_LIVE", "MT5_LIVE_CONNECTED")
+                result = Triple(mt5, "MT5_LIVE", "MT5_LIVE_CONNECTED")
+            } else {
+                result = Triple(tvProvider(), "TRADINGVIEW", "MT5_CANDLE_UNAVAILABLE")
             }
-            logDebug("SignalDataSource", "accountMode=LIVE mt5Connected=true selectedSource=TRADINGVIEW reason=MT5_CANDLE_UNAVAILABLE symbol=$symbol/$timeframe bars=${mt5.size}")
         } else {
             val reason = if (live) "MT5_LIVE_OFFLINE" else "DEMO_FORCES_TV"
-            logDebug("SignalDataSource", "accountMode=${if (live) "LIVE" else "DEMO"} mt5Connected=$connected selectedSource=TRADINGVIEW reason=$reason symbol=$symbol/$timeframe")
+            result = Triple(tvProvider(), "TRADINGVIEW", reason)
         }
-        val reason = if (live && connected) "MT5_CANDLE_UNAVAILABLE" else if (live) "MT5_LIVE_OFFLINE" else "DEMO_FORCES_TV"
-        return Triple(tvProvider(), "TRADINGVIEW", reason)
+
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        val decisionKey = "$symbol:live=$live,conn=$connected,src=${result.second},reason=${result.third}"
+        val prev = lastLoggedDecisions[symbol]
+
+        // รวมเหลือ 1 บรรทัด: พ่นเฉพาะเมื่อเริ่มแรก, สถานะ routing เปลี่ยนแปลง, หรือครบ 5 นาที (Heartbeat)
+        if (prev == null || prev.first != decisionKey || (now - prev.second) >= 300_000L) {
+            lastLoggedDecisions[symbol] = decisionKey to now
+            logDebug(
+                "SignalDataSource",
+                "accountMode=${if (live) "LIVE" else "DEMO"} mt5Connected=$connected selectedSource=${result.second} reason=${result.third} symbol=$symbol"
+            )
+        }
+
+        return result
     }
 }
 
@@ -112,6 +130,9 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "signal_data_source" to candleSource,
             "signal_data_source_reason" to candleSourceReason
         )
+
+        // ── Closed-Loop Learning: Evaluate active open signals against current candles ──
+        runCatching { SignalOutcomeTracker.evaluateOpenSignals(symbol, candles) }
 
         val n = candles.size
         val sigIdx = n - 2 // แท่งปิดล่าสุด (แท่ง n-1 อาจกำลังวิ่ง)
@@ -151,13 +172,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 m15c = if (tf == "15m") candles else TradingSignalMarketDataRouter.fetch(symbol, "15m", 300) {
                     smcApi.fetchCandlesWithSource(symbol, "15m", 300).candles
                 }.first
-                val h1 = TradingSignalMarketDataRouter.fetch(symbol, "1h", 500) {
+                val h1 = if (tf == "1h") candles else TradingSignalMarketDataRouter.fetch(symbol, "1h", 500) {
                     smcApi.fetchCandlesWithSource(symbol, "1h", 500).candles
                 }.first
-                val m5 = TradingSignalMarketDataRouter.fetch(symbol, "5m", 500) {
+                val m5 = if (tf == "5m") candles else TradingSignalMarketDataRouter.fetch(symbol, "5m", 500) {
                     smcApi.fetchCandlesWithSource(symbol, "5m", 500).candles
                 }.first
-                val m1 = TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
+                val m1 = if (tf == "1m") candles else TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
                     smcApi.fetchCandlesWithSource(symbol, "1m", 500).candles
                 }.first
                 val r = com.example.personalaibot.automation.smc.UnifiedSmcSignals.evaluate(h1, m15c, m5, m1)
@@ -267,15 +288,62 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         var dcU = Double.NEGATIVE_INFINITY; var dcL = Double.POSITIVE_INFINITY
         for (j in max(0, sigIdx - 20) until sigIdx) { dcU = max(dcU, candles[j].high); dcL = min(dcL, candles[j].low) }
         fun fmt(v: Double) = if (abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
-        val context = "trend=$trend | RSI=${"%.1f".format(rsi)} | vsBB=${if (close > bbBasis + 2 * bbSd) "เหนือUpper" else if (close < bbBasis - 2 * bbSd) "ใต้Lower" else if (close > bbBasis) "โซนบน" else "โซนล่าง"} | ATR14=${fmt(atr14)} | DC20[${fmt(dcL)}-${fmt(dcU)}]"
+
+        // ── EMA 14/60 Detection: คำนวณการตัดกัน (Cross) และการบีบตัวเข้าหากัน (Near Cross) ──
+        val ema14Series = ema(closes, 14)
+        val ema60Series = ema(closes, 60)
+        val e14Sig = ema14Series[sigIdx]
+        val e60Sig = ema60Series[sigIdx]
+        val e14SigPrev = ema14Series[max(0, sigIdx - 1)]
+        val e60SigPrev = ema60Series[max(0, sigIdx - 1)]
+
+        val emaCross = when {
+            !e14Sig.isNaN() && !e60Sig.isNaN() && !e14SigPrev.isNaN() && !e60SigPrev.isNaN() -> when {
+                e14SigPrev <= e60SigPrev && e14Sig > e60Sig -> "GOLDEN_CROSS"
+                e14SigPrev >= e60SigPrev && e14Sig < e60Sig -> "DEATH_CROSS"
+                else -> "NONE"
+            }
+            else -> "NONE"
+        }
+        val emaSpread = if (!e14Sig.isNaN() && !e60Sig.isNaN()) abs(e14Sig - e60Sig) else 0.0
+        val emaSpreadPrev = if (!e14SigPrev.isNaN() && !e60SigPrev.isNaN()) abs(e14SigPrev - e60SigPrev) else emaSpread
+        val isEmaConverging = emaSpread < emaSpreadPrev
+        val emaNearThreshold = max(atr14 * 0.35, close * 0.0012)
+        val isEmaNearCross = emaSpread <= emaNearThreshold && isEmaConverging && emaCross == "NONE"
+        val emaNearCrossSide = when {
+            isEmaNearCross && e14Sig < e60Sig && e14Sig >= e14SigPrev -> "BUY"
+            isEmaNearCross && e14Sig > e60Sig && e14Sig <= e14SigPrev -> "SELL"
+            else -> "NONE"
+        }
+        val emaState = if (e14Sig > e60Sig) "BULLISH" else "BEARISH"
+
+        // ถ้าเกิด EMA 14/60 ตัดกันสดๆ บนแท่งนี้ ให้เพิ่ม edge ยืนยันสัญญาณ
+        if (emaCross == "GOLDEN_CROSS" && edges.none { it.side == "BUY" } && unified == null) {
+            edges += SignalMarkerProvider.SignalMarker(sigTime, "BUY", "E14/60▲", "#FFD54F")
+        } else if (emaCross == "DEATH_CROSS" && edges.none { it.side == "SELL" } && unified == null) {
+            edges += SignalMarkerProvider.SignalMarker(sigTime, "SELL", "E14/60▼", "#FFB74D")
+        }
+
+        val context = "trend=$trend | EMA14/60=$emaState(spread=${fmt(emaSpread)},cross=$emaCross${if (isEmaNearCross) ",nearCross=$emaNearCrossSide" else ""}) | RSI=${"%.1f".format(rsi)} | vsBB=${if (close > bbBasis + 2 * bbSd) "เหนือUpper" else if (close < bbBasis - 2 * bbSd) "ใต้Lower" else if (close > bbBasis) "โซนบน" else "โซนล่าง"} | ATR14=${fmt(atr14)} | DC20[${fmt(dcL)}-${fmt(dcU)}]"
 
         if (edges.isEmpty() && smcNew.isEmpty() && unified == null) {
+            val anticipation = detectAnticipation(candles, sigIdx, atr14, mtfDigest, symbol)
+            val isAnticipation = anticipation != null
+            val stage = if (isAnticipation) "ANTICIPATION" else "NONE"
+            val liveTime = candles.last().timestamp
             return mapOf(
                 "signal_buy" to "0",
                 "signal_sell" to "0",
                 "signal_buy_id" to "0",
                 "signal_sell_id" to "0",
                 "signal_event" to "NONE",
+                "signal_stage" to stage,
+                "signal_anticipation" to if (isAnticipation) "1" else "0",
+                "signal_anticipation_side" to (anticipation?.side ?: ""),
+                "signal_anticipation_desc" to (anticipation?.reason ?: ""),
+                "signal_anticipation_zone" to (anticipation?.zone ?: ""),
+                "signal_anticipation_confidence" to (anticipation?.confidence?.toString() ?: "0"),
+                "signal_anticipation_id" to if (isAnticipation) liveTime.toString() else "0",
                 "signal_mix_score" to mixScore.toString(),
                 "signal_mix_votes" to mixVoteDetail,
                 "signal_gated" to gatedKinds.joinToString(","),
@@ -283,6 +351,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 "signal_keyzone" to if (mtfDigest?.keyZoneHit != null) "1" else "0",
                 "signal_keyzone_desc" to (mtfDigest?.keyZoneHit ?: ""),
                 "signal_mtf_context" to (mtfDigest?.text ?: ""),
+                "ema14" to fmt(e14Sig),
+                "ema60" to fmt(e60Sig),
+                "ema14_60_spread" to fmt(emaSpread),
+                "ema14_60_state" to emaState,
+                "ema14_60_cross" to emaCross,
+                "ema14_60_near_cross" to if (isEmaNearCross) "1" else "0",
+                "ema14_60_near_cross_side" to emaNearCrossSide,
                 "close" to fmt(close),
                 "signal_context" to context,
                 "signal_data_source" to candleSource,
@@ -354,6 +429,23 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         if (previousLoggedBar != sigTime) {
             lastLoggedSignalBar[signalLogKey] = sigTime
             logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)} source=$candleSource reason=$candleSourceReason bar=$sigTime")
+
+            // ── Record confirmed signal to persistent SignalOutcomeTracker (บันทึกครั้งเดียวต่อแท่งสัญญาณใหม่) ──
+            val signalId = "${symbol}_${tf}_${side}_${effSigTime}"
+            runCatching {
+                SignalOutcomeTracker.recordSignal(
+                    signalId = signalId,
+                    symbol = symbol,
+                    interval = tf,
+                    strategy = kind,
+                    side = side,
+                    entryPrice = entryPrice,
+                    stopLoss = sl,
+                    takeProfit = tp,
+                    rr = rr,
+                    createdAt = effSigTime
+                )
+            }
         }
 
         return mapOf(
@@ -362,6 +454,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "signal_buy_id" to if (side == "BUY") effSigTime.toString() else "0",
             "signal_sell_id" to if (side == "SELL") effSigTime.toString() else "0",
             "signal_event" to side,
+            "signal_stage" to "CONFIRMED",
+            "signal_anticipation" to "0",
+            "signal_anticipation_side" to "",
+            "signal_anticipation_desc" to "",
+            "signal_anticipation_zone" to "",
+            "signal_anticipation_confidence" to "0",
+            "signal_anticipation_id" to "0",
             "signal_strategy" to strategies,
             "signal_side" to side,
             "signal_entry" to fmt(entryPrice),
@@ -379,10 +478,425 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "signal_keyzone_desc" to (mtfDigest?.keyZoneHit ?: ""),
             "signal_mtf_context" to (mtfDigest?.text ?: ""),
             "signal_context" to context,
+            "ema14" to fmt(e14Sig),
+            "ema60" to fmt(e60Sig),
+            "ema14_60_spread" to fmt(emaSpread),
+            "ema14_60_state" to emaState,
+            "ema14_60_cross" to emaCross,
+            "ema14_60_near_cross" to if (isEmaNearCross) "1" else "0",
+            "ema14_60_near_cross_side" to emaNearCrossSide,
             "signal_data_source" to candleSource,
             "signal_data_source_reason" to candleSourceReason,
             "signal_bar_time" to effSigTime.toString(),
             "close" to fmt(close)
+        )
+    }
+
+    // ─── Signal Anticipation & Pre-Alert Engine ───────────────────────────
+
+    data class AnticipationSignal(
+        val side: String,
+        val setupType: String,
+        val reason: String,
+        val zone: String,
+        val confidence: Int
+    )
+
+    data class AnticipationHit(
+        val factorId: String,
+        val side: String,
+        val setupType: String,
+        val reason: String,
+        val zone: String,
+        val confidence: Int
+    )
+
+    internal fun detectAnticipation(
+        candles: List<Candle>,
+        sigIdx: Int,
+        atr14: Double,
+        mtfDigest: com.example.personalaibot.automation.smc.MarketContextDigest.Digest? = null,
+        symbol: String = ""
+    ): AnticipationSignal? {
+        if (candles.size < 15 || atr14 <= 0.0) return null
+        val activeFactors = AnticipationConfigManager.getActiveFactors(symbol)
+        if (activeFactors.isEmpty()) return null
+
+        val liveIdx = candles.size - 1
+        val live = candles[liveIdx]
+        val closes = candles.map { it.close }
+        val rsi14 = rsiSeries(closes, 14)[liveIdx]
+
+        val hits = mutableListOf<AnticipationHit>()
+
+        // 1. KEYZONE_PROXIMITY
+        if ("KEYZONE_PROXIMITY" in activeFactors) {
+            val kz = mtfDigest?.keyZoneHit
+            if (!kz.isNullOrBlank()) {
+                val isDemand = kz.contains("Support", ignoreCase = true) ||
+                               kz.contains("Demand", ignoreCase = true) ||
+                               kz.contains("Bullish", ignoreCase = true) ||
+                               kz.contains("EQL", ignoreCase = true) ||
+                               kz.contains("Discount", ignoreCase = true)
+                val isSupply = kz.contains("Resistance", ignoreCase = true) ||
+                               kz.contains("Supply", ignoreCase = true) ||
+                               kz.contains("Bearish", ignoreCase = true) ||
+                               kz.contains("EQH", ignoreCase = true) ||
+                               kz.contains("Premium", ignoreCase = true)
+                if (isDemand) {
+                    hits.add(AnticipationHit(
+                        factorId = "KEYZONE_PROXIMITY",
+                        side = "BUY",
+                        setupType = "KEYZONE_PROXIMITY",
+                        reason = "ราคาลงมาทดสอบ Demand / Bullish Zone ($kz)",
+                        zone = kz,
+                        confidence = 78
+                    ))
+                } else if (isSupply) {
+                    hits.add(AnticipationHit(
+                        factorId = "KEYZONE_PROXIMITY",
+                        side = "SELL",
+                        setupType = "KEYZONE_PROXIMITY",
+                        reason = "ราคาขึ้นมาทดสอบ Supply / Bearish Zone ($kz)",
+                        zone = kz,
+                        confidence = 78
+                    ))
+                }
+            }
+        }
+
+        // 2. WICK_SWEEP_REJECTION
+        if ("WICK_SWEEP_REJECTION" in activeFactors) {
+            val body = abs(live.close - live.open)
+            val lowerWick = min(live.open, live.close) - live.low
+            val upperWick = live.high - max(live.open, live.close)
+            val lookbackRange = max(0, liveIdx - 10) until liveIdx
+            val priorLow = lookbackRange.minOfOrNull { candles[it].low } ?: live.low
+            val priorHigh = lookbackRange.maxOfOrNull { candles[it].high } ?: live.high
+
+            if (live.low < priorLow && lowerWick >= 1.5 * max(body, atr14 * 0.2)) {
+                hits.add(AnticipationHit(
+                    factorId = "WICK_SWEEP_REJECTION",
+                    side = "BUY",
+                    setupType = "WICK_SWEEP_REJECTION",
+                    reason = "ราคา Sweep หลุด Low ย่อย (${"%.2f".format(priorLow)}) เกิดไส้ล่างปฏิเสธราคา (Wick Rejection)",
+                    zone = "Low Sweep: ${"%.2f".format(live.low)} - ${"%.2f".format(priorLow)}",
+                    confidence = 75
+                ))
+            }
+            if (live.high > priorHigh && upperWick >= 1.5 * max(body, atr14 * 0.2)) {
+                hits.add(AnticipationHit(
+                    factorId = "WICK_SWEEP_REJECTION",
+                    side = "SELL",
+                    setupType = "WICK_SWEEP_REJECTION",
+                    reason = "ราคา Sweep ทะลุ High ย่อย (${"%.2f".format(priorHigh)}) เกิดไส้บนปฏิเสธราคา (Wick Rejection)",
+                    zone = "High Sweep: ${"%.2f".format(priorHigh)} - ${"%.2f".format(live.high)}",
+                    confidence = 75
+                ))
+            }
+        }
+
+        // 3. RSI_EXTREME
+        if ("RSI_EXTREME" in activeFactors) {
+            if (rsi14 <= 28.0) {
+                hits.add(AnticipationHit(
+                    factorId = "RSI_EXTREME",
+                    side = "BUY",
+                    setupType = "RSI_EXTREME",
+                    reason = "RSI เข้าเขต Oversold (${"%.1f".format(rsi14)}) กำลังสะสมแรงดีดตัวขึ้น",
+                    zone = "Oversold Zone (RSI ${"%.1f".format(rsi14)})",
+                    confidence = 70
+                ))
+            }
+            if (rsi14 >= 72.0) {
+                hits.add(AnticipationHit(
+                    factorId = "RSI_EXTREME",
+                    side = "SELL",
+                    setupType = "RSI_EXTREME",
+                    reason = "RSI เข้าเขต Overbought (${"%.1f".format(rsi14)}) กำลังสะสมแรงเทขาย",
+                    zone = "Overbought Zone (RSI ${"%.1f".format(rsi14)})",
+                    confidence = 70
+                ))
+            }
+        }
+
+        // 4. EMA_NEAR_CROSS
+        if ("EMA_NEAR_CROSS" in activeFactors && candles.size >= 60) {
+            val ema14Live = ema(closes, 14)
+            val ema60Live = ema(closes, 60)
+            val efNow = ema14Live[liveIdx]
+            val esNow = ema60Live[liveIdx]
+            val efPrev = ema14Live[liveIdx - 1]
+            val esPrev = ema60Live[liveIdx - 1]
+            if (!efNow.isNaN() && !esNow.isNaN() && !efPrev.isNaN() && !esPrev.isNaN()) {
+                val spreadNow = abs(efNow - esNow)
+                val spreadPrev = abs(efPrev - esPrev)
+                val isConverging = spreadNow < spreadPrev
+                val nearThresh = max(atr14 * 0.35, live.close * 0.0012)
+                fun fmtP(v: Double) = if (abs(v) >= 100) "%.2f".format(v) else "%.4f".format(v)
+                if (spreadNow <= nearThresh && isConverging) {
+                    if (efNow < esNow && efNow >= efPrev) {
+                        hits.add(AnticipationHit(
+                            factorId = "EMA_NEAR_CROSS",
+                            side = "BUY",
+                            setupType = "EMA_NEAR_CROSS",
+                            reason = "EMA14 (${fmtP(efNow)}) บีบตัวเข้าหา EMA60 (${fmtP(esNow)}) ระยะห่าง ${fmtP(spreadNow)} กำลังจะเกิด Golden Cross",
+                            zone = "EMA Convergence: ${fmtP(efNow)} → ${fmtP(esNow)}",
+                            confidence = 76
+                        ))
+                    } else if (efNow > esNow && efNow <= efPrev) {
+                        hits.add(AnticipationHit(
+                            factorId = "EMA_NEAR_CROSS",
+                            side = "SELL",
+                            setupType = "EMA_NEAR_CROSS",
+                            reason = "EMA14 (${fmtP(efNow)}) บีบตัวเข้าหา EMA60 (${fmtP(esNow)}) ระยะห่าง ${fmtP(spreadNow)} กำลังจะเกิด Death Cross",
+                            zone = "EMA Convergence: ${fmtP(efNow)} → ${fmtP(esNow)}",
+                            confidence = 76
+                        ))
+                    }
+                }
+            }
+        }
+
+        // 5. BOLLINGER_SQUEEZE
+        if ("BOLLINGER_SQUEEZE" in activeFactors && candles.size >= 20) {
+            val bbPeriod = 20
+            val bbSd = stdev(closes, bbPeriod, liveIdx)
+            val bbBasis = closes.subList(max(0, liveIdx - bbPeriod + 1), liveIdx + 1).average()
+            val bbUpper = bbBasis + 2 * bbSd
+            val bbLower = bbBasis - 2 * bbSd
+            val bbWidth = bbUpper - bbLower
+            if (bbWidth <= 2.2 * atr14 && bbSd > 0) {
+                if (live.close >= bbUpper - 0.25 * atr14) {
+                    hits.add(AnticipationHit(
+                        factorId = "BOLLINGER_SQUEEZE",
+                        side = "BUY",
+                        setupType = "BOLLINGER_SQUEEZE",
+                        reason = "Bollinger Bands บีบตัวแคบ (Bandwidth ${"%.2f".format(bbWidth)}) และราคาดันชิดขอบบนเตรียม Breakout BUY",
+                        zone = "Upper Band: ${"%.2f".format(bbUpper)}",
+                        confidence = 74
+                    ))
+                } else if (live.close <= bbLower + 0.25 * atr14) {
+                    hits.add(AnticipationHit(
+                        factorId = "BOLLINGER_SQUEEZE",
+                        side = "SELL",
+                        setupType = "BOLLINGER_SQUEEZE",
+                        reason = "Bollinger Bands บีบตัวแคบ (Bandwidth ${"%.2f".format(bbWidth)}) และราคาดันชิดขอบล่างเตรียม Breakout SELL",
+                        zone = "Lower Band: ${"%.2f".format(bbLower)}",
+                        confidence = 74
+                    ))
+                }
+            }
+        }
+
+        // 6. MACD_HISTOGRAM_TURN
+        if ("MACD_HISTOGRAM_TURN" in activeFactors && candles.size >= 35) {
+            val ema12 = ema(closes, 12)
+            val ema26 = ema(closes, 26)
+            val macdLine = closes.indices.map { if (ema12[it].isNaN() || ema26[it].isNaN()) Double.NaN else ema12[it] - ema26[it] }
+            val validMacdIndices = macdLine.mapIndexedNotNull { idx, v -> if (!v.isNaN()) idx to v else null }
+            if (validMacdIndices.size >= 10) {
+                val signalLine = ema(validMacdIndices.map { it.second }, 9)
+                if (signalLine.size >= 2) {
+                    val mNow = validMacdIndices.last().second
+                    val mPrev = validMacdIndices[validMacdIndices.size - 2].second
+                    val sNow = signalLine.last()
+                    val sPrev = signalLine[signalLine.size - 2]
+                    if (!sNow.isNaN() && !sPrev.isNaN()) {
+                        val histNow = mNow - sNow
+                        val histPrev = mPrev - sPrev
+                        if (histPrev < 0 && histNow > histPrev && histNow > -0.6 * atr14) {
+                            hits.add(AnticipationHit(
+                                factorId = "MACD_HISTOGRAM_TURN",
+                                side = "BUY",
+                                setupType = "MACD_HISTOGRAM_TURN",
+                                reason = "MACD Histogram หดตัวเงยหัวขึ้นจากแดนลบ (${"%.2f".format(histNow)}) เริ่มต้นรอบ Momentum ขาขึ้น",
+                                zone = "MACD Turn (${"%.2f".format(histNow)})",
+                                confidence = 72
+                            ))
+                        } else if (histPrev > 0 && histNow < histPrev && histNow < 0.6 * atr14) {
+                            hits.add(AnticipationHit(
+                                factorId = "MACD_HISTOGRAM_TURN",
+                                side = "SELL",
+                                setupType = "MACD_HISTOGRAM_TURN",
+                                reason = "MACD Histogram หดตัวปักหัวลงจากแดนบวก (${"%.2f".format(histNow)}) เริ่มต้นรอบ Momentum ขาลง",
+                                zone = "MACD Turn (${"%.2f".format(histNow)})",
+                                confidence = 72
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7. VOLUME_ABSORPTION
+        if ("VOLUME_ABSORPTION" in activeFactors && candles.size >= 25 && live.volume > 0.0) {
+            val volWindow = candles.subList(max(0, liveIdx - 20), liveIdx)
+            val avgVol = if (volWindow.isNotEmpty()) volWindow.map { it.volume }.average() else 0.0
+            val body = abs(live.close - live.open)
+            if (avgVol > 0.0 && live.volume >= 1.8 * avgVol && body <= 0.35 * atr14) {
+                if (live.close <= live.open) {
+                    hits.add(AnticipationHit(
+                        factorId = "VOLUME_ABSORPTION",
+                        side = "BUY",
+                        setupType = "VOLUME_ABSORPTION",
+                        reason = "เกิด Volume Absorption สูง ${"%.1f".format(live.volume / avgVol)}x เท่าที่สเปรดแคบ (Smart Money ซุ่มดูดซับแรงขาย)",
+                        zone = "Absorption Base: ${"%.2f".format(live.low)}",
+                        confidence = 77
+                    ))
+                } else {
+                    hits.add(AnticipationHit(
+                        factorId = "VOLUME_ABSORPTION",
+                        side = "SELL",
+                        setupType = "VOLUME_ABSORPTION",
+                        reason = "เกิด Volume Absorption สูง ${"%.1f".format(live.volume / avgVol)}x เท่าที่สเปรดแคบ (Smart Money ระบายของ/ดูดซับแรงซื้อ)",
+                        zone = "Absorption Ceiling: ${"%.2f".format(live.high)}",
+                        confidence = 77
+                    ))
+                }
+            }
+        }
+
+        // 8. FIBONACCI_GOLDEN_POCKET
+        if ("FIBONACCI_GOLDEN_POCKET" in activeFactors && candles.size >= 30) {
+            val swingCandles = candles.takeLast(30)
+            val swingHigh = swingCandles.maxOf { it.high }
+            val swingLow = swingCandles.minOf { it.low }
+            val swingRange = swingHigh - swingLow
+            if (swingRange >= 2.0 * atr14) {
+                val fib618Buy = swingHigh - 0.618 * swingRange
+                val fib650Buy = swingHigh - 0.650 * swingRange
+                if (live.low <= fib618Buy && live.close >= fib650Buy - 0.1 * atr14) {
+                    hits.add(AnticipationHit(
+                        factorId = "FIBONACCI_GOLDEN_POCKET",
+                        side = "BUY",
+                        setupType = "FIBONACCI_GOLDEN_POCKET",
+                        reason = "ราคาย่อตัวลงมาแตะแนวรับ Fibonacci Golden Pocket 0.618-0.65 (${"%.2f".format(fib650Buy)} - ${"%.2f".format(fib618Buy)})",
+                        zone = "Golden Pocket: ${"%.2f".format(fib650Buy)} - ${"%.2f".format(fib618Buy)}",
+                        confidence = 75
+                    ))
+                }
+                val fib618Sell = swingLow + 0.618 * swingRange
+                val fib650Sell = swingLow + 0.650 * swingRange
+                if (live.high >= fib618Sell && live.close <= fib650Sell + 0.1 * atr14) {
+                    hits.add(AnticipationHit(
+                        factorId = "FIBONACCI_GOLDEN_POCKET",
+                        side = "SELL",
+                        setupType = "FIBONACCI_GOLDEN_POCKET",
+                        reason = "ราคาดีดตัวขึ้นมาแตะแนวต้าน Fibonacci Golden Pocket 0.618-0.65 (${"%.2f".format(fib618Sell)} - ${"%.2f".format(fib650Sell)})",
+                        zone = "Golden Pocket: ${"%.2f".format(fib618Sell)} - ${"%.2f".format(fib650Sell)}",
+                        confidence = 75
+                    ))
+                }
+            }
+        }
+
+        // 9. STOCHASTIC_OVERSOLD_TURN
+        if ("STOCHASTIC_OVERSOLD_TURN" in activeFactors && candles.size >= 20) {
+            val stochPeriod = 14
+            val kValues = mutableListOf<Double>()
+            for (idx in (liveIdx - 5)..liveIdx) {
+                if (idx < stochPeriod - 1) continue
+                val window = candles.subList(idx - stochPeriod + 1, idx + 1)
+                val h = window.maxOf { it.high }
+                val l = window.minOf { it.low }
+                val k = if (h > l) ((candles[idx].close - l) / (h - l)) * 100.0 else 50.0
+                kValues.add(k)
+            }
+            if (kValues.size >= 3) {
+                val kNow = kValues.last()
+                val kPrev = kValues[kValues.size - 2]
+                if (kPrev < 22.0 && kNow > kPrev && kNow >= 20.0) {
+                    hits.add(AnticipationHit(
+                        factorId = "STOCHASTIC_OVERSOLD_TURN",
+                        side = "BUY",
+                        setupType = "STOCHASTIC_OVERSOLD_TURN",
+                        reason = "Stochastic (%K=${"%.1f".format(kNow)}) ตัดเงยหัวขึ้นจากเขต Oversold (<20)",
+                        zone = "Stoch Oversold (${"%.1f".format(kNow)})",
+                        confidence = 71
+                    ))
+                } else if (kPrev > 78.0 && kNow < kPrev && kNow <= 80.0) {
+                    hits.add(AnticipationHit(
+                        factorId = "STOCHASTIC_OVERSOLD_TURN",
+                        side = "SELL",
+                        setupType = "STOCHASTIC_OVERSOLD_TURN",
+                        reason = "Stochastic (%K=${"%.1f".format(kNow)}) ตัดปักหัวลงจากเขต Overbought (>80)",
+                        zone = "Stoch Overbought (${"%.1f".format(kNow)})",
+                        confidence = 71
+                    ))
+                }
+            }
+        }
+
+        // 10. SESSION_OPEN_SWEEP
+        if ("SESSION_OPEN_SWEEP" in activeFactors && candles.size >= 40) {
+            val sessionWindow = candles.takeLast(24)
+            val sHigh = sessionWindow.dropLast(1).maxOf { it.high }
+            val sLow = sessionWindow.dropLast(1).minOf { it.low }
+            if (live.low < sLow && live.close > sLow) {
+                hits.add(AnticipationHit(
+                    factorId = "SESSION_OPEN_SWEEP",
+                    side = "BUY",
+                    setupType = "SESSION_OPEN_SWEEP",
+                    reason = "ราคา Sweep กวาดสภาพคล่องหลุด Session Low (${"%.2f".format(sLow)}) แล้วดีดกลับขึ้นมาอย่างรวดเร็ว",
+                    zone = "Session Low Sweep: ${"%.2f".format(sLow)}",
+                    confidence = 79
+                ))
+            } else if (live.high > sHigh && live.close < sHigh) {
+                hits.add(AnticipationHit(
+                    factorId = "SESSION_OPEN_SWEEP",
+                    side = "SELL",
+                    setupType = "SESSION_OPEN_SWEEP",
+                    reason = "ราคา Sweep กวาดสภาพคล่องทะลุ Session High (${"%.2f".format(sHigh)}) แล้วถูกกดกลับลงมาอย่างรวดเร็ว",
+                    zone = "Session High Sweep: ${"%.2f".format(sHigh)}",
+                    confidence = 79
+                ))
+            }
+        }
+
+        if (hits.isEmpty()) return null
+
+        // ── Confluence Multi-Factor Synthesis ──
+        val buyHits = hits.filter { it.side == "BUY" }
+        val sellHits = hits.filter { it.side == "SELL" }
+
+        val dominantHits = when {
+            buyHits.size > sellHits.size -> buyHits
+            sellHits.size > buyHits.size -> sellHits
+            else -> if ((buyHits.maxOfOrNull { it.confidence } ?: 0) >= (sellHits.maxOfOrNull { it.confidence } ?: 0)) buyHits else sellHits
+        }
+
+        if (dominantHits.isEmpty()) return null
+
+        val dominantSide = dominantHits.first().side
+        val baseConf = dominantHits.maxOf { it.confidence }
+        val finalConfidence = when (dominantHits.size) {
+            1 -> baseConf
+            2 -> max(80, baseConf + 5)
+            3 -> max(88, baseConf + 10)
+            else -> min(96, baseConf + 15)
+        }
+
+        val setupType = if (dominantHits.size > 1) {
+            "CONFLUENCE_${dominantHits.size}F"
+        } else {
+            dominantHits.first().setupType
+        }
+
+        val combinedReason = if (dominantHits.size > 1) {
+            "⚡ [Confluence ${dominantHits.size} ปัจจัย]: " + dominantHits.joinToString(" ; ") { it.reason }
+        } else {
+            dominantHits.first().reason
+        }
+
+        val primaryZone = dominantHits.first().zone
+
+        return AnticipationSignal(
+            side = dominantSide,
+            setupType = setupType,
+            reason = combinedReason,
+            zone = primaryZone,
+            confidence = finalConfidence
         )
     }
 
@@ -573,12 +1087,12 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             if (d > 0) gain += d else loss -= d
         }
         var avgGain = gain / period; var avgLoss = loss / period
-        out[period] = if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + avgGain / avgLoss)
+        out[period] = if (avgGain == 0.0 && avgLoss == 0.0) 50.0 else if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + avgGain / avgLoss)
         for (i in period + 1 until closes.size) {
             val d = closes[i] - closes[i - 1]
             avgGain = (avgGain * (period - 1) + max(d, 0.0)) / period
             avgLoss = (avgLoss * (period - 1) + max(-d, 0.0)) / period
-            out[i] = if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + avgGain / avgLoss)
+            out[i] = if (avgGain == 0.0 && avgLoss == 0.0) 50.0 else if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + avgGain / avgLoss)
         }
         return out
     }

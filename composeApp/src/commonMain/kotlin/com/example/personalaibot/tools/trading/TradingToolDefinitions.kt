@@ -375,7 +375,43 @@ object TradingToolDefinitions {
                     "condition_operator" to ParameterProperty("STRING", "เครื่องมือเปรียบเทียบ (>=, <=, ==, >, <, contains)"),
                     "condition_value"    to ParameterProperty("STRING", "ค่าเปรียบเทียบ (เช่น 4800, 30, bullish)"),
                     "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
+                    "voice"    to ParameterProperty("STRING", "เปิดแจ้งเตือนด้วยเสียงพูด: true (default) หรือ false"),
                     "interval_minutes"   to ParameterProperty("NUMBER", "ความถี่ในการตรวจสอบสัญญาณ (1-1440 นาที, default 1 นาที)")
+                ),
+                required = listOf("action")
+            )
+        ),
+
+        FunctionDeclaration(
+            name = "trading_signal_anticipation",
+            description = """จัดการระบบคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) และปรับแต่งปัจจัยการคาดการณ์
+                |ใช้เมื่อผู้ใช้สั่ง: "ใช้ tool คาดการณ์ล่วงหน้า [symbol]", "ตั้งแจ้งเตือนคาดการณ์ทองคำ", "ปรับปัจจัยคาดการณ์", "เพิ่มปัจจัย EMA", "ดูปัจจัยคาดการณ์ล่วงหน้า", "แนะนำปัจจัยคาดการณ์"
+                |
+                |Action:
+                |- 'create': ตั้งแจ้งเตือนคาดการณ์ล่วงหน้าสำหรับ symbol ที่ระบุ (สร้าง Alert Job ในระบบ background เฝ้าดู signal_anticipation >= 1 โดยอัตโนมัติ พร้อมตั้งชุดปัจจัยที่ต้องการ หรือใช้ 4 ปัจจัยหลักเป็น default)
+                |- 'config': ปรับเปลี่ยน/เพิ่ม/ลบ ปัจจัยที่ใช้ในการคาดการณ์ของ symbol นั้น (บังคับเลือกจากคลัง 10 ปัจจัยมาตรฐานเพื่อกันความผิดพลาด)
+                |- 'list_factors': ดูรายการ 10 ปัจจัยมาตรฐานที่ระบบรองรับ (Curated Factor Whitelist) พร้อมสถานะเปิด/ปิด
+                |- 'recommend': ให้ AI แนะนำชุดปัจจัยที่เหมาะสมกับพฤติกรรมตลาดของสินทรัพย์นั้น
+                |- 'status': ตรวจสอบการตั้งค่าและสถานะการเฝ้าระวังคาดการณ์ของ symbol นั้น
+                |
+                |Parameters:
+                |- symbol: เช่น XAUUSD, BTCUSDT
+                |- timeframe: ไทม์เฟรมที่ต้องการเฝ้าระวัง เช่น 5m, 15m, 30m, 1h, 4h หรือ all หรือหลาย TF เช่น '15m,1h' (default คือ 15m หากไม่ระบุ — รองรับ m5 ถึง h4)
+                |- factors: รายการปัจจัยที่ต้องการกำหนด (comma-separated เช่น "KEYZONE_PROXIMITY,WICK_SWEEP_REJECTION,RSI_EXTREME,EMA_NEAR_CROSS")
+                |- add_factors: ปัจจัยที่ต้องการเพิ่มเข้าไป (เช่น "BOLLINGER_SQUEEZE" หรือ "VOLUME_ABSORPTION")
+                |- remove_factors: ปัจจัยที่ต้องการเอาออก (เช่น "RSI_EXTREME")
+                |- delivery: 'ai' (default) หรือ 'direct'""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "การกระทำ: create, config, list_factors, recommend, status", enum = listOf("create", "config", "list_factors", "recommend", "status")),
+                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT"),
+                    "timeframe" to ParameterProperty("STRING", "Timeframe เช่น 5m, 15m, 30m, 1h, 4h, all หรือระบุหลาย TF เช่น '15m,1h' (default 15m)"),
+                    "factors" to ParameterProperty("STRING", "รายการปัจจัยที่ต้องการเปิดใช้ (คั่นด้วยจุลภาค)"),
+                    "add_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเพิ่มเข้าไป"),
+                    "remove_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเอาออก"),
+                    "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai (default) หรือ direct", enum = listOf("ai", "direct")),
+                    "voice" to ParameterProperty("STRING", "เปิดแจ้งเตือนด้วยเสียงพูด: true (default) หรือ false")
                 ),
                 required = listOf("action")
             )
@@ -1126,6 +1162,7 @@ object TradingToolDefinitions {
                     "condition_operator" to ParameterProperty("STRING", "> | < | >= | <= | == | contains (default: >=)"),
                     "condition_value" to ParameterProperty("STRING", "ค่าเปรียบเทียบ เช่น 4100, 30, 85 (สำหรับ update ใช้เป็นค่าใหม่)"),
                     "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
+                    "voice" to ParameterProperty("STRING", "เปิดแจ้งเตือนด้วยเสียงพูด: true (default) หรือ false"),
                     "interval_minutes" to ParameterProperty("NUMBER", "ความถี่ตรวจสอบเป็นนาที (default: 15, min: 1, max: 1440)"),
                     "alert_id" to ParameterProperty("NUMBER", "ID ของ alert ที่ต้องการลบ/แก้ไข (สำหรับ delete/update)")
                 ),

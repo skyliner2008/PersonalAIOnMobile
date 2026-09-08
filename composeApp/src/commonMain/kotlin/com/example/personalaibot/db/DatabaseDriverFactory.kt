@@ -165,7 +165,30 @@ private fun ensureNewTablesExist(driver: SqlDriver) {
         // Migration: add unique index for KnowledgeNode.name (idempotent)
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_node_name ON KnowledgeNode(name)",
         "CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts ON TvCandle(symbol, interval, ts)",
-        "CREATE INDEX IF NOT EXISTS idx_mt5_trade_type_time ON Mt5TradeRecord(record_type, event_time DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_mt5_trade_type_time ON Mt5TradeRecord(record_type, event_time DESC)",
+        // Signal Tracking Records (Closed-Loop Learning)
+        """CREATE TABLE IF NOT EXISTS SignalTrackingRecord (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL UNIQUE,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            side TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            stop_loss REAL NOT NULL,
+            take_profit REAL NOT NULL,
+            rr REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            mfe REAL NOT NULL DEFAULT 0.0,
+            mae REAL NOT NULL DEFAULT 0.0,
+            exit_price REAL,
+            pnl_r REAL,
+            bars_held INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            closed_at INTEGER
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_signal_tracking_symbol_status ON SignalTrackingRecord(symbol, status)",
+        "CREATE INDEX IF NOT EXISTS idx_signal_tracking_strategy ON SignalTrackingRecord(strategy, status)"
     )
 
     statements.forEach { sql ->

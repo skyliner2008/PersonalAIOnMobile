@@ -72,10 +72,10 @@ class VoiceController(
         logDebug("JARVIS_VM", "Starting Live Voice Input")
 
         // ทักทายยืนยันความพร้อม: ผู้ใช้จะได้รู้ทันทีว่า session READY แล้วคุยได้
-        // ใช้ประโยคทักทายภาษาไทยที่เป็นธรรมชาติ ปราศจาก [SYSTEM] หรือคำภาษาอังกฤษ
-        // เพื่อป้องกันไม่ให้โมเดลเสียงหลุดไปใช้ text-only หรือสำเนียงเพี้ยน (เช่น 'เจ้านาว')
-        val agentName = com.example.personalaibot.ai.JarvisPersona.identity.agentName.ifBlank { "จาวิส" }
-        orchestrator.setLiveGreetingOnReadyIfAbsent("สวัสดี$agentName พร้อมคุยไหม")
+        // สำคัญมาก: ต้องใช้ภาษาไทยล้วน "สวัสดีจาวิส พร้อมคุยไหม"
+        // ห้ามส่งตัวอักษรภาษาอังกฤษ "JARVIS" เด็ดขาด เพราะจะกระตุ้นให้ Gemini Live Acoustic Model
+        // สลับไปใช้สำเนียงฝรั่ง (English accent / phonetics) ทำให้พูดไม่ชัดและติดสำเนียงต่างชาติ
+        orchestrator.setLiveGreetingOnReadyIfAbsent("สวัสดีจาวิส พร้อมคุยไหม")
 
         // Barge-in: ผู้ใช้พูดแทรก (VAD interrupt) ต้อง flush คิวเสียง AI ที่ค้างเล่นทันที
         // ไม่งั้นเสียงเก่าเล่นต่อทับ turn ใหม่ — handler มีใน LiveGeminiService/orchestrator แต่ไม่เคยถูก wire (review 2026-08-18)
@@ -100,10 +100,17 @@ class VoiceController(
                 // 1. Build core memory context for live session/tool bridge
                 val coreContext = coreContextProvider()
 
-                // 2. ดึงประวัติการสนทนาสั้นๆ เพื่อส่งให้ Live Session รู้บริบท
-                val historySnapshot = messages.value.takeLast(10).joinToString("\n") {
-                    "${if (it.role == "user") "User" else "JARVIS"}: ${it.content}"
-                }
+                // 2. ดึงประวัติการสนทนาสั้นๆ เพื่อส่งให้ Live Session รู้บริบท (กรองคำทักทายและข้อความระบบออกเพื่อรักษาสำเนียงไทยแท้)
+                val historySnapshot = messages.value
+                    .filter { msg ->
+                        val c = msg.content.trim()
+                        !c.contains("พร้อมคุยไหม") &&
+                        !c.contains("LIVE READY") &&
+                        !c.contains("กำลังเชื่อมต่อ Live session")
+                    }
+                    .takeLast(8).joinToString("\n") {
+                        "${if (it.role == "user") "ผู้ใช้" else "จาวิส"}: ${it.content}"
+                    }
 
                     // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
                 launch {

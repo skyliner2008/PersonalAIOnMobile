@@ -36,6 +36,7 @@ fun LiveModePanel(
     onToggleMute: () -> Unit,
     onEndLive: () -> Unit,
     onFrameCapture: (String, ByteArray) -> Unit,
+    onAlwaysLive: (() -> Unit)? = null,
     riskAccount: TradingAccount? = null,
     riskPct: Double? = null,
     riskKillSwitchActive: Boolean = false
@@ -143,12 +144,32 @@ fun LiveModePanel(
                     )
                 }
 
-                // Exit Button (X)
-                IconButton(
-                    onClick = onEndLive,
-                    modifier = Modifier.align(Alignment.CenterEnd).size(32.dp)
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(Icons.Default.Close, "Exit", tint = Color.White.copy(0.4f), modifier = Modifier.size(20.dp))
+                    // Always Live Button (expand to full-screen robot avatar)
+                    if (onAlwaysLive != null) {
+                        IconButton(
+                            onClick = onAlwaysLive,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Fullscreen,
+                                "Always Live",
+                                tint = JarvisTheme.Cyan.copy(0.7f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Exit Button (X)
+                    IconButton(
+                        onClick = onEndLive,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Close, "Exit", tint = Color.White.copy(0.4f), modifier = Modifier.size(20.dp))
+                    }
                 }
             }
 

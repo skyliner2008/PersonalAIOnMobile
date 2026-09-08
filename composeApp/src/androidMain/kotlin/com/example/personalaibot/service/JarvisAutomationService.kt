@@ -164,12 +164,12 @@ class JarvisAutomationService : Service() {
     /** Setup watchdog: READY must arrive promptly or the provider/network is considered unhealthy. */
     private val liveVoiceSetupTimeoutMs = 8_000L
     /** Hard ceiling for a one-shot Live alert session; long signal summaries can legitimately stream for ~60s. */
-    private val liveVoiceSessionTimeoutMs = 22_000L
+    private val liveVoiceSessionTimeoutMs = 35_000L
     /** Once audio has started, only fail when the stream stops making progress for this long. */
     private val liveVoiceAudioIdleTimeoutMs = 10_000L
     /** Circuit breaker for runaway Live alert generations. */
     /** Short-form Signal Alert cap. ~120 Thai chars keeps spoken alerts near 10–15s. */
-    private val liveVoiceSummaryCharCap = 120
+    private val liveVoiceSummaryCharCap = 350
     /** Serialize alert-summary Gemini calls to prevent burst/429 and unbounded concurrent work. */
     private val alertAiMutex = Mutex()
 
@@ -223,6 +223,13 @@ class JarvisAutomationService : Service() {
         strategySignalProvider = com.example.personalaibot.automation.StrategySignalProvider(smcApi)
         signalAlertProvider = com.example.personalaibot.automation.SignalAlertProvider(smcApi)
 
+        try {
+            val deviceControlExecutor = com.example.personalaibot.tools.device.DeviceControlExecutor(applicationContext)
+            com.example.personalaibot.tools.ToolExecutor.initDeviceExecutor(deviceControlExecutor)
+        } catch (e: Exception) {
+            logError("AutomationService", "Failed to init DeviceControlExecutor: ${e.message}", e)
+        }
+
         initTts()
         startLoop()
     }
@@ -232,6 +239,15 @@ class JarvisAutomationService : Service() {
             tts = android.speech.tts.TextToSpeech(applicationContext) { status ->
                 ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS
                 if (ttsReady) {
+                    try {
+                        val attrs = android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                        tts?.setAudioAttributes(attrs)
+                    } catch (e: Exception) {
+                        logError("AutomationService", "Failed to set AudioAttributes: ${e.message}", e)
+                    }
                     val avail = tts?.setLanguage(java.util.Locale("th", "TH"))
                     if (avail == android.speech.tts.TextToSpeech.LANG_MISSING_DATA ||
                         avail == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED
@@ -554,6 +570,7 @@ class JarvisAutomationService : Service() {
             when (condition.field) {
                 "signal_buy", "signal_buy_id" -> data["signal_buy_id"]?.toLongOrNull() ?: 0L
                 "signal_sell", "signal_sell_id" -> data["signal_sell_id"]?.toLongOrNull() ?: 0L
+                "signal_anticipation", "signal_anticipation_id" -> data["signal_anticipation_id"]?.toLongOrNull() ?: 0L
                 else -> 0L
             }
         } else 0L
@@ -566,8 +583,9 @@ class JarvisAutomationService : Service() {
         // Job-level dedup only knows about the exact last signal_id. A new candle/strategy
         // can therefore bypass it even when the previous alert was only seconds ago.
         // Apply a short market-event throttle at symbol+TF+side level before FIRE.
+        val signalSide = data["signal_side"] ?: data["signal_anticipation_side"] ?: "UNKNOWN"
         val signalThrottleKey = if (job.tool_name == "trading_signal_alert" && signalId > 0L) {
-            job.symbol + "|" + condition.field + "|" + (data["signal_side"] ?: "UNKNOWN")
+            job.symbol + "|" + condition.field + "|" + signalSide
         } else null
         var throttledSignal = false
         if (isMet && signalThrottleKey != null && !triggered) {
@@ -691,7 +709,7 @@ class JarvisAutomationService : Service() {
         val body = aiText ?: "ถึงเวลาแล้ว: ${task.prompt}"
         sendNotification("⏰ Jarvis: ${task.name}", body, (task.id + 100_000).toInt())
         pushToChat("⏰ **${task.name}**\n\n$body", """{"type":"scheduled_task","task_id":${task.id}}""")
-        if (settingEnabled("alert_voice", false)) speakAlert(body)
+        if (settingEnabled("alert_voice", true)) speakAlert(body)
     }
 
     // ─── AI Wake-up — ปลุก AI มาสรุปบริบทก่อนแจ้งเตือนผู้ใช้ ────────────────
@@ -709,23 +727,24 @@ class JarvisAutomationService : Service() {
      *  ถ้าปิดเสียง: push การ์ดทันที (ไม่มี footer) */
     private suspend fun deliverChatAndVoice(
         cardBody: String,
-        metaFor: (String?) -> String,
+        metaFor: (String?, String?) -> String,
         shortSpeech: String,
         fullSpeech: String,
         liveSummary: Boolean = false,
         timeframeMin: Int? = null
     ) {
-        if (settingEnabled("alert_voice", false)) {
+        if (settingEnabled("alert_voice", true)) {
             // Live Summary ต้องรอ output transcription จบก่อน push การ์ด เพื่อให้
             // Chat ใช้ summary เดียวกับเสียงจริงจาก Gemini Live ไม่ใช่ summary คนละโมเดล
             val result = speakAlert(shortSpeech, fullSpeech, liveSummary, timeframeMin)
-            val finalBody = if (liveSummary && !result.summary.isNullOrBlank()) {
+            val effectiveSummary = if (liveSummary && !result.summary.isNullOrBlank()) result.summary else null
+            val finalBody = if (effectiveSummary != null) {
                 if (cardBody.contains("**JARVIS Live Summary:**")) cardBody
-                else "$cardBody\n\n**JARVIS Live Summary:** ${result.summary}"
+                else "$cardBody\n\n**JARVIS Live Summary:** $effectiveSummary"
             } else cardBody
-            pushToChat(finalBody, metaFor(result.engineLabel))
+            pushToChat(finalBody, metaFor(result.engineLabel, effectiveSummary))
         } else {
-            pushToChat(cardBody, metaFor(null))
+            pushToChat(cardBody, metaFor(null, null))
         }
     }
 
@@ -735,7 +754,7 @@ class JarvisAutomationService : Service() {
         logDebug("AutomationService",
             "🔔 FIRE '${job.name}' [${job.tool_name}] symbol=${job.symbol} value=$value | " +
             "mode=$delivery aiSummary=${settingEnabled("alert_ai_summary", true)} " +
-            "voice=${settingEnabled("alert_voice", false)}/${setting("alert_voice_engine").ifBlank { "device" }} " +
+            "voice=${settingEnabled("alert_voice", true)}/${setting("alert_voice_engine").ifBlank { "device" }} " +
             "model=${setting("model_name").ifBlank { "gemini-2.0-flash" }}")
 
 
@@ -745,8 +764,9 @@ class JarvisAutomationService : Service() {
         // ADJUST = ปรับ SL/TP ตามโครงสร้าง (ผ่าน validation เท่านั้น ไม่งั้น fallback ค่าเดิม)
         var effData: Map<String, String> = data
         var supervisorNote: String? = null
-        val isKeyzoneOnly = isSignalAlert && data["signal_side"] == null
-        if (isSignalAlert && !isKeyzoneOnly && delivery != "direct" &&
+        val isAnticipationAlert = isSignalAlert && (effData["signal_anticipation"] == "1" || effData["signal_stage"] == "ANTICIPATION" || job.condition_json.contains("signal_anticipation"))
+        val isKeyzoneOnly = isSignalAlert && !isAnticipationAlert && effData["signal_side"] == null
+        if (isSignalAlert && !isKeyzoneOnly && !isAnticipationAlert && delivery != "direct" &&
             (data["signal_strategy"] ?: "").contains("Unified SMC")
         ) {
             val sup = runCatching { runStrategySupervisor(job, data) }
@@ -818,29 +838,43 @@ class JarvisAutomationService : Service() {
 
         // ── โหมดส่งตรง: ไม่เรียก AI (ประหยัดโทเคน) — notification + ส่งเข้าแชทโดยตรง ──
         if (delivery == "direct") {
-            val body = if (isSignalAlert) {
-                "📡 Signal ${effData["signal_side"]} ${job.symbol} (${effData["signal_strategy"]})\n" +
-                    "เหตุผล: ${effData["signal_reason"]}\n" +
-                    "Entry: ${effData["signal_entry"]} | SL: ${effData["signal_sl"]} | TP: ${effData["signal_tp"]} | RR 1:${effData["signal_rr"]}"
-            } else {
-                "🎯 ${job.name}: ${job.symbol} เข้าเงื่อนไขแล้ว — ค่าปัจจุบัน: $value"
+            val body = when {
+                isAnticipationAlert -> {
+                    val side = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
+                    val zone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
+                    "⚡ คาดการณ์ $side ${job.symbol} ที่โซน $zone — ${effData["signal_anticipation_desc"] ?: "เฝ้าระวังการกลับตัว"}"
+                }
+                isSignalAlert -> {
+                    "📡 Signal ${effData["signal_side"]} ${job.symbol} (${effData["signal_strategy"]})\n" +
+                        "เหตุผล: ${effData["signal_reason"]}\n" +
+                        "Entry: ${effData["signal_entry"]} | SL: ${effData["signal_sl"]} | TP: ${effData["signal_tp"]} | RR 1:${effData["signal_rr"]}"
+                }
+                else -> {
+                    "🎯 ${job.name}: ${job.symbol} เข้าเงื่อนไขแล้ว — ค่าปัจจุบัน: $value"
+                }
             }
             sendJobAlertNotification(job, body)
             // การ์ดแชท + เสียง — การ์ดจะมี footer บอก engine เสียงที่พูดจริง (push ตอนเสียงเริ่ม)
             deliverChatAndVoice(
                 cardBody = when {
+                    isAnticipationAlert -> buildAnticipationChatCard(job, effData, null)
                     isKeyzoneOnly -> buildKeyzoneChatCard(job, effData, null)
                     isSignalAlert -> buildSignalChatCard(job, effData, null)
                     else -> buildAlertChatCard(job, value, effData, null)
                 },
-                metaFor = { v ->
+                metaFor = { v, s ->
                     when {
-                        isKeyzoneOnly -> alertChatMeta(job, value, null, "signal_alert_direct", v)
-                        isSignalAlert -> signalChatMeta(job, effData, null, "signal_alert_direct", v)
-                        else -> alertChatMeta(job, value, null, "signal_alert_direct", v)
+                        isAnticipationAlert -> anticipationChatMeta(job, effData, s, "signal_alert_direct", v)
+                        isKeyzoneOnly -> keyzoneChatMeta(job, effData, s, "signal_alert_direct", v)
+                        isSignalAlert -> signalChatMeta(job, effData, s, "signal_alert_direct", v)
+                        else -> alertChatMeta(job, value, s, "signal_alert_direct", v)
                     }
                 },
-                shortSpeech = if (isSignalAlert) buildSignalSpeech(job, data) else buildAlertSpeech(job, value),
+                shortSpeech = when {
+                    isAnticipationAlert -> buildAnticipationSpeech(job, effData)
+                    isSignalAlert -> buildSignalSpeech(job, effData)
+                    else -> buildAlertSpeech(job, value)
+                },
                 fullSpeech = body,
                 timeframeMin = symbolTimeframeMin(job.symbol))
             return
@@ -850,40 +884,64 @@ class JarvisAutomationService : Service() {
         // ไม่เรียก generateContent ก่อน Live อีกต่อไป เพราะจะทำให้เสียงต้องรอ Chat model timeout/fallback
         val useLiveSummary = isSignalAlert &&
             settingEnabled("alert_ai_summary", true) &&
-            settingEnabled("alert_voice", false) &&
+            settingEnabled("alert_voice", true) &&
             isLiveEngine(setting("alert_voice_engine").ifBlank { "device" })
 
-        val contextPrompt = if (isKeyzoneOnly) buildString {
-            appendLine("เหตุการณ์: ราคา ${job.symbol} เคลื่อนไปแตะจุดสำคัญของโครงสร้างตลาด (ยังไม่มีสัญญาณเข้าเทรด)")
-            appendLine("จุดที่แตะ: ${effData["signal_keyzone_desc"]}")
-            appendLine("โครงสร้างตลาด 5 ไทม์เฟรม:")
-            appendLine(effData["signal_mtf_context"]?.takeIf { it.isNotBlank() } ?: (effData["signal_context"] ?: "-"))
-            appendLine()
-            appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยสั้น 2-3 ประโยค: ราคาแตะจุดไหน โครงสร้างรอบข้างเป็นอย่างไร และควรจับตาอะไร (ยังไม่มีสัญญาณเข้าเทรด) — ใช้เฉพาะข้อมูลที่ให้ ห้ามสมมติเพิ่ม")
-        } else if (isSignalAlert) buildString {
-            appendLine("เหตุการณ์: ระบบ Signal Alert ตรวจพบสัญญาณเทรดใหม่ของ ${job.symbol}!")
-            appendLine("สัญญาณ: ${effData["signal_side"]} (กลยุทธ์: ${effData["signal_strategy"]})")
-            appendLine("เหตุผล/เงื่อนไขที่เกิดสัญญาณ: ${effData["signal_reason"]}")
-            appendLine("จุดเข้าออเดอร์: ${effData["signal_entry"]} | Stop Loss: ${effData["signal_sl"]} | Take Profit: ${effData["signal_tp"]} (Risk:Reward ≈ 1:${effData["signal_rr"]})")
-            appendLine("บริบทกราฟโดยรวม: ${effData["signal_context"]}")
-            appendLine()
-            if (useLiveSummary) {
-                appendLine("[LIVE SIGNAL SUMMARY]")
-                appendLine("วิเคราะห์ข้อมูลที่ให้มาแล้วพูดสรุปเป็นภาษาไทยแบบธรรมชาติ ไม่ใช่การอ่านข้อความดิบ")
-                appendLine("ต้องมีเพียง 2-3 ประโยค หรือราว 35-55 คำ และควรจบภายใน ~15 วินาที ห้ามขยายความเกินข้อมูลที่ให้มา")
-                appendLine("ครอบคลุมเท่าที่ทำได้ในความยาวจำกัด: (1) Signal และ Strategy (2) Entry/SL/TP/RR (3) เหตุผลหรือ Context สำคัญเพียง 1 จุด และความเสี่ยงสั้นๆ")
-                appendLine("ใช้เฉพาะข้อมูลที่ได้รับ ห้ามสมมติราคา/อินดิเคเตอร์/ข่าวหรือข้อมูลตลาดที่ไม่มีใน payload และห้ามรับประกันผลกำไร")
-                appendLine("พูดเป็นบทวิเคราะห์ต่อเนื่อง ห้ามใช้ Markdown ตาราง bullet หรือหัวข้อแบบอ่านรายการ และห้ามพูดคำว่า 'ฉันกำลังคิด'")
-            } else {
-                appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยแบบสั้น 3-4 ประโยค: (1) มีสัญญาณอะไรจากกลยุทธ์ไหน เพราะอะไร (2) จุดเข้า/SL/TP (3) quick-check จากบริบทที่ให้เท่านั้น ว่าสอดคล้องกับเทรนด์/โมเมนตัมไหม น่าสนใจหรือควรระวังอะไร — ใช้เฉพาะข้อมูลด้านบน ห้ามสมมติข้อมูลเพิ่ม")
+        val contextPrompt = when {
+            isAnticipationAlert -> buildString {
+                val antSide = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
+                val antZone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
+                val antDesc = effData["signal_anticipation_desc"] ?: ""
+                val antConf = effData["signal_anticipation_confidence"] ?: "75"
+                val closePrice = effData["close"] ?: "-"
+                appendLine("เหตุการณ์: ระบบ AI คาดการณ์สัญญาณล่วงหน้า (Anticipation / Pre-Signal) ของ ${job.symbol}")
+                appendLine("ทิศทาง: $antSide (ความเชื่อมั่น: $antConf%) | โซนสำคัญ: $antZone (@ $closePrice)")
+                appendLine("ปัจจัยที่เกิด: $antDesc")
+                appendLine()
+                if (useLiveSummary) {
+                    appendLine("[LIVE ANTICIPATION SUMMARY]")
+                    appendLine("กฎการพูดเสียงสด (Live Voice):")
+                    appendLine("1. ไม่ต้องบอกค่าทางเทคนิค ตัวเลขทศนิยม หรือค่าอินดิเคเตอร์ยิบย่อย (เช่น ค่า RSI ละเอียด, สเปรด, ตัวเลข Fibonacci)")
+                    appendLine("2. เน้นสรุปแนวโน้มทิศทาง ($antSide) และสิ่งที่ต้องจับตามอง (เช่น รอแท่งเทียนปิดยืนยัน หรือเฝ้าระวังการหลุดแนวรับต้าน) ให้เข้าใจทันที")
+                    appendLine("3. พูดเป็นภาษาไทยธรรมชาติกระชับ 1-2 ประโยค จบสมบูรณ์ และลงท้ายด้วย ค่ะ เสมอ")
+                } else {
+                    appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยสั้นๆ 1-2 ประโยค: สรุปแนวโน้มทิศทาง $antSide และสิ่งที่ต้องจับตามอง (ไม่ต้องบอกค่าเทคนิคยิบย่อย)")
+                }
             }
-        } else buildString {
-            appendLine("เหตุการณ์: การแจ้งเตือน '${job.name}' ของ ${job.symbol} เข้าเงื่อนไขแล้ว")
-            appendLine("เงื่อนไขที่ตั้งไว้: ${job.condition_json}")
-            appendLine("ค่าปัจจุบัน: $value")
-            appendLine("ข้อมูลดิบ: ${effData.entries.take(8).joinToString { "${it.key}=${it.value}" }}")
-            appendLine()
-            appendLine("ช่วยสรุปแจ้งผู้ใช้แบบสั้น 2-3 ประโยค ภาษาไทย ว่าเกิดอะไรขึ้น และมีข้อแนะนำสั้นๆ (ถ้าเหมาะสม)")
+            isKeyzoneOnly -> buildString {
+                appendLine("เหตุการณ์: ราคา ${job.symbol} เคลื่อนไปแตะจุดสำคัญของโครงสร้างตลาด (ยังไม่มีสัญญาณเข้าเทรด)")
+                appendLine("จุดที่แตะ: ${effData["signal_keyzone_desc"]}")
+                appendLine("โครงสร้างตลาด 5 ไทม์เฟรม:")
+                appendLine(effData["signal_mtf_context"]?.takeIf { it.isNotBlank() } ?: (effData["signal_context"] ?: "-"))
+                appendLine()
+                appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยสั้น 2-3 ประโยค: ราคาแตะจุดไหน โครงสร้างรอบข้างเป็นอย่างไร และควรจับตาอะไร (ยังไม่มีสัญญาณเข้าเทรด) — ใช้เฉพาะข้อมูลที่ให้ ห้ามสมมติเพิ่ม")
+            }
+            isSignalAlert -> buildString {
+                appendLine("เหตุการณ์: ระบบ Signal Alert ตรวจพบสัญญาณเทรดใหม่ของ ${job.symbol}!")
+                appendLine("สัญญาณ: ${effData["signal_side"]} (กลยุทธ์: ${effData["signal_strategy"]})")
+                appendLine("เหตุผล/เงื่อนไขที่เกิดสัญญาณ: ${effData["signal_reason"]}")
+                appendLine("จุดเข้าออเดอร์: ${effData["signal_entry"]} | Stop Loss: ${effData["signal_sl"]} | Take Profit: ${effData["signal_tp"]} (Risk:Reward ≈ 1:${effData["signal_rr"]})")
+                appendLine("บริบทกราฟโดยรวม: ${effData["signal_context"]}")
+                appendLine()
+                if (useLiveSummary) {
+                    appendLine("[LIVE SIGNAL SUMMARY]")
+                    appendLine("วิเคราะห์ข้อมูลที่ให้มาแล้วพูดสรุปเป็นภาษาไทยแบบธรรมชาติ ไม่ใช่การอ่านข้อความดิบ")
+                    appendLine("ต้องมีเพียง 2-3 ประโยค หรือราว 35-55 คำ และควรจบภายใน ~15 วินาที ห้ามขยายความเกินข้อมูลที่ให้มา")
+                    appendLine("ครอบคลุมเท่าที่ทำได้ในความยาวจำกัด: (1) Signal และ Strategy (2) Entry/SL/TP/RR (3) เหตุผลหรือ Context สำคัญเพียง 1 จุด และความเสี่ยงสั้นๆ")
+                    appendLine("ใช้เฉพาะข้อมูลที่ได้รับ ห้ามสมมติราคา/อินดิเคเตอร์/ข่าวหรือข้อมูลตลาดที่ไม่มีใน payload และห้ามรับประกันผลกำไร")
+                    appendLine("พูดเป็นบทวิเคราะห์ต่อเนื่อง ห้ามใช้ Markdown ตาราง bullet หรือหัวข้อแบบอ่านรายการ และห้ามพูดคำว่า 'ฉันกำลังคิด'")
+                } else {
+                    appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยแบบสั้น 3-4 ประโยค: (1) มีสัญญาณอะไรจากกลยุทธ์ไหน เพราะอะไร (2) จุดเข้า/SL/TP (3) quick-check จากบริบทที่ให้เท่านั้น ว่าสอดคล้องกับเทรนด์/โมเมนตัมไหม น่าสนใจหรือควรระวังอะไร — ใช้เฉพาะข้อมูลด้านบน ห้ามสมมติข้อมูลเพิ่ม")
+                }
+            }
+            else -> buildString {
+                appendLine("เหตุการณ์: การแจ้งเตือน '${job.name}' ของ ${job.symbol} เข้าเงื่อนไขแล้ว")
+                appendLine("เงื่อนไขที่ตั้งไว้: ${job.condition_json}")
+                appendLine("ค่าปัจจุบัน: $value")
+                appendLine("ข้อมูลดิบ: ${effData.entries.take(8).joinToString { "${it.key}=${it.value}" }}")
+                appendLine()
+                appendLine("ช่วยสรุปแจ้งผู้ใช้แบบสั้น 2-3 ประโยค ภาษาไทย ว่าเกิดอะไรขึ้น และมีข้อแนะนำสั้นๆ (ถ้าเหมาะสม)")
+            }
         }
 
         val aiText = supervisorNote ?: if (!useLiveSummary && settingEnabled("alert_ai_summary", true)) {
@@ -907,29 +965,45 @@ class JarvisAutomationService : Service() {
             null
         }
 
-        val body = aiText ?: if (isKeyzoneOnly) {
-            "📍 ${job.symbol} แตะจุดสำคัญ: ${effData["signal_keyzone_desc"]?.ifBlank { "โครงสร้างตลาด" }}"
-        } else if (isSignalAlert) {
-            "📡 Signal ${effData["signal_side"]} ${job.symbol} @ ${effData["signal_entry"]} " +
-                "(SL ${effData["signal_sl"]} / TP ${effData["signal_tp"]}) — ${effData["signal_strategy"]}: ${effData["signal_reason"]}"
-        } else {
-            "${job.symbol} เข้าเงื่อนไขแล้ว! ค่าปัจจุบัน: $value"
+        val body = aiText ?: when {
+            isAnticipationAlert -> {
+                val antSide = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
+                val antZone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
+                "⚡ คาดการณ์ $antSide ${job.symbol} ที่โซน $antZone — ${effData["signal_anticipation_desc"] ?: "เฝ้าระวังการกลับตัว"}"
+            }
+            isKeyzoneOnly -> {
+                "📍 ${job.symbol} แตะจุดสำคัญ: ${effData["signal_keyzone_desc"]?.ifBlank { "โครงสร้างตลาด" }}"
+            }
+            isSignalAlert -> {
+                "📡 Signal ${effData["signal_side"]} ${job.symbol} @ ${effData["signal_entry"]} " +
+                    "(SL ${effData["signal_sl"]} / TP ${effData["signal_tp"]}) — ${effData["signal_strategy"]}: ${effData["signal_reason"]}"
+            }
+            else -> {
+                "${job.symbol} เข้าเงื่อนไขแล้ว! ค่าปัจจุบัน: $value"
+            }
         }
         sendJobAlertNotification(job, body)
         deliverChatAndVoice(
             cardBody = when {
+                isAnticipationAlert -> buildAnticipationChatCard(job, effData, aiText)
                 isKeyzoneOnly -> buildKeyzoneChatCard(job, effData, aiText)
                 isSignalAlert -> buildSignalChatCard(job, effData, aiText)
                 else -> buildAlertChatCard(job, value, effData, aiText)
             },
-            metaFor = { v ->
+            metaFor = { v, s ->
+                val finalSummary = s ?: aiText
                 when {
-                    isKeyzoneOnly -> alertChatMeta(job, value, aiText, "signal_alert_ai", v)
-                    isSignalAlert -> signalChatMeta(job, effData, aiText, "signal_alert_ai", v)
-                    else -> alertChatMeta(job, value, aiText, "signal_alert_ai", v)
+                    isAnticipationAlert -> anticipationChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
+                    isKeyzoneOnly -> keyzoneChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
+                    isSignalAlert -> signalChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
+                    else -> alertChatMeta(job, value, finalSummary, "signal_alert_ai", v)
                 }
             },
-            shortSpeech = if (isSignalAlert) buildSignalSpeech(job, data) else buildAlertSpeech(job, value),
+            shortSpeech = when {
+                isAnticipationAlert -> buildAnticipationSpeech(job, effData)
+                isSignalAlert -> buildSignalSpeech(job, effData)
+                else -> buildAlertSpeech(job, value)
+            },
             fullSpeech = if (useLiveSummary) contextPrompt else body,
             liveSummary = useLiveSummary,
             timeframeMin = symbolTimeframeMin(job.symbol))
@@ -984,12 +1058,10 @@ class JarvisAutomationService : Service() {
             logDebug("AutomationService", "🧠 AI summary skipped — no api_key in settings")
             return null
         }
-        val primary = setting("model_name").ifBlank { "gemini-2.0-flash" }
+        val primary = setting("model_name").ifBlank { com.example.personalaibot.data.ModelConfig.getBestActiveModel() }
         // Alert summaries are time-critical. Keep a bounded fallback chain so a provider outage
         // cannot turn one notification into a minute-long cascade of sequential timeouts.
-        val models = (listOf(primary) + com.example.personalaibot.data.ModelConfig.GEMINI_FALLBACK_MODELS)
-            .distinct()
-            .take(4)
+        val models = com.example.personalaibot.data.ModelConfig.getFallbackChain(primary).take(4)
         logDebug("AutomationService", "🧠 AI summary start — chain=${models.joinToString(" → ")}")
         for (m in models) {
             val t0 = System.currentTimeMillis()
@@ -1046,10 +1118,28 @@ class JarvisAutomationService : Service() {
         return if (v.isBlank()) default else v == "true"
     }
 
-    private fun speak(text: String) {
-        if (!ttsReady) return
+    private suspend fun speak(text: String) {
+        if (tts == null) {
+            initTts()
+        }
+        if (!ttsReady) {
+            val deadline = System.currentTimeMillis() + 1500L
+            while (!ttsReady && System.currentTimeMillis() < deadline) {
+                delay(100L)
+            }
+        }
+        if (!ttsReady) {
+            logError("AutomationService", "TTS speak dropped — ttsReady is false after waiting", null)
+            return
+        }
         try {
-            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "jarvis_alert")
+            val params = android.os.Bundle().apply {
+                putFloat(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            }
+            tts?.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "jarvis_alert_${System.currentTimeMillis()}")
+            logDebug("AutomationService", "🔊 Android TTS speak called: '$text'")
+            val estimatedDurationMs = (text.length * 120L).coerceIn(2000L, 8000L)
+            delay(estimatedDurationMs)
         } catch (e: Exception) {
             logError("AutomationService", "TTS speak failed: ${e.message}", e)
         }
@@ -1115,6 +1205,40 @@ class JarvisAutomationService : Service() {
             voice?.let { put("voice", it) }
         }.toString()
 
+    /** metadata โครงสร้างของ anticipation alert (Pre-signal) — MessageBubble render เป็นการ์ด 3D คาดการณ์ */
+    private fun anticipationChatMeta(job: AlertJob, data: Map<String, String>, aiSummary: String?, type: String, voice: String? = null): String =
+        kotlinx.serialization.json.buildJsonObject {
+            put("type", type)
+            put("kind", "anticipation")
+            put("job_id", job.id)
+            put("name", job.name)
+            val (baseSym, tf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+            put("symbol", "$baseSym@$tf")
+            put("side", data["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY")
+            put("zone", data["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone")
+            put("desc", data["signal_anticipation_desc"]?.ifBlank { "เฝ้าระวังการกลับตัวในโซนสำคัญ" } ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ")
+            put("confidence", data["signal_anticipation_confidence"]?.ifBlank { "75" } ?: "75")
+            put("price", data["close"] ?: "-")
+            data["signal_mtf_context"]?.takeIf { it.isNotBlank() }?.let { put("mtf", it) }
+            aiSummary?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
+            voice?.let { put("voice", it) }
+        }.toString()
+
+    /** metadata โครงสร้างของ keyzone hit — MessageBubble render เป็นการ์ด 3D แจ้งเตือนโซนสำคัญ */
+    private fun keyzoneChatMeta(job: AlertJob, data: Map<String, String>, aiSummary: String?, type: String, voice: String? = null): String =
+        kotlinx.serialization.json.buildJsonObject {
+            put("type", type)
+            put("kind", "keyzone")
+            put("job_id", job.id)
+            put("name", job.name)
+            put("symbol", job.symbol)
+            put("desc", data["signal_keyzone_desc"]?.ifBlank { "ราคาแตะจุดสำคัญของโครงสร้างตลาด" } ?: "ราคาแตะจุดสำคัญของโครงสร้างตลาด")
+            put("price", data["close"] ?: "-")
+            data["signal_mtf_context"]?.takeIf { it.isNotBlank() }?.let { put("mtf", it) }
+            aiSummary?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
+            voice?.let { put("voice", it) }
+        }.toString()
+
     /** metadata โครงสร้างของ alert ทั่วไป (ราคา/indicator/ฯลฯ) — MessageBubble render เป็นการ์ด cyan */
     private fun alertChatMeta(job: AlertJob, value: String, aiSummary: String?, type: String, voice: String? = null): String =
         kotlinx.serialization.json.buildJsonObject {
@@ -1128,6 +1252,28 @@ class JarvisAutomationService : Service() {
             aiSummary?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
             voice?.let { put("voice", it) }
         }.toString()
+
+    /**
+     * การ์ดคาดการณ์สัญญาณล่วงหน้าสำหรับแชท — กะทัดรัด แสดงเฉพาะปัจจัยที่เกิด ไม่รกพื้นที่
+     */
+    private fun buildAnticipationChatCard(job: AlertJob, data: Map<String, String>, aiSummary: String?): String {
+        val side = data["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
+        val badge = if (side.equals("BUY", ignoreCase = true)) "⚡🟢" else "⚡🔴"
+        val conf = data["signal_anticipation_confidence"]?.ifBlank { "75" } ?: "75"
+        val close = data["close"] ?: "-"
+        val desc = data["signal_anticipation_desc"]?.ifBlank { "เฝ้าระวังการกลับตัวในโซนสำคัญ" } ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ"
+        val (sym, tf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+        return buildString {
+            appendLine("$badge **คาดการณ์ $side — $sym (${tf.uppercase()})**")
+            appendLine("ความเชื่อมั่น: $conf% • ราคา: $close")
+            appendLine()
+            appendLine("**ปัจจัยที่เกิด:** $desc")
+            if (!aiSummary.isNullOrBlank()) {
+                appendLine()
+                appendLine("**สิ่งที่ต้องจับตามอง:** $aiSummary")
+            }
+        }.trim()
+    }
 
     /**
      * การ์ดสัญญาณสำหรับแชท — header BUY🟢/SELL🔴 + ตาราง Entry/TP/SL/RR/ATR + เหตุผล
@@ -1177,6 +1323,25 @@ class JarvisAutomationService : Service() {
                 appendLine("**JARVIS quick-check:** $aiSummary")
             }
         }.trim()
+    }
+
+    /** ข้อความพูดสั้นๆ สำหรับ anticipation alert — สรุปแนวโน้มทิศทางและสิ่งที่ต้องจับตามอง ไม่บอกค่าเทคนิคยิบย่อย */
+    private fun buildAnticipationSpeech(job: AlertJob, data: Map<String, String>): String {
+        val isBuy = (data["signal_anticipation_side"] ?: "BUY").equals("BUY", ignoreCase = true)
+        val dirTh = if (isBuy) "ฝั่งซื้อเริ่มได้เปรียบ ลุ้นกลับตัวขึ้น" else "ฝั่งขายเริ่มได้เปรียบ ลุ้นทิ้งตัวลง"
+        val (sym, tf) = com.example.personalaibot.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+        val symTh = when (sym.uppercase()) {
+            "XAUUSD" -> "ทองคำ"; "XAGUSD" -> "เงินแท่ง"
+            "BTCUSDT", "BTCUSD" -> "บิทคอยน์"; "ETHUSDT", "ETHUSD" -> "อีเทอเรียม"
+            else -> sym
+        }
+        val tfTh = when (tf.lowercase()) {
+            "1m" -> "1 นาที"; "5m" -> "5 นาที"; "15m" -> "15 นาที"; "30m" -> "30 นาที"
+            "1h" -> "1 ชั่วโมง"; "4h" -> "4 ชั่วโมง"; "1d" -> "รายวัน"; "1w" -> "รายสัปดาห์"
+            else -> tf
+        }
+        val zone = data["signal_anticipation_zone"]?.ifBlank { "โซนสำคัญ" } ?: "โซนสำคัญ"
+        return "คาดการณ์ $symTh ไทม์เฟรม $tfTh ที่$zone $dirTh ให้จับตาดูการปิดแท่งเทียนนะคะ"
     }
 
     /** ข้อความพูดสั้นๆ สำหรับ signal alert — ลดเวลา synthesize/ฟังของ Gemini TTS (ข้อความยาว = ดีเลย์สูง) */
@@ -1340,7 +1505,8 @@ class JarvisAutomationService : Service() {
     // (2026-08-26 — เดิมเริ่มจากโมเดลที่ผู้ใช้เลือกใน Settings แต่ 3.1 มั่วเกินไปสำหรับ alert)
 
     private val LIVE_VOICE_MODELS = listOf(
-        "gemini-2.5-flash-native-audio-preview-12-2025" to "Live 2.5 Native",
+        "gemini-2.5-flash-native-audio-preview-09-2025" to "Live 2.5 Native (09-2025)",
+        "gemini-2.5-flash-native-audio-latest" to "Live 2.5 Native Latest",
         "gemini-3.1-flash-live-preview" to "Live 3.1"
     )
 
@@ -1367,15 +1533,13 @@ class JarvisAutomationService : Service() {
      */
     private fun liveVoiceChain(): List<Pair<String, String>> {
         val selected = setting("live_model_name").removePrefix("models/").ifBlank {
-            "gemini-3.1-flash-live-preview"
+            com.example.personalaibot.data.ModelConfig.DEFAULT_LIVE_MODEL
         }
-        // ลำดับความเสถียรจากการวัดจริง: 2.5 Native ก่อน → 3.1 → โมเดลที่ผู้ใช้เลือก (ถ้าไม่ใช่ 2 ตัวนี้) ต่อท้าย
-        val candidates = LIVE_VOICE_MODELS.map { it.first } +
-            selected.takeIf { sel -> LIVE_VOICE_MODELS.none { it.first == sel } }.let { listOfNotNull(it) }
+        val candidates = com.example.personalaibot.data.ModelConfig.getLiveFallbackChain(selected)
         val available = candidates.filterNot(::isLiveModelAudioCoolingDown)
         val effective = if (available.isNotEmpty()) available else candidates
         return effective.map { model ->
-            val label = LIVE_VOICE_MODELS.firstOrNull { it.first == model }?.second ?: model
+            val label = LIVE_VOICE_MODELS.firstOrNull { it.first == model }?.second ?: model.substringAfterLast('/')
             model to label
         }
     }
@@ -1482,24 +1646,37 @@ class JarvisAutomationService : Service() {
         liveSummary: Boolean = false,
         timeframeMin: Int? = null
     ): VoiceDeliveryResult {
+        // ปลุกหน้าจอให้ติดขึ้นมาเพื่อให้ผู้ใช้เห็นการแจ้งเตือนทันที
+        AlwaysLiveManager.getInstanceOrNull()?.wakeScreen()
+
+        // ขอ WakeLock ชั่วคราวป้องกัน CPU หลับระหว่างสังเคราะห์/สตรีมเสียงแจ้งเตือน
+        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = powerManager?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "personalaibot:alert_voice")
+        wakeLock?.acquire(30_000L)
+
         val engine = setting("alert_voice_engine").ifBlank { "device" }
         val live = isLiveEngine(engine)
         val short = sanitizeForSpeech(shortText)
         val full = sanitizeForSpeech(fullText ?: shortText)
         logDebug("AutomationService", "🔊 speakAlert engine=$engine ttsReady=$ttsReady liveSummary=$liveSummary")
-        if (!live) {
-            if (short.isBlank()) return VoiceDeliveryResult("-", null)
-            speak(short)
-            logDebug("AutomationService", "🔊 → Android TTS (device mode) spoken")
-            return VoiceDeliveryResult("Android TTS", null)
+        AlwaysLiveManager.getInstanceOrNull()?.let { mgr ->
+            mgr.onAiStateChanged("speaking")
+            mgr.detectSentiment(full.ifBlank { short })
         }
-        if (full.isBlank()) return VoiceDeliveryResult("-", null)
-        val apiKey = setting("api_key")
-        if (apiKey.isBlank()) {
-            logDebug("AutomationService", "🔊 ไม่มี api_key → Android TTS")
-            if (short.isNotBlank()) speak(short)
-            return VoiceDeliveryResult("Android TTS (ไม่มี api_key)", null)
-        }
+        try {
+            if (!live) {
+                if (short.isBlank()) return VoiceDeliveryResult("-", null)
+                speak(short)
+                logDebug("AutomationService", "🔊 → Android TTS (device mode) spoken")
+                return VoiceDeliveryResult("Android TTS", null)
+            }
+            if (full.isBlank()) return VoiceDeliveryResult("-", null)
+            val apiKey = setting("api_key")
+            if (apiKey.isBlank()) {
+                logDebug("AutomationService", "🔊 ไม่มี api_key → Android TTS")
+                if (short.isNotBlank()) speak(short)
+                return VoiceDeliveryResult("Android TTS (ไม่มี api_key)", null)
+            }
 
         val voiceName = setting("voice_name").ifBlank { "Aoede" }
         val chain = liveVoiceChain()
@@ -1579,6 +1756,12 @@ class JarvisAutomationService : Service() {
         logDebug("AutomationService", "🔊 Live chain พังทั้งหมด → Android TTS")
         if (short.isNotBlank()) speak(short)
         return VoiceDeliveryResult("Android TTS (fallback)", null)
+        } finally {
+            AlwaysLiveManager.getInstanceOrNull()?.onAiStateChanged("idle")
+            try {
+                if (wakeLock?.isHeld == true) wakeLock.release()
+            } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -1677,7 +1860,7 @@ class JarvisAutomationService : Service() {
                                     [LIVE SIGNAL ALERT MODE]
                                     คุณกำลังทำหน้าที่เป็นเสียงแจ้งเตือนสัญญาณเทรดของ JARVIS ไม่ใช่นักวิเคราะห์แบบเต็มรูปแบบ
                                     วิเคราะห์ payload ที่ผู้ใช้ส่งมาแล้วพูดสรุปเป็นภาษาไทยให้กระชับ ชัดเจน และฟังจบเร็ว
-                                    จำกัดคำตอบให้สั้นมาก: 1-2 ประโยค ประมาณ 20-35 คำ และไม่เกินราว 120 ตัวอักษรในภาษาไทยเท่าที่ทำได้ เพื่อให้เสียงแจ้งเตือนจบเร็ว
+                                    จำกัดคำตอบให้กระชับ: 1-2 ประโยค ประมาณ 25-40 คำ พูดสรุปให้จบประโยคอย่างสมบูรณ์ และลงท้ายด้วย ค่ะ เสมอ เพื่อให้เสียงแจ้งเตือนชัดเจนและเป็นธรรมชาติ
                                     ต้องกล่าวให้ครบเท่าที่ข้อมูลมี: Signal/Strategy และ Entry/SL/TP; ถ้าข้อมูลยาวเกิน ให้ตัด Context/Risk ก่อน แต่ห้ามตัดราคาและทิศทาง
                                     หากข้อมูลไม่ครบ ให้พูดเฉพาะข้อมูลที่มี ห้ามเดา ห้ามเพิ่มราคา อินดิเคเตอร์ ข่าว หรือเหตุการณ์ตลาด
                                     ห้ามรับประกันผลกำไร ไม่ต้องอธิบายเหตุผลเชิงลึก ไม่ต้องมีคำเกริ่น คำลงท้าย หรือคำเชิญให้ทำสิ่งอื่น
@@ -1987,7 +2170,7 @@ class JarvisAutomationService : Service() {
                     sendNotification(title, short, 9000 + (System.currentTimeMillis() % 1000).toInt())
                     deliverChatAndVoice(
                         cardBody = body,
-                        metaFor = { voice -> if (voice != null) meta.dropLast(1) + ",\"voice\":\"$voice\"}" else meta },
+                        metaFor = { voice, _ -> if (voice != null) meta.dropLast(1) + ",\"voice\":\"$voice\"}" else meta },
                         shortSpeech = short,
                         fullSpeech = full
                     )

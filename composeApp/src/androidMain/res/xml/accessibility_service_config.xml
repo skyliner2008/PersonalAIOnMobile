@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    JarvisAccessibilityService configuration.
+
+    accessibilityEventTypes="typeAllMask" — รับทุก event เพื่อติดตาม context ของแอปที่ใช้งานอยู่
+    canRetrieveWindowContent="true"       — อ่าน UI tree ของแอปอื่นได้ (screen reading)
+    canPerformGestures="true"             — ทำ gesture (tap, swipe) บนหน้าจอได้ (API 24+)
+    flagReportViewIds="true"              — รับ resource-id ของ view เพื่อ target-click แม่นยำ
+    flagRequestFilterKeyEvents="true"     — รับ key events เพื่อ intercept hardware buttons ถ้าต้องการ
+    notificationTimeout="100"             — throttle event ไม่ให้ท่วม (ms)
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRequestFilterKeyEvents|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.example.personalaibot.MainActivity"
+    android:description="@string/accessibility_service_description" />

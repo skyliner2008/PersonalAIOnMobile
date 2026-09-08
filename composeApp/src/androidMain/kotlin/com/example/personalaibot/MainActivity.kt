@@ -30,13 +30,27 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.collect
 import androidx.lifecycle.lifecycleScope
 
+import android.view.WindowManager
+import android.app.KeyguardManager
+
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        @Volatile
+        var instance: MainActivity? = null
+            private set
+        var isActivityResumed: Boolean = false
+            private set
+    }
 
     private lateinit var voiceManager: VoiceManager
 
     // Callback ส่งกลับไปที่ Compose เพื่อ toggle live mode จาก widget
     private var onToggleLiveFromWidget: (() -> Unit)? = null
     private var onWidgetClosedCallback: (() -> Unit)? = null
+    private var onExpandAlwaysLiveCallback: (() -> Unit)? = null
+    private var onCloseAlwaysLiveCallback: (() -> Unit)? = null
+    private lateinit var alwaysLiveManager: com.example.personalaibot.service.AlwaysLiveManager
 
     /**
      * Cached singleton — re-creating this on every download tap leaks the
@@ -94,6 +108,7 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
         _setupStatus["overlay"] = canDrawOverlay()
         _setupStatus["files"] = _allFilesAccessGranted.value
+        _setupStatus["accessibility"] = com.example.personalaibot.service.JarvisAccessibilityService.isEnabled()
         _setupStatus["battery"] = try {
             (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .isIgnoringBatteryOptimizations(packageName)
@@ -144,12 +159,56 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             },
+            com.example.personalaibot.ui.screen.SetupCheckItem(
+                "ควบคุมเครื่อง (Accessibility)", "ให้ JARVIS ควบคุมแอปอื่น, อ่านจอ, แตะปุ่มแทนคุณ", granted("accessibility"),
+            ) {
+                try {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            },
         )
     }
 
     override fun onResume() {
         super.onResume()
+        isActivityResumed = true
         updatePermissionStatus()
+        // Ensure screen flags are cleared in normal mode, or kept over lockscreen in Control Mode
+        if (::alwaysLiveManager.isInitialized) {
+            val state = alwaysLiveManager.state.value
+            if (state == com.example.personalaibot.service.AlwaysLiveManager.AlwaysLiveState.OFF) {
+                clearScreenFlags()
+            } else {
+                turnScreenOnTemporarily()
+                setKeepScreenOn(true)
+            }
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isActivityResumed = false
+        // If Always Live is running in FULL_SCREEN, minimize to Floating Widget only if user actually
+        // leaves to another app (interactive screen, not locked, not finishing)
+        if (::alwaysLiveManager.isInitialized &&
+            alwaysLiveManager.state.value == com.example.personalaibot.service.AlwaysLiveManager.AlwaysLiveState.FULL_SCREEN) {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            if (pm?.isInteractive == true && km?.isKeyguardLocked != true && !isFinishing) {
+                alwaysLiveManager.minimize()
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // When device display turns off and app stops in normal mode, clear any lockscreen flags
+        if (::alwaysLiveManager.isInitialized &&
+            alwaysLiveManager.state.value == com.example.personalaibot.service.AlwaysLiveManager.AlwaysLiveState.OFF) {
+            clearScreenFlags()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -162,7 +221,16 @@ class MainActivity : ComponentActivity() {
             )
         )
         super.onCreate(savedInstanceState)
+        instance = this
         com.example.personalaibot.automation.AndroidContextHolder.appContext = applicationContext
+
+        // Clear any leftover screen flags so normal mode never shows over lockscreen
+        clearScreenFlags()
+
+        if (intent?.action == "com.example.personalaibot.HOTWORD_WAKE") {
+            wakeAndTurnScreenOn()
+            setKeepScreenOn(true)
+        }
         
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -180,6 +248,9 @@ class MainActivity : ComponentActivity() {
         val driverFactory = DatabaseDriverFactory(applicationContext)
         voiceManager = VoiceManager(applicationContext)
         val fileToolExecutor = FileToolExecutor(applicationContext)
+        val deviceControlExecutor = com.example.personalaibot.tools.device.DeviceControlExecutor(applicationContext)
+        com.example.personalaibot.tools.ToolExecutor.initDeviceExecutor(deviceControlExecutor)
+        alwaysLiveManager = com.example.personalaibot.service.AlwaysLiveManager.getInstance(applicationContext)
 
         checkAndRequestPermissions()
 
@@ -187,6 +258,9 @@ class MainActivity : ComponentActivity() {
             App(
                 databaseDriverFactory = driverFactory,
                 voiceManager = voiceManager,
+                onKeepScreenOn = { keepOn ->
+                    setKeepScreenOn(keepOn)
+                },
                 onStartWidget = { 
                     if (canDrawOverlay()) {
                         FloatingWidgetService.startWidget(applicationContext)
@@ -203,6 +277,18 @@ class MainActivity : ComponentActivity() {
                 },
                 registerWidgetClosed = { callback ->
                     onWidgetClosedCallback = callback
+                },
+                onStartAlwaysLive = {
+                    alwaysLiveManager.enable()
+                },
+                onStopAlwaysLive = {
+                    alwaysLiveManager.disable()
+                },
+                registerExpandAlwaysLive = { callback ->
+                    onExpandAlwaysLiveCallback = callback
+                },
+                registerCloseAlwaysLive = { callback ->
+                    onCloseAlwaysLiveCallback = callback
                 },
                 requestAllFilesPermission = {
                     requestAllFilesPermission()
@@ -253,6 +339,85 @@ class MainActivity : ComponentActivity() {
         if (intent.action == "com.example.personalaibot.WIDGET_CLOSED") {
             onWidgetClosedCallback?.invoke()
         }
+        if (intent.action == "com.example.personalaibot.HOTWORD_WAKE") {
+            wakeAndTurnScreenOn()
+            setKeepScreenOn(true)
+            onExpandAlwaysLiveCallback?.invoke()
+        } else if (intent.action == "com.example.personalaibot.EXPAND_ALWAYS_LIVE") {
+            wakeAndTurnScreenOn()
+            setKeepScreenOn(true)
+            onExpandAlwaysLiveCallback?.invoke()
+        }
+    }
+
+    fun setKeepScreenOn(keepOn: Boolean) {
+        runOnUiThread {
+            if (keepOn) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+    }
+
+    fun turnScreenOnTemporarily() {
+        runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            }
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+    }
+
+    fun clearScreenFlags() {
+        runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(false)
+                setTurnScreenOn(false)
+            }
+            @Suppress("DEPRECATION")
+            window.clearFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+            )
+        }
+    }
+
+    fun wakeAndTurnScreenOn() {
+        turnScreenOnTemporarily()
+    }
+
+    fun expandAlwaysLive() {
+        runOnUiThread {
+            turnScreenOnTemporarily()
+            setKeepScreenOn(true)
+            alwaysLiveManager.enable()
+            onExpandAlwaysLiveCallback?.invoke()
+        }
+    }
+
+    fun closeAlwaysLive() {
+        runOnUiThread {
+            alwaysLiveManager.disable()
+            onCloseAlwaysLiveCallback?.invoke()
+            clearScreenFlags()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (instance == this) {
+            instance = null
+            isActivityResumed = false
+        }
+        alwaysLiveManager.destroy()
     }
 
     // ─── Permissions ──────────────────────────────────────────────────────────

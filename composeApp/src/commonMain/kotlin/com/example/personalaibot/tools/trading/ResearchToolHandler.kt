@@ -155,6 +155,26 @@ internal class ResearchToolHandler(
             recs.groupBy { it.strategy }.toList()
                 .sortedByDescending { (_, l) -> l.filter { it.outcome != "OPEN" }.sumOf { it.result_r ?: 0.0 } }
                 .forEach { (name, list) -> appendLine("• **$name**: ${summarize(list)}") }
+
+            appendLine()
+            appendLine("🧠 **Closed-Loop Strategy Reinforcement Status (สถานะการปรับน้ำหนัก AI):**")
+            val strategies = recs.map { it.strategy }.distinct()
+            strategies.forEach { strat ->
+                val perf = com.example.personalaibot.automation.SignalOutcomeTracker.getStrategyPerformance(strat)
+                val adj = com.example.personalaibot.automation.SignalOutcomeTracker.getStrategyConfidenceAdjustment(strat)
+                val statusBadge = when {
+                    adj > 0.15 -> "🔥 HOT (+${"%.2f".format(adj)} Boost — เพิ่มน้ำหนัก)"
+                    adj > 0.0 -> "📈 FAVORABLE (+${"%.2f".format(adj)} Boost)"
+                    adj < -0.20 -> "❄️ COLD (${"%.2f".format(adj)} Penalty — สกัดกั้นสัญญาณอ่อน)"
+                    adj < 0.0 -> "⚠️ UNFAVORABLE (${"%.2f".format(adj)} Penalty)"
+                    else -> "⚖️ NEUTRAL (+0.00)"
+                }
+                if (perf != null && (perf.wins + perf.losses > 0)) {
+                    appendLine("• **$strat**: WR ${"%.1f".format(perf.winRatePct)}% | Avg ${"%+.2f".format(perf.avgR)}R | MFE ${"%.2f".format(perf.avgMfeR)}R | MAE ${"%.2f".format(perf.avgMaeR)}R → $statusBadge")
+                } else {
+                    appendLine("• **$strat**: $statusBadge")
+                }
+            }
         }.trim()
     }
 

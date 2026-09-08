@@ -255,6 +255,11 @@ class GeminiService(
      */
     var onWorkingConfigChanged: ((model: String, apiKey: String) -> Unit)? = null
 
+    /**
+     * เรียกเมื่อโมเดลติด 404 (ไม่มีจริงใน API) — ให้ caller สั่ง refresh listModels สดจาก Google API
+     */
+    var onModelNotFound: ((model: String) -> Unit)? = null
+
     /** สลับไปใช้ key ใหม่ (ใช้ภายใน fallback rotation เท่านั้น — ไม่ persist) */
     private fun rotateApiKey(newKey: String) {
         logDebug("GeminiService", "API key rotation: → ${com.example.personalaibot.maskApiKey(newKey)}")
@@ -537,8 +542,8 @@ class GeminiService(
         }
 
         fun trySwitchFallbackModel(): String? {
-            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.GEMINI_FALLBACK_MODELS
-            val next = chain.firstOrNull { it !in triedModels }
+            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.getFallbackChain(modelName)
+            val next = chain.firstOrNull { it !in triedModels && !ModelConfig.isModelDead(it) }
                 ?: return null
             val old = modelName
             modelName = next
@@ -614,7 +619,10 @@ class GeminiService(
                                 }
                                 modelFailed = true
                             } else if (httpResponse.status.value == 404) {
-                                // โมเดลไม่มีจริง/ใช้ generateContent ไม่ได้ — หมุน key ไม่ช่วย ข้ามไปสลับโมเดลเลย
+                                // โมเดลไม่มีจริง/ใช้ generateContent ไม่ได้ — Blacklist และ trigger refresh
+                                val dead = modelName
+                                ModelConfig.markModelDead(dead)
+                                onModelNotFound?.invoke(dead)
                                 modelFailed = true; modelNotFound = true
                             } else {
                                 emitText("⚠️ API Error ${httpResponse.status.value}: ${err.take(300)}")
@@ -993,6 +1001,7 @@ class GeminiService(
         return try {
             val response = client.get(listModelsUrl())
             val modelList: ModelListResponse = response.body()
+            ModelConfig.updateAvailableModels(modelList.models)
             modelList.models.filter {
                 it.supportedGenerationMethods?.contains("generateContent") == true
             }
@@ -1037,8 +1046,8 @@ class GeminiService(
             triedKeys.add(next); rotateApiKey(next); return true
         }
         fun switchModel(): Boolean {
-            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.GEMINI_FALLBACK_MODELS
-            val next = chain.firstOrNull { it !in triedModels } ?: return false
+            val chain = fallbackModelsOverride?.takeIf { it.isNotEmpty() } ?: ModelConfig.getFallbackChain(modelName)
+            val next = chain.firstOrNull { it !in triedModels && !ModelConfig.isModelDead(it) } ?: return false
             logDebug("GeminiService", "Model fallback (non-stream): $modelName → $next")
             triedModels.add(next); modelName = next; return true
         }
@@ -1102,8 +1111,13 @@ class GeminiService(
                     if (switchKey() || switchModel()) { waited429 = 0; continue }
                     return "⚠️ Error $code (ลองทุก key+โมเดลใน chain แล้วไม่สำเร็จ)"
                 }
-                // 404 = โมเดลไม่มีจริง/ใช้ method นี้ไม่ได้ — หมุน key ไม่ช่วย ข้ามไปโมเดลถัดไปเลย
-                if (code == 404 && switchModel()) continue
+                // 404 = โมเดลไม่มีจริง/ใช้ method นี้ไม่ได้ — Blacklist และ trigger refresh
+                if (code == 404) {
+                    val dead = modelName
+                    ModelConfig.markModelDead(dead)
+                    onModelNotFound?.invoke(dead)
+                    if (switchModel()) continue
+                }
                 return "⚠️ Error $code"
             } catch (e: Exception) {
                 logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)

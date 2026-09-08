@@ -32,6 +32,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.produceState
+import com.example.personalaibot.automation.SignalOutcomeTracker
+import com.example.personalaibot.db.SignalTrackingRecord
 import com.example.personalaibot.tools.trading.auto.AutoTradingViewModel
 import com.example.personalaibot.ui.theme.JarvisTheme
 import kotlin.math.roundToInt
@@ -42,6 +45,9 @@ import kotlin.math.roundToInt
 internal fun TerminalEventsTab(vm: AutoTradingViewModel) {
     val decisions by vm.lastDecisions.collectAsState()
     val state by vm.state.collectAsState()
+    val recentOutcomes by produceState<List<SignalTrackingRecord>>(initialValue = emptyList()) {
+        value = SignalOutcomeTracker.getRecentResolvedSignals(3)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -70,6 +76,46 @@ internal fun TerminalEventsTab(vm: AutoTradingViewModel) {
                     color = Color.White.copy(alpha = 0.8f),
                     fontSize = 11.sp,
                 )
+            }
+        }
+
+        if (recentOutcomes.isNotEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = JarvisTheme.Card),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .border(1.dp, JarvisTheme.Cyan.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🧠 Closed-Loop Signal Outcomes", color = JarvisTheme.Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            Text("Learning Active", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                        }
+                        recentOutcomes.forEach { rec ->
+                            val isWin = rec.status == "WIN"
+                            val badgeColor = if (isWin) BuyGreen else if (rec.status == "LOSS") SellRed else Color.White.copy(alpha = 0.5f)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${rec.symbol} ${rec.side} (${rec.strategy})", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "${rec.status} ${rec.pnl_r?.let { "%+.2fR".format(it) } ?: "-"} · MFE ${"%.1fR".format(rec.mfe)}",
+                                    color = badgeColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 

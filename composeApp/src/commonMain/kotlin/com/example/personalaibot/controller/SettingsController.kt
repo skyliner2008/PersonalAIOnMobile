@@ -42,7 +42,8 @@ class SettingsController(
         "gemini-1.5-flash-latest",
         "gemini-live-preview",
         "gemini-2.5-flash-native-audio-preview-12-2025",
-        "gemini-2.5-flash-native-audio-preview"
+        "gemini-2.5-flash-native-audio-preview",
+        "gemini-2.5-flash-native-audio-preview-09-2025" // Auto-upgrade old default to gemini-3.1-flash-live-preview
     )
 
     private val _apiKey = MutableStateFlow("")
@@ -103,10 +104,44 @@ class SettingsController(
         val savedKey = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("api_key").executeAsOneOrNull() ?: ""
         }
-        val savedModel = withContext(Dispatchers.IO) {
+        var savedModel = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("model_name").executeAsOneOrNull()
                 ?: defaultMainModel
         }
+
+        // โหลด cached model names เพื่อใช้ตรวจสอบความถูกต้องของโมเดลทันทีตั้งแต่เริ่มบูต (Cold-start validation)
+        val cachedGeminiModelsStr = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("cached_gemini_models").executeAsOneOrNull() ?: ""
+        }
+        if (cachedGeminiModelsStr.isNotBlank()) {
+            val cachedList = cachedGeminiModelsStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            if (cachedList.isNotEmpty()) {
+                val pseudoModels = cachedList.map {
+                    com.example.personalaibot.data.GeminiModel(
+                        name = "models/$it",
+                        supportedGenerationMethods = listOf("generateContent")
+                    )
+                }
+                com.example.personalaibot.data.ModelConfig.updateAvailableModels(pseudoModels)
+            }
+        }
+
+        // Auto-migration logic: ตรวจสอบโมเดลที่เลิกใช้งาน/ติด 404 (เช่น gemini-3.1-pro)
+        val deprecatedMainModels = setOf(
+            "gemini-3.1-pro",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-latest",
+            "gemini-1.0-pro"
+        )
+        if (deprecatedMainModels.contains(savedModel) || com.example.personalaibot.data.ModelConfig.isModelDead(savedModel)) {
+            val best = com.example.personalaibot.data.ModelConfig.getBestActiveModel()
+            logDebug("JarvisVM", "Migrating deprecated/dead model '$savedModel' to active '$best'")
+            savedModel = best
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("model_name", savedModel)
+            }
+        }
+
         var savedLiveModel = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("live_model_name").executeAsOneOrNull()
                 ?: defaultLiveModel
@@ -201,6 +236,12 @@ class SettingsController(
             }
         }
 
+        // Wire 404 self-healing: เมื่อโมเดลติด 404 (ไม่มีจริงใน API) ให้สั่ง refresh รายชื่อโมเดลทันที
+        orchestrator.getGeminiService().onModelNotFound = { deadModel ->
+            logDebug("JarvisVM", "Model '$deadModel' returned 404 NOT_FOUND. Triggering dynamic model list refresh.")
+            refreshModels()
+        }
+
         // Register external providers on startup
         orchestrator.updateProviderKeys(
             openaiKey = savedOpenaiKey,
@@ -228,6 +269,21 @@ class SettingsController(
         scope.launch {
             orchestrator.applyVoiceIdentity(voice)
             updateSettings(_apiKey.value, _selectedModel.value, _liveModelName.value, voice)
+        }
+    }
+
+    /** อัปเดตและบันทึกโมเดล Live ที่ได้รับการ promote เมื่อเชื่อมต่อสำเร็จ โดยไม่กระทบ state อื่น */
+    fun updateLiveModelSilently(newModel: String) {
+        val clean = newModel.removePrefix("models/").trim()
+        if (clean.isBlank() || _liveModelName.value == clean) return
+        _liveModelName.value = clean
+        scope.launch(Dispatchers.IO) {
+            try {
+                database.jarvisDatabaseQueries.insertSetting("live_model_name", clean)
+                logDebug("Settings", "Persisted promoted live model to DB: $clean")
+            } catch (e: Exception) {
+                logError("Settings", "Failed to persist live model: ${e.message}", e)
+            }
         }
     }
 
@@ -277,11 +333,41 @@ class SettingsController(
                 val models = orchestrator.listAvailableModels()
                 if (models.isNotEmpty()) {
                     _availableModels.value = models
+                    // อัปเดต ModelConfig แบบ dynamic เพื่อให้ระบบมีคลังโมเดลที่ใช้งานได้จริงจาก Google API เสมอ
+                    com.example.personalaibot.data.ModelConfig.updateAvailableModels(models)
+
+                    // แคชรายชื่อโมเดลลงฐานข้อมูล เพื่อให้บูตเครื่องครั้งถัดไปตรวจสอบได้ทันทีก่อนต่อเน็ต (Cold-start)
+                    val modelNames = models.map { it.name.removePrefix("models/").trim() }.distinct()
+                    withContext(Dispatchers.IO) {
+                        database.jarvisDatabaseQueries.insertSetting("cached_gemini_models", modelNames.joinToString(","))
+                    }
+
+                    // Auto-validate & Migrate: ถ้าโมเดลที่เลือกไว้ในปัจจุบันไม่มีใน API (เช่น gemini-3.1-pro)
+                    // ให้ย้ายไปโมเดล Flash ตัวใหม่ล่าสุดที่พร้อมใช้งานโดยอัตโนมัติ
+                    val currentModel = _selectedModel.value
+                    if (currentModel.isNotBlank() && !currentModel.contains("/") && !com.example.personalaibot.data.ModelConfig.isModelSupported(currentModel)) {
+                        val replacement = com.example.personalaibot.data.ModelConfig.getBestActiveModel()
+                        logDebug("JarvisVM", "Current model '$currentModel' not found in active API models. Auto-migrating to '$replacement'")
+                        _selectedModel.value = replacement
+                        withContext(Dispatchers.IO) {
+                            database.jarvisDatabaseQueries.insertSetting("model_name", replacement)
+                        }
+                        orchestrator.updateConfig(_apiKey.value, replacement, _liveModelName.value, _voiceName.value)
+                    }
+
+                    // อัปเดต fallback chain ให้ใช้โมเดลจริงที่ active จาก API
+                    val dynamicChain = com.example.personalaibot.data.ModelConfig.getFallbackChain(_selectedModel.value)
+                    orchestrator.updateGeminiFallbackChain(dynamicChain)
                 }
             } catch (e: Exception) {
                 logError("JarvisVM", "Failed to fetch models", e)
             }
         }
+    }
+
+    /** สั่ง refresh รายชื่อโมเดลจาก API สด */
+    fun refreshModels() {
+        fetchModels()
     }
 
     suspend fun getModelsForProvider(providerId: String, freeOnly: Boolean = false, apiKeyOverride: String? = null): List<com.example.personalaibot.data.providers.LlmModelInfo> {

@@ -1,5 +1,176 @@
 # 🤖 PersonalAIBot — JARVIS for Android
 
+> **Gemini 3.1 Flash Live Primary Model & Automatic Model Switch Fix (2026-09-09):**
+> - **Primary Default Live Model (`gemini-3.1-flash-live-preview`)**:
+>   - Established `gemini-3.1-flash-live-preview` as the primary default Live model (`DEFAULT_LIVE_MODEL` and index 0 in `SEED_LIVE_MODELS` and `liveCandidates`). It delivers the lowest latency (~835ms READY), natural Thai prosody, and the most reliable native tool calling (`device_always_live`, `trading_smc_analysis`).
+> - **Root-Cause Resolution of Spontaneous Model Switching**:
+>   - **Removed from `deprecatedLiveModels`**: Removed `gemini-3.1-flash-live-preview` from `deprecatedLiveModels` in `SettingsController.kt`. Previously, cold-start boot mistakenly detected it as deprecated and overwrote SQLite with the older `09-2025` fallback.
+>   - **Prevented Silent SQLite Overwrite on Transient Fallback**: Removed `settings.updateLiveModelSilently(winningModel)` from `JarvisViewModel.kt`. Temporary runtime fallbacks during brief network hiccups no longer permanently overwrite the user's manual setting in the database.
+>   - **Clean Session Start**: Configured `LiveGeminiService.kt` to always reset `liveModelName` to the user's configured model at the start of each user-initiated conversation, preventing fallback models from sticking across sessions.
+>   - **Expanded Setup Watchdog & Reduced Penalty**: Increased `setupWatchdog` delay from 3500ms to 6000ms to accommodate mobile data handshake latencies without premature timeouts, and reduced `penalizeLiveModel` duration from 15 minutes to 60 seconds.
+>
+> **Keyboard IME AdjustResize & Inset Fix (2026-09-09):**
+> - **Enforce `adjustResize` in `AndroidManifest.xml`**:
+>   - Declared `android:windowSoftInputMode="adjustResize"` on `MainActivity`, preventing OEM ROMs (e.g. Huawei/Honor EMUI/MagicOS, Xiaomi) using 3-button navigation from falling back to `adjustPan`. Eliminates the severe bug where tapping the text input panned the entire window off-screen to the top status bar.
+> - **Consolidated Additive Insets in `ChatInputBar.kt`**:
+>   - Replaced stacked `.navigationBarsPadding().imePadding()` with `windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))`, calculating `max(navigationBars, ime)` to ensure the input bar rests cleanly right above the soft keyboard without giant black voids or double-insets.
+>
+> **Live Voice Connection Latency & Dynamic Self-Healing Fix (2026-09-08):**
+> - **Sub-2s Instant Live Voice Connection**:
+>   - Set `gemini-2.5-flash-native-audio-preview-09-2025` as the primary default Live model (`DEFAULT_LIVE_MODEL` and top of `SEED_LIVE_MODELS`), eliminating the 37-second delay caused by unresponsive preview endpoints.
+>   - Auto-migrated legacy stored settings (`gemini-3.1-flash-live-preview` and `12-2025`) in `SettingsController.kt` to the high-performance `09-2025` model.
+> - **Immediate WebSocket Socket Abort (<1ms)**:
+>   - Reduced `setupWatchdog` timeout from 7000ms to 3500ms in `LiveGeminiService.kt`.
+>   - On timeout, directly cancels the WebSocket session coroutine (`this@webSocket.cancel`) instead of calling graceful `close()`, completely eliminating the 7.2s RFC 6455 2-way close handshake wait on unresponsive servers.
+> - **Self-Healing Model Promotion & Temporary Penalty**:
+>   - **Auto-Promotion (`promoteHealthyLiveModel`)**: When a Live model successfully connects (`setupComplete`), it is immediately promoted to index 0 and persisted to SQLite (`live_model_name`), remembering healthy models across app sessions.
+>   - **Temporary Penalty (`penalizeLiveModel`)**: Models timing out during setup are penalized for 15 minutes and moved to the tail of the fallback chain, preventing repeated cascading delays.
+>
+> **Screen Wakeup Lifecycle, Keyguard Overlay & Normal Mode Auto-Sleep Fix (2026-09-08):**
+> - **Elimination of Lock Screen Keyguard Overlay (`AndroidManifest.xml`)**:
+>   - Removed static `android:showWhenLocked="true"` and `android:turnScreenOn="true"` from `MainActivity` in `AndroidManifest.xml`. When the phone sleeps in normal mode and wakes, Android displays the standard lock screen with PIN/fingerprint instead of trapping the user in the app above the keyguard.
+> - **Gated Temporary Wake Flags (`AlwaysLiveManager.kt`)**:
+>   - Gated `turnScreenOnTemporarily()` in `wakeScreen()` behind `_state.value == AlwaysLiveState.FULL_SCREEN`. In normal mode, screen wake for trade alerts uses only the 10-second `WakeLock` without permanently applying `FLAG_SHOW_WHEN_LOCKED` to `MainActivity`.
+> - **Window Flags Lifecycle Cleanup (`MainActivity.kt`)**:
+>   - Added `clearScreenFlags()` in `onCreate()`, `onResume()`, and `onStop()` whenever in normal mode (`AlwaysLiveState.OFF`), ensuring `setShowWhenLocked(false)`, `setTurnScreenOn(false)`, and window flags are actively cleared.
+> - **Screen Sleep Only in Control Mode**:
+>   - Strictly enforced that the screen only stays awake when in active Control Mode (`AlwaysLiveState.FULL_SCREEN` or `MINI_FLOATING`). In normal chat mode, the screen sleeps normally based on Android system display timeout.
+> - **Overlay Param Cleanup (`FloatingWidgetService.kt`)**:
+>   - Removed `FLAG_KEEP_SCREEN_ON` from floating widget overlay window params so the widget does not keep the device awake.
+>
+> **Anticipation Alert Card UI Refinement (2026-09-08):**
+> - **Header Row Squeezing Fix**: Moved confidence `%` out of the top header row, leaving ample space for `⚡ คาดการณ์ SELL/BUY`, symbol, and timeframe badge, preventing vertical character clipping.
+> - **Clean Line 2 (Confidence & Price)**: Repositioned confidence % alongside current price (`ความเชื่อมั่น 76%` • `ราคา 4405.06`) in Line 2 with balanced `SpaceBetween` alignment.
+> - **Redundancy Elimination**: Removed repetitive `meta.zone` (e.g. `EMA Convergence: ...`) from Line 2, preventing truncation and duplication with the `ปัจจัยที่เกิด` bullet list below it.
+>
+> **Voice Alert Delivery & Background Screen Wakeup (2026-09-08):**
+> - **Default-Enabled Voice Alerts**:
+>   - Converted `alert_voice` default from `false` to `true` across `AlertController.kt`, `JarvisAutomationService.kt`, and SQLite `AppSetting` fallback, ensuring voice alerts trigger out of the box.
+> - **Auto Voice Activation on Alert Creation**:
+>   - Creating an alert via Live Voice or `trading_signal_anticipation` automatically ensures `alert_voice` is set to `true`, providing immediate spoken confirmation and alerts.
+> - **Background Screen Wakeup & CPU WakeLock**:
+>   - Automatic screen wakeup (`AlwaysLiveManager.wakeScreen()`) upon alert firing so users see and hear notifications even when locked.
+>   - Temporary 30-second `PARTIAL_WAKE_LOCK` prevents CPU Doze suspension during audio synthesis and playback.
+> - **Android TTS Priority & Dynamic Live Voice Fallback**:
+>   - Assigned `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` and `CONTENT_TYPE_SPEECH` to Android TTS with a 1.5s initialization watchdog.
+>   - Integrated `liveVoiceChain()` with `ModelConfig.getLiveFallbackChain()`.
+>
+> **Gemini Live Voice & Connection Stability (2026-09-07):**
+> - **Multi-Tier Automated Fallback Chain**:
+>   - Integrated `ModelConfig.getLiveFallbackChain()` prioritizing `gemini-3.1-flash-live-preview` with automatic fallback to `gemini-2.5-flash-native-audio-preview-12-2025` and `gemini-2.5-flash-native-audio-latest`.
+>   - Eliminates manual intervention when preview models fail or experience regional outages.
+> - **7-Second Setup Watchdog**:
+>   - Coroutine watchdog monitoring `setupComplete` from Google's Live WebSocket; automatically disconnects and rotates to the fallback model if handshake exceeds 7 seconds.
+> - **Deterministic 100% Natural Thai Voice & Greeting Shield**:
+>   - **Phonetic Acoustic Purity**: Replaced English trigger token `"สวัสดีJARVIS พร้อมคุยไหม"` with pure Thai `"สวัสดีจาวิส พร้อมคุยไหม"`, preventing the multimodal synthesizer from switching to Western/English acoustic prosody.
+>   - **Consistent Fixed Session Greeting**: Strictly bound in `LIVE_RULES` to output `"สวัสดีค่ะนายท่าน จาวิสพร้อมคุยแล้วค่ะ มีอะไรให้จาวิสช่วยวันนี้ดีคะ"` word-for-word on initial turn, respecting the user's custom call name (`c.userCallName`) and gender particles.
+>   - **Zero Personality Drift**: Removed `"(British Butler Style)"` vibe and explicitly barred stock/trading hallucinations during session opening greetings.
+>
+> **Dynamic Gemini Model Registry & Self-Healing Model Discovery (2026-09-07):**
+> - **Zero Hardcoded Model Lock-in**:
+>   - Replaced static model lists with a dynamic registry (`ModelConfig.kt`) that synchronizes directly with Google's live API (`ModelService.ListModels` at `/v1beta/models?key=$apiKey`).
+>   - Automatically discovers active models (`gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`, etc.) and filters out non-chat models (embeddings, imagen, robotics, aqa).
+> - **Smart Capability & Latency-Optimized Ordering**:
+>   - Prioritizes high-throughput, low-latency Flash & Flash-Lite models sorted by highest semantic version first, with Pro models as deep reasoning fallbacks.
+> - **Self-Healing on 404 NOT_FOUND**:
+>   - Instantly blacklists dead/deprecated/renamed models upon receiving HTTP 404, excises them from active fallback chains in real-time, and auto-migrates database user preferences to the top healthy Flash model.
+>   - Latency shield for voice tools: streamlined macro calendar analysis timeout to 12s and disabled secondary retry loops to keep voice interactions smooth and responsive.
+>
+> **Always AI Live Mode — 3D Robot Avatar, Mini Floating Overlay & Wake-on-Voice (2026-09-06):**
+> - **Full-Screen Live Mode (`AlwaysLiveScreen.kt`)**:
+>   - Full-screen ambient AI companion with 3D-styled animated robot avatar (`JarvisAvatar.kt`) and 36-bar circular audio visualizer ring.
+>   - Dynamic emotional gradient background shifting with AI mood (Cyan, Amber, Crimson, Gold, Mint, Lavender).
+>   - Seamless controls: Mic mute/unmute, front/rear camera toggle for Vision, minimize to floating widget, end session.
+> - **Mini Floating Robot Overlay (`FloatingWidgetService.kt`)**:
+>   - Transformed floating widget into an animated mini robot avatar (~80dp) running Jetpack Compose inside a Foreground Service via custom `ServiceLifecycleOwner`.
+>   - Touch gestures: Free drag with physics-based snap-to-edge, single tap to focus app, double tap to expand full-screen, long-press to toggle voice stream.
+> - **Background Wake-on-Call / Hotword Engine (`HotwordDetector.kt`)**:
+>   - Energy-efficient voice detection using AudioRecord (8 kHz mono) with duty-cycle sampling (2s listen, 1s sleep).
+>   - Auto screen wakeup (`PARTIAL_WAKE_LOCK`, `ACQUIRE_CAUSES_WAKEUP`, `turnScreenOn`, `showWhenLocked`) presenting the live interface over the lock screen upon voice trigger.
+> - **Central State Machine (`AlwaysLiveManager.kt`)**:
+>   - Coordinates states (`OFF`, `FULL_SCREEN`, `MINI_FLOATING`, `BACKGROUND_LISTEN`), auto-recovers on screen on/off, and maps real-time speech sentiment to 10 avatar emotion states (`IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `HAPPY`, `EXCITED`, `SAD`, `ANGRY`, `LOVE`, `SLEEPING`).
+>
+> **JARVIS Full Mobile Device Control via Voice & Accessibility Service (2026-09-06):**
+> - **Hands-Free Full Mobile Automation**:
+>   - Upgraded JARVIS from a conversational AI companion to a **full mobile device controller** capable of operating other apps and hardware via real-time voice commands (Gemini Live) and text chat.
+>   - Operates seamlessly across Foreground, Background Service (`JarvisAutomationService`), and Floating Overlay Widget (`FloatingWidgetService`).
+> - **18 New Native Tools in `📱 Device Control` Category (`DeviceToolDefinitions.kt`)**:
+>   - **Hardware Controls**:
+>     - `device_flashlight`: Turn torch/flashlight ON, OFF, or TOGGLE.
+>     - `device_volume`: Control audio volume (UP, DOWN, MUTE, UNMUTE, VIBRATE, SILENT, NORMAL, SET 0-100%, MAX, STATUS) across all audio streams (`media`, `ring`, `notification`, `alarm`, `system`, `call`).
+>     - `device_brightness`: Adjust screen brightness (SET 0-100% or AUTO) with automated redirection to `WRITE_SETTINGS` if needed.
+>     - `device_media_control`: Control music/media playback (PLAY, PAUSE, TOGGLE, NEXT, PREVIOUS, STOP) via system media key events.
+>     - `device_always_live`: Voice-activate or exit Always AI Live mode (โหมดควบคุม) via voice commands ("เปิดโหมด Always", "เปิดโหมดควบคุม", "ปิดโหมด Always", "ปิดโหมดควบคุม") with full-screen 3D avatar & ambient wake lock.
+>   - **App Launcher**:
+>     - `device_open_app`: Open any app by Thai/English name with built-in mapping for 40+ popular apps and dynamic package manager resolution.
+>     - `device_navigate`: Open Google Maps to view any location/city/country (`action="view"` via `geo:0,0?q=` avoiding "no route found" errors for international places) or start turn-by-turn navigation (`action="navigate"` via `google.navigation:q=` with `drive`, `walk`, `bike`, `transit`).
+>     - `device_send_email`: Compose new email in Gmail/Email clients with recipient, subject, and body pre-filled.
+>     - `device_add_calendar`: Schedule calendar events in Google Calendar with start/end epoch times and locations.
+>     - `device_make_call` & `device_send_sms`: Safe intent-based phone calls and SMS messaging.
+>     - `device_set_alarm`: Set Android alarm clocks with custom hours, minutes, and alarm labels.
+>     - `device_open_url` & `device_search_web`: Launch web URLs or perform Google web searches in browser.
+>   - **Screen Interaction & UI Automation (Android AccessibilityService)**:
+>     - `device_read_screen`: Traverse active UI hierarchy, reading all visible texts, buttons, IDs, and interactive elements for AI analysis.
+>     - `device_tap`: Click/tap buttons by text, resource ID, or screen coordinates `(x, y)`.
+>     - `device_type_text`: Type text into the currently focused input field with optional text clearing.
+>     - `device_scroll`: Scroll screen content UP or DOWN via global accessibility gestures.
+>     - `device_press_button`: Perform global Android actions (Back, Home, Recent Apps, Notifications, Quick Settings, Screenshot, Lock Screen).
+>     - `device_get_app_info`: Identify the package and activity of the app currently in the foreground.
+>   - **System Info**:
+>     - `device_battery_status`: Inspect battery percentage and AC/USB/Wireless charging status.
+>     - `device_wifi_status`: Inspect WiFi connection, SSID, link speed, and signal strength.
+> - **KMP Clean Decoupling (`DeviceControlHandler.kt` / `DeviceControlExecutor.kt`)**:
+>   - Created `DeviceControlHandler` pure Kotlin interface in `commonMain` to cleanly bridge multiplatform `ToolExecutor` and Android-specific `DeviceControlExecutor`.
+> - **Seamless Setup Checklist Integration (`MainActivity.kt`)**:
+>   - Added "ควบคุมเครื่อง (Accessibility)" with 1-click shortcut to Android Accessibility Settings in the in-app Setup Checklist.
+> - **Verified with 100% Pass Rate**: Tested with dedicated unit tests (`DeviceControlTest.kt`) covering tool registry, declarations, and executor routing (`BUILD SUCCESSFUL`).
+>
+> **Dedicated Signal Anticipation Tool & Curated 10-Factor Confluence Engine (2026-09-05):**
+> - **Dedicated AI Tool (`trading_signal_anticipation`)**:
+>   - Introduced native trading tool `trading_signal_anticipation` enabling AI to configure, query, and monitor early signal setups on any symbol directly through Text and Live Voice interactions (e.g., *"ใช้ tool คาดการณ์ล่วงหน้า ทองคำ"*).
+>   - Automatically sets up background alerts (`trading_signal_alert` on `signal_anticipation >= 1`) with zero friction, eliminating redundant back-and-forth questions.
+>   - **Clean Separation of Concerns**: Removed manual Anticipation presets from `AutomationScreen.kt` to prevent user configuration confusion — Anticipation alerts are now managed exclusively by AI.
+> - **Curated 10-Factor Whitelist (`AnticipationConfigManager.kt`)**:
+>   - Prevents AI hallucinations and invalid factor parameters by strictly enforcing a whitelist of 10 mathematically and technically verified market anticipation factors:
+>     - **Core Factors (Default ON)**: `KEYZONE_PROXIMITY` (SMC Demand/Supply/FVG), `WICK_SWEEP_REJECTION` (Price Action Rejection), `RSI_EXTREME` (Momentum Oversold/Overbought), `EMA_NEAR_CROSS` (EMA 14/60 Dynamic Convergence).
+>     - **Extended Factors (Optional/Market-Adaptive)**: `BOLLINGER_SQUEEZE` (Volatility Compression), `MACD_HISTOGRAM_TURN` (Momentum Shift), `VOLUME_ABSORPTION` (VSA Smart Money Absorption), `FIBONACCI_GOLDEN_POCKET` (0.618-0.650 Touch), `STOCHASTIC_OVERSOLD_TURN` (Cycle Reversal), `SESSION_OPEN_SWEEP` (Asia/London High/Low Liquidity Sweep).
+>   - Supports dynamic factor query (`list_factors`), custom configuration (`config`), smart asset-class recommendations (`recommend`), and instant reset (`reset`).
+> - **Multi-Factor Confluence Scoring & Dynamic Confidence Boost**:
+>   - Upgraded `SignalAlertProvider.kt` to evaluate all active factors simultaneously across incoming candles.
+>   - Dynamically scales confidence and synthesizes confluences when multiple factors align in the same direction (1 factor: base confidence; 2 factors: 80–85%; 3 factors: 88–92%; 4+ factors: 95–96%).
+> - **Anticipation Card UI Layout Fix & Timeframe Display Badge (`MessageBubble.kt`, `JarvisAutomationService.kt`)**:
+>   - **Fixed Vertical Text Squeezing**: Resolved a Compose layout issue in `AnticipationAlertCard3D` where long zone descriptions caused the price `@ 4424.04` to be compressed into a vertical 1-character column on the right screen border. Enforced `TextOverflow.Ellipsis` with `Modifier.weight(1f, fill = false)` on the zone text and `softWrap = false` on the price text with `Arrangement.SpaceBetween`.
+>   - **Explicit Timeframe Badges**: Added a translucent timeframe chip badge (`[1H]`, `[15M]`, `[4H]`, etc.) in the card header next to the asset symbol in both `AnticipationAlertCard3D` and `SignalAlertCard3D`.
+>   - **Default Timeframe Policy (15m) & Multi-TF Anticipation Coverage (`JarvisOrchestrator.kt`, `ToolExecutor.kt`, `TradingToolDefinitions.kt`, `JarvisPersona.kt`)**:
+>     - **15m Default Timeframe**: When the user requests an anticipation alert without specifying a timeframe (e.g. *"แจ้งเตือนคาดการณ์ล่วงหน้า ทองคำ"*), the engine now strictly defaults to `15m` (m15) instead of 1h. 15m is the primary setup timeframe for Unified SMC confluence and intra-day trading.
+>     - **Supported Anticipation Timeframe Range (m5 – h4)**: Supports all intermediate intervals from `5m` to `4h` (`5m`, `15m`, `30m`, `1h`, `4h`).
+>     - **Multi-TF & "All" Support**: Users can request anticipation across multiple timeframes (e.g. `"15m,1h"`) or all supported timeframes (e.g. *"ทุก TF"* / `"all"`). The engine automatically registers parallel alert jobs across all requested timeframes.
+>     - **Background 5-TF Ingestion Alignment**: Aligns with the app's multi-timeframe market structure engine (`MarketContextDigest` / Unified SMC) which continuously pulls 5 TFs (1m, 5m, 15m, 1h, 4h), providing instant cached candle evaluation across all anticipation timeframes.
+>   - **Consistent Timeframe Tracking & Voice**: Updated `ToolExecutor.kt` and `JarvisOrchestrator.kt` to preserve timeframe in alert jobs (`XAUUSD@15m`, `Anticipation XAUUSD [15M]`) and updated AI speech to explicitly include timeframe (e.g. *"คาดการณ์ ทองคำ ไทม์เฟรม 15 นาที..."*), eliminating ambiguity.
+>   - **Model Fallback Optimization (`ModelConfig.kt`)**: Updated `DEFAULT_MAIN_MODEL = "gemini-3.6-flash"` and reordered fallback models (`gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite`) to prevent 404 errors on legacy models (`gemini-3.1-pro`, `gemini-2.5-flash`) and eliminate 14-second startup delays.
+> - **Verified with 100% Pass Rate**: Comprehensive test suites across `AnticipationConfigManagerTest.kt` and `SignalAnticipationTest.kt` pass with zero failures (`BUILD SUCCESSFUL`).
+>
+> **Mobile AI Trading Intelligence & Closed-Loop Reinforcement Architecture (2026-09-04):**
+> - **Dual-Stage Signal Engine (Anticipation $\to$ Confirmed)**:
+>   - Upgraded `SignalAlertProvider.kt` with `detectAnticipation`: scans intra-bar real-time dynamics, Keyzone Proximity (0.3×ATR of Demand/Supply Order Blocks, FVGs, Swing Liquidity from 5TF MarketContextDigest), Intra-bar Wick Sweep Rejections, and RSI Extreme/Divergence zones.
+>   - Alerts users in advance with `signal_stage = "ANTICIPATION"`, `signal_anticipation_desc`, and target zone while safely preventing automated bot early-fills until candle close confirmation (`signal_stage = "CONFIRMED"`).
+> - **Closed-Loop Signal Outcome Tracker (`SignalOutcomeTracker.kt`)**:
+>   - Tracks every emitted live signal in SQLite via new schema `SignalTrackingRecord` (migration `10.sqm`).
+>   - Evaluates forward candles in real time against take-profit and stop-loss levels, calculating Maximum Favorable Excursion (MFE), Maximum Adverse Excursion (MAE), Realized PnL (R-multiple), bars held, and trade status (`WIN`, `LOSS`, `EXPIRED`).
+> - **Reinforcement Feedback to Strategy Confirmation Gate (`StrategyConfirmationGate.kt`)**:
+>   - Connected `SignalOutcomeTracker.getStrategyConfidenceAdjustment(strategy)` directly to `StrategyConfirmationGate`.
+>   - High-performing strategies (Win Rate $\ge$ 65%, avg R $\ge$ 0.3R) receive automatic confidence boosts (+0.10 to +0.20), while strategies in cold losing streaks receive penalties (-0.15 to -0.25) and are gated from issuing low-conviction signals during unfavorable market regimes.
+> - **Pure Mobile TradingView Fusion (`TradingViewSignalIntelligence.kt`)**:
+>   - Deterministic multi-timeframe weighted fusion across 15m, 30m, 1h, and 4h timeframes directly on mobile without external vendor latency.
+> - **Anticipation & Keyzone 3D Alert Card UI (`MessageBubble.kt`, `JarvisAutomationService.kt`)**:
+>   - Designed and integrated dedicated 3D Glassmorphic Alert Cards: `AnticipationAlertCard3D` with electric badges (`⚡ คาดการณ์ BUY`/`SELL`), Keyzone, Current Price, Confidence %, Description, Market Context, and quick-check summaries.
+>   - Built `KeyzoneAlertCard3D` (amber 3D shell) for market structure zone contacts and implemented robust content fallback in `GenericAlertCard` ensuring historical and future alert messages in chat render rich, complete details without empty boxes.
+> - **EMA 14/60 Near-Cross (Convergence) & Confirmed Cross Detection (`SignalAlertProvider.kt`, `SmcFlowAlertProvider.kt`)**:
+>   - **Dynamic Near-Cross Convergence Detection**: Automatically monitors EMA 14 and EMA 60 proximity with volatility-adaptive spread threshold `max(atr14 * 0.35, close * 0.0012)`. When lines converge (`spreadNow < spreadPrev`), triggers anticipation pre-alerts (`signal_stage = "ANTICIPATION"`, Setup `EMA_NEAR_CROSS`, Confidence 76%) before actual intersection occurs (BUY for pending Golden Cross, SELL for pending Death Cross).
+>   - **Confirmed Cross Signal Events**: Detects Golden Cross (`GOLDEN_CROSS`) and Death Cross (`DEATH_CROSS`) upon candle close, outputting `E14/60▲` (BUY) and `E14/60▼` (SELL) with auto-calculated entry, TP, and SL.
+>   - **Alert Presets & Catalog**: Added 3 one-click presets in `AutomationScreen.kt` (`⚡ EMA 14/60 เกือบตัดกัน`, `🎯 EMA 14/60 Golden Cross`, `🎯 EMA 14/60 Death Cross`) and registered fields `ema14_60_cross`, `ema14_60_near_cross`, `ema14_60_near_cross_side`, `ema14_60_spread`, and `ema14_60_state` in `AlertFieldCatalog`.
+> - **Verified with 100% Pass Rate**: Tested comprehensively with `SignalOutcomeTrackerTest.kt` and `SignalAnticipationTest.kt` across 130 test suites (`BUILD SUCCESSFUL`).
+>
 > **Full Non-Trading Tools Audit & Flexibility Upgrades (2026-09-04):**
 > - **Thai Date & Time Context (`get_current_datetime`)**: Upgraded to provide complete Thai day-of-week ("วันศุกร์"), Thai month names ("กันยายน"), Buddhist Era year ("พ.ศ. 2569"), seconds, and timezone identifier (`Asia/Bangkok`), eliminating date/time ambiguity in Thai conversation.
 > - **Thai Unit Normalization (`convert_units`)**: Added `normalizeUnitName` supporting Thai unit names and abbreviations (e.g. "กิโลเมตร" $\to$ `km`, "ไร่" $\to$ `rai`, "ตารางวา" $\to$ `sqwa`, "วา" $\to$ `wa`, "เซลเซียส" $\to$ `celsius`), expanded traditional Thai land units (1 ไร่ = 4 งาน = 400 ตารางวา = 1,600 ตารางเมตร), and made input parameters flexible (`value`/`amount`, `from_unit`/`from`, `to_unit`/`to`).

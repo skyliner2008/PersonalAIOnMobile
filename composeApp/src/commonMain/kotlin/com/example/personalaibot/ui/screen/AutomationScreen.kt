@@ -661,7 +661,7 @@ private fun AlertEditDialog(
 // ─── Create Alert Dialog ─────────────────────────────────────────────────
 
 // ─── Preset ลัดสำหรับ alert ที่ใช้บ่อย ──────────────────────────────────
-private data class AlertPreset(
+internal data class AlertPreset(
     val label: String,
     val toolName: String,
     val field: String,
@@ -669,7 +669,7 @@ private data class AlertPreset(
     val value: String
 )
 
-private val ALERT_PRESETS = listOf(
+internal val ALERT_PRESETS = listOf(
     AlertPreset("💰 ราคาถึงเป้า", "trading_price", "price", ">=", ""),
     AlertPreset("📉 RSI Oversold", "trading_indicators", "rsi14", "<=", "30"),
     AlertPreset("📈 RSI Overbought", "trading_indicators", "rsi14", ">=", "70"),
@@ -694,7 +694,10 @@ private val ALERT_PRESETS = listOf(
     AlertPreset("🚀 Donchian Breakout ขึ้น", "trading_strategy_signal", "donchian_signal", "==", "BUY"),
     AlertPreset("🔻 Donchian Breakout ลง", "trading_strategy_signal", "donchian_signal", "==", "SELL"),
     AlertPreset("📡 Signal BUY ใหม่", "trading_signal_alert", "signal_buy", ">=", "1"),
-    AlertPreset("📡 Signal SELL ใหม่", "trading_signal_alert", "signal_sell", ">=", "1")
+    AlertPreset("📡 Signal SELL ใหม่", "trading_signal_alert", "signal_sell", ">=", "1"),
+    AlertPreset("⚡ EMA 14/60 เกือบตัดกัน (เตือนก่อนตัด)", "trading_signal_alert", "ema14_60_near_cross", "==", "1"),
+    AlertPreset("🎯 EMA 14/60 Golden Cross (ตัดขึ้น)", "trading_signal_alert", "ema14_60_cross", "==", "GOLDEN_CROSS"),
+    AlertPreset("🎯 EMA 14/60 Death Cross (ตัดลง)", "trading_signal_alert", "ema14_60_cross", "==", "DEATH_CROSS")
 )
 
 /**

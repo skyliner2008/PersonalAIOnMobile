@@ -312,7 +312,10 @@ class JarvisViewModel(
     )
 
     init {
-        // Bridge camera frames to the unified Live session in the orchestrator
+        // Track winning live model; do NOT silently overwrite user's DB settings during transient runtime fallback
+        orchestrator.onLiveModelChanged = { winningModel ->
+            logDebug("JarvisVM", "Live session active with model: $winningModel")
+        }
 
         // Bridge camera frames to the unified Live session in the orchestrator
         cameraService.onLiveFrameReady = { jpegBase64 ->

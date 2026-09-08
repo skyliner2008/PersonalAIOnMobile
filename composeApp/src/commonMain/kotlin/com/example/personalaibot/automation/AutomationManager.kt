@@ -82,6 +82,13 @@ class AutomationManager(private val database: JarvisDatabase) {
         }
     }
 
+    fun setAlertVoiceEnabled(enabled: Boolean) {
+        scope.launch {
+            database.jarvisDatabaseQueries.insertSetting("alert_voice", enabled.toString())
+            logDebug("AutomationManager", "Persisted alert_voice: $enabled")
+        }
+    }
+
     fun registerJob(
         name: String,
         symbol: String,

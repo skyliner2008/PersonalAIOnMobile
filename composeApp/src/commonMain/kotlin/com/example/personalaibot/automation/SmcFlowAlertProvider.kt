@@ -58,6 +58,9 @@ class SmcFlowAlertProvider(private val smcApi: SmcApiService) {
             efPrev >= esPrev && ef < es -> "DEATH_CROSS"
             else -> "NONE"
         }
+        val spread = abs(ef - es)
+        val spreadPrev = abs(efPrev - esPrev)
+        val isConverging = spread < spreadPrev
         // LTF confirm ใน Pine ใช้ TF 5m — ที่นี่ใช้แท่งปัจจุบันของ TF ตัวเองแทน (close vs open)
         val bullConfirm = last.close > last.open
         val bearConfirm = last.close < last.open
@@ -66,9 +69,16 @@ class SmcFlowAlertProvider(private val smcApi: SmcApiService) {
             emaCross == "DEATH_CROSS" && bearConfirm -> "SELL"
             else -> "NONE"
         }
+        val atrSeries = atrSeries(candles, UT_ATR_PERIOD)
+        val nearCrossThreshold = max((atrSeries.lastOrNull() ?: 0.0) * 0.35, last.close * 0.0012)
+        val isNearCross = spread <= nearCrossThreshold && isConverging && emaCross == "NONE"
+        val nearCrossSide = when {
+            isNearCross && ef < es && ef >= efPrev -> "BUY"
+            isNearCross && ef > es && ef <= efPrev -> "SELL"
+            else -> "NONE"
+        }
 
         // ── UT Bot (trailing stop + trigger) ──
-        val atrSeries = atrSeries(candles, UT_ATR_PERIOD)
         val utStop = DoubleArray(n)
         val utPos = IntArray(n)  // 1 = long trend, -1 = short trend
         var prevStop = 0.0
@@ -186,6 +196,8 @@ class SmcFlowAlertProvider(private val smcApi: SmcApiService) {
             put("ema14_60_state", if (ef > es) "BULLISH" else "BEARISH")
             put("ema14_60_cross", emaCross)
             put("ema14_60_signal", emaSignal)
+            put("ema14_60_near_cross", if (isNearCross) "1" else "0")
+            put("ema14_60_near_cross_side", nearCrossSide)
             // UT Bot
             put("utbot_signal", when {
                 utBuyAt(n - 1) -> "BUY"
@@ -227,7 +239,7 @@ class SmcFlowAlertProvider(private val smcApi: SmcApiService) {
             appendLine()
             appendLine("### EMA 14/60")
             appendLine("ema14=${d["ema14"]} | ema60=${d["ema60"]} | state=${d["ema14_60_state"]}")
-            appendLine("ema14_60_cross=${d["ema14_60_cross"]} | ema14_60_signal=${d["ema14_60_signal"]}")
+            appendLine("ema14_60_cross=${d["ema14_60_cross"]} | ema14_60_signal=${d["ema14_60_signal"]} | ema14_60_near_cross=${d["ema14_60_near_cross"]}(${d["ema14_60_near_cross_side"]})")
             appendLine()
             appendLine("### UT Bot (key=2.0, atr=6)")
             appendLine("utbot_signal=${d["utbot_signal"]} | utbot_trend=${d["utbot_trend"]} | utbot_stop=${d["utbot_stop"]}")

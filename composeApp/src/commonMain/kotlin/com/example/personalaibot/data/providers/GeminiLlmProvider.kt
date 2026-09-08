@@ -86,10 +86,16 @@ class GeminiLlmProvider(
             val respText: String = response.body()
             val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
             val modelList = json.decodeFromString<com.example.personalaibot.data.ModelListResponse>(respText)
+            // ซิงก์ registry กลางแบบ dynamic ตามโมเดลจริงที่มีใน API ทันที
+            com.example.personalaibot.data.ModelConfig.updateAvailableModels(modelList.models)
+
             val mappedList = modelList.models.filter {
+                val cleanId = it.name.removePrefix("models/")
+                !com.example.personalaibot.data.ModelConfig.isModelDead(cleanId) &&
                 // รวม models ที่รองรับ generateContent (chat ปกติ) หรือ bidiGenerateContent (live)
-                val methods = it.supportedGenerationMethods ?: emptyList()
-                methods.contains("generateContent") || methods.contains("bidiGenerateContent")
+                (it.supportedGenerationMethods ?: emptyList()).let { methods ->
+                    methods.contains("generateContent") || methods.contains("bidiGenerateContent")
+                }
             }.map { model ->
                 val methods = model.supportedGenerationMethods ?: emptyList()
                 val nameLC = model.name.lowercase().removePrefix("models/")
@@ -108,16 +114,14 @@ class GeminiLlmProvider(
                 )
             }
             
-            // Inject Preview Models ที่ /v1beta/models มักไม่คืนมา
-            // ⚠️ MAINTENANCE: รายการนี้ hardcode — ตรวจสอบกับ Gemini API docs เป็นระยะ
-            // (models ที่ถูก deprecate จะยังโผล่ใน list แต่เรียกใช้จริงไม่ได้)
+            // Inject Preview Models ที่ /v1beta/models มักไม่คืนมา (กรองเฉพาะตัวที่ยังไม่ตาย)
             val knownPreviews = listOf(
                 LlmModelInfo("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live Preview", supportsVision = true, supportsLive = true),
                 LlmModelInfo("gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio (12-2025)", supportsVision = true, supportsLive = true),
                 LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio (09-2025)", supportsVision = true, supportsLive = true),
                 LlmModelInfo("gemini-2.0-flash-exp", "Gemini 2.0 Flash Experimental (Realtime)", supportsVision = true, supportsLive = true),
                 LlmModelInfo("gemini-3.5-live-translate-preview", "Gemini 3.5 Live Translate Preview", supportsVision = false, supportsLive = true)
-            )
+            ).filter { !com.example.personalaibot.data.ModelConfig.isModelDead(it.id) }
             val existingIds = mappedList.map { it.id }.toSet()
             mappedList + knownPreviews.filter { it.id !in existingIds }
         } catch (e: Exception) {

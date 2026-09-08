@@ -335,12 +335,9 @@ class LiveGeminiService(
     private val realtimeInputReadyGraceMs: Long = 250L
     // Live-specific credential/model rotation. The normal GeminiService fallback chain
     // is request/response based and cannot be reused directly for a persistent WebSocket.
+    private var configuredLiveModelName: String = liveModelName.removePrefix("models/")
     private var liveApiKeys: List<String> = listOf(apiKey).filter { it.isNotBlank() }
-    private var liveModelChain: List<String> = listOf(
-        liveModelName,
-        "gemini-2.5-flash-native-audio-preview-12-2025",
-        "gemini-2.0-flash-exp"
-    ).map { it.removePrefix("models/") }.distinct()
+    private var liveModelChain: List<String> = com.example.personalaibot.data.ModelConfig.getLiveFallbackChain(liveModelName)
     private var liveKeyIndex: Int = 0
     private var liveModelIndex: Int = 0
     private val triedLiveCredentials = mutableSetOf<String>()
@@ -362,6 +359,9 @@ class LiveGeminiService(
 
     /** ข้อความที่จะส่งให้ model พูดทันทีหลัง session READY (เช่นทักยืนยันเสียงใหม่หลังเปลี่ยนเสียง). */
     var pendingGreetingOnReady: String? = null
+
+    /** แจ้งเตือนเมื่อมีโมเดล Live ที่พร้อมใช้งานจริง (setupComplete สำเร็จ) เพื่อให้บันทึกจำข้าม session */
+    var onLiveModelPromoted: ((String) -> Unit)? = null
 
     // Monotonically increasing WebSocket lifecycle id. A READY coroutine must never send
     // through a newer socket after the socket that produced READY has been replaced.
@@ -435,14 +435,13 @@ class LiveGeminiService(
 
     fun updateConfig(newApiKey: String, newModelName: String, voiceName: String = "Aoede") {
         apiKey = newApiKey
-        liveModelName = newModelName.removePrefix("models/")
+        configuredLiveModelName = newModelName.removePrefix("models/")
+        liveModelName = configuredLiveModelName
         selectedVoiceName = voiceName
         if (liveApiKeys.isEmpty() || !liveApiKeys.contains(newApiKey)) {
             liveApiKeys = listOf(newApiKey).filter { it.isNotBlank() } + liveApiKeys.filter { it != newApiKey }
         }
-        if (liveModelChain.isEmpty() || !liveModelChain.contains(liveModelName)) {
-            liveModelChain = listOf(liveModelName) + liveModelChain.filter { it != liveModelName }
-        }
+        liveModelChain = com.example.personalaibot.data.ModelConfig.getLiveFallbackChain(liveModelName)
         liveKeyIndex = liveApiKeys.indexOf(newApiKey).coerceAtLeast(0)
         liveModelIndex = liveModelChain.indexOf(liveModelName).coerceAtLeast(0)
     }
@@ -540,10 +539,15 @@ class LiveGeminiService(
 
         userRequestedDisconnect = false
         triedLiveCredentials.clear()
+        // Always start attempt 1 with the user's explicitly configured model
+        liveModelName = configuredLiveModelName
+        // Refresh fallback chain using latest dynamic models & promotions
+        liveModelChain = com.example.personalaibot.data.ModelConfig.getLiveFallbackChain(liveModelName)
         // Start a fresh retry budget for this user-initiated Live session.
         liveKeyIndex = liveApiKeys.indexOf(apiKey).takeIf { it >= 0 } ?: 0
         liveModelIndex = liveModelChain.indexOf(liveModelName).takeIf { it >= 0 } ?: 0
         var attempt = 0
+        var fallbackCount = 0
         while (attempt <= maxRetries) {
             isSetupComplete = false
             sessionWasReady = false
@@ -566,9 +570,20 @@ class LiveGeminiService(
             connectionStartedAtMs = System.currentTimeMillis()
 
             var terminalCloseReason: String? = null
+            var timedOutWaitingForSetup = false
             try {
                 client.webSocket(url) {
                     webSocketSession = this
+
+                    val setupWatchdog = launch {
+                        delay(6000L)
+                        if (!isSetupComplete) {
+                            logDebug("LiveGemini", "⏱️ setupComplete timeout (6000ms) for model $liveModelName — terminating WebSocket to trigger immediate fallback")
+                            timedOutWaitingForSetup = true
+                            com.example.personalaibot.data.ModelConfig.penalizeLiveModel(liveModelName)
+                            this@webSocket.cancel(kotlinx.coroutines.CancellationException("setupComplete timeout"))
+                        }
+                    }
 
                     val fullModel = if (liveModelName.startsWith("models/")) liveModelName else "models/$liveModelName"
 
@@ -621,21 +636,28 @@ class LiveGeminiService(
                     val setupJson = sanitizeForWebSocketText(json.encodeToString(setup))
                     send(Frame.Text(setupJson))
 
-                    for (frame in incoming) {
-                        val text = when (frame) {
-                            is Frame.Text -> frame.readText()
-                            is Frame.Binary -> frame.readBytes().decodeToString()
-                            else -> continue
+                    try {
+                        for (frame in incoming) {
+                            val text = when (frame) {
+                                is Frame.Text -> frame.readText()
+                                is Frame.Binary -> frame.readBytes().decodeToString()
+                                else -> continue
+                            }
+                            // logDebug("LiveGemini", "⬇ RAW FRAME: $text")
+                            handleServerFrame(text)
+                            if (isSetupComplete && setupWatchdog.isActive) {
+                                setupWatchdog.cancel()
+                            }
+                            if (goAwayReceived) {
+                                // Google explicitly expects the client to close after GoAway; waiting for
+                                // the server aborts the socket and produces VIOLATED_POLICY in practice.
+                                logDebug("LiveGemini", "🛑 GoAway received — closing current WebSocket cleanly for session resumption")
+                                close(CloseReason(CloseReason.Codes.NORMAL, "GoAway handled; reconnect with session resumption"))
+                                break
+                            }
                         }
-                        // logDebug("LiveGemini", "⬇ RAW FRAME: $text")
-                        handleServerFrame(text)
-                        if (goAwayReceived) {
-                            // Google explicitly expects the client to close after GoAway; waiting for
-                            // the server aborts the socket and produces VIOLATED_POLICY in practice.
-                            logDebug("LiveGemini", "🛑 GoAway received — closing current WebSocket cleanly for session resumption")
-                            close(CloseReason(CloseReason.Codes.NORMAL, "GoAway handled; reconnect with session resumption"))
-                            break
-                        }
+                    } finally {
+                        setupWatchdog.cancel()
                     }
 
                     val reason = closeReason.await()
@@ -660,6 +682,9 @@ class LiveGeminiService(
                     }
                 }
                 if (userRequestedDisconnect) break
+                if (sessionWasReady) {
+                    fallbackCount = 0
+                }
                 if (terminalCloseReason != null) {
                     val normalizedTerminal = terminalCloseReason!!.lowercase()
                     val quotaError =
@@ -672,9 +697,29 @@ class LiveGeminiService(
                         attempt = 0
                         continue
                     }
+                    if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
+                        fallbackCount++
+                        val prevModel = liveModelName
+                        liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+                        liveModelName = liveModelChain[liveModelIndex]
+                        sessionResumptionHandle = null
+                        logDebug("LiveGemini", "🔄 Live setup rejected ($terminalCloseReason) with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
+                        attempt = 0
+                        continue
+                    }
                     _connectionState.value = ConnectionState.Error(terminalCloseReason!!)
                     logError("LiveGemini", "🛑 Terminal Live API/session error: $terminalCloseReason")
                     break
+                }
+                if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
+                    fallbackCount++
+                    val prevModel = liveModelName
+                    liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+                    liveModelName = liveModelChain[liveModelIndex]
+                    sessionResumptionHandle = null
+                    logDebug("LiveGemini", "🔄 Live session setup timeout/closed before READY with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
+                    attempt = 0
+                    continue
                 }
                 // Server-initiated close (GoAway / session duration limit ~10-15 นาทีของ Live API)
                 // เดิม break ทิ้ง → session ตายเงียบ ผู้ใช้ยังเปิด Live แต่ทุกข้อความส่งไม่ถึง
@@ -686,8 +731,33 @@ class LiveGeminiService(
                 }
                 logDebug("LiveGemini", "🔁 Server closed session (GoAway/timeout) — auto-reconnecting (attempt $attempt/$maxRetries)")
             } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (e is kotlinx.coroutines.CancellationException) {
+                    if (timedOutWaitingForSetup) {
+                        logDebug("LiveGemini", "⏱️ setupComplete timeout caught — falling back immediately without handshake delay")
+                        if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
+                            fallbackCount++
+                            val prevModel = liveModelName
+                            liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+                            liveModelName = liveModelChain[liveModelIndex]
+                            sessionResumptionHandle = null
+                            logDebug("LiveGemini", "🔄 Live session setup timeout before READY with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
+                            attempt = 0
+                            continue
+                        }
+                    }
+                    throw e
+                }
                 logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
+                if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
+                    fallbackCount++
+                    val prevModel = liveModelName
+                    liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+                    liveModelName = liveModelChain[liveModelIndex]
+                    sessionResumptionHandle = null
+                    logDebug("LiveGemini", "🔄 Live connection error with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
+                    attempt = 0
+                    continue
+                }
                 attempt++
                 if (attempt > maxRetries) {
                     _connectionState.value = ConnectionState.Error("Connection failed after ${maxRetries + 1} attempts: ${e.message}")
@@ -748,6 +818,8 @@ class LiveGeminiService(
                 logDebug("LiveGemini", "✅ Live session READY (${readyLatencyMs}ms)")
                 isSetupComplete = true
                 sessionWasReady = true
+                com.example.personalaibot.data.ModelConfig.promoteHealthyLiveModel(liveModelName)
+                onLiveModelPromoted?.invoke(liveModelName)
                 // Give the WebSocket a short scheduling window after setupComplete before
                 // accepting realtime PCM from the microphone. This prevents a cross-coroutine
                 // race where the first audio frame is emitted in the same scheduler slice as
