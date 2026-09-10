@@ -121,8 +121,8 @@
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.personalaibot.action.ALERT_STOP" />
-                <action android:name="com.example.personalaibot.action.ALERT_REPEAT" />
+                <action android:name="com.skyliner2008.jarvis.action.ALERT_STOP" />
+                <action android:name="com.skyliner2008.jarvis.action.ALERT_REPEAT" />
             </intent-filter>
         </receiver>
 

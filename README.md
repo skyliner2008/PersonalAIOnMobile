@@ -6,6 +6,13 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **3D Robot Clay Avatar, Dedicated Logcat & Anti-Flapping Audio Engine (2026-09-10):**
+> - **3D Pearlescent Clay Robot Avatar (`JarvisAvatar.kt`)**: Re-sculpted in Jetpack Compose Canvas with radial highlights, soft depth shadows, sky-blue 3D headphone earcups (`#29B6F6`), and 10 animated facial expressions. Removed obsolete halo ring and visor scanlines.
+> - **Anti-Flapping Speech Hysteresis (`App.kt`, `VoiceController.kt`)**: 850ms audio chunk hangover and 700ms user speech hold window eliminate status pill and ambient color fluttering between "Speaking" and "Listening".
+> - **Dedicated Logcat Tag `JarvisAvatar`**: Filter live state transitions directly via `adb logcat -s JarvisAvatar`.
+> - **10-Emotion Multi-Channel Testing**: Test all 10 expressions & color palettes via chat (`/avatar demo`, `/avatar <emotion>`), voice triggers ("ทำหน้าดีใจ", "เดโม่อารมณ์"), or ADB broadcast (`adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION --es emotion "HAPPY"`).
+> - **God Service Decomposition & Production Namespace**: Split monolithic 150KB `JarvisAutomationService.kt` into 4 decoupled components and migrated codebase to `com.skyliner2008.jarvis`.
+>
 > **Gemini 3.1 Flash Live Primary Model & Automatic Model Switch Fix (2026-09-09):**
 > - **Primary Default Live Model (`gemini-3.1-flash-live-preview`)**:
 >   - Established `gemini-3.1-flash-live-preview` as the primary default Live model (`DEFAULT_LIVE_MODEL` and index 0 in `SEED_LIVE_MODELS` and `liveCandidates`). It delivers the lowest latency (~835ms READY), natural Thai prosody, and the most reliable native tool calling (`device_always_live`, `trading_smc_analysis`).

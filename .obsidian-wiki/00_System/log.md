@@ -1,3 +1,115 @@
+## 2026-09-10 — Dedicated Logcat Tag (JarvisAvatar), Speech Hysteresis (Anti-Flapping) & 10-Emotion Multi-Channel Testing
+- **Dedicated Logcat Tag `JarvisAvatar`**:
+  - สร้างจุดบันทึก Logcat แบบเรียลไทม์ผ่าน Tag `JarvisAvatar` สำหรับตรวจจับการเปลี่ยนผ่านของอารมณ์และสถานะการสนทนา:
+    - ฟิลเตอร์ง่ายผ่านคำสั่ง: `adb logcat -s JarvisAvatar` หรือใน Android Studio `tag:JarvisAvatar`
+    - ล็อกทุกครั้งที่สถานะเปลี่ยน: `🎭 [EMOTION] "statusText" | AI speaking | User speaking | Mic Level`
+- **Speech Hysteresis & Hangover Window (แก้ปัญหากล่องข้อความและสีสลับกระพริบไปมา)**:
+  - `VoiceController.kt`: คำนวณความยาวเสียง PCM จริง (`chunkDurationMs`) พร้อมบวกช่วง Hangover 850ms หลังเสียงจบ เพื่อป้องกันไม่ให้สถานะ `isAiSpeaking` หลุดลงระหว่างช่วงว่างของ Audio chunks
+  - `VoiceController.kt`: ต่อ `setLiveInterruptionHandler` เพื่อเคลียร์คิวและตัดเสียง AI ทันทีเมื่อผู้ใช้พูดแทรก (Barge-in)
+  - `App.kt`: เพิ่มตัวหน่วงสถานะการพูดของผู้ใช้ (`userSpeakingHold`) ด้วย Hysteresis Window 700ms ทำให้ช่วงหยุดหายใจหรือเว้นวรรคระหว่างคำไม่ทำให้สถานะแกว่งสลับระหว่าง `LISTENING` และ `IDLE`
+- **Multi-Channel Commands สำหรับทดสอบ 10 Facial Expressions & Color Palettes**:
+  - **In-Chat Commands** (`ChatController.kt`):
+    - `/avatar demo` — เล่นการแสดงโชว์วนลูปครบทั้ง 10 อารมณ์ (อารมณ์ละ 3.2 วินาที)
+    - `/avatar <emotion>` — เลือกทดสอบอารมณ์เฉพาะ เช่น `/avatar happy`, `/avatar love`, `/avatar excited`, `/avatar angry`, `/avatar sad`, `/avatar sleeping`, `/avatar thinking`, `/avatar listening`, `/avatar speaking`, `/avatar idle`
+    - `/avatar reset` — ยกเลิกการ override กลับสู่โหมดตรวจจับอัตโนมัติตามธรรมชาติ
+    - รองรับคำสั่งเสียงภาษาไทยธรรมชาติ: "ทำหน้าดีใจ", "ทำหน้าโกรธ", "ทำหน้ารัก", "เดโม่อารมณ์", "รีเซ็ตอารมณ์"
+  - **ADB Terminal Broadcast Commands** (`MainActivity.kt`):
+    - `adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION --es emotion "HAPPY"`
+    - `adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION --es emotion "DEMO"`
+    - `adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION --es emotion "RESET"`
+- **StatusPill Color Palette Matching (`AlwaysLiveScreen.kt`)**:
+  - กล่องแคปซูลแสดงสถานะ (`StatusPill`) ปรับขอบเรืองแสงและสีตัวอักษรให้ตรงกับ Palette อารมณ์ทั้ง 10 อารมณ์ (Teal, Gold, Pink, Red, Ice Slate, Violet, Lavender, Emerald, Aqua) อย่างกลมกลืน
+- **Verification**:
+  - `:composeApp:compileDebugKotlinAndroid` ผ่าน 100%
+  - `:composeApp:assembleDebug` ผ่าน 100%
+  - ติดตั้ง APK และทดสอบ Broadcast Intent / Logcat / Screen capture บน Samsung Galaxy (`R5CT42YEMMM`) ครบทุกสถานะ
+
+## 2026-09-10 — JARVIS 3D Robot Avatar Clay Redesign & Dynamic Ambient Emotion Refinement
+- **Avatar 3D Clay Aesthetic Transformation (`JarvisAvatar.kt`)**:
+  - เปลี่ยนสไตล์หุ่นยนต์เป็น **3D Pearlescent White Clay Robot** ตาม Reference Image: ลำตัวและศีรษะทรงกลมเคลือบเงานุ่มนวล (Soft radial highlights & depth shadows)
+  - เพิ่ม **Sky-Blue 3D Headphone Earcups** (`#29B6F6` / `#0288D1`) โอบด้านข้างศีรษะ พร้อมปุ่มหูฟังทรงโดม และเสาอากาศ Cyan Antenna Sphere ด้านบน
+  - **เอาออกตามสั่ง**: ถอด Halo Ring เหนือศีรษะ และเส้นเลเซอร์สแกน Visor Holographic Scanline ออก 100%
+  - **3D Articulated Arm & Waving Gesture**: แขนขวาโบกทักทายสดใส (Waving Hello Gesture สวิง -42° ถึง -68° สัมพันธ์กับจังหวะมือ) พร้อมแขนซ้ายลอยตัวปรับท่าทางตามอารมณ์
+  - **2D Lissajous Floating Drift**: ตัวหุ่นยนต์ลอยขยับเคลื่อนที่อย่างอิสระและมีชีวิตชีวา (X/Y Drift) เสริมกับการลอยตัว Levitation แนวดิ่ง
+  - **Curious Alive Head Tilt & Speech Nod**: ศีรษะเอียงตามอารมณ์ (Curious sway ในโหมดพัก/ฟัง/คิด) และพยักหน้าตามจังหวะคำพูด AI
+  - **3D Floating Companion Thought Bubble (`...`)**: บอลลูนความคิดสีขาวคล้ายดินน้ำมันพร้อมจุด 3 จุดเด้งดึ๋งเมื่อ AI อยู่ในโหมด Thinking / Executing Tools
+  - **10 Visor Facial Expressions (`drawEyes`, `drawMouth`)**:
+    - `IDLE`: ตากลมรีแบบ Capsule Pill LED (`❚ ❚`) พร้อมแอนิเมชันกะพริบตา และลูกเล่นวิ้งตาขี้เล่น (Playful Wink) สลับไปมา
+    - `SPEAKING`: ตารูปแคปซูลมีมิติขยายตัวตามพลังเสียง พร้อมปากรูปวงรีเปิด-ปิดสัมพันธ์กับระดับเสียง AI แบบเรียลไทม์
+    - `LISTENING`: ตากลมโตสว่างไสว (`O O`) พร้อมวงแหวนสะท้อนแสงรอบนอกและจุดตาดำสีขาวด้านใน และปากรูป "o" น่ารัก
+    - `THINKING`: สายตาช่างคิดมองเยื้องขวาบน พร้อมตาขวาสลัวหรี่ลงครึ่งหนึ่ง
+    - `HAPPY`: ตาโค้งยิ้มเปี่ยมสุข (`^ ^`) พร้อมปากยิ้มหวาน
+    - `EXCITED`: ตารูปดาว 4 แฉกสีทองเปล่งประกาย (`★ ★`) พร้อมปากยิ้มกว้างรูปทรงตัว D
+    - `LOVE`: ตารูปหัวใจสีชมพูนีออน (`♥ ♥`) พร้อมประกายเงาสะท้อนและหัวใจลอยเหนือศีรษะ
+    - `ANGRY`: ตารูปไข่เฉียงพร้อมคิ้วขมวดทรงพลังและปากซิกแซก
+    - `SAD`: ตาโค้งละห้อย (`︵ ︵`) พร้อมหยดน้ำตาสีฟ้าเรืองแสงไหลลงมา และปากคว่ำ
+    - `SLEEPING`: ตาปิดสนิทเป็นเส้นโค้งนิ่งสงบ (`─ ─`) พร้อมตัวอักษร ZZZ ลอยหมุนวน
+- **Real-time Audio & Sentiment Pipeline Integration (`VoiceController.kt`, `JarvisViewModel.kt`, `App.kt`)**:
+  - เชื่อมต่อสัญญาณเสียงไมโครโฟน (`VoiceInputService` RMS) และเสียงสังเคราะห์ของ AI (`LiveGeminiService` / `TtsService` RMS) เข้าสู่ StateFlow `audioLevel` และ `isAiSpeaking`
+  - ปรับระบบตรวจจับ Emotion ใน `App.kt`: วิเคราะห์อารมณ์จากเครื่องมือที่ทำงาน (Tools), ระดับเสียงไมค์, ข้อความคำตอบของ AI (ความยินดี, ความสุข, ความตื่นเต้น, ข้อผิดพลาด) ถ่ายทอดไปยัง Avatar แบบอัตโนมัติ
+- **Dynamic Ambient Emotion Color Palettes (`AlwaysLiveScreen.kt`)**:
+  - อัปเกรดสีพื้นหลัง 3 ชั้น และสีออร่าให้เปลี่ยนตามอารมณ์ทั้ง 10 อารมณ์อย่างชัดเจน (listening: Deep Neon Aqua, speaking: Electric Emerald, thinking: Cyber Violet, happy: Oceanic Teal, excited: Solar Gold, love: Hot Pink, angry: Flame Red, sad: Ice Slate, sleeping: Lavender Void)
+  - อัปเกรดวงแหวน 36-Bar Audio Visualizer ให้สะท้อนสีหลักและสีรองตามอารมณ์ของ AI
+- **Verification & Deployment**:
+  - `:composeApp:compileDebugKotlinAndroid` ผ่าน 100%
+  - `:composeApp:testDebugUnitTest` ผ่าน 100%
+  - `:composeApp:assembleDebug` ผ่าน 100%
+  - ติดตั้ง APK และเปิดใช้งานจริงบนอุปกรณ์จริง Samsung Galaxy (`R5CT42YEMMM`) พร้อมจับภาพหน้าจอยืนยันทั้ง Portrait และ Landscape
+
+## 2026-09-10 — Always Live Mode Sci-Fi Upgrade & Screen Reading Architecture
+- **36-Bar Radial Audio Visualizer Ring (`AlwaysLiveScreen.kt`)**:
+  - อัปเกรดจาก 24 Arcs เดิม เป็น **36 Radial Equalizer Bars** กระจายรอบทิศทาง 360 องศา ตอบสนองระดับเสียงไมโครโฟน (`audioLevel`) ผสม Wave Frequency Harmonic
+  - เพิ่ม **Dual Rotating HUD Reticle Rings**: วงแหวน HUD สองชั้นหมุนทวนเข็ม/ตามเข็มพร้อมเส้นประ Sci-Fi
+  - เพิ่ม **Cardinal Tech Dial Marks** ที่ 0°, 90°, 180°, 270° สไตล์ Stark Industries / Jarvis Interface
+- **JARVIS 3D Robot Avatar & Sci-Fi Gesture System (`JarvisAvatar.kt`, `AvatarAnimations.kt`)**:
+  - เพิ่ม **3D Arc Reactor (Chest Core)**: แกนพลังงานเรืองแสงเต้นเป็นจังหวะที่หน้าอกหุ่นยนต์ พร้อม Metallic outer bezel และ 3 tri-radial emitter notches
+  - เพิ่ม **Holographic 3D Halo Ring**: วงแหวนโฮโลแกรมหมุนวนเหนือศีรษะพร้อมประจุพลังงาน Orbiting Energy Node
+  - เพิ่ม **Visor Holographic Scanline**: เส้นเลเซอร์เรดาร์สแกนผ่านหน้าจอ Visor แก้วลึก Obsidian
+  - เพิ่มท่าทางการเคลื่อนไหวระดับสูง: Anti-gravity Hover Levitation (ลอยตัวนุ่มนวล), Head Tilt Gyro (เอียงศีรษะตามอารมณ์/การฟัง/คิด), และ Arm Floating Articulation
+- **Dynamic Ambient Gradient (`AlwaysLiveScreen.kt`)**:
+  - พื้นหลังแบบมีชีวิตพร้อม Multi-layer Radial Aura เต้นเรืองแสงตามเสียงพูด
+  - การสลับโทนสีตาม Emotion นุ่มนวล 100% ด้วย `animateColorAsState`
+- **Responsive Dual-Orientation Layout (Portrait & Landscape)**:
+  - ใช้ `BoxWithConstraints` รองรับทั้งแนวตั้งและแนวนอน
+  - ในโหมด **Landscape (แนวนอน)**: ปรับเป็น Two-Pane Layout โดยฝั่งซ้ายแสดง 3D Avatar + 36-bar Visualizer เต็มตา และฝั่งขวาแสดง Cyber HUD Telemetry Card พร้อมปุ่มควบคุม ช่วยให้วางบนโต๊ะหรือใช้งานในรถยนต์ได้อย่างลงตัว
+- **Screen Reading & External App Automation Architecture Analysis**:
+  - ยืนยันการทำงานของ `JarvisAccessibilityService` ในการตรวจจับ `currentPackage` และการแปลง UI Tree เป็น `ScreenNode`
+  - ตรวจสอบ Flow การทำงานของ `DeviceControlExecutor` ในการย่อ Always Live เป็น Floating Bubble อัตโนมัติเมื่อเปิดแอปภายนอก (เช่น YouTube, Gmail) เพื่อทำการค้นหา แตะเลือกคลิป หรืออ่านสรุปเนื้อหาอีเมลให้ผู้ใช้ฟัง
+- **Verification**:
+  - `:composeApp:compileDebugKotlinAndroid` ผ่าน 100%
+  - `:composeApp:testDebugUnitTest` ผ่าน 100%
+
+## 2026-09-10 — God Service Decomposition, Production Namespace Migration & iOS Guard
+- **Split `JarvisAutomationService.kt` (150KB / 2,275 บรรทัด → 4 โมดูลย่อย)**:
+  - `AlertPresentationFormatter.kt` (256 บรรทัด): ฟังก์ชันจัดฟอร์แมตการ์ดแชท (Anticipation, Signal, Keyzone, Alert), JSON metadata, Condition translation, และข้อความเสียงภาษาไทย (Stateless Object)
+  - `TradingAlertEvaluator.kt` (514 บรรทัด): โลจิกประเมินเงื่อนไข Alert, SMC, Indicators, Adaptive interval, Backoff, AI Strategy Supervisor, และ Signal Outcome Tracking
+  - `LiveVoiceAlertEngine.kt` (745 บรรทัด): ระบบสังเคราะห์เสียง Gemini Live WebSocket แบบสตรีมมิ่ง, AudioTrack PCM, WakeLock, Fallback Model Chain, และคิวจัดลำดับเสียงแจ้งเตือน (Priority Queue Scheduler)
+  - `JarvisAutomationService.kt` (Slim Orchestrator เหลือ 733 บรรทัด): จัดการเฉพาะ Service Lifecycle, Android Foreground Notification, Task/Job dispatching loop
+- **Production Namespace Migration (`com.example.personalaibot` → `com.skyliner2008.jarvis`)**:
+  - ย้ายไดเรกทอรีแพ็กเกจทั้งหมด 5 ชุด: `commonMain`, `androidMain`, `iosMain`, `commonTest`, และ `sqldelight`
+  - ปรับปรุง Package statement, imports, broadcast intent action constants และ inline FQN ครบทั้ง 265 ไฟล์
+  - อัปเดต `composeApp/build.gradle.kts` (`namespace`, `applicationId`, `sqldelight.packageName`)
+  - อัปเดต `AndroidManifest.xml`, `accessibility_service_config.xml`, และ `iosApp/Configuration/Config.xcconfig`
+  - เพิ่ม `com.skyliner2008.jarvis` เข้า `composeApp/google-services.json`
+- **Temporarily Disable iOS Target (`composeApp/build.gradle.kts`)**:
+  - เพิ่มแฟล็ก `enableIos = project.findProperty("enableIos") == "true"` ครอบ iOS targets และ dependencies
+  - สามารถเปิดกลับมาคอมไพล์ได้ทุกเมื่อด้วยคำสั่ง `./gradlew build -PenableIos=true`
+- **Verification**:
+  - `:composeApp:compileDebugKotlinAndroid` ผ่าน 100%
+  - `:composeApp:testDebugUnitTest` ผ่านทุกเคส
+  - `:composeApp:assembleDebug` ผ่านสำเร็จ (ได้ไฟล์ `PersonalAIBot-debug.apk` ขนาด 105MB)
+
+## 2026-09-10 — Comprehensive Project Review (Antigravity)
+- **Full-Stack Project Review** — สำรวจโปรเจคทั้งหมด (composeApp 260 Kotlin files, mt5-core-server 123 TS files, build config, documentation)
+- **Overall Score: 4.0/5.0** — Architecture ⭐5, Features ⭐5, Build ⭐5, Documentation ⭐5, Tests ⭐3, Maintainability ⭐3, iOS ⭐2, Production Readiness ⭐4
+- **จุดแข็งหลัก**: Controller Delegation Pattern, 6-Layer Memory Engine, FIFO Mutex Bridge, Multi-Provider Fallback, 100+ AI Tools, Device Control ระดับ JARVIS
+- **Critical Issues ที่ต้องแก้**:
+  1. `JarvisAutomationService.kt` (~150KB) — God Service ต้องแยกเป็น 3-4 services
+  2. `com.example.personalaibot` namespace — Google Play จะปฏิเสธ, ต้องเปลี่ยนเป็น production package
+  3. iOS stubs — Camera, Voice, Device Control ยังเป็น stubs ทั้งหมด
+- **Important Issues**: ไม่มี navigation library (ใช้ boolean flags), test coverage gaps (Controllers/Orchestrator ไม่มี tests), lint ปิด, versionCode ต่ำ
+- **Action Plan**: Split God Service → Change namespace → Add Controller tests → Implement navigation → Enable lint → Auto-increment version → iOS MVP
+
 ## 2026-09-09 — Gemini 3.1 Flash Live Primary Model & Spontaneous Model Switch Fix
 - **Establish `gemini-3.1-flash-live-preview` as Primary Live Model (`ModelConfig.kt`, `SettingsController.kt`, `LiveGeminiService.kt`, `JarvisViewModel.kt`)**:
   - **ปัญหาที่พบ**: ผู้ใช้ทดสอบพบว่า `gemini-3.1-flash-live-preview` ทำงานได้เร็วที่สุด (~835ms), สำเนียงไทยเป็นธรรมชาติ และเรียก Native Tools แม่นยำ แต่ในบางครั้งระบบกลับสลับไปใช้ `gemini-2.5-flash-native-audio-preview-09-2025` เองโดยอัตโนมัติ ทั้งที่ผู้ใช้เลือก 3.1 ไว้

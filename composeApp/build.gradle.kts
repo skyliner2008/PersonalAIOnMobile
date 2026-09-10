@@ -11,6 +11,9 @@ plugins {
     alias(libs.plugins.googleServices)
 }
 
+// iOS target is temporarily disabled — re-enable with: ./gradlew build -PenableIos=true
+val enableIos = project.findProperty("enableIos") == "true"
+
 kotlin {
     androidTarget {
         compilerOptions {
@@ -19,14 +22,16 @@ kotlin {
         }
     }
     
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
-            baseName = "ComposeApp"
-            isStatic = true
-            freeCompilerArgs += "-Xexpect-actual-classes"
+    if (enableIos) {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64()
+        ).forEach { iosTarget ->
+            iosTarget.binaries.framework {
+                baseName = "ComposeApp"
+                isStatic = true
+                freeCompilerArgs += "-Xexpect-actual-classes"
+            }
         }
     }
     
@@ -81,9 +86,11 @@ kotlin {
             implementation(libs.multiplatform.webview)
             implementation(kotlin("reflect"))
         }
-        iosMain.dependencies {
-            implementation(libs.sqldelight.native.driver)
-            implementation(libs.ktor.client.darwin)
+        if (enableIos) {
+            iosMain.dependencies {
+                implementation(libs.sqldelight.native.driver)
+                implementation(libs.ktor.client.darwin)
+            }
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -92,11 +99,11 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.personalaibot"
+    namespace = "com.skyliner2008.jarvis"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.example.personalaibot"
+        applicationId = "com.skyliner2008.jarvis"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 2
@@ -133,7 +140,7 @@ android {
 sqldelight {
     databases {
         create("JarvisDatabase") {
-            packageName.set("com.example.personalaibot.db")
+            packageName.set("com.skyliner2008.jarvis.db")
         }
     }
 }
