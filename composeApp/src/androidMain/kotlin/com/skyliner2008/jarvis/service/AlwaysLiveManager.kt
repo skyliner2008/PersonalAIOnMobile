@@ -7,8 +7,16 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
+import com.skyliner2008.jarvis.pet.PetMotionBridge
+import com.skyliner2008.jarvis.pet.PetMotionDetector
+import com.skyliner2008.jarvis.sound.RobotSound
+import com.skyliner2008.jarvis.sound.RobotSoundEngine
+import com.skyliner2008.jarvis.sound.RobotSoundPlayer
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +71,146 @@ class AlwaysLiveManager(private val context: Context) {
     // ─── Avatar State (shared across all UI modes) ───────────────────────
     private val _avatarState = MutableStateFlow(AvatarState())
     val avatarState: StateFlow<AvatarState> = _avatarState.asStateFlow()
+
+    // ─── Always Live Profile (Control, Drive, Pet) ────────────────────────
+    private val _currentProfile = MutableStateFlow(AlwaysLiveProfile.CONTROL)
+    val currentProfile: StateFlow<AlwaysLiveProfile> = _currentProfile.asStateFlow()
+
+    private var petMotionDetector: PetMotionDetector? = null
+
+    init {
+        RobotSoundPlayer.handler = { sound ->
+            when (sound) {
+                com.skyliner2008.jarvis.sound.RobotSound.HAPPY -> RobotSoundEngine.playHappyChirp()
+                com.skyliner2008.jarvis.sound.RobotSound.PURR -> RobotSoundEngine.playPurr()
+                com.skyliner2008.jarvis.sound.RobotSound.SURPRISE -> RobotSoundEngine.playSurprise()
+                com.skyliner2008.jarvis.sound.RobotSound.CONFUSED -> RobotSoundEngine.playConfused()
+                com.skyliner2008.jarvis.sound.RobotSound.ALARM -> RobotSoundEngine.playAlarm()
+                com.skyliner2008.jarvis.sound.RobotSound.YAWN -> RobotSoundEngine.playYawn()
+                com.skyliner2008.jarvis.sound.RobotSound.GIGGLE -> RobotSoundEngine.playGiggle()
+                com.skyliner2008.jarvis.sound.RobotSound.WAKE_UP -> RobotSoundEngine.playWakeUp()
+                com.skyliner2008.jarvis.sound.RobotSound.SNORE -> RobotSoundEngine.playSnore()
+                com.skyliner2008.jarvis.sound.RobotSound.CHIRP_START -> RobotSoundEngine.playChirpStart()
+                com.skyliner2008.jarvis.sound.RobotSound.CHIRP_END -> RobotSoundEngine.playChirpEnd()
+                com.skyliner2008.jarvis.sound.RobotSound.ACKNOWLEDGE -> RobotSoundEngine.playAcknowledge()
+                com.skyliner2008.jarvis.sound.RobotSound.SPARKLE -> RobotSoundEngine.playSparkle()
+                com.skyliner2008.jarvis.sound.RobotSound.MISSILE_LAUNCH -> RobotSoundEngine.playMissileLaunch()
+                com.skyliner2008.jarvis.sound.RobotSound.EXPLOSION -> RobotSoundEngine.playExplosion()
+                com.skyliner2008.jarvis.sound.RobotSound.CRUNCH_EAT -> RobotSoundEngine.playCrunchEat()
+                com.skyliner2008.jarvis.sound.RobotSound.BUBBLE_POP -> RobotSoundEngine.playBubblePop()
+                com.skyliner2008.jarvis.sound.RobotSound.BELL_TOY -> RobotSoundEngine.playBellToy()
+                com.skyliner2008.jarvis.sound.RobotSound.SCAN_RADAR -> RobotSoundEngine.playScanRadar()
+            }
+        }
+        com.skyliner2008.jarvis.pet.PetVisionDetector.installBridge()
+        com.skyliner2008.jarvis.sound.AmbientSoundEngine.installBridge()
+    }
+
+    fun setProfile(profile: AlwaysLiveProfile) {
+        val prev = _currentProfile.value
+        _currentProfile.value = profile
+        Log.i(TAG, "Profile changed: $prev -> $profile")
+        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = (profile == AlwaysLiveProfile.PET)
+        if (profile == AlwaysLiveProfile.PET) {
+            startPetMode()
+        } else if (prev == AlwaysLiveProfile.PET) {
+            stopPetMode()
+        }
+    }
+
+    private fun startPetMode() {
+        Log.i(TAG, "🐾 Starting Pet Mode (Virtual Desk Pet)")
+        RobotSoundPlayer.handler = { sound ->
+            when (sound) {
+                RobotSound.HAPPY -> RobotSoundEngine.playHappyChirp()
+                RobotSound.PURR -> RobotSoundEngine.playPurr()
+                RobotSound.SURPRISE -> RobotSoundEngine.playSurprise()
+                RobotSound.CONFUSED -> RobotSoundEngine.playConfused()
+                RobotSound.ALARM -> RobotSoundEngine.playAlarm()
+                RobotSound.YAWN -> RobotSoundEngine.playYawn()
+                RobotSound.GIGGLE -> RobotSoundEngine.playGiggle()
+                RobotSound.WAKE_UP -> RobotSoundEngine.playWakeUp()
+                RobotSound.SNORE -> RobotSoundEngine.playSnore()
+                RobotSound.CHIRP_START -> RobotSoundEngine.playChirpStart()
+                RobotSound.CHIRP_END -> RobotSoundEngine.playChirpEnd()
+                RobotSound.ACKNOWLEDGE -> RobotSoundEngine.playAcknowledge()
+                RobotSound.SPARKLE -> RobotSoundEngine.playSparkle()
+                RobotSound.MISSILE_LAUNCH -> RobotSoundEngine.playMissileLaunch()
+                RobotSound.EXPLOSION -> RobotSoundEngine.playExplosion()
+                RobotSound.CRUNCH_EAT -> RobotSoundEngine.playCrunchEat()
+                RobotSound.BUBBLE_POP -> RobotSoundEngine.playBubblePop()
+                RobotSound.BELL_TOY -> RobotSoundEngine.playBellToy()
+                RobotSound.SCAN_RADAR -> RobotSoundEngine.playScanRadar()
+            }
+        }
+
+        if (petMotionDetector == null) {
+            petMotionDetector = PetMotionDetector(
+                context = context,
+                onShake = {
+                    _avatarState.value = _avatarState.value.copy(
+                        emotion = AvatarEmotion.DIZZY,
+                        isDizzy = true,
+                        statusText = "โอ๊ยย เวียนหัวจังง! @_@"
+                    )
+                    RobotSoundEngine.playConfused()
+                    PetMotionBridge.triggerShake()
+                    scope.launch {
+                        delay(3500)
+                        if (_avatarState.value.isDizzy) {
+                            _avatarState.value = _avatarState.value.copy(
+                                emotion = AvatarEmotion.IDLE,
+                                isDizzy = false,
+                                statusText = null
+                            )
+                        }
+                    }
+                },
+                onFaceDown = {
+                    _avatarState.value = _avatarState.value.copy(
+                        emotion = AvatarEmotion.SLEEPING,
+                        statusText = "คว่ำหน้าจอ -> หลับฟี้ๆ Zzz..."
+                    )
+                    RobotSoundEngine.playYawn()
+                    PetMotionBridge.triggerFaceDown()
+                    scope.launch {
+                        delay(1200)
+                        if (_avatarState.value.emotion == AvatarEmotion.SLEEPING) {
+                            RobotSoundEngine.playSnore()
+                        }
+                    }
+                },
+                onFaceUp = {
+                    _avatarState.value = _avatarState.value.copy(
+                        emotion = AvatarEmotion.HAPPY,
+                        statusText = "หงายหน้าจอขึ้น -> ตื่นแล้วค่าา! ✨"
+                    )
+                    RobotSoundEngine.playWakeUp()
+                    PetMotionBridge.triggerFaceUp()
+                    scope.launch {
+                        delay(2200)
+                        if (_avatarState.value.emotion == AvatarEmotion.HAPPY) {
+                            _avatarState.value = _avatarState.value.copy(
+                                emotion = AvatarEmotion.IDLE,
+                                statusText = null
+                            )
+                        }
+                    }
+                }
+            )
+        }
+        petMotionDetector?.start()
+        RobotSoundEngine.playWakeUp()
+    }
+
+    private fun stopPetMode() {
+        Log.i(TAG, "🐾 Stopping Pet Mode")
+        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
+        RobotSoundPlayer.handler = null
+        com.skyliner2008.jarvis.sound.AmbientSoundEngine.stop()
+        petMotionDetector?.stop()
+        petMotionDetector = null
+    }
 
     // ─── Configuration ───────────────────────────────────────────────────
     data class AlwaysLiveConfig(
@@ -170,6 +318,9 @@ class AlwaysLiveManager(private val context: Context) {
         transitionTo(AlwaysLiveState.OFF)
         unregisterScreenReceiver()
         stopHotwordDetection()
+        stopPetMode()
+        _currentProfile.value = AlwaysLiveProfile.CONTROL
+        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
         releaseWakeLock()
         releaseScreenBrightLock()
         // Stop floating widget if running
@@ -311,7 +462,11 @@ class AlwaysLiveManager(private val context: Context) {
     }
 
     fun setSpeaking(speaking: Boolean) {
+        val wasSpeaking = _avatarState.value.isSpeaking
         _avatarState.update { it.copy(isSpeaking = speaking) }
+        if (speaking && !wasSpeaking && _currentProfile.value == AlwaysLiveProfile.PET) {
+            RobotSoundEngine.playHappyChirp()
+        }
     }
 
     fun setStatusText(text: String?) {

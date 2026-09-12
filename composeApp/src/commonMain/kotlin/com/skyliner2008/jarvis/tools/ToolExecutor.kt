@@ -7,6 +7,8 @@ import com.skyliner2008.jarvis.tools.system.SystemToolExecutor
 import com.skyliner2008.jarvis.tools.device.DeviceControlHandler
 import io.ktor.client.*
 import kotlinx.datetime.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlin.math.*
 
 /**
@@ -109,8 +111,14 @@ object ToolExecutor {
                 }
                 // ─── Device Control Tools (Hardware / App Launch / Accessibility) ──
                 ToolRegistry.isDeviceTool(routedToolName) -> {
-                    _deviceExecutor?.execute(routedToolName, routedArgs)
+                    val raw = _deviceExecutor?.execute(routedToolName, routedArgs)
                         ?: "⚠️ Device Control module ยังไม่พร้อมใช้งาน (DeviceControlExecutor ยังไม่ถูก init)"
+                    if (raw.startsWith("NEARBY_SEARCH_REQUEST::")) {
+                        val query = raw.substringAfter("query=").substringBefore("::location=")
+                        val loc = raw.substringAfter("::location=").substringBefore("::lat=")
+                        val summary = raw.substringAfter("::summary=")
+                        "$summary\n🔍 ค้นหาสถานที่ใกล้เคียง '$query' ในย่าน $loc เรียบร้อยแล้วค่ะ"
+                    } else raw
                 }
                 // ─── Trading Tools ─────────────────────────────────────────
                 ToolRegistry.isTradingTool(routedToolName) -> {
@@ -573,7 +581,7 @@ object ToolExecutor {
             "list_factors" -> {
                 val active = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getActiveFactors(symbol)
                 buildString {
-                    appendLine("📋 **คลัง 10 ปัจจัยมาตรฐานสำหรับการคาดการณ์ล่วงหน้า (Curated Factor Whitelist)**")
+                    appendLine("📋 **คลัง ${com.skyliner2008.jarvis.automation.AnticipationConfigManager.ALL_FACTORS.size} ปัจจัยมาตรฐานสำหรับการคาดการณ์ล่วงหน้า (Curated Factor Whitelist)**")
                     appendLine("สินทรัพย์อ้างอิง: $symbol")
                     appendLine()
                     com.skyliner2008.jarvis.automation.AnticipationConfigManager.ALL_FACTORS.forEachIndexed { i, f ->
@@ -604,7 +612,7 @@ object ToolExecutor {
                 val active = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getActiveFactors(symbol)
                 buildString {
                     appendLine("📊 **สถานะการคาดการณ์ล่วงหน้า (Signal Anticipation) — $symbol**")
-                    appendLine("• **จำนวนปัจจัยที่เปิดใช้งาน**: ${active.size} จาก 10 ปัจจัย")
+                    appendLine("• **จำนวนปัจจัยที่เปิดใช้งาน**: ${active.size} จาก ${com.skyliner2008.jarvis.automation.AnticipationConfigManager.ALL_FACTORS.size} ปัจจัย")
                     active.forEach { fid ->
                         val def = com.skyliner2008.jarvis.automation.AnticipationConfigManager.findFactor(fid)
                         appendLine("  - ✅ **${def?.name ?: fid}** (`$fid`)")
@@ -612,7 +620,169 @@ object ToolExecutor {
                 }.trim()
             }
 
-            else -> "❌ ไม่รองรับ action '$action' — ใช้ create, config, list_factors, recommend, หรือ status"
+            "scan", "analyze" -> {
+                val executor = _tradingExecutor
+                    ?: return "⚠️ ระบบ Trading Tool ยังไม่พร้อมใช้งาน (รอการเชื่อมต่อ Network/Client)"
+                val scanData = runCatching {
+                    executor.executeSignalAnticipationScan(symbolBase, tf)
+                }.getOrElse {
+                    return "❌ เกิดข้อผิดพลาดในการสแกนแท่งเทียน $symbolBase ($tf): ${it.message}"
+                }
+
+                val hasAnticipation = scanData["signal_anticipation"] == "1"
+                val close = scanData["close"] ?: "-"
+                val mtf = scanData["signal_mtf_context"]?.takeIf { it.isNotBlank() } ?: (scanData["signal_context"] ?: "-")
+
+                if (hasAnticipation) {
+                    val side = scanData["signal_anticipation_side"] ?: "BUY"
+                    val badge = if (side.equals("BUY", ignoreCase = true)) "🟢 BUY" else "🔴 SELL"
+                    val stage = scanData["signal_anticipation_stage"] ?: "PRE_SETUP"
+                    val stageBadge = when (stage) {
+                        "CONFIRMING" -> "🔥 [CONFIRMING - ยืนยันสัญญาณ]"
+                        "TRIGGER_READY" -> "⚡ [TRIGGER READY - จุดพร้อมเข้า]"
+                        else -> "⏳ [PRE SETUP - ตั้งโครงสร้าง]"
+                    }
+                    val conf = scanData["signal_anticipation_confidence"] ?: "75"
+                    val factor = scanData["signal_anticipation_factor"] ?: "ANTICIPATION"
+                    val desc = scanData["signal_anticipation_desc"] ?: "เข้าเงื่อนไขการคาดการณ์ล่วงหน้า"
+                    val zone = scanData["signal_anticipation_zone"] ?: "-"
+                    val entry = scanData["signal_anticipation_entry"]?.takeIf { it.isNotBlank() }
+                    val sl = scanData["signal_anticipation_sl"]?.takeIf { it.isNotBlank() }
+                    val tp1 = scanData["signal_anticipation_tp1"]?.takeIf { it.isNotBlank() }
+                    val tp2 = scanData["signal_anticipation_tp2"]?.takeIf { it.isNotBlank() }
+                    val tp3 = scanData["signal_anticipation_tp3"]?.takeIf { it.isNotBlank() }
+
+                    buildString {
+                        appendLine("⚡ **ผลการสแกนคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation)**")
+                        appendLine("• **สินทรัพย์**: $symbolBase (TF: ${tf.uppercase()}) | ราคาปัจจุบัน: $close")
+                        appendLine("• **ทิศทางที่คาดหมาย**: $badge | $stageBadge")
+                        appendLine("• **ระดับความเชื่อมั่น**: $conf% (คำนวณจาก Confluence & AI Feedback)")
+                        appendLine("• **ปัจจัยกระตุ้น**: `$factor`")
+                        appendLine("• **โซนราคา / Shift State**: $zone")
+                        appendLine("• **เหตุผลทางเทคนิค**: $desc")
+                        if (entry != null && sl != null) {
+                            appendLine()
+                            appendLine("🎯 **Execution Rails (แผนระดับราคาล่วงหน้า)**:")
+                            appendLine("| ระดับ | ราคา |")
+                            appendLine("|---|---|")
+                            appendLine("| Entry Price | $entry |")
+                            appendLine("| Stop Loss | $sl |")
+                            if (tp1 != null) appendLine("| Take Profit 1 | $tp1 |")
+                            if (tp2 != null) appendLine("| Take Profit 2 | $tp2 |")
+                            if (tp3 != null) appendLine("| Take Profit 3 | $tp3 |")
+                        }
+                        appendLine()
+                        appendLine("🌐 **โครงสร้างตลาด (MTF Context)**:")
+                        appendLine(mtf)
+                        appendLine()
+                        appendLine("💡 **คำแนะนำ JARVIS**: สามารถสั่ง *\"ตั้งเตือนคาดการณ์ $symbolBase TF $tf\"* เพื่อให้ระบบเฝ้าดูและส่งเสียงเตือนเมื่อถึงจุดยืนยันราคาได้ทันทีครับ")
+                    }.trim()
+                } else {
+                    val active = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getActiveFactors(symbolBase)
+                    buildString {
+                        appendLine("🔍 **ผลการสแกนคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation)**")
+                        appendLine("• **สินทรัพย์**: $symbolBase (TF: ${tf.uppercase()}) | ราคาปัจจุบัน: $close")
+                        appendLine("• **สถานะ**: ยังไม่พบ Trigger หรือการบีบตัว/การกลับตัวที่เข้าเกณฑ์ในแท่งปัจจุบัน")
+                        appendLine("• **ปัจจัยที่เปิดเฝ้าระวัง (${active.size} ปัจจัย)**: " + active.joinToString(", "))
+                        appendLine()
+                        appendLine("🌐 **โครงสร้างตลาด (MTF Context)**:")
+                        appendLine(mtf)
+                        appendLine()
+                        appendLine("💡 หากต้องการให้ JARVIS เฝ้าตรวจจับสัญญาณตลอด 24 ชม. สามารถสั่ง *\"ตั้งเตือนคาดการณ์ $symbolBase\"* ได้ครับ")
+                    }.trim()
+                }
+            }
+
+            "learning", "performance" -> {
+                val perf = com.skyliner2008.jarvis.automation.SignalOutcomeTracker.getAnticipationPerformance()
+                buildString {
+                    appendLine("🧠 **รายงานสถิติและการเรียนรู้ของระบบ Anticipation (Reinforcement Learning)**")
+                    appendLine("ระบบบันทึกและติดตามผลการคาดการณ์แบบอัตโนมัติ เพื่อปรับปรุงค่าน้ำหนักความแม่นยำอย่างต่อเนื่อง")
+                    appendLine()
+                    appendLine("📊 **ภาพรวมสถิติการคาดการณ์ (Anticipation Overview)**:")
+                    appendLine("• **จำนวนการคาดการณ์ทั้งหมด (Total Anticipations)**: ${perf.totalAnticipations} รายการ")
+                    appendLine("• **เปลี่ยนเป็นสัญญาณเข้าออเดอร์จริง (Converted to Entry)**: ${perf.convertedCount} รายการ (${"%.1f".format(perf.conversionRatePct)}%)")
+                    appendLine("• **ถูกยกเลิก/ไม่ถึงจุดเข้า (Invalidated/Expired)**: ${perf.invalidated} รายการ")
+                    appendLine("• **ผลลัพธ์ของสัญญาณที่เข้าเทรดจริง**: ชนะ ${perf.wins} / แพ้ ${perf.losses} (Win Rate: ${"%.1f".format(perf.winRatePct)}%)")
+                    appendLine("• **กำไรเฉลี่ยต่อการเทรด (Avg R-Multiple)**: ${"%.2f".format(perf.avgR)}R")
+                    appendLine()
+                    appendLine("⚙️ **การปรับค่าน้ำหนักความเชื่อมั่นแยกตามปัจจัย (Factor Breakdown & Dynamic Weights)**:")
+                    com.skyliner2008.jarvis.automation.AnticipationConfigManager.ALL_FACTORS.forEach { factor ->
+                        val stats = perf.factorBreakdown[factor.id]
+                        val totalF = stats?.first ?: 0L
+                        val wrF = stats?.second ?: 0.0
+                        val dynAdj = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getDynamicWeight(factor.id)
+                        val effConf = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getEffectiveConfidence(factor.id)
+                        val sign = if (dynAdj >= 0) "+$dynAdj" else "$dynAdj"
+                        appendLine("• **${factor.name}** (`${factor.id}`):")
+                        appendLine("  - สถิติ: เกิดขึ้น ${totalF} ครั้ง | Win Rate: ${"%.1f".format(wrF)}%")
+                        appendLine("  - ความเชื่อมั่น: ค่าเริ่มต้น ${factor.defaultConfidence}% ➔ ปรับไดนามิก ($sign%) ➔ ปัจจุบัน **${effConf}%**")
+                    }
+                }.trim()
+            }
+
+            "inspect", "history", "records" -> {
+                val limit = args["limit"]?.toLongOrNull() ?: 10L
+                val records = com.skyliner2008.jarvis.automation.SignalOutcomeTracker.getRecentAnticipationRecords(symbolBase, limit)
+                if (records.isEmpty()) {
+                    return "📭 ยังไม่มีประวัติการคาดการณ์ (Anticipation) สำหรับ $symbolBase ในฐานข้อมูล\n" +
+                            "ระบบจะบันทึกอัตโนมัติเมื่อ Alert Job ตรวจพบ Anticipation หรือสแกนพบจุดสะสมพลัง"
+                }
+
+                buildString {
+                    appendLine("🔍 **ประวัติการคาดการณ์ล่วงหน้า (Anticipation Audit) — $symbolBase** (${records.size} รายการล่าสุด)")
+                    appendLine("สามารถตรวจสอบความสมเหตุสมผลและ Snapshot สภาพแวดล้อมตลาด ณ จุดที่เกิดการคาดการณ์ได้ดังนี้:")
+                    appendLine()
+
+                    records.forEachIndexed { i, rec ->
+                        val sideBadge = if (rec.side.equals("BUY", ignoreCase = true)) "🟢 BUY" else "🔴 SELL"
+                        val statusBadge = when (rec.status) {
+                            "WIN" -> "✅ WIN (${"%+.2f".format(rec.pnl_r ?: 0.0)}R)"
+                            "LOSS" -> "❌ LOSS (−1.00R)"
+                            "INVALIDATED" -> "🚫 INVALIDATED (ยกเลิกก่อนเข้า)"
+                            "ANTICIPATING" -> "⏳ ANTICIPATING (กำลังเฝ้าดู)"
+                            "OPEN" -> "📈 OPEN (เข้าออเดอร์แล้ว)"
+                            else -> rec.status
+                        }
+                        val factor = rec.strategy.removePrefix("ANTICIPATION_")
+                        val dt = Instant.fromEpochMilliseconds(rec.created_at)
+                            .toLocalDateTime(TimeZone.currentSystemDefault())
+                        val timeStr = "%02d/%02d %02d:%02d".format(dt.dayOfMonth, dt.monthNumber, dt.hour, dt.minute)
+
+                        appendLine("${i + 1}. $sideBadge **${rec.symbol}** (${rec.interval}) | ปัจจัย: `$factor` — $statusBadge")
+                        appendLine("   - **เวลา**: $timeStr | Entry: ${rec.entry_price} | SL: ${rec.stop_loss} | TP1: ${rec.take_profit} (RR 1:${"%.2f".format(rec.rr)})")
+
+                        // อ่าน Snapshot สภาพแวดล้อมจาก features_json
+                        val featJson = rec.features_json
+                        if (!featJson.isNullOrBlank()) {
+                            val parsed = runCatching {
+                                Json.decodeFromString<Map<String, JsonElement>>(featJson)
+                            }.getOrNull()
+                            if (parsed != null) {
+                                fun f(k: String) = parsed[k]?.toString()?.trim('"') ?: "-"
+                                val rsi = f("rsi14")
+                                val fastRsi = f("fastRsi5")
+                                val adx = f("adx14")
+                                val atr = f("atr14")
+                                val mtfH1 = f("h1Trend")
+                                val mtfH4 = f("h4Trend")
+                                val sqz = f("squeezeState")
+                                val veyra = f("veyraScore")
+                                val reason = f("anticipation_reason")
+                                val zone = f("anticipation_zone")
+
+                                if (reason != "-") appendLine("   - **เหตุผล**: $reason | โซน: $zone")
+                                appendLine("   - 🌐 **สภาพแวดล้อมกราฟ (Snapshot Genome)**:")
+                                appendLine("     • เทรนด์: H4=$mtfH4, H1=$mtfH1 | Squeeze: $sqz | Veyra Score: $veyra/100")
+                                appendLine("     • อินดิเคเตอร์: RSI14=$rsi, FastRSI5=$fastRsi, ADX=$adx, ATR=$atr")
+                            }
+                        }
+                        appendLine()
+                    }
+                }.trim()
+            }
+
+            else -> "❌ ไม่รองรับ action '$action' — ใช้ create, scan, analyze, inspect, history, learning, performance, config, list_factors, recommend, หรือ status"
         }
     }
 

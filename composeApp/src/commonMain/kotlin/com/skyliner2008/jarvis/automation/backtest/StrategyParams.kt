@@ -27,6 +27,7 @@ data class TpSlParams(val slMult: Double, val tpMult: Double) {
             "DC" -> TpSlParams(0.5, 2.0)                            // buffer หลัง exit band, RR 1:2
             "REV" -> TpSlParams(0.5, 1.5)                           // buffer หลัง swing (cap 2.5 ATR), fallback TP 1.5×ATR
             "3BR" -> TpSlParams(1.0, 2.0)                           // floor factor + RR (structural อยู่แล้ว)
+            "VEYRA", "BBSQ", "FRSI" -> TpSlParams(0.5, 2.0)         // buffer หลัง swing/structure, RR 1:2
             else -> TpSlParams(1.5, 2.0)
         }
 
@@ -61,7 +62,7 @@ data class TpSlParams(val slMult: Double, val tpMult: Double) {
          */
         fun enforceRrFloor(kind: String, p: TpSlParams, minRr: Double = 1.2): TpSlParams = when (kind) {
             "REV" -> p
-            "3BR", "MOM", "TR", "E", "DC", "52H", "MIX" -> if (p.tpMult < minRr) p.copy(tpMult = minRr) else p
+            "3BR", "MOM", "TR", "E", "DC", "52H", "MIX", "VEYRA", "BBSQ", "FRSI" -> if (p.tpMult < minRr) p.copy(tpMult = minRr) else p
             else -> if (p.slMult > 0 && p.tpMult / p.slMult < minRr) p.copy(tpMult = round2(p.slMult * minRr)) else p
         }
     }
@@ -136,8 +137,8 @@ fun parameterizedTpSl(
             val anchor = if (isBuy) swingLow(candles, i, 10) else swingHigh(candles, i, 10)
             rrLevels(structuralRisk(anchor, atr14))
         }
-        // ตามเทรนด์/โมเมนตัม/52H/MIX — SL หลัง swing 10 แท่ง, TP = RR × risk
-        "MOM", "TR", "E", "52H", "MIX" -> {
+        // ตามเทรนด์/โมเมนตัม/52H/MIX/VEYRA/BBSQ/FRSI — SL หลัง swing 10 แท่ง, TP = RR × risk
+        "MOM", "TR", "E", "52H", "MIX", "VEYRA", "BBSQ", "FRSI" -> {
             val anchor = if (isBuy) swingLow(candles, i, 10) else swingHigh(candles, i, 10)
             rrLevels(structuralRisk(anchor, atr14))
         }

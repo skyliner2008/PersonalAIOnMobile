@@ -16,21 +16,26 @@ class AnticipationConfigManagerTest {
     }
 
     @Test
-    fun testDefaultFactors_containsCoreFourFactors() {
+    fun testDefaultFactors_containsAllThirteenFactors() {
         val factors = AnticipationConfigManager.getActiveFactors("XAUUSD")
-        assertEquals(4, factors.size)
+        assertEquals(13, factors.size)
         assertTrue(factors.contains("KEYZONE_PROXIMITY"))
         assertTrue(factors.contains("WICK_SWEEP_REJECTION"))
         assertTrue(factors.contains("RSI_EXTREME"))
         assertTrue(factors.contains("EMA_NEAR_CROSS"))
+        assertTrue(factors.contains("VEYRA_SHIFT"))
+        assertTrue(factors.contains("BB_KC_SQUEEZE"))
+        assertTrue(factors.contains("FAST_RSI_REVERSAL"))
     }
 
     @Test
-    fun testAddFactor_validExtendedFactor() {
+    fun testAddFactor_validFactorAfterRemoval() {
+        AnticipationConfigManager.removeFactor("XAUUSD", "BOLLINGER_SQUEEZE")
+        assertEquals(12, AnticipationConfigManager.getActiveFactors("XAUUSD").size)
         val success = AnticipationConfigManager.addFactor("XAUUSD", "BOLLINGER_SQUEEZE")
         assertTrue(success, "Should successfully add valid factor from whitelist")
         val factors = AnticipationConfigManager.getActiveFactors("XAUUSD")
-        assertEquals(5, factors.size)
+        assertEquals(13, factors.size)
         assertTrue(factors.contains("BOLLINGER_SQUEEZE"))
     }
 
@@ -39,29 +44,29 @@ class AnticipationConfigManagerTest {
         val success = AnticipationConfigManager.addFactor("XAUUSD", "RANDOM_HALLUCINATED_FACTOR")
         assertFalse(success, "Should reject factor not in curated whitelist")
         val factors = AnticipationConfigManager.getActiveFactors("XAUUSD")
-        assertEquals(4, factors.size)
+        assertEquals(13, factors.size)
     }
 
     @Test
-    fun testRemoveFactor_removesCoreFactor() {
+    fun testRemoveFactor_removesFactor() {
         val success = AnticipationConfigManager.removeFactor("XAUUSD", "RSI_EXTREME")
         assertTrue(success)
         val factors = AnticipationConfigManager.getActiveFactors("XAUUSD")
-        assertEquals(3, factors.size)
+        assertEquals(12, factors.size)
         assertFalse(factors.contains("RSI_EXTREME"))
     }
 
     @Test
-    fun testResetToDefaults_restoresCoreFactors() {
-        AnticipationConfigManager.addFactor("XAUUSD", "VOLUME_ABSORPTION")
+    fun testResetToDefaults_restoresAllFactors() {
         AnticipationConfigManager.removeFactor("XAUUSD", "EMA_NEAR_CROSS")
-        assertEquals(4, AnticipationConfigManager.getActiveFactors("XAUUSD").size)
+        AnticipationConfigManager.removeFactor("XAUUSD", "VOLUME_ABSORPTION")
+        assertEquals(11, AnticipationConfigManager.getActiveFactors("XAUUSD").size)
 
         AnticipationConfigManager.resetToDefaults("XAUUSD")
         val restored = AnticipationConfigManager.getActiveFactors("XAUUSD")
-        assertEquals(4, restored.size)
+        assertEquals(13, restored.size)
         assertTrue(restored.contains("EMA_NEAR_CROSS"))
-        assertFalse(restored.contains("VOLUME_ABSORPTION"))
+        assertTrue(restored.contains("VOLUME_ABSORPTION"))
     }
 
     @Test
@@ -75,7 +80,7 @@ class AnticipationConfigManagerTest {
 
         val bbInfo = list.firstOrNull { it.first.id == "BOLLINGER_SQUEEZE" }
         assertNotNull(bbInfo)
-        assertFalse(bbInfo.second) // inactive by default
+        assertTrue(bbInfo.second) // active by default
     }
 
     @Test

@@ -16,6 +16,12 @@ import com.skyliner2008.jarvis.voice.VoiceManager
 import com.skyliner2008.jarvis.automation.AutomationManager
 import com.skyliner2008.jarvis.tools.trading.auto.AutoTradingViewModel
 import com.skyliner2008.jarvis.tools.ToolExecutor
+import com.skyliner2008.jarvis.sound.AmbientSoundPlayer
+import com.skyliner2008.jarvis.sound.RobotSoundPlayer
+import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
+import com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme
+import com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState
+import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
 import com.skyliner2008.jarvis.tools.ToolCall
 import com.skyliner2008.jarvis.tools.camera.CameraToolExecutor
 import com.skyliner2008.jarvis.tools.trading.AiTrackingInsight
@@ -155,49 +161,286 @@ class JarvisViewModel(
 
     val floatingWidgetEnabled: StateFlow<Boolean> get() = settings.floatingWidgetEnabled
 
-    val testEmotionOverride = MutableStateFlow<com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion?>(null)
+    val testEmotionOverride = MutableStateFlow<AvatarEmotion?>(null)
     val testStatusOverride = MutableStateFlow<String?>(null)
+    val testFaceStateOverride = MutableStateFlow<RobotFaceState?>(null)
     private var demoJob: kotlinx.coroutines.Job? = null
 
-    fun setTestEmotion(emotion: com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion?, customStatus: String? = null) {
+    private val _isDemoRunning = MutableStateFlow(false)
+    val isDemoRunning: StateFlow<Boolean> = _isDemoRunning.asStateFlow()
+
+    private val _alwaysLiveProfile = MutableStateFlow(AlwaysLiveProfile.CONTROL)
+    val alwaysLiveProfile: StateFlow<AlwaysLiveProfile> = _alwaysLiveProfile.asStateFlow()
+
+    fun setAlwaysLiveProfile(profile: AlwaysLiveProfile) {
+        val prev = _alwaysLiveProfile.value
+        _alwaysLiveProfile.value = profile
+        val isPet = profile == AlwaysLiveProfile.PET
+        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = isPet
+        voice.setRobotVoiceEnabled(isPet)
+
+        if (prev != profile) {
+            com.skyliner2008.jarvis.logDebug("JarvisVM", "AlwaysLiveProfile switched: $prev -> $profile (isPet=$isPet)")
+            orchestrator.resetLiveSessionResumption()
+            val greeting = if (isPet) "สวัสดีฮับ พร้อมเล่นแล้ว" else "สวัสดีจาวิส พร้อมคุยไหม"
+            orchestrator.setLiveGreetingOnReady(greeting)
+
+            if (voice.isListening.value) {
+                viewModelScope.launch {
+                    val prompt = if (isPet) {
+                        "[ระบบ]: สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดทักทายและตอบรับผู้ใช้สั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ มีเสียงหุ่นยนต์ตัวน้อย แล้วเล่นกับเจ้านายทันที (ห้ามใช้ markdown ห้ามตอบเป็นทางการ)"
+                    } else {
+                        "[ระบบ]: สลับเข้าสู่โหมดควบคุม/Always AI Live แล้ว! — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ"
+                    }
+                    com.skyliner2008.jarvis.logDebug("JarvisVM", "Sending realtime persona prompt to active Live session: $prompt")
+                    orchestrator.sendLiveRealtimeText(prompt)
+                }
+            }
+        }
+    }
+
+    private var faceAutoDecayJob: Job? = null
+
+    fun resetToIdleFace() {
+        faceAutoDecayJob?.cancel()
+        faceAutoDecayJob = null
+        testFaceStateOverride.value = null
+        testEmotionOverride.value = null
+        testStatusOverride.value = null
+        AmbientSoundPlayer.setTheme(BackgroundTheme.DEFAULT)
+        com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🌙 Reverted to normal IDLE face (dark OLED theme, silent ambient)")
+    }
+
+    fun setTestEmotion(emotion: AvatarEmotion?, customStatus: String? = null, autoDecayMs: Long = 6000L) {
         demoJob?.cancel()
         demoJob = null
+        faceAutoDecayJob?.cancel()
+        _isDemoRunning.value = false
         testEmotionOverride.value = emotion
-        testStatusOverride.value = customStatus
+        testStatusOverride.value = null
+        testFaceStateOverride.value = null
         com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🧪 Test Emotion Override: ${emotion?.name ?: "RESET (Auto)"}")
+
+        if (emotion != null && autoDecayMs > 0L) {
+            faceAutoDecayJob = viewModelScope.launch {
+                delay(autoDecayMs)
+                while (voice.isAiSpeaking.value) {
+                    delay(1000)
+                }
+                delay(2500)
+                if (!_isDemoRunning.value) {
+                    resetToIdleFace()
+                }
+            }
+        }
+    }
+
+    fun setTestFaceState(face: RobotFaceState?, autoDecayMs: Long = 6000L) {
+        demoJob?.cancel()
+        demoJob = null
+        faceAutoDecayJob?.cancel()
+        _isDemoRunning.value = false
+        testFaceStateOverride.value = face
+        testEmotionOverride.value = face?.emotion
+        testStatusOverride.value = null
+        com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎭 Test Face Override: ${face?.emotion} | BG: ${face?.backgroundTheme} | Props: ${face?.props} | Gesture: ${face?.gesture}")
+
+        if (face != null && autoDecayMs > 0L) {
+            faceAutoDecayJob = viewModelScope.launch {
+                delay(autoDecayMs)
+                while (voice.isAiSpeaking.value) {
+                    delay(1000)
+                }
+                delay(2500)
+                if (!_isDemoRunning.value) {
+                    resetToIdleFace()
+                }
+            }
+        }
+    }
+
+    fun addCustomProp(prop: com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp) {
+        com.skyliner2008.jarvis.pet.PetCustomPropStore.saveCustomProp(prop)
+        val currentFace = testFaceStateOverride.value ?: RobotFaceState()
+        val updatedProps = currentFace.customProps.filterNot { it.id == prop.id || it.name == prop.name } + prop
+        setTestFaceState(currentFace.copy(customProps = updatedProps))
+    }
+
+    fun removeCustomProp(nameOrId: String) {
+        val currentFace = testFaceStateOverride.value ?: return
+        val updatedProps = currentFace.customProps.filterNot {
+            it.id.equals(nameOrId, ignoreCase = true) || it.name.equals(nameOrId, ignoreCase = true)
+        }
+        setTestFaceState(currentFace.copy(customProps = updatedProps))
+    }
+
+    fun clearCustomProps() {
+        val currentFace = testFaceStateOverride.value ?: return
+        setTestFaceState(currentFace.copy(customProps = emptyList()))
+    }
+
+    fun stopEmotionDemo() {
+        demoJob?.cancel()
+        demoJob = null
+        faceAutoDecayJob?.cancel()
+        faceAutoDecayJob = null
+        _isDemoRunning.value = false
+        resetToIdleFace()
+        com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⏹️ Emotion Demo stopped — returned to Auto mode")
     }
 
     fun startEmotionDemo() {
         demoJob?.cancel()
+        _isDemoRunning.value = true
+
+        // สลับเข้าโหมดสัตว์เลี้ยงอัตโนมัติเพื่อให้เห็นหัวหุ่นยนต์ 3D + ฉากหลัง + ท่าทาง + อุปกรณ์เสริม
+        if (_alwaysLiveProfile.value != AlwaysLiveProfile.PET) {
+            setAlwaysLiveProfile(AlwaysLiveProfile.PET)
+        }
+
         demoJob = viewModelScope.launch {
-            val allEmotions = listOf(
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.IDLE to "IDLE — Capsule Pill Eyes, Wink & Signature Cyan",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LISTENING to "LISTENING — Big Round Eyes, O-Mouth & Neon Aqua",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.THINKING to "THINKING — Curious Gaze, Squint Arc & Cyber Violet",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SPEAKING to "SPEAKING — Resonant Capsule Eyes, Pulsing Mouth & Emerald",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.HAPPY to "HAPPY — Cheerful Smiling Arcs (^.^) & Oceanic Teal",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EXCITED to "EXCITED — 4-Point Golden Stars (★.★), D-Smile & Solar Gold",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LOVE to "LOVE — Radiant Neon Hearts (♥.♥), Floating Hearts & Hot Pink",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ANGRY to "ANGRY — Slanted Brow Furrow, Zigzag Mouth & Flame Red",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SAD to "SAD — Droopy Arcs (︵.︵), Luminous Teardrops & Ice Slate",
-                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SLEEPING to "SLEEPING — Closed Slits (─.─), Floating ZZZ & Lavender Void"
+            data class DemoScene(
+                val face: RobotFaceState,
+                val description: String,
+                val soundEffect: (() -> Unit)? = null,
+                val durationMs: Long = 3500L
             )
-            com.skyliner2008.jarvis.logDebug("JarvisAvatar", "▶️ Starting 10-Emotion Showcase Demo (3.2s per emotion)...")
-            for ((emo, desc) in allEmotions) {
-                testEmotionOverride.value = emo
-                testStatusOverride.value = "🧪 [DEMO] $desc"
-                com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎭 Showcase [${emo.name}]: $desc")
-                kotlinx.coroutines.delay(3200)
+
+            val scenes = listOf(
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "happy",
+                        eyeStyleName = "star",
+                        backgroundName = "sunny",
+                        propsRaw = "music_notes,sparkles",
+                        gestureName = "jump",
+                        speechText = "☀️ ท้องฟ้าแจ่มใส กระโดดดีใจ!"
+                    ),
+                    description = "☀️ [1/8 SUNNY] แดดอุ่น + สปริงกระโดด (JUMP) + โน้ตดนตรี & ดาววิ้งค์",
+                    soundEffect = { RobotSoundPlayer.playChirpStart() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "sad",
+                        eyeStyleName = "crying",
+                        backgroundName = "rainy",
+                        propsRaw = "umbrella,sweat_drop",
+                        gestureName = "tilt_left",
+                        speechText = "🌧️ ฝนตกแล้ว กางร่มกันฝนนะ"
+                    ),
+                    description = "🌧️ [2/8 RAINY] ฝนโปรยปราย + เอียงหัวหลบฝน (TILT_LEFT) + กางร่ม (UMBRELLA)",
+                    soundEffect = { RobotSoundPlayer.playAcknowledge() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "excited",
+                        eyeStyleName = "star",
+                        backgroundName = "sakura",
+                        propsRaw = "sparkles",
+                        gestureName = "wobble",
+                        speechText = "🌸 กลีบซากุระปลิวไสว ดุ๊กดิ๊กจัง"
+                    ),
+                    description = "🌸 [3/8 SAKURA] สายลมซากุระ + โยกหัวดุ๊กดิ๊ก (WOBBLE) + ตาดาวทอง (STAR)",
+                    soundEffect = { RobotSoundPlayer.playSparkle() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "love",
+                        eyeStyleName = "heart",
+                        backgroundName = "love_bg",
+                        propsRaw = "hearts",
+                        gestureName = "bounce",
+                        speechText = "💖 รักบอสนะคะ ส่งหัวใจดวงโตๆ"
+                    ),
+                    description = "💖 [4/8 LOVE_BG] คลื่นอบอุ่น + กระดอนร่าเริง (BOUNCE) + หัวใจสีชมพูลอยฟุ้ง",
+                    soundEffect = { RobotSoundPlayer.playPurr() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "angry",
+                        eyeStyleName = "cross",
+                        backgroundName = "thunder",
+                        propsRaw = "fire,exclamation",
+                        gestureName = "shake",
+                        speechText = "⚡ ฟ้าร้องน่ากลัว ตัวสั่นไปหมดแล้ว!"
+                    ),
+                    description = "⚡ [5/8 THUNDER] พายุสายฟ้า + สั่นระรัวเร็ว (SHAKE) + ไฟลุก & ตกใจ (!)",
+                    soundEffect = { RobotSoundPlayer.playAlarm() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "thinking",
+                        eyeStyleName = "question",
+                        backgroundName = "matrix",
+                        propsRaw = "question_mark",
+                        gestureName = "tilt_right",
+                        speechText = "🟩 กำลังเชื่อมต่อข้อมูลใน Matrix..."
+                    ),
+                    description = "🟩 [6/8 MATRIX] สายธารดิจิทัล + เอียงคอสงสัย (TILT_RIGHT) + เครื่องหมายคำถาม (?)",
+                    soundEffect = { RobotSoundPlayer.playConfused() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "sleeping",
+                        eyeStyleName = "default",
+                        backgroundName = "night",
+                        propsRaw = "zzzzz",
+                        gestureName = "nod",
+                        speechText = "🌌 คืนนี้ดวงดาวสวยจัง ง่วงแล้ว Zzz"
+                    ),
+                    description = "🌌 [7/8 NIGHT] ราตรีดาวระยิบระยับ + สัปหงกเบาๆ (NOD) + ตัว Zzz ลอยหลับปุ๋ย",
+                    soundEffect = { RobotSoundPlayer.playChirpEnd() },
+                    durationMs = 3500L
+                ),
+                DemoScene(
+                    face = RobotFaceState(
+                        emotionName = "idle",
+                        eyeStyleName = "default",
+                        backgroundName = "default",
+                        propsRaw = "",
+                        gestureName = "idle",
+                        speechText = "🤖 พร้อมดูแลและช่วยเหลือบอสเสมอค่ะ!"
+                    ),
+                    description = "🤖 [8/8 DEFAULT] กลับสู่โหมดสแตนด์บายปกติ พร้อมรับใช้บอสค่ะ!",
+                    soundEffect = { RobotSoundPlayer.playChirpStart() },
+                    durationMs = 3000L
+                )
+            )
+
+            com.skyliner2008.jarvis.logDebug("JarvisAvatar", "▶️ Starting 8-Scene Living Avatar Showcase Demo (Backgrounds + Gestures + Props + SFX)...")
+            try {
+                for (scene in scenes) {
+                    testFaceStateOverride.value = scene.face
+                    testEmotionOverride.value = scene.face.emotion
+                    testStatusOverride.value = scene.description
+                    // เล่นเสียงเอฟเฟกต์เฉพาะซีน
+                    scene.soundEffect?.invoke()
+                    // สลับเสียงบรรยากาศคลอตามธีมฉากหลัง
+                    AmbientSoundPlayer.setTheme(scene.face.backgroundTheme)
+                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎭 Showcase: ${scene.description}")
+                    kotlinx.coroutines.delay(scene.durationMs)
+                }
+            } finally {
+                com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⏹️ Showcase Demo finished — returning to Auto mode")
+                _isDemoRunning.value = false
+                testFaceStateOverride.value = null
+                testEmotionOverride.value = null
+                testStatusOverride.value = null
+                AmbientSoundPlayer.setTheme(BackgroundTheme.DEFAULT)
             }
-            com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⏹️ Emotion Showcase Demo finished — returning to Auto mode")
-            testEmotionOverride.value = null
-            testStatusOverride.value = null
         }
     }
 
     init {
         chat.onTestEmotion = { emo, status -> setTestEmotion(emo, status) }
         chat.onStartDemo = { startEmotionDemo() }
+        chat.onStopDemo = { stopEmotionDemo() }
 
         // Auto-check and initialize local ONNX if files exist on disk.
         // After init, if the model loaded successfully, mark progress = 2f
@@ -357,6 +600,10 @@ class JarvisViewModel(
     )
 
     init {
+        voice.onTestEmotion = { emo, status -> setTestEmotion(emo, status) }
+        voice.onStartDemo = { startEmotionDemo() }
+        voice.onStopDemo = { stopEmotionDemo() }
+
         // Track winning live model; do NOT silently overwrite user's DB settings during transient runtime fallback
         orchestrator.onLiveModelChanged = { winningModel ->
             logDebug("JarvisVM", "Live session active with model: $winningModel")
@@ -380,7 +627,7 @@ class JarvisViewModel(
         )
 
         // Bridge AI vision request to camera service with safety timeout
-        orchestrator.setAiVisionToggle { active ->
+        val applyAiVisionToggle: (Boolean) -> Unit = { active ->
             if (active) {
                 _isAiVisionRequested.value = true
                 cameraService.isAiVisionRequested = true
@@ -407,6 +654,8 @@ class JarvisViewModel(
                 }
             }
         }
+        orchestrator.setAiVisionToggle(applyAiVisionToggle)
+        com.skyliner2008.jarvis.pet.PetVisionBridge.onAiVisionStreamToggle = applyAiVisionToggle
 
         // --- AI-Controlled Voice Change ---
         orchestrator.setVoiceChangeHandler { newVoice ->
@@ -659,16 +908,33 @@ class JarvisViewModel(
         }
     }
 
+    /**
+     * ส่งเฟรมภาพสดตรงเข้าสู่ Gemini Live session (สำหรับโหมด Always Live / Pet Vision)
+     */
+    fun sendLiveCameraFrame(jpegBase64: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            orchestrator.sendLiveCameraFrame(jpegBase64)
+        }
+    }
+
     // ─── Live Voice (Gemini Multimodal Live) ───────────────────────────
 
 
     /** ชื่อ tool ที่กำลัง execute อยู่ — expose ไปยัง UI */
     val activeToolName: StateFlow<String?> = orchestrator.activeToolName
 
+    /** ผลลัพธ์ tool ล่าสุด — expose ไปยัง UI สำหรับแสดงใน PetDialogueCard */
+    val lastToolResult: StateFlow<Pair<String, String>?> = orchestrator.lastToolResult
+
+    /** ปิดกล่องข้อความ tool card */
+    fun dismissToolCard() = orchestrator.clearLastToolResult()
+
     // ─── Voice function forwarders → VoiceController ───
     fun startVoiceInput() = voice.startVoiceInput()
     fun stopVoiceInput() = voice.stopVoiceInput()
     fun clearVoiceError() = voice.clearVoiceError()
+    fun announceNotification(appName: String, sender: String, content: String) =
+        voice.announceNotification(appName, sender, content)
 
     fun clearChat() = chat.clearChat()
 
@@ -748,6 +1014,7 @@ class JarvisViewModel(
     override fun onCleared() {
         super.onCleared()
         mt5.shutdown()
+        com.skyliner2008.jarvis.pet.PetVisionBridge.onAiVisionStreamToggle = null
         stopCameraAnalysis()
         cameraService.release()
         voice.shutdown()

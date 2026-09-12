@@ -90,8 +90,11 @@ actual fun CameraPreviewView(
         }, ContextCompat.getMainExecutor(context))
     }
 
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val orientation = configuration.orientation
+
     // Bind/unbind effect — Mutex-protected to prevent "Device 0 Conflicts"
-    LaunchedEffect(cameraProvider, isActive, isFrontCamera, lifecycleOwner) {
+    LaunchedEffect(cameraProvider, isActive, isFrontCamera, lifecycleOwner, orientation) {
         val provider = cameraProvider ?: return@LaunchedEffect
 
         // Debounce: let rapid Compose recompositions settle before touching hardware
@@ -103,6 +106,13 @@ actual fun CameraPreviewView(
                     provider.unbindAll()
 
                     if (!isActive) return@withContext
+
+                    val targetRotation = when (orientation) {
+                        android.content.res.Configuration.ORIENTATION_LANDSCAPE -> android.view.Surface.ROTATION_90
+                        else -> android.view.Surface.ROTATION_0
+                    }
+                    previewUseCase.targetRotation = targetRotation
+                    imageAnalysisUseCase.targetRotation = targetRotation
 
                     val cameraSelector = if (isFrontCamera) {
                         CameraSelector.DEFAULT_FRONT_CAMERA
@@ -142,7 +152,7 @@ actual fun CameraPreviewView(
         modifier = modifier,
         factory = { ctx ->
             PreviewView(ctx).apply {
-                scaleType = PreviewView.ScaleType.FILL_CENTER
+                scaleType = PreviewView.ScaleType.FIT_CENTER
                 // Link the stable preview use-case to this view's surface
                 previewUseCase.surfaceProvider = this.surfaceProvider
             }
@@ -179,97 +189,33 @@ private fun processFrame(
 
 /**
  * แปลง ImageProxy ➔ JPEG ByteArray
- * รองรับ YUV_420_888 (format ปกติของ CameraX) และ JPEG โดยตรง
+ * ใช้ CameraX imageProxy.toBitmap() แปลงทุก Format (YUV_420_888, JPEG, RGBA)
+ * ได้ภาพคมชัด ถูกต้อง 100% ไม่เกิดแถบลายหรือภาพสีเพี้ยน
  */
 private fun imageProxyToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray? {
-    return when (imageProxy.format) {
-        ImageFormat.JPEG -> {
-            val buffer = imageProxy.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
-            bytes
-        }
-        ImageFormat.YUV_420_888 -> {
-            yuvToJpeg(imageProxy, isFrontCamera)
-        }
-        else -> {
-            bitmapToJpeg(imageProxy, isFrontCamera)
-        }
-    }
-}
-
-private fun yuvToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray? {
-    val yPlane = imageProxy.planes[0]
-    val uPlane = imageProxy.planes[1]
-    val vPlane = imageProxy.planes[2]
-
-    val ySize = yPlane.buffer.remaining()
-    val uSize = uPlane.buffer.remaining()
-    val vSize = vPlane.buffer.remaining()
-
-    val nv21 = ByteArray(ySize + uSize + vSize)
-    yPlane.buffer.get(nv21, 0, ySize)
-    vPlane.buffer.get(nv21, ySize, vSize)
-    uPlane.buffer.get(nv21, ySize + vSize, uSize)
-
-    val yuvImage = YuvImage(nv21, ImageFormat.NV21, imageProxy.width, imageProxy.height, null)
-    val out = ByteArrayOutputStream()
-    yuvImage.compressToJpeg(Rect(0, 0, imageProxy.width, imageProxy.height), 60, out)
-
-    val rawJpeg = out.toByteArray()
-
-    // Apply rotation + mirror so AI sees the SAME orientation as the Preview
-    val rotation = imageProxy.imageInfo.rotationDegrees
-    if (rotation == 0 && !isFrontCamera) return rawJpeg // Fast path: no transform needed
-
-    val bitmap = BitmapFactory.decodeByteArray(rawJpeg, 0, rawJpeg.size) ?: return rawJpeg
-    val matrix = Matrix().apply {
-        if (rotation != 0) postRotate(rotation.toFloat())
-        if (isFrontCamera) postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
-        
-        // Optimization: Scale down to max 640px to save data/tokens
-        val maxDim = maxOf(bitmap.width, bitmap.height)
-        if (maxDim > 640) {
-            val scale = 640f / maxDim
-            postScale(scale, scale)
-        }
-    }
-    val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-    val transformedOut = ByteArrayOutputStream()
-    transformed.compress(Bitmap.CompressFormat.JPEG, 60, transformedOut)
-    if (transformed != bitmap) transformed.recycle()
-    bitmap.recycle()
-    return transformedOut.toByteArray()
-}
-
-private fun bitmapToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray? {
     return try {
         val bitmap = imageProxy.toBitmap()
-        val rotatedBitmap = if (isFrontCamera) {
-            val matrix = Matrix().apply {
-                postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
-                postScale(-1f, 1f)
+        val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
+        val matrix = Matrix().apply {
+            if (rotation != 0f) postRotate(rotation)
+            // Mirror front camera around the center pivot
+            if (isFrontCamera) postScale(-1f, 1f, bitmap.width / 2f, bitmap.height / 2f)
+
+            // Optimization: Scale down to max 640px to conserve CPU and streaming bandwidth
+            val maxDim = maxOf(bitmap.width, bitmap.height)
+            if (maxDim > 640) {
+                val scale = 640f / maxDim.toFloat()
+                postScale(scale, scale)
             }
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        } else {
-            val matrix = Matrix().apply { 
-                postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
-                
-                // Optimization: Scale down to max 640px
-                val maxDim = maxOf(bitmap.width, bitmap.height)
-                if (maxDim > 640) {
-                    val scale = 640f / maxDim
-                    postScale(scale, scale)
-                }
-            }
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         }
+        val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         val out = ByteArrayOutputStream()
-        rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 60, out)
-        if (rotatedBitmap != bitmap) rotatedBitmap.recycle()
+        transformed.compress(Bitmap.CompressFormat.JPEG, 70, out)
+        if (transformed != bitmap) transformed.recycle()
         bitmap.recycle()
         out.toByteArray()
     } catch (e: Exception) {
+        android.util.Log.w("CameraPreview", "imageProxyToJpeg conversion error: ${e.message}")
         null
     }
 }

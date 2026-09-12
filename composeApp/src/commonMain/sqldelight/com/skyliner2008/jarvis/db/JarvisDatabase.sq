@@ -836,6 +836,7 @@ CREATE TABLE IF NOT EXISTS SignalTrackingRecord (
     exit_price REAL,
     pnl_r REAL,
     bars_held INTEGER NOT NULL DEFAULT 0,
+    features_json TEXT,
     created_at INTEGER NOT NULL,
     closed_at INTEGER
 );
@@ -849,9 +850,9 @@ ON SignalTrackingRecord(strategy, status);
 insertSignalTrackingRecord:
 INSERT OR IGNORE INTO SignalTrackingRecord(
     signal_id, symbol, interval, strategy, side, entry_price, stop_loss, take_profit, rr,
-    status, mfe, mae, exit_price, pnl_r, bars_held, created_at, closed_at
+    status, mfe, mae, exit_price, pnl_r, bars_held, features_json, created_at, closed_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 getSignalTrackingRecordById:
 SELECT * FROM SignalTrackingRecord WHERE signal_id = ?;
@@ -861,6 +862,9 @@ SELECT * FROM SignalTrackingRecord WHERE status = 'OPEN' ORDER BY created_at ASC
 
 getOpenSignalTrackingRecordsBySymbol:
 SELECT * FROM SignalTrackingRecord WHERE symbol = ? AND status = 'OPEN' ORDER BY created_at ASC;
+
+getPendingSignalTrackingRecordsBySymbol:
+SELECT * FROM SignalTrackingRecord WHERE symbol = ? AND status IN ('OPEN', 'ANTICIPATING') ORDER BY created_at ASC;
 
 updateSignalTrackingOutcome:
 UPDATE SignalTrackingRecord
@@ -881,7 +885,18 @@ GROUP BY strategy;
 
 getRecentResolvedSignals:
 SELECT * FROM SignalTrackingRecord
-WHERE status != 'OPEN'
+WHERE status NOT IN ('OPEN', 'ANTICIPATING')
 ORDER BY closed_at DESC
 LIMIT :limit;
+
+getAllSignalTrackingRecords:
+SELECT * FROM SignalTrackingRecord
+ORDER BY created_at DESC;
+
+getAllAnticipationTrackingRecords:
+SELECT * FROM SignalTrackingRecord
+WHERE strategy LIKE 'ANTICIPATION_%'
+ORDER BY created_at DESC
+LIMIT :limit;
+
 

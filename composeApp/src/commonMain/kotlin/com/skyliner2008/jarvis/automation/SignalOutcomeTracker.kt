@@ -39,7 +39,7 @@ object SignalOutcomeTracker {
         val avgMaeR: Double
     )
 
-    /** บันทึกสัญญาณที่เพิ่งเกิดสถานะ CONFIRMED ลงฐานข้อมูล */
+    /** บันทึกสัญญาณที่เพิ่งเกิดสถานะ CONFIRMED ลงฐานข้อมูล พร้อม Snapshot Features */
     fun recordSignal(
         signalId: String,
         symbol: String,
@@ -50,6 +50,7 @@ object SignalOutcomeTracker {
         stopLoss: Double,
         takeProfit: Double,
         rr: Double,
+        featuresJson: String? = null,
         createdAt: Long = Clock.System.now().toEpochMilliseconds()
     ) {
         val db = getDb() ?: return
@@ -79,12 +80,63 @@ object SignalOutcomeTracker {
                 exit_price = null,
                 pnl_r = null,
                 bars_held = 0L,
+                features_json = featuresJson,
                 created_at = createdAt,
                 closed_at = null
             )
             logDebug("SignalTracker", "Recorded signal $signalId: $symbol $interval $side $strategy @ $entryPrice (SL: $stopLoss, TP: $takeProfit)")
         }.onFailure {
             logDebug("SignalTracker", "Failed to record signal $signalId: ${it.message}")
+        }
+    }
+
+    /** บันทึกการคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ลงฐานข้อมูล (สำหรับวิเคราะห์แยกส่วน) */
+    fun recordAnticipation(
+        anticipationId: String,
+        symbol: String,
+        interval: String,
+        factorId: String,
+        side: String,
+        entryPrice: Double,
+        stopLoss: Double,
+        takeProfit: Double,
+        rr: Double,
+        featuresJson: String? = null,
+        createdAt: Long = Clock.System.now().toEpochMilliseconds()
+    ) {
+        val db = getDb() ?: return
+        val risk = abs(entryPrice - stopLoss)
+        if (risk <= 0.0 || entryPrice <= 0.0) return
+
+        val existing = runCatching {
+            db.jarvisDatabaseQueries.getSignalTrackingRecordById(anticipationId).executeAsOneOrNull()
+        }.getOrNull()
+        if (existing != null) return
+
+        runCatching {
+            db.jarvisDatabaseQueries.insertSignalTrackingRecord(
+                signal_id = anticipationId,
+                symbol = symbol.uppercase(),
+                interval = interval.lowercase(),
+                strategy = "ANTICIPATION_$factorId",
+                side = side.uppercase(),
+                entry_price = entryPrice,
+                stop_loss = stopLoss,
+                take_profit = takeProfit,
+                rr = rr,
+                status = "ANTICIPATING",
+                mfe = 0.0,
+                mae = 0.0,
+                exit_price = null,
+                pnl_r = null,
+                bars_held = 0L,
+                features_json = featuresJson,
+                created_at = createdAt,
+                closed_at = null
+            )
+            logDebug("SignalTracker", "Recorded anticipation $anticipationId: $symbol $interval $side $factorId @ $entryPrice (SL: $stopLoss, TP: $takeProfit)")
+        }.onFailure {
+            logDebug("SignalTracker", "Failed to record anticipation $anticipationId: ${it.message}")
         }
     }
 
@@ -98,7 +150,7 @@ object SignalOutcomeTracker {
         val closedAt: Long?
     )
 
-    /** ฟังก์ชันทดสอบผลลัพธ์ของ 1 สัญญาณแบบ Pure Function */
+    /** ฟังก์ชันทดสอบผลลัพธ์ของ 1 สัญญาณแบบ Pure Function (รองรับทั้ง CONFIRMED และ ANTICIPATING) */
     fun evaluateSingleSignal(
         side: String,
         entryPrice: Double,
@@ -106,15 +158,18 @@ object SignalOutcomeTracker {
         takeProfit: Double,
         rr: Double,
         createdAt: Long,
-        forwardCandles: List<Candle>
+        forwardCandles: List<Candle>,
+        initialStatus: String = "OPEN"
     ): OutcomeEvaluation {
         val isBuy = side.equals("BUY", ignoreCase = true)
         val risk = abs(entryPrice - stopLoss)
         if (risk <= 0.0 || forwardCandles.isEmpty()) {
-            return OutcomeEvaluation("OPEN", null, null, 0.0, 0.0, 0L, null)
+            return OutcomeEvaluation(initialStatus, null, null, 0.0, 0.0, 0L, null)
         }
 
-        var status = "OPEN"
+        val isAnticipating = initialStatus == "ANTICIPATING"
+        var isTriggered = !isAnticipating
+        var status = initialStatus
         var exitPrice: Double? = null
         var pnlR: Double? = null
         var maxFavPrice = entryPrice
@@ -124,64 +179,98 @@ object SignalOutcomeTracker {
 
         for (candle in forwardCandles) {
             if (isBuy) {
-                maxFavPrice = max(maxFavPrice, candle.high)
-                maxAdvPrice = min(maxAdvPrice, candle.low)
+                // ถ้าอยู่ในสถานะเฝ้าระวัง (Anticipating) ตรวจสอบว่าราคาแตะจุดเข้าหรือไม่ หรือหลุด SL ก่อน
+                if (isAnticipating && !isTriggered) {
+                    if (candle.low <= stopLoss) {
+                        status = "INVALIDATED"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    }
+                    if (candle.low <= entryPrice && candle.high >= entryPrice * 0.998) {
+                        isTriggered = true
+                    }
+                }
 
-                val hitSl = candle.low <= stopLoss
-                val hitTp = candle.high >= takeProfit
+                if (isTriggered) {
+                    maxFavPrice = max(maxFavPrice, candle.high)
+                    maxAdvPrice = min(maxAdvPrice, candle.low)
 
-                if (hitSl && hitTp) {
-                    status = "LOSS"
-                    exitPrice = stopLoss
-                    pnlR = -1.0
-                    closedAt = candle.timestamp
-                    break
-                } else if (hitTp) {
-                    status = "WIN"
-                    exitPrice = takeProfit
-                    pnlR = rr
-                    closedAt = candle.timestamp
-                    break
-                } else if (hitSl) {
-                    status = "LOSS"
-                    exitPrice = stopLoss
-                    pnlR = -1.0
-                    closedAt = candle.timestamp
-                    break
+                    val hitSl = candle.low <= stopLoss
+                    val hitTp = candle.high >= takeProfit
+
+                    if (hitSl && hitTp) {
+                        status = "LOSS"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    } else if (hitTp) {
+                        status = "WIN"
+                        exitPrice = takeProfit
+                        pnlR = rr
+                        closedAt = candle.timestamp
+                        break
+                    } else if (hitSl) {
+                        status = "LOSS"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    }
                 }
             } else {
-                maxFavPrice = min(maxFavPrice, candle.low)
-                maxAdvPrice = max(maxAdvPrice, candle.high)
+                if (isAnticipating && !isTriggered) {
+                    if (candle.high >= stopLoss) {
+                        status = "INVALIDATED"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    }
+                    if (candle.high >= entryPrice && candle.low <= entryPrice * 1.002) {
+                        isTriggered = true
+                    }
+                }
 
-                val hitSl = candle.high >= stopLoss
-                val hitTp = candle.low <= takeProfit
+                if (isTriggered) {
+                    maxFavPrice = min(maxFavPrice, candle.low)
+                    maxAdvPrice = max(maxAdvPrice, candle.high)
 
-                if (hitSl && hitTp) {
-                    status = "LOSS"
-                    exitPrice = stopLoss
-                    pnlR = -1.0
-                    closedAt = candle.timestamp
-                    break
-                } else if (hitTp) {
-                    status = "WIN"
-                    exitPrice = takeProfit
-                    pnlR = rr
-                    closedAt = candle.timestamp
-                    break
-                } else if (hitSl) {
-                    status = "LOSS"
-                    exitPrice = stopLoss
-                    pnlR = -1.0
-                    closedAt = candle.timestamp
-                    break
+                    val hitSl = candle.high >= stopLoss
+                    val hitTp = candle.low <= takeProfit
+
+                    if (hitSl && hitTp) {
+                        status = "LOSS"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    } else if (hitTp) {
+                        status = "WIN"
+                        exitPrice = takeProfit
+                        pnlR = rr
+                        closedAt = candle.timestamp
+                        break
+                    } else if (hitSl) {
+                        status = "LOSS"
+                        exitPrice = stopLoss
+                        pnlR = -1.0
+                        closedAt = candle.timestamp
+                        break
+                    }
                 }
             }
 
-            // Timeout หลังจาก 50 แท่ง
-            if (barsHeld >= 50) {
-                status = "EXPIRED"
+            // Timeout หลังจาก 25 แท่งสำหรับ Anticipation หรือ 50 แท่งสำหรับ Signal ปกติ
+            val maxBars = if (isAnticipating && !isTriggered) 25 else 50
+            if (barsHeld >= maxBars) {
+                status = if (isAnticipating && !isTriggered) "EXPIRED" else "EXPIRED"
                 exitPrice = candle.close
-                pnlR = if (isBuy) (candle.close - entryPrice) / risk else (entryPrice - candle.close) / risk
+                pnlR = if (isTriggered) {
+                    if (isBuy) (candle.close - entryPrice) / risk else (entryPrice - candle.close) / risk
+                } else 0.0
                 closedAt = candle.timestamp
                 break
             }
@@ -201,13 +290,17 @@ object SignalOutcomeTracker {
         )
     }
 
-    /** ตรวจสอบและอัปเดตผลลัพธ์ของสัญญาณที่เปิดอยู่เทียบกับแท่งเทียนราคาตลาด */
+    /** ตรวจสอบและอัปเดตผลลัพธ์ของสัญญาณที่เปิดอยู่เทียบกับแท่งเทียนราคาตลาด พร้อม Reinforcement Learning */
     fun evaluateOpenSignals(symbol: String, candles: List<Candle>): Int {
         if (candles.size < 2) return 0
         val db = getDb() ?: return 0
         val openSignals = runCatching {
-            db.jarvisDatabaseQueries.getOpenSignalTrackingRecordsBySymbol(symbol.uppercase()).executeAsList()
-        }.getOrElse { emptyList() }
+            db.jarvisDatabaseQueries.getPendingSignalTrackingRecordsBySymbol(symbol.uppercase()).executeAsList()
+        }.getOrElse {
+            runCatching {
+                db.jarvisDatabaseQueries.getOpenSignalTrackingRecordsBySymbol(symbol.uppercase()).executeAsList()
+            }.getOrElse { emptyList() }
+        }
 
         if (openSignals.isEmpty()) return 0
         var resolvedCount = 0
@@ -223,10 +316,11 @@ object SignalOutcomeTracker {
                 takeProfit = sig.take_profit,
                 rr = sig.rr,
                 createdAt = sig.created_at,
-                forwardCandles = forwardCandles
+                forwardCandles = forwardCandles,
+                initialStatus = sig.status
             )
 
-            if (result.status != "OPEN") {
+            if (result.status != "OPEN" && result.status != "ANTICIPATING") {
                 db.jarvisDatabaseQueries.updateSignalTrackingOutcome(
                     status = result.status,
                     mfe = result.mfeR,
@@ -238,7 +332,19 @@ object SignalOutcomeTracker {
                     signalId = sig.signal_id
                 )
                 resolvedCount++
-                logDebug("SignalTracker", "Signal ${sig.signal_id} resolved as ${result.status}: pnlR=${"%.2f".format(result.pnlR ?: 0.0)}R, MFE=${"%.2f".format(result.mfeR)}R, MAE=${"%.2f".format(result.maeR)}R")
+                logDebug("SignalTracker", "Signal ${sig.signal_id} (${sig.strategy}) resolved as ${result.status}: pnlR=${"%.2f".format(result.pnlR ?: 0.0)}R, MFE=${"%.2f".format(result.mfeR)}R, MAE=${"%.2f".format(result.maeR)}R")
+
+                // ── Reinforcement Learning Feedback ──
+                if (sig.strategy.startsWith("ANTICIPATION_")) {
+                    val factorId = sig.strategy.removePrefix("ANTICIPATION_")
+                    if (result.status == "WIN") {
+                        AnticipationConfigManager.applyFactorWeightAdjustment(factorId, +2)
+                        logDebug("SignalTracker", "🧠 Reinforcement Learning: Factor $factorId +2 confidence on WIN")
+                    } else if (result.status == "LOSS" || result.status == "INVALIDATED") {
+                        AnticipationConfigManager.applyFactorWeightAdjustment(factorId, -2)
+                        logDebug("SignalTracker", "🧠 Reinforcement Learning: Factor $factorId -2 confidence on ${result.status}")
+                    }
+                }
             }
         }
         return resolvedCount
@@ -299,5 +405,70 @@ object SignalOutcomeTracker {
         return runCatching {
             db.jarvisDatabaseQueries.getRecentResolvedSignals(limit).executeAsList()
         }.getOrElse { emptyList() }
+    }
+
+    data class AnticipationPerformance(
+        val totalAnticipations: Long,
+        val convertedCount: Long,
+        val conversionRatePct: Double,
+        val wins: Long,
+        val losses: Long,
+        val invalidated: Long,
+        val winRatePct: Double,
+        val avgR: Double,
+        val factorBreakdown: Map<String, Pair<Long, Double>>
+    )
+
+    /** ดึงสถิติผลการดำเนินงานย้อนหลังและการเรียนรู้ของระบบ Anticipation ทั้งหมด */
+    fun getAnticipationPerformance(): AnticipationPerformance {
+        val db = getDb() ?: return AnticipationPerformance(0, 0, 0.0, 0, 0, 0, 0.0, 0.0, emptyMap())
+        val records = runCatching {
+            db.jarvisDatabaseQueries.getAllAnticipationTrackingRecords(500).executeAsList()
+        }.getOrElse { emptyList() }
+
+        if (records.isEmpty()) return AnticipationPerformance(0, 0, 0.0, 0, 0, 0, 0.0, 0.0, emptyMap())
+
+        val total = records.size.toLong()
+        val converted = records.count { it.status in listOf("WIN", "LOSS", "BE", "OPEN") }.toLong()
+        val wins = records.count { it.status == "WIN" }.toLong()
+        val losses = records.count { it.status == "LOSS" }.toLong()
+        val invalidated = records.count { it.status == "INVALIDATED" }.toLong()
+        val decided = wins + losses
+        val winRate = if (decided > 0) (wins * 100.0 / decided) else 0.0
+        val conversionRate = if (total > 0) (converted * 100.0 / total) else 0.0
+        val avgR = records.filter { it.pnl_r != null }.mapNotNull { it.pnl_r }.average().takeIf { !it.isNaN() } ?: 0.0
+
+        val factorMap = records.groupBy { it.strategy.removePrefix("ANTICIPATION_") }.mapValues { (_, list) ->
+            val fWins = list.count { it.status == "WIN" }
+            val fLosses = list.count { it.status == "LOSS" }
+            val fDecided = fWins + fLosses
+            val fWr = if (fDecided > 0) (fWins * 100.0 / fDecided) else 0.0
+            list.size.toLong() to fWr
+        }
+
+        return AnticipationPerformance(
+            totalAnticipations = total,
+            convertedCount = converted,
+            conversionRatePct = conversionRate,
+            wins = wins,
+            losses = losses,
+            invalidated = invalidated,
+            winRatePct = winRate,
+            avgR = avgR,
+            factorBreakdown = factorMap
+        )
+    }
+
+    /** ดึงรายการ Anticipation ล่าสุดจากฐานข้อมูลเพื่อใช้ตรวจสอบย้อนหลัง (Audit & Inspect) */
+    fun getRecentAnticipationRecords(symbol: String? = null, limit: Long = 10): List<SignalTrackingRecord> {
+        val db = getDb() ?: return emptyList()
+        val all = runCatching {
+            db.jarvisDatabaseQueries.getAllAnticipationTrackingRecords(limit = 100).executeAsList()
+        }.getOrElse { emptyList() }
+        val filtered = if (!symbol.isNullOrBlank()) {
+            val s = symbol.trim().uppercase().substringBefore("@")
+            all.filter { it.symbol.equals(s, ignoreCase = true) }
+        } else all
+        return filtered.take(limit.toInt())
     }
 }

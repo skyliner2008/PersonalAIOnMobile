@@ -62,6 +62,7 @@ class ChatController(
 
     var onTestEmotion: ((com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion?, String?) -> Unit)? = null
     var onStartDemo: (() -> Unit)? = null
+    var onStopDemo: (() -> Unit)? = null
 
     fun sendMessage(
         text: String,
@@ -71,13 +72,42 @@ class ChatController(
         if (text.isBlank() && attachments.isEmpty()) return
 
         val cleanText = text.trim()
-        if (cleanText.startsWith("/avatar", ignoreCase = true) ||
+        val isAvatarCmd = cleanText.startsWith("/avatar", ignoreCase = true) ||
             cleanText.startsWith("/emotion", ignoreCase = true) ||
+            cleanText.startsWith("/demo", ignoreCase = true) ||
             cleanText.startsWith("/test", ignoreCase = true) ||
             cleanText.startsWith("ทำหน้า", ignoreCase = true) ||
-            cleanText.contains("แสดงอารมณ์ทั้งหมด") ||
-            cleanText.contains("เดโม่อารมณ์")) {
+            cleanText.equals("ทดสอบเดโม", ignoreCase = true) ||
+            cleanText.equals("เดโม", ignoreCase = true) ||
+            cleanText.equals("demo", ignoreCase = true) ||
+            cleanText.contains("ทดสอบเดโม") ||
+            cleanText.contains("แสดงอารมณ์") ||
+            cleanText.contains("โชว์อารมณ์") ||
+            cleanText.contains("ทดสอบอารมณ์") ||
+            cleanText.contains("เดโม่อารมณ์") ||
+            cleanText.contains("เดโมอารมณ์") ||
+            cleanText.contains("ซะแดงเดโมอารมณ์") ||
+            cleanText.contains("แสดงเดโม่อารมณ์") ||
+            cleanText.contains("รีเซ็ตอารมณ์")
+        if (isAvatarCmd) {
             handleAvatarTestCommand(cleanText)
+            return
+        }
+
+        val lowerText = cleanText.lowercase()
+        val isAlwaysLiveCmd = cleanText.startsWith("/always", ignoreCase = true) ||
+            cleanText.startsWith("/control", ignoreCase = true) ||
+            cleanText.startsWith("/drive", ignoreCase = true) ||
+            cleanText.startsWith("/car", ignoreCase = true) ||
+            lowerText in setOf("โหมดควบคุม", "โหมดขับขี่", "โหมดรถยนต์", "control mode", "drive mode", "car mode") ||
+            lowerText.startsWith("เปิดโหมดควบคุม") || lowerText.startsWith("เปิดโหมดขับขี่") || lowerText.startsWith("เปิดโหมดรถยนต์") ||
+            lowerText.startsWith("เข้าโหมดควบคุม") || lowerText.startsWith("เข้าโหมดขับขี่") || lowerText.startsWith("เข้าโหมดรถยนต์") ||
+            lowerText.startsWith("เปิดโหมด always") || lowerText.startsWith("เข้าโหมด always") || lowerText == "เปิด always" ||
+            lowerText.startsWith("ปิดโหมดควบคุม") || lowerText.startsWith("ปิดโหมดขับขี่") || lowerText.startsWith("ปิดโหมดรถยนต์") ||
+            lowerText.startsWith("ออกจากโหมดควบคุม") || lowerText.startsWith("ออกจากโหมดขับขี่") || lowerText.startsWith("ออกจากโหมดรถยนต์") ||
+            lowerText.startsWith("ปิดโหมด always") || lowerText.startsWith("ออกจากโหมด always") || lowerText == "ปิด always"
+        if (isAlwaysLiveCmd) {
+            handleAlwaysLiveCommand(cleanText)
             return
         }
 
@@ -204,12 +234,21 @@ class ChatController(
     }
 
     private fun handleAvatarTestCommand(cmd: String) {
-        val lower = cmd.lowercase()
+        val lower = cmd.lowercase().trim()
         val parts = cmd.split(Regex("\\s+"))
         val target = if (parts.size > 1) parts[1].lowercase() else ""
 
-        val isDemo = target in listOf("demo", "all") || lower.contains("แสดงอารมณ์ทั้งหมด") || lower.contains("เดโม่อารมณ์")
-        val isReset = target in listOf("reset", "auto", "stop", "off") || lower.contains("รีเซ็ต") || lower.contains("โหมดปกติ")
+        val isDemo = target in listOf("demo", "all", "start") ||
+            lower == "demo" || lower == "/demo" || lower == "เดโม" || lower == "ทดสอบเดโม" ||
+            lower.contains("ทดสอบเดโม") || lower.contains("แสดงเดโม") ||
+            lower.contains("ทดสอบระบบ") || lower.contains("ทดสอบหุ่นยนต์") ||
+            lower.contains("แสดงอารมณ์ทั้งหมด") || lower.contains("เดโม่อารมณ์") ||
+            lower.contains("เดโมอารมณ์") || lower.contains("ซะแดงเดโมอารมณ์") ||
+            lower.contains("โชว์อารมณ์") || lower.contains("ทดสอบอารมณ์") ||
+            lower.contains("แสดงเดโม่อารมณ์") || lower.contains("แสดงอารมณ์")
+        val isReset = target in listOf("reset", "auto", "stop", "off") ||
+            lower.contains("หยุดเดโม") || lower.contains("หยุดทดสอบ") ||
+            lower.contains("รีเซ็ต") || lower.contains("โหมดปกติ") || lower.contains("กลับสู่ปกติ")
 
         val matchedEmotion = when {
             isDemo || isReset -> null
@@ -219,6 +258,8 @@ class ChatController(
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EXCITED
             target in listOf("love", "heart") || lower.contains("รัก") || lower.contains("หัวใจ") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LOVE
+            target in listOf("enraged", "fight", "rage") || lower.contains("โกรธจัด") || lower.contains("สู้กลับ") || lower.contains("ยิงจรวด") ->
+                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ENRAGED
             target in listOf("angry", "mad") || lower.contains("โกรธ") || lower.contains("โมโห") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ANGRY
             target in listOf("sad", "cry") || lower.contains("เศร้า") || lower.contains("เสียใจ") || lower.contains("ร้องไห้") ->
@@ -242,7 +283,7 @@ class ChatController(
             isDemo -> {
                 _messages.value = _messages.value + Message(
                     "model",
-                    "▶️ **เริ่มโหมด Emotion Showcase Demo!**\nกำลังสลับแสดงท่าทาง ตา ปาก และชุดสีพื้นหลังครบทั้ง 10 อารมณ์ (เปลี่ยนทุก 3.2 วินาที)\n(พิมพ์ `/avatar reset` เพื่อกลับสู่โหมดปกติได้ทุกเมื่อ)",
+                    "▶️ **เริ่มโหมด Living Avatar Showcase Demo!**\nกำลังสลับแสดงฉากหลังไดนามิก 8 ธีม, ท่าทางภาษากาย, อุปกรณ์เสริมลอย และเสียง FX ครบทั้ง 8 ซีน (เปลี่ยนทุก 3.5 วินาที)\n(พิมพ์ `หยุดเดโม` หรือ `/demo stop` เพื่อหยุดได้ทุกเมื่อค่ะ)",
                     isStatic = true
                 )
                 onStartDemo?.invoke()
@@ -253,7 +294,7 @@ class ChatController(
                     "⏹️ **รีเซ็ตเรียบร้อยค่ะ**\nAvatar กลับสู่โหมดตรวจจับอัตโนมัติตามปกติแล้วค่ะ",
                     isStatic = true
                 )
-                onTestEmotion?.invoke(null, null)
+                onStopDemo?.invoke() ?: onTestEmotion?.invoke(null, null)
             }
             matchedEmotion != null -> {
                 val (title, detail) = when (matchedEmotion) {
@@ -265,6 +306,8 @@ class ChatController(
                         "LOVE (ส่งหัวใจ/ความรัก)" to "ตารูปหัวใจสีชมพูนีออน (♥.♥) + หัวใจลอย + แสง Hot Pink"
                     com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ANGRY ->
                         "ANGRY (เตือน/โกรธ)" to "คิ้วเฉียงขมวดคม + ปากซิกแซก + พื้นหลังเตือนภัย Alert Flame Red"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ENRAGED ->
+                        "ENRAGED (โกรธจัด/สู้กลับ)" to "ตาขวางแดงเพลิง (ò.ó) + ปากขบฟันแหลม + ยิงจรวดมิสซายระเบิดหน้าจอ + แสง Alert Flame Red"
                     com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SAD ->
                         "SAD (เศร้า/เห็นใจ)" to "ตาละห้อยคว่ำ (︵.︵) + หยดน้ำตาสีฟ้าเรืองแสง + แสง Ice Slate Blue"
                     com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SLEEPING ->
@@ -277,6 +320,18 @@ class ChatController(
                         "SPEAKING (กำลังพูด)" to "ตาแคปซูลมีมิติ + ปากวงรีสั่นไหวตามเสียง + แสง Electric Emerald"
                     com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.IDLE ->
                         "IDLE (พร้อมทำงาน)" to "ตากลมรี Capsule Pill LED (❚ ❚) + ลูกเล่นขยิบตาวิ้ง (Wink) + แสง Cyber Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.WINK ->
+                        "WINK (ขยิบตา)" to "ตาซ้ายขยิบเส้นตรง + ตาขวากลมโตวิ้ง + แสง Vibrant Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.CONFUSED ->
+                        "CONFUSED (สงสัย)" to "เครื่องหมายคำถาม '?' ลอยตรงกลาง + ปากตรง + แสง Amber Orange"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.POUT ->
+                        "POUT (งอน/แก้มป่อง)" to "แก้มป่องสีชมพูเรืองแสง + ปากงอน 'Hmph' + แสง Rose Violet"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DIZZY ->
+                        "DIZZY (ตาลาย/มึนงง)" to "ตาวนเข็มนาฬิการูปก้นหอย Spiral (@_@) + ปากคลื่น + แสง Mystic Purple"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SURPRISED ->
+                        "SURPRISED (ตกใจ)" to "ตาเบิกกว้างสุดขีด (O_O) + ปากอ้า 'O' + แสง Electric White-Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.BORED ->
+                        "BORED (เบื่อ/ง่วง)" to "ตาลู่ครึ่งปิด (─.─) + ปากเส้นตรงเฉยเมย + แสง Cool Slate Gray"
                 }
                 _messages.value = _messages.value + Message(
                     "model",
@@ -305,6 +360,33 @@ class ChatController(
                     isStatic = true
                 )
             }
+        }
+    }
+
+    private fun handleAlwaysLiveCommand(cmd: String) {
+        val lower = cmd.lowercase()
+        // ในภาษาไทย "เปิด" มี substring "ปิด" อยู่ข้างในเสมอ ต้องตัด "เปิด" ออกก่อนเช็ค "ปิด"
+        val lowerWithoutOpen = lower.replace("เปิด", "")
+        val isOff = lowerWithoutOpen.contains("ปิด") || lowerWithoutOpen.contains("ออก") || lowerWithoutOpen.contains("off") || lowerWithoutOpen.contains("stop") || lowerWithoutOpen.contains("disable")
+        val isDrive = lower.contains("ขับขี่") || lower.contains("รถยนต์") || lower.contains("drive") || lower.contains("car")
+        val isPet = lower.contains("สัตว์เลี้ยง") || lower.contains("แก้เบื่อ") || lower.contains("pet")
+        val action = if (isOff) "off" else "on"
+        val mode = when {
+            isPet -> "pet"
+            isDrive -> "drive"
+            else -> "control"
+        }
+
+        _messages.value = _messages.value + Message("user", cmd)
+
+        scope.launch {
+            val res = com.skyliner2008.jarvis.tools.ToolExecutor.execute(
+                com.skyliner2008.jarvis.tools.ToolCall(
+                    name = "device_always_live",
+                    args = mapOf("action" to action, "mode" to mode)
+                )
+            )
+            _messages.value = _messages.value + Message("model", res.result, isStatic = true)
         }
     }
 }

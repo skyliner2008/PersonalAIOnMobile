@@ -72,6 +72,11 @@ class TradingToolExecutionBackend(
             .getOrElse { "❌ SMC Flow error: ${it.message}" }
     }
 
+    /** trading_signal_anticipation scan — สแกนหาการคาดการณ์สัญญาณล่วงหน้าทันที */
+    internal suspend fun executeSignalAnticipationScan(symbol: String, timeframe: String): Map<String, String> {
+        return signalAlertProvider.fetch("$symbol@$timeframe")
+    }
+
     // ─── Internal Compatibility Delegators ──────────────────────────────────────
     internal fun executeBacktest(args: Map<String, String>): String = backtestHandler.executeBacktest(args)
     internal fun executeBacktestOptimize(args: Map<String, String>): String = backtestHandler.executeOptimize(args)

@@ -51,6 +51,10 @@ kotlin {
             implementation(libs.camerax.camera2)
             implementation(libs.camerax.lifecycle)
             implementation(libs.camerax.view)
+
+            // ML Kit Face & Object Detection (Gaze tracking, Desk Sentry, Copycat, Object & Hand detection)
+            implementation("com.google.android.gms:play-services-mlkit-face-detection:17.1.0")
+            implementation("com.google.mlkit:object-detection:17.0.2")
             
             // ONNX Runtime for Local Embeddings (Android only)
             // Upgraded from 1.19.2 → 1.23.0 for 16 KB page size alignment (Google Play requirement Nov 2025)

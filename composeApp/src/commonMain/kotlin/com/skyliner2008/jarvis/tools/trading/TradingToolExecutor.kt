@@ -9,4 +9,7 @@ class TradingToolExecutor(client: HttpClient, geminiService: GeminiService) {
 
     suspend fun execute(toolName: String, args: Map<String, String>): String =
         backend.execute(toolName, args)
+
+    suspend fun executeSignalAnticipationScan(symbol: String, timeframe: String): Map<String, String> =
+        backend.executeSignalAnticipationScan(symbol, timeframe)
 }

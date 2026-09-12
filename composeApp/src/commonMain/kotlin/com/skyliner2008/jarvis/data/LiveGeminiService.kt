@@ -101,7 +101,7 @@ data class LiveVoiceConfig(
 
 @Serializable
 data class LivePrebuiltVoiceConfig(
-    @SerialName("voice_name") val voiceName: String? = null
+    @SerialName("voiceName") val voiceName: String? = null
 )
 
 // ── RealtimeInput (audio / video / text streaming) ───────────────
@@ -418,11 +418,18 @@ class LiveGeminiService(
     private val preReadyMutex = kotlinx.coroutines.sync.Mutex()
     private val maxPreReadyChunks = 400 // ~8–16 วินาที ขึ้นกับ AudioRecord buffer size/device
     private var droppedPreReadyChunks = 0
+    private var sentAudioChunks: Long = 0L
 
     // Live API session resumption: keeps the conversation alive across periodic WebSocket resets.
     private var sessionResumptionHandle: String? = null
     private var goAwayReceived = false
     private var connectionStartedAtMs: Long = 0L
+
+    /** รีเซ็ต session resumption handle เพื่อให้การเปลี่ยนโหมด (เช่น Pet <-> Assistant) ไม่ดึงบริบทโหมดเก่ากลับมา */
+    fun resetSessionResumption() {
+        sessionResumptionHandle = null
+        logDebug("LiveGemini", "🔄 Session resumption handle reset for clean persona transition")
+    }
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
@@ -528,6 +535,29 @@ class LiveGeminiService(
         return out.toString()
     }
 
+    private fun isRemoteSocketCloseException(e: Throwable): Boolean {
+        val className = e::class.simpleName ?: ""
+        val msg = e.message ?: ""
+        val causeClassName = e.cause?.let { it::class.simpleName } ?: ""
+        val causeMsg = e.cause?.message ?: ""
+        return className.contains("EOFException") ||
+                className.contains("SocketClosed") ||
+                className.contains("ClosedReceiveChannelException") ||
+                className.contains("SocketException") ||
+                causeClassName.contains("EOFException") ||
+                causeClassName.contains("SocketClosed") ||
+                causeClassName.contains("SocketException") ||
+                msg.contains("EOF", ignoreCase = true) ||
+                msg.contains("unexpected end of stream", ignoreCase = true) ||
+                msg.contains("Connection reset", ignoreCase = true) ||
+                msg.contains("Software caused connection abort", ignoreCase = true) ||
+                msg.contains("Socket closed", ignoreCase = true) ||
+                msg.contains("Channel was closed", ignoreCase = true) ||
+                causeMsg.contains("EOF", ignoreCase = true) ||
+                causeMsg.contains("Connection reset", ignoreCase = true) ||
+                causeMsg.contains("unexpected end of stream", ignoreCase = true)
+    }
+
     suspend fun connectAndListen(tools: GeminiTool? = null, historyContext: String = "", coreContext: String = "") {
         if (apiKey.isBlank()) {
             logError("LiveGemini", "API key is blank — aborting connection")
@@ -591,14 +621,17 @@ class LiveGeminiService(
                         setup = LiveSetup(
                             model = fullModel,
                             outputAudioTranscription = JsonObject(emptyMap()),
-                            inputAudioTranscription = JsonObject(emptyMap()),
+                            inputAudioTranscription = buildJsonObject {
+                                putJsonArray("languageCodes") {
+                                    add("th-TH")
+                                    add("en-US")
+                                }
+                            },
                             realtimeInputConfig = LiveRealtimeInputConfig(
                                 automaticActivityDetection = LiveAutomaticActivityDetection(
                                     disabled = false,
-                                    startOfSpeechSensitivity = "START_SENSITIVITY_HIGH",
-                                    endOfSpeechSensitivity = "END_SENSITIVITY_HIGH",
-                                    prefixPaddingMs = 80,
-                                    silenceDurationMs = 500
+                                    prefixPaddingMs = 300,
+                                    silenceDurationMs = 1200
                                 )
                             ),
                             // Resume the same Live conversation only after a reconnect.
@@ -612,19 +645,26 @@ class LiveGeminiService(
                             // Repeated NOT_CONSISTENT closes were observed immediately after READY.
                             // Resume/compression will be reintroduced only after isolated validation.
                             systemInstruction = LiveSystemInstruction(
-                                parts = listOf(
-                                    LivePart(text = LIVE_SYSTEM_PROMPT),
-                                    LivePart(text = "[STRICT RULE] เมื่อต้องระบุรายชื่อหุ้นหรือข้อมูลตลาด คุณต้องเรียกใช้เครื่องมือที่เกี่ยวข้องเสมอ ห้ามตอบจากความจำเด็ดขาด"),
-                                    LivePart(text = if (coreContext.isNotBlank()) "Core Memory Context:\n$coreContext" else ""),
-                                    LivePart(text = if (historyContext.isNotBlank()) "Recent Conversation History:\n$historyContext" else "")
-                                ).filter { it.text?.isNotBlank() == true }
+                                parts = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
+                                    listOf(
+                                        LivePart(text = com.skyliner2008.jarvis.ai.JarvisPersona.PET_LIVE_SYSTEM_PROMPT),
+                                        LivePart(text = if (coreContext.isNotBlank()) "Core Memory Context:\n$coreContext" else "")
+                                    ).filter { it.text?.isNotBlank() == true }
+                                } else {
+                                    listOf(
+                                        LivePart(text = LIVE_SYSTEM_PROMPT),
+                                        LivePart(text = "[STRICT RULE] เมื่อต้องระบุรายชื่อหุ้นหรือข้อมูลตลาด คุณต้องเรียกใช้เครื่องมือที่เกี่ยวข้องเสมอ ห้ามตอบจากความจำเด็ดขาด"),
+                                        LivePart(text = if (coreContext.isNotBlank()) "Core Memory Context:\n$coreContext" else ""),
+                                        LivePart(text = if (historyContext.isNotBlank()) "Recent Conversation History:\n$historyContext" else "")
+                                    ).filter { it.text?.isNotBlank() == true }
+                                }
                             ),
                             generationConfig = LiveGenerationConfig(
                                 responseModalities = listOf("AUDIO"),
                                 speechConfig = LiveSpeechConfig(
                                     voiceConfig = LiveVoiceConfig(
                                         prebuiltVoiceConfig = LivePrebuiltVoiceConfig(
-                                            voiceName = selectedVoiceName
+                                            voiceName = selectedVoiceName.ifBlank { "Aoede" }
                                         )
                                     )
                                 )
@@ -747,20 +787,33 @@ class LiveGeminiService(
                     }
                     throw e
                 }
-                logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
-                if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
-                    fallbackCount++
-                    val prevModel = liveModelName
-                    liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
-                    liveModelName = liveModelChain[liveModelIndex]
-                    sessionResumptionHandle = null
-                    logDebug("LiveGemini", "🔄 Live connection error with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
-                    attempt = 0
-                    continue
-                }
-                attempt++
-                if (attempt > maxRetries) {
-                    _connectionState.value = ConnectionState.Error("Connection failed after ${maxRetries + 1} attempts: ${e.message}")
+                val remoteClose = isRemoteSocketCloseException(e)
+                if (sessionWasReady && remoteClose) {
+                    // Server-initiated TCP/EOF or unexpected socket closure on an already established Live session
+                    logDebug("LiveGemini", "🔌 Remote server closed connection (${e::class.simpleName ?: e.message ?: "EOF"}) — auto-reconnecting (attempt ${if (sessionWasReady) 1 else attempt + 1}/$maxRetries)")
+                    attempt = if (sessionWasReady) 1 else attempt + 1
+                    if (attempt > 1) {
+                        sessionResumptionHandle = null
+                    }
+                } else {
+                    logError("LiveGemini", "Connection error (attempt ${attempt + 1})", e)
+                    if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
+                        fallbackCount++
+                        val prevModel = liveModelName
+                        liveModelIndex = (liveModelIndex + 1) % liveModelChain.size
+                        liveModelName = liveModelChain[liveModelIndex]
+                        sessionResumptionHandle = null
+                        logDebug("LiveGemini", "🔄 Live connection error with $prevModel — rotating to fallback model: $liveModelName ($fallbackCount/${liveModelChain.size})")
+                        attempt = 0
+                        continue
+                    }
+                    attempt++
+                    if (attempt > 1) {
+                        sessionResumptionHandle = null
+                    }
+                    if (attempt > maxRetries) {
+                        _connectionState.value = ConnectionState.Error("Connection failed after ${maxRetries + 1} attempts: ${e.message}")
+                    }
                 }
             } finally {
                 // Final flush of remaining turn buffers to DB before closing
@@ -1008,11 +1061,17 @@ class LiveGeminiService(
     }
 
     suspend fun sendAudioChunk(pcmBase64: String) {
-        // ยังไม่ READY — เก็บเข้า ring buffer แทนที่จะทิ้งเงียบๆ (flush ตอน setupComplete)
-        if (!isSetupComplete || System.currentTimeMillis() < realtimeInputReadyAtMs) {
+        val session = webSocketSession
+        val isSessionActive = session != null && session.isActive
+        if (!isSessionActive && isSetupComplete) {
+            isSetupComplete = false
+        }
+
+        // ยังไม่ READY หรือ session ไม่ active — เก็บเข้า ring buffer แทนที่จะส่งเข้า websocket
+        if (!isSetupComplete || !isSessionActive || System.currentTimeMillis() < realtimeInputReadyAtMs) {
             // During the short post-READY protocol grace period, intentionally discard PCM.
             // The microphone remains running and the next frame will be sent normally.
-            if (isSetupComplete && System.currentTimeMillis() < realtimeInputReadyAtMs) {
+            if (isSetupComplete && isSessionActive && System.currentTimeMillis() < realtimeInputReadyAtMs) {
                 return
             }
             preReadyMutex.withLock {
@@ -1023,6 +1082,10 @@ class LiveGeminiService(
                 preReadyAudioBuffer.addLast(pcmBase64)
             }
             return
+        }
+        sentAudioChunks++
+        if (sentAudioChunks % 250L == 0L) {
+            logDebug("LiveGemini", "🎤 Audio chunks streaming to WebSocket (#$sentAudioChunks)")
         }
         sendIfReady {
             val msg = LiveRealtimeInputMessage(
@@ -1137,11 +1200,21 @@ class LiveGeminiService(
         logDebug("LiveGemini", "Session disconnected")
     }
 
+    private var lastSendSkippedLogMs: Long = 0L
+
     /** @return true ถ้าส่งเข้า websocket จริง — false ถ้า session ไม่พร้อม (caller ต้องไม่ log ว่าส่งแล้ว) */
     private suspend fun sendIfReady(buildJson: () -> String): Boolean {
         val session = webSocketSession
-        if (session == null || !session.isActive || !isSetupComplete) {
-            logDebug("LiveGemini", "⚠️ send skipped — session ไม่พร้อม (hasSession=${session != null}, active=${session?.isActive == true}, ready=$isSetupComplete)")
+        val isSessionActive = session != null && session.isActive
+        if (!isSessionActive || !isSetupComplete) {
+            if (!isSessionActive && isSetupComplete) {
+                isSetupComplete = false
+            }
+            val now = System.currentTimeMillis()
+            if (now - lastSendSkippedLogMs > 3000L) {
+                lastSendSkippedLogMs = now
+                logDebug("LiveGemini", "⚠️ send skipped — session ไม่พร้อม (hasSession=${session != null}, active=$isSessionActive, ready=$isSetupComplete)")
+            }
             return false
         }
         try {

@@ -94,8 +94,15 @@ class SignalAnticipationTest {
         val anticipation = provider.detectAnticipation(baseCandles, baseCandles.size - 2, 10.0, null)
         assertNotNull(anticipation, "Wick sweep rejection should trigger anticipation")
         assertEquals("BUY", anticipation.side)
-        assertEquals("WICK_SWEEP_REJECTION", anticipation.setupType)
+        assertTrue(anticipation.setupType == "WICK_SWEEP_REJECTION" || anticipation.setupType.startsWith("CONFLUENCE"))
         assertTrue(anticipation.reason.contains("Wick Rejection"))
+
+        // When isolated to WICK_SWEEP_REJECTION factor only
+        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("SWEEP_ONLY", listOf("WICK_SWEEP_REJECTION"))
+        val isolated = provider.detectAnticipation(baseCandles, baseCandles.size - 2, 10.0, null, symbol = "SWEEP_ONLY")
+        assertNotNull(isolated)
+        assertEquals("WICK_SWEEP_REJECTION", isolated.setupType)
+        assertEquals("BUY", isolated.side)
     }
 
     @Test
@@ -194,7 +201,8 @@ class SignalAnticipationTest {
         // แท่ง 74 (Live): ปิด 1997.0 อยู่ในช่วง High/Low ของแท่ง 73 เพื่อไม่ให้เกิด Wick Sweep
         list.add(createCandle(1995.0, 1997.0, 1994.0, 1997.0, 1700000000000L + 74 * 60000L))
 
-        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null)
+        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("EMA_BUY_TEST", listOf("EMA_NEAR_CROSS"))
+        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null, symbol = "EMA_BUY_TEST")
         assertNotNull(anticipation, "EMA near cross should trigger anticipation")
         assertEquals("BUY", anticipation.side)
         assertEquals("EMA_NEAR_CROSS", anticipation.setupType)
@@ -221,7 +229,8 @@ class SignalAnticipationTest {
         // แท่ง 74 (Live): ปิด 2003.0
         list.add(createCandle(2005.0, 2006.0, 2003.0, 2003.0, 1700000000000L + 74 * 60000L))
 
-        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null)
+        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("EMA_SELL_TEST", listOf("EMA_NEAR_CROSS"))
+        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null, symbol = "EMA_SELL_TEST")
         assertNotNull(anticipation, "EMA near death cross should trigger anticipation")
         assertEquals("SELL", anticipation.side)
         assertEquals("EMA_NEAR_CROSS", anticipation.setupType)
@@ -331,5 +340,88 @@ class SignalAnticipationTest {
         val resAll = com.skyliner2008.jarvis.tools.ToolExecutor.execute(callAll)
         assertEquals("all", capturedAlertArgs!!["timeframe"])
         assertTrue(resAll.result.contains("TF: ALL"))
+    }
+
+    @Test
+    fun testVeyraShiftEngine_detectsShiftAndBuildsExecutionRails() {
+        // สร้าง 80 แท่งไต่ระดับขาขึ้นแข็งแกร่ง (Trend + Momentum + Auction Value Field + Volume Impulse)
+        val candles = (0 until 80).map { i ->
+            val base = 2000.0 + i * 2.0
+            val vol = if (i >= 75) 250.0 else 100.0
+            createCandle(base, base + 3.0, base - 1.0, base + 2.5, 1700000000000L + i * 60000L).copy(volume = vol)
+        }
+        val result = com.skyliner2008.jarvis.automation.strategy.VeyraShiftEngine.evaluate(candles)
+        assertNotNull(result, "VeyraShiftEngine should evaluate 80 candles")
+        assertTrue(result.dominantScore >= 40.0, "Score should reflect institutional trend")
+        assertTrue(result.entry > 0.0, "Execution Rail: Entry should be positive")
+        assertTrue(result.stopLoss > 0.0, "Execution Rail: Stop Loss should be positive")
+        assertTrue(result.tp1 > 0.0 && result.tp2 > 0.0 && result.tp3 > 0.0, "Execution Rails: TP1, TP2, TP3 should be defined")
+    }
+
+    @Test
+    fun testBBSqueezeTrendEngine_detectsSqueezeAndBreakout() {
+        // สร้าง 40 แท่งสลับแคบๆ เพื่อเกิด Bollinger Squeeze ใน Keltner
+        val candles = (0 until 40).map { i ->
+            val p = 2000.0 + (if (i % 2 == 0) 0.3 else -0.3)
+            createCandle(p, p + 0.5, p - 0.5, p, 1700000000000L + i * 60000L)
+        }
+        val result = com.skyliner2008.jarvis.automation.strategy.BBSqueezeTrendEngine.evaluate(candles)
+        assertNotNull(result, "BBSqueezeTrendEngine should evaluate 40 candles")
+        assertTrue(result.bbUpper > result.bbLower, "Bollinger bands should be valid")
+        assertTrue(result.entryPrice > 0.0, "Entry price should be calculated")
+    }
+
+    @Test
+    fun testFastRsiEngine_reversalTriggers() {
+        // สร้าง 20 แท่ง: ร่วงแรงให้ RSI5 ต่ำกว่า 35 แล้วดีดตัวขึ้น
+        val candles = mutableListOf<Candle>()
+        for (i in 0 until 15) {
+            val p = 2000.0 - i * 5.0
+            candles.add(createCandle(p, p + 1.0, p - 5.0, p - 4.5, 1700000000000L + i * 60000L))
+        }
+        // แท่งดีดตัวกลับ
+        candles.add(createCandle(1925.0, 1945.0, 1924.0, 1942.0, 1700000000000L + 15 * 60000L))
+
+        val result = com.skyliner2008.jarvis.automation.strategy.FastRsiEngine.evaluate(candles)
+        assertNotNull(result, "FastRsiEngine should evaluate candles")
+        assertTrue(result.rsi5 in 0.0..100.0, "RSI5 should be between 0 and 100")
+        assertTrue(result.stopLoss > 0.0, "SL should be defined")
+    }
+
+    @Test
+    fun testAnticipationReinforcementLearningWeights() {
+        val baseConf = com.skyliner2008.jarvis.automation.AnticipationConfigManager.FACTOR_VEYRA_SHIFT.defaultConfidence
+        assertEquals(84, baseConf)
+
+        com.skyliner2008.jarvis.automation.AnticipationConfigManager.applyFactorWeightAdjustment("VEYRA_SHIFT", 4)
+        val boosted = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getEffectiveConfidence("VEYRA_SHIFT")
+        assertEquals(88, boosted)
+
+        com.skyliner2008.jarvis.automation.AnticipationConfigManager.applyFactorWeightAdjustment("VEYRA_SHIFT", -6)
+        val penalized = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getEffectiveConfidence("VEYRA_SHIFT")
+        assertEquals(82, penalized)
+    }
+
+    @Test
+    fun testToolExecutor_learningActionReturnsClosedLoopStats() = kotlinx.coroutines.runBlocking {
+        val call = com.skyliner2008.jarvis.tools.ToolCall(
+            name = "trading_signal_anticipation",
+            args = mapOf("action" to "learning")
+        )
+        val res = com.skyliner2008.jarvis.tools.ToolExecutor.execute(call)
+        assertTrue(res.result.contains("รายงานสถิติและการเรียนรู้ของระบบ Anticipation"), "Should return reinforcement learning report")
+        assertTrue(res.result.contains("Reinforcement Learning"))
+        assertTrue(res.result.contains("Total Anticipations"))
+        assertTrue(res.result.contains("Veyra Institutional Shift Ledger"))
+    }
+
+    @Test
+    fun testToolExecutor_inspectActionHandlesEmptyAndFormattedRecords() = kotlinx.coroutines.runBlocking {
+        val callEmpty = com.skyliner2008.jarvis.tools.ToolCall(
+            name = "trading_signal_anticipation",
+            args = mapOf("action" to "inspect", "symbol" to "UNKNOWN_SYM")
+        )
+        val resEmpty = com.skyliner2008.jarvis.tools.ToolExecutor.execute(callEmpty)
+        assertTrue(resEmpty.result.contains("ยังไม่มีประวัติการคาดการณ์"), "Should indicate empty history")
     }
 }

@@ -57,6 +57,8 @@ internal class ResearchToolHandler(
         "trading_mix_config" -> backtestHandler.executeMixConfig(args)
         "trading_strategy_signal" -> executeStrategySignal(args)
         "trading_signal_stats" -> executeSignalStats(args)
+        "trading_signal_data_export" -> executeSignalDataExport(args)
+        "trading_signal_config_import" -> executeSignalConfigImport(args)
         "trading_position_sizing" -> executePositionSizing(args)
         "trading_correlation_matrix" -> executeCorrelationMatrix(args)
         "trading_economic_data" -> executeEconomicData(args)
@@ -569,6 +571,52 @@ internal class ResearchToolHandler(
                 if (confluenceMatch) "TA and Sentiment are aligned."
                 else "TA and Sentiment conflict; wait for confirmation."
             )
+        }
+    }
+
+    internal fun executeSignalDataExport(args: Map<String, String>): String {
+        val symbol = args["symbol"]?.takeUnless { it.equals("all", ignoreCase = true) }
+        val interval = args["interval"]?.takeUnless { it.equals("all", ignoreCase = true) }
+        val strategy = args["strategy"]?.takeUnless { it.equals("all", ignoreCase = true) }
+        val status = args["status"] ?: "all"
+        val format = args["format"] ?: "json"
+        val limit = args["limit"]?.toIntOrNull() ?: 500
+
+        val result = com.skyliner2008.jarvis.automation.SignalDatasetManager.exportDataset(
+            symbol = symbol,
+            interval = interval,
+            strategy = strategy,
+            status = status,
+            format = format,
+            limit = limit
+        )
+
+        return buildString {
+            appendLine(result.summaryTh)
+            appendLine()
+            if (result.totalCount > 0) {
+                appendLine("```${if (result.dataFormat == "csv") "csv" else "json"}")
+                appendLine(result.payload)
+                appendLine("```")
+            } else {
+                appendLine("*(ยังไม่มีข้อมูลสัญญาณที่ตรงกับเงื่อนไขการค้นหา)*")
+            }
+        }
+    }
+
+    internal fun executeSignalConfigImport(args: Map<String, String>): String {
+        val configJson = args["config_json"] ?: args["config"] ?: args["json"]
+            ?: return "❌ กรุณาระบุพารามิเตอร์ `config_json` ที่มี JSON โครงสร้างการตั้งค่า (tunings หรือ entry_params)"
+
+        val result = com.skyliner2008.jarvis.automation.SignalDatasetManager.importConfiguration(configJson)
+
+        return buildString {
+            appendLine(result.messageTh)
+            if (result.details.isNotEmpty()) {
+                appendLine()
+                appendLine("📋 **รายละเอียด:**")
+                result.details.forEach { appendLine("- $it") }
+            }
         }
     }
 }

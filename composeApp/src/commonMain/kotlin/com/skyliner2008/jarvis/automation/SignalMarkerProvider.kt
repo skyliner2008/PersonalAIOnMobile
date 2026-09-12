@@ -1,5 +1,8 @@
 package com.skyliner2008.jarvis.automation
 
+import com.skyliner2008.jarvis.automation.strategy.BBSqueezeTrendEngine
+import com.skyliner2008.jarvis.automation.strategy.FastRsiEngine
+import com.skyliner2008.jarvis.automation.strategy.VeyraShiftEngine
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.tools.trading.Candle
 import com.skyliner2008.jarvis.tools.trading.SmcApiService
@@ -17,7 +20,7 @@ import kotlin.math.sqrt
  *  - Strategy Library (5 ตัว): tsmom flip, trend state change, reversal trigger,
  *    donchian breakout, w52high proximity cross
  *  - SMC Flow System: UT Bot flip, EMA14/60 cross, 3-Bar Reversal
- *  (SMC Confluence ไม่ทำ marker — ต้องเรียก SMC analysis ต่อแท่ง หนักเกินไป)
+ *  - Quant & Institutional Engines (Pine Script): Veyra Shift Ledger, BB/KC Squeeze, Fast RSI
  *
  * Marker = แท่งที่เกิดเหตุ (edge-triggered: สัญญาณเปลี่ยนเท่านั้น ไม่ซ้ำทุกแท่ง)
  */
@@ -26,7 +29,7 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
     data class SignalMarker(
         val time: Long,
         val side: String,   // BUY | SELL
-        val label: String,  // เช่น "DC▲", "UT▼", "E14/60▲"
+        val label: String,  // เช่น "DC▲", "UT▼", "E14/60▲", "VEYRA▲", "BBSQ▲", "FRSI▲"
         val color: String   // hex
     )
 
@@ -36,12 +39,13 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
         private const val SELL_COLOR = "#EF5350"
 
         /**
-         * Strategy consolidation (2026-08-27): cross-TF forensics (XAUUSD, MT5, 60/20/20 split)
-         * พบว่าเฉพาะ MOM และ REV ที่ expectancy บวกครบทุก phase — TR/DC/52H/E/UT/3BR ถูกตัด
-         * ออกจาก pipeline สัญญาณ (โค้ดยังเก็บไว้ re-enable ได้) ส่วน engine หลักคือ UNIFIED_SMC
-         * (automation/smc/UnifiedSmcSignals.kt) ที่รวมทุก TF เป็น setup เดียว
+         * Comprehensive Multi-Strategy Suite:
+         * รองรับทั้ง 8 Classic strategies + 3 Pine Script institutional/quant strategies
          */
-        val ENABLED_KINDS = setOf("MOM", "REV")
+        val ENABLED_KINDS = setOf(
+            "MOM", "REV", "TR", "DC", "52H", "E", "UT", "3BR",
+            "VEYRA", "BBSQ", "FRSI"
+        )
     }
 
     /** คำนวณ markers ทั้งหมดของ symbol@tf (เรียงตามเวลา) — คืน emptyList ถ้าข้อมูลไม่พอ */
@@ -244,6 +248,55 @@ class SignalMarkerProvider(private val smcApi: SmcApiService) {
                     (c0.close < c0.open) && (c0.low < c2.low)
                 if (bull) marks += SignalMarker(c0.timestamp, "BUY", "3BR▲", "#81C784")
                 else if (bear) marks += SignalMarker(c0.timestamp, "SELL", "3BR▼", "#BA68C8")
+            }
+            out += marks.takeLast(maxPerKind)
+        }
+
+        // 9) Veyra Institutional Shift
+        run {
+            val marks = mutableListOf<SignalMarker>()
+            var prevDir = 0
+            val startIdx = maxOf(60, n - 60)
+            for (i in startIdx until n) {
+                val sub = candles.subList(0, i + 1)
+                val res = VeyraShiftEngine.evaluate(sub) ?: continue
+                if (res.dominantScore >= 65.0 && res.dominantDir != 0 && res.dominantDir != prevDir) {
+                    val side = if (res.dominantDir > 0) "BUY" else "SELL"
+                    marks += SignalMarker(candles[i].timestamp, side, "VEYRA${if (side == "BUY") "▲" else "▼"}", if (side == "BUY") "#00E676" else "#FF1744")
+                    prevDir = res.dominantDir
+                }
+            }
+            out += marks.takeLast(maxPerKind)
+        }
+
+        // 10) BB/KC Squeeze Breakout
+        run {
+            val marks = mutableListOf<SignalMarker>()
+            var prevFired = false
+            val startIdx = maxOf(30, n - 60)
+            for (i in startIdx until n) {
+                val sub = candles.subList(0, i + 1)
+                val res = BBSqueezeTrendEngine.evaluate(sub) ?: continue
+                if (res.isSqueezeFired && !prevFired && (res.signalSide == "BUY" || res.signalSide == "SELL")) {
+                    marks += SignalMarker(candles[i].timestamp, res.signalSide, "BBSQ${if (res.signalSide == "BUY") "▲" else "▼"}", if (res.signalSide == "BUY") "#00B0FF" else "#F50057")
+                }
+                prevFired = res.isSqueezeFired
+            }
+            out += marks.takeLast(maxPerKind)
+        }
+
+        // 11) Fast RSI Reversal (ABQ1)
+        run {
+            val marks = mutableListOf<SignalMarker>()
+            val startIdx = maxOf(10, n - 60)
+            for (i in startIdx until n) {
+                val sub = candles.subList(0, i + 1)
+                val res = FastRsiEngine.evaluate(sub) ?: continue
+                if (res.isCrossOver35) {
+                    marks += SignalMarker(candles[i].timestamp, "BUY", "FRSI▲", "#76FF03")
+                } else if (res.isCrossUnder75) {
+                    marks += SignalMarker(candles[i].timestamp, "SELL", "FRSI▼", "#FF5252")
+                }
             }
             out += marks.takeLast(maxPerKind)
         }

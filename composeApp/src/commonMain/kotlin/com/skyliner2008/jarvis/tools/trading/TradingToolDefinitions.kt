@@ -384,29 +384,34 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_signal_anticipation",
-            description = """จัดการระบบคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) และปรับแต่งปัจจัยการคาดการณ์
-                |ใช้เมื่อผู้ใช้สั่ง: "ใช้ tool คาดการณ์ล่วงหน้า [symbol]", "ตั้งแจ้งเตือนคาดการณ์ทองคำ", "ปรับปัจจัยคาดการณ์", "เพิ่มปัจจัย EMA", "ดูปัจจัยคาดการณ์ล่วงหน้า", "แนะนำปัจจัยคาดการณ์"
+            description = """จัดการและสแกนระบบคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ตรวจจับ-วิเคราะห์-แจ้งเตือน-เรียนรู้ (Closed-Loop Flow)
+                |ใช้เมื่อผู้ใช้สั่ง: "สแกนหาคาดการณ์สัญญาณ [symbol]", "ใช้ tool คาดการณ์ล่วงหน้า [symbol]", "ตั้งแจ้งเตือนคาดการณ์ทองคำ", "ดูผลการเรียนรู้ของ anticipation", "สถิติความแม่นยำคาดการณ์", "ตรวจสอบประวัติคาดการณ์", "ดูสภาพแวดล้อมที่คาดการณ์ทองคำ", "ปรับปัจจัยคาดการณ์"
                 |
                 |Action:
-                |- 'create': ตั้งแจ้งเตือนคาดการณ์ล่วงหน้าสำหรับ symbol ที่ระบุ (สร้าง Alert Job ในระบบ background เฝ้าดู signal_anticipation >= 1 โดยอัตโนมัติ พร้อมตั้งชุดปัจจัยที่ต้องการ หรือใช้ 4 ปัจจัยหลักเป็น default)
-                |- 'config': ปรับเปลี่ยน/เพิ่ม/ลบ ปัจจัยที่ใช้ในการคาดการณ์ของ symbol นั้น (บังคับเลือกจากคลัง 10 ปัจจัยมาตรฐานเพื่อกันความผิดพลาด)
-                |- 'list_factors': ดูรายการ 10 ปัจจัยมาตรฐานที่ระบบรองรับ (Curated Factor Whitelist) พร้อมสถานะเปิด/ปิด
+                |- 'scan' / 'analyze': สแกนแท่งเทียนปัจจุบันทันทีเพื่อตรวจจับการฟอร์มตัวของสัญญาณล่วงหน้า พร้อมคำนวณ Execution Rails (Entry, SL, TP1, TP2, TP3) และ Veyra Shift Score
+                |- 'create': ตั้งแจ้งเตือนคาดการณ์ล่วงหน้าสำหรับ symbol ที่ระบุ (สร้าง Alert Job ในระบบ background เฝ้าดู signal_anticipation >= 1 ตลอด 24 ชม. พร้อมเปิดใช้ 13 ปัจจัยมาตรฐานเริ่มต้น)
+                |- 'inspect' / 'history' / 'records': ตรวจสอบประวัติการคาดการณ์ย้อนหลัง ดูรายละเอียด Entry, SL, TP, ผลลัพธ์ R, และ Snapshot สภาพแวดล้อมตลาด (H4/H1 Trend, Squeeze, Veyra Score, RSI, Fast RSI, ADX) เพื่อตรวจความถูกต้องและสมเหตุสมผล
+                |- 'learning' / 'performance': ดูรายงานผลการเรียนรู้แบบ Closed-Loop Reinforcement Learning สถิติการเปลี่ยนเป็นออเดอร์จริง Win Rate และการปรับค่าน้ำหนักความเชื่อมั่นของแต่ละปัจจัย
+                |- 'config': ปรับเปลี่ยน/เพิ่ม/ลบ ปัจจัยที่ใช้ในการคาดการณ์ของ symbol นั้น (บังคับเลือกจากคลัง 13 ปัจจัยมาตรฐานเพื่อกันความผิดพลาด)
+                |- 'list_factors': ดูรายการ 13 ปัจจัยมาตรฐานที่ระบบรองรับ (Curated Factor Whitelist รวมทั้ง Veyra Shift, BB KC Squeeze, Fast RSI) พร้อมสถานะเปิด/ปิด
                 |- 'recommend': ให้ AI แนะนำชุดปัจจัยที่เหมาะสมกับพฤติกรรมตลาดของสินทรัพย์นั้น
                 |- 'status': ตรวจสอบการตั้งค่าและสถานะการเฝ้าระวังคาดการณ์ของ symbol นั้น
                 |
                 |Parameters:
                 |- symbol: เช่น XAUUSD, BTCUSDT
-                |- timeframe: ไทม์เฟรมที่ต้องการเฝ้าระวัง เช่น 5m, 15m, 30m, 1h, 4h หรือ all หรือหลาย TF เช่น '15m,1h' (default คือ 15m หากไม่ระบุ — รองรับ m5 ถึง h4)
-                |- factors: รายการปัจจัยที่ต้องการกำหนด (comma-separated เช่น "KEYZONE_PROXIMITY,WICK_SWEEP_REJECTION,RSI_EXTREME,EMA_NEAR_CROSS")
-                |- add_factors: ปัจจัยที่ต้องการเพิ่มเข้าไป (เช่น "BOLLINGER_SQUEEZE" หรือ "VOLUME_ABSORPTION")
-                |- remove_factors: ปัจจัยที่ต้องการเอาออก (เช่น "RSI_EXTREME")
+                |- timeframe: ไทม์เฟรมที่ต้องการเฝ้าระวังหรือสแกน เช่น 5m, 15m, 30m, 1h, 4h หรือ all (default คือ 15m หากไม่ระบุ)
+                |- limit: จำนวนรายการประวัติที่ต้องการตรวจสอบ (เฉพาะ action=inspect/history เช่น 5, 10, 20)
+                |- factors: รายการปัจจัยที่ต้องการกำหนด (comma-separated เช่น "KEYZONE_PROXIMITY,VEYRA_SHIFT,BB_KC_SQUEEZE,FAST_RSI_REVERSAL")
+                |- add_factors: ปัจจัยที่ต้องการเพิ่มเข้าไป (เช่น "VEYRA_SHIFT" หรือ "BB_KC_SQUEEZE")
+                |- remove_factors: ปัจจัยที่ต้องการเอาออก
                 |- delivery: 'ai' (default) หรือ 'direct'""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "action" to ParameterProperty("STRING", "การกระทำ: create, config, list_factors, recommend, status", enum = listOf("create", "config", "list_factors", "recommend", "status")),
+                    "action" to ParameterProperty("STRING", "การกระทำ: scan, analyze, create, inspect, history, records, learning, performance, config, list_factors, recommend, status", enum = listOf("scan", "analyze", "create", "inspect", "history", "records", "learning", "performance", "config", "list_factors", "recommend", "status")),
                     "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT"),
                     "timeframe" to ParameterProperty("STRING", "Timeframe เช่น 5m, 15m, 30m, 1h, 4h, all หรือระบุหลาย TF เช่น '15m,1h' (default 15m)"),
+                    "limit" to ParameterProperty("NUMBER", "จำนวนรายการประวัติที่ต้องการดึงมาตรวจสอบ (เฉพาะ action=inspect/history/records, default 10)"),
                     "factors" to ParameterProperty("STRING", "รายการปัจจัยที่ต้องการเปิดใช้ (คั่นด้วยจุลภาค)"),
                     "add_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเพิ่มเข้าไป"),
                     "remove_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเอาออก"),
@@ -546,6 +551,44 @@ object TradingToolDefinitions {
                     )
                 ),
                 required = listOf("symbol")
+            )
+        ),
+
+        // ── 14d-1. Export Signal Dataset (ส่งออกชุดข้อมูลสัญญาณพร้อม Features และผลลัพธ์) ──
+        FunctionDeclaration(
+            name = "trading_signal_data_export",
+            description = """ส่งออกชุดข้อมูลประวัติสัญญาณการเทรด (Signal Tracking Records) พร้อม Snapshot คุณลักษณะแท่งเทียนและตลาด 25+ ค่า (Features JSON) และผลลัพธ์การเทรดจำลองจริง (Win/Loss, MFE, MAE, R-multiple)
+                |ใช้เมื่อผู้ใช้สั่ง: "export สัญญาณเทรด", "ส่งออก dataset สัญญาณ", "ขอข้อมูล signal ไปเทรน AI", "export features สัญญาณ", "ดึงประวัติการเทรดจำลองไปวิเคราะห์"
+                |รองรับรูปแบบ: json (default) หรือ csv""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol"   to ParameterProperty("STRING", "Symbol ที่ต้องการกรอง เช่น XAUUSD, BTCUSDT (เว้นว่างเพื่อดึงทั้งหมด)"),
+                    "interval" to ParameterProperty("STRING", "Timeframe เช่น 5m, 15m, 30m, 1h, 4h (เว้นว่างเพื่อดึงทั้งหมด)"),
+                    "strategy" to ParameterProperty("STRING", "กลยุทธ์ เช่น all, VEYRA, BBSQ, FRSI, UNIFIED_SMC, MOM, REV, TR, DC (default all)"),
+                    "status"   to ParameterProperty("STRING", "สถานะผลลัพธ์: resolved (จบแล้ว), all, WIN, LOSS, OPEN (default resolved)", enum = listOf("resolved", "all", "WIN", "LOSS", "OPEN")),
+                    "format"   to ParameterProperty("STRING", "รูปแบบข้อมูล: json (default) หรือ csv", enum = listOf("json", "csv")),
+                    "limit"    to ParameterProperty("NUMBER", "จำนวนรายการสูงสุด (default 500)")
+                ),
+                required = emptyList()
+            )
+        ),
+
+        // ── 14d-2. Import Tuned Strategy Configuration (นำเข้าพารามิเตอร์ที่ AI ปรับจูนแล้ว) ──
+        FunctionDeclaration(
+            name = "trading_signal_config_import",
+            description = """นำเข้าชุดพารามิเตอร์กลยุทธ์ (SL/TP multipliers, Entry thresholds, Strategy Gate) ที่ผ่านการปรับแต่ง/วิเคราะห์โดย AI ภายนอกหรือ ML Model กลับเข้าสู่ระบบ SQLite
+                |ใช้เมื่อผู้ใช้สั่ง: "import พารามิเตอร์", "นำเข้า config กลยุทธ์", "อัปเดต params ที่ AI จูนมา", "ใส่การตั้งค่ากลยุทธ์ใหม่"
+                |พารามิเตอร์จะถูกบันทึกเข้า StrategyTuning และ EntryTuning โดยอัตโนมัติ และมีผลต่อ Live Alert ในรอบถัดไปทันที""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "config_json" to ParameterProperty(
+                        type = "STRING",
+                        description = "JSON payload ที่มีฟิลด์ 'tunings' (array ของ {kind, sl_mult, tp_mult, score, grade}) หรือ 'entry_params' (array ของ {kind, params}) เช่น {\"symbol\":\"XAUUSD\",\"interval\":\"15m\",\"tunings\":[{\"kind\":\"VEYRA\",\"sl_mult\":0.8,\"tp_mult\":2.5}]}"
+                    )
+                ),
+                required = listOf("config_json")
             )
         ),
 

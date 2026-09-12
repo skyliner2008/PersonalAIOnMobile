@@ -184,11 +184,14 @@ private fun ensureNewTablesExist(driver: SqlDriver) {
             exit_price REAL,
             pnl_r REAL,
             bars_held INTEGER NOT NULL DEFAULT 0,
+            features_json TEXT,
             created_at INTEGER NOT NULL,
             closed_at INTEGER
         )""",
         "CREATE INDEX IF NOT EXISTS idx_signal_tracking_symbol_status ON SignalTrackingRecord(symbol, status)",
-        "CREATE INDEX IF NOT EXISTS idx_signal_tracking_strategy ON SignalTrackingRecord(strategy, status)"
+        "CREATE INDEX IF NOT EXISTS idx_signal_tracking_strategy ON SignalTrackingRecord(strategy, status)",
+        // Migration: add features_json to SignalTrackingRecord for existing databases
+        "ALTER TABLE SignalTrackingRecord ADD COLUMN features_json TEXT"
     )
 
     statements.forEach { sql ->

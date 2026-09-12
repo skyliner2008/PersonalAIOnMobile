@@ -58,6 +58,16 @@ fun JarvisAvatar(
     val armMotion = rememberArmMotion(state.emotion, state.isSpeaking)
     val winkFactor by rememberWinkState()
     val reactorPulse by rememberReactorPulse()
+    val dizzyAngle by if (state.isDizzy) {
+        val inf = rememberInfiniteTransition(label = "dizzy")
+        inf.animateFloat(
+            initialValue = 0f, targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(650, easing = LinearEasing)),
+            label = "dizzy_rot"
+        )
+    } else {
+        remember { mutableStateOf(0f) }
+    }
     val isCompanionVisible = state.emotion == AvatarEmotion.THINKING || 
         (state.statusText != null && state.statusText.contains("กำลัง"))
     val companionBubble = rememberCompanionBubbleState(isCompanionVisible)
@@ -80,7 +90,7 @@ fun JarvisAvatar(
 
     // Eye color based on emotion
     val eyeColor = when (state.emotion) {
-        AvatarEmotion.ANGRY -> angryRed
+        AvatarEmotion.ANGRY, AvatarEmotion.ENRAGED -> angryRed
         AvatarEmotion.LOVE -> heartPink
         AvatarEmotion.SLEEPING -> sleepBlue.copy(alpha = 0.6f)
         AvatarEmotion.EXCITED -> excitedGold
@@ -89,7 +99,7 @@ fun JarvisAvatar(
 
     // Glow color
     val glowColor = when (state.emotion) {
-        AvatarEmotion.ANGRY -> angryRed.copy(alpha = 0.22f)
+        AvatarEmotion.ANGRY, AvatarEmotion.ENRAGED -> angryRed.copy(alpha = 0.35f)
         AvatarEmotion.LOVE -> heartPink.copy(alpha = 0.25f)
         AvatarEmotion.SLEEPING -> sleepBlue.copy(alpha = 0.12f)
         AvatarEmotion.EXCITED -> excitedGold.copy(alpha = 0.28f)
@@ -103,7 +113,7 @@ fun JarvisAvatar(
         else -> 0f
     }
     val bodyOffsetX = when (state.emotion) {
-        AvatarEmotion.ANGRY -> shake
+        AvatarEmotion.ANGRY, AvatarEmotion.ENRAGED -> shake
         AvatarEmotion.SAD -> slowSway
         else -> 0f
     }
@@ -438,13 +448,16 @@ fun JarvisAvatar(
                 )
 
                 // ═══════════════════════════════════════════════════════════
-                // 4. Eyes (10 Expressions from Image 2 + Playful Wink)
+                // 4. Eyes (10 Expressions from Image 2 + Playful Wink + Dynamic Gaze)
                 // ═══════════════════════════════════════════════════════════
                 val eyeRadius = u * 0.04f
-                val eyeY = visorY + visorH * 0.4f
+                val baseEyeY = visorY + visorH * 0.4f
                 val eyeSpacing = visorW * 0.22f
-                val leftEyeX = centerX - eyeSpacing
-                val rightEyeX = centerX + eyeSpacing
+                val gazeShiftX = (state.gazeOffsetX.coerceIn(-1f, 1f)) * eyeRadius * 0.75f
+                val gazeShiftY = (state.gazeOffsetY.coerceIn(-1f, 1f)) * eyeRadius * 0.6f
+                val leftEyeX = centerX - eyeSpacing + gazeShiftX
+                val rightEyeX = centerX + eyeSpacing + gazeShiftX
+                val eyeY = baseEyeY + gazeShiftY
 
                 drawEyes(
                     emotion = state.emotion,
@@ -455,6 +468,8 @@ fun JarvisAvatar(
                     eyeColor = eyeColor,
                     blinkFactor = eyeBlink,
                     winkFactor = winkFactor,
+                    isDizzy = state.isDizzy,
+                    dizzyAngle = dizzyAngle,
                     unit = u,
                     textMeasurer = textMeasurer
                 )
@@ -647,8 +662,36 @@ private fun DrawScope.drawEyes(
     leftEyeX: Float, rightEyeX: Float, eyeY: Float,
     eyeRadius: Float, eyeColor: Color, blinkFactor: Float,
     winkFactor: Float,
+    isDizzy: Boolean = false,
+    dizzyAngle: Float = 0f,
     unit: Float, textMeasurer: TextMeasurer
 ) {
+    if (isDizzy) {
+        // Spiral / Dizzy eyes (@_@) rotating when shaken
+        val r = eyeRadius * 1.25f
+        rotate(dizzyAngle, Offset(leftEyeX, eyeY)) {
+            drawArc(
+                color = eyeColor,
+                startAngle = 0f, sweepAngle = 290f, useCenter = false,
+                topLeft = Offset(leftEyeX - r, eyeY - r),
+                size = Size(r * 2f, r * 2f),
+                style = Stroke(width = unit * 0.016f, cap = StrokeCap.Round)
+            )
+            drawCircle(eyeColor, radius = r * 0.35f, center = Offset(leftEyeX, eyeY))
+        }
+        rotate(-dizzyAngle, Offset(rightEyeX, eyeY)) {
+            drawArc(
+                color = eyeColor,
+                startAngle = 0f, sweepAngle = 290f, useCenter = false,
+                topLeft = Offset(rightEyeX - r, eyeY - r),
+                size = Size(r * 2f, r * 2f),
+                style = Stroke(width = unit * 0.016f, cap = StrokeCap.Round)
+            )
+            drawCircle(eyeColor, radius = r * 0.35f, center = Offset(rightEyeX, eyeY))
+        }
+        return
+    }
+
     when (emotion) {
         AvatarEmotion.HAPPY -> {
             // ^_^ — Cheerful smiling upward arcs

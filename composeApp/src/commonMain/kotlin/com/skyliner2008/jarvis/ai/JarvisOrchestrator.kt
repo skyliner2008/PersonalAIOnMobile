@@ -92,6 +92,9 @@ class JarvisOrchestrator(
     val audioOutputFlow: Flow<ByteArray> = liveService.audioOutputFlow
     val textOutputFlow: Flow<com.skyliner2008.jarvis.data.LiveGeminiService.LiveTextUpdate> = liveService.textOutputFlow
     val activeToolName: StateFlow<String?> = toolBridge.activeToolName
+    val lastToolResult: StateFlow<Pair<String, String>?> = toolBridge.lastToolResult
+
+    fun clearLastToolResult() = toolBridge.clearLastToolResult()
 
     fun getGeminiService() = geminiService
 
@@ -652,6 +655,11 @@ class JarvisOrchestrator(
     /** ตั้ง greeting เฉพาะเมื่อยังไม่มีของเดิมค้างอยู่ (กันทับ greeting สำคัญ เช่นยืนยันเปลี่ยนเสียง) */
     fun setLiveGreetingOnReadyIfAbsent(text: String) {
         if (liveService.pendingGreetingOnReady == null) liveService.pendingGreetingOnReady = text
+    }
+
+    /** รีเซ็ต session resumption handle เมื่อสลับโหมด/โปรไฟล์ เพื่อตัดขาดบริบทเก่า ป้องกันความสับสนระหว่าง Persona */
+    fun resetLiveSessionResumption() {
+        liveService.resetSessionResumption()
     }
 
     /**

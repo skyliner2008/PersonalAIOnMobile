@@ -31,7 +31,8 @@ data class DetectedObject(
     val label: String,
     val confidence: Float,
     val boundingBox: BoundingBox? = null,
-    val color: String = "#00E5FF"    // Overlay color (default = Cyan)
+    val color: String = "#00E5FF",    // Overlay color (default = Cyan)
+    val isLocked: Boolean = false
 )
 
 /**

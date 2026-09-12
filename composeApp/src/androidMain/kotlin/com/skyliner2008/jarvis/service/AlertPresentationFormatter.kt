@@ -101,23 +101,53 @@ object AlertPresentationFormatter {
 
 
     /**
-     * การ์ดคาดการณ์สัญญาณล่วงหน้าสำหรับแชท — กะทัดรัด แสดงเฉพาะปัจจัยที่เกิด ไม่รกพื้นที่
+     * การ์ดคาดการณ์สัญญาณล่วงหน้าสำหรับแชท — กะทัดรัด แสดงขั้นตอนความพร้อม (Stage) และ Execution Rails (Entry/SL/TP)
      */
     fun buildAnticipationChatCard(job: AlertJob, data: Map<String, String>, aiSummary: String?): String {
         val side = data["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
         val badge = if (side.equals("BUY", ignoreCase = true)) "⚡🟢" else "⚡🔴"
         val conf = data["signal_anticipation_confidence"]?.ifBlank { "75" } ?: "75"
         val close = data["close"] ?: "-"
+        val stage = data["signal_anticipation_stage"]?.ifBlank { "PRE_SETUP" } ?: "PRE_SETUP"
+        val stageBadge = when (stage) {
+            "CONFIRMING" -> "🔥 [CONFIRMING - ยืนยันสัญญาณ]"
+            "TRIGGER_READY" -> "⚡ [TRIGGER READY - จุดพร้อมเข้า]"
+            else -> "⏳ [PRE SETUP - ตั้งโครงสร้าง]"
+        }
+        val factor = data["signal_anticipation_factor"]?.ifBlank { "ANTICIPATION" } ?: "ANTICIPATION"
         val desc = data["signal_anticipation_desc"]?.ifBlank { "เฝ้าระวังการกลับตัวในโซนสำคัญ" } ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ"
+        val zone = data["signal_anticipation_zone"]
         val (sym, tf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+
+        val entry = data["signal_anticipation_entry"]?.takeIf { it.isNotBlank() }
+        val sl = data["signal_anticipation_sl"]?.takeIf { it.isNotBlank() }
+        val tp1 = data["signal_anticipation_tp1"]?.takeIf { it.isNotBlank() }
+        val tp2 = data["signal_anticipation_tp2"]?.takeIf { it.isNotBlank() }
+        val tp3 = data["signal_anticipation_tp3"]?.takeIf { it.isNotBlank() }
+
         return buildString {
             appendLine("$badge **คาดการณ์ $side — $sym (${tf.uppercase()})**")
-            appendLine("ความเชื่อมั่น: $conf% • ราคา: $close")
+            appendLine("$stageBadge • ความเชื่อมั่น: $conf% • ราคา: $close")
+            if (!zone.isNullOrBlank()) {
+                appendLine("• โซน/ปัจจัย: $zone ($factor)")
+            }
             appendLine()
             appendLine("**ปัจจัยที่เกิด:** $desc")
+
+            if (entry != null && sl != null) {
+                appendLine()
+                appendLine("| Execution Rail | ระดับราคา |")
+                appendLine("|---|---|")
+                appendLine("| แผนเข้า (Entry) | $entry |")
+                appendLine("| Stop Loss (SL) | $sl |")
+                if (tp1 != null) appendLine("| Take Profit 1 | $tp1 |")
+                if (tp2 != null) appendLine("| Take Profit 2 | $tp2 |")
+                if (tp3 != null) appendLine("| Take Profit 3 | $tp3 |")
+            }
+
             if (!aiSummary.isNullOrBlank()) {
                 appendLine()
-                appendLine("**สิ่งที่ต้องจับตามอง:** $aiSummary")
+                appendLine("**JARVIS Supervisor / สรุป:** $aiSummary")
             }
         }.trim()
     }
@@ -187,8 +217,16 @@ object AlertPresentationFormatter {
             "1h" -> "1 ชั่วโมง"; "4h" -> "4 ชั่วโมง"; "1d" -> "รายวัน"; "1w" -> "รายสัปดาห์"
             else -> tf
         }
+        val stage = data["signal_anticipation_stage"] ?: "PRE_SETUP"
+        val stageTh = when (stage) {
+            "CONFIRMING" -> "ยืนยันแท่งเทียนแล้ว"
+            "TRIGGER_READY" -> "เข้าจุดทริกเกอร์พร้อมเปิดออเดอร์"
+            else -> "กำลังเริ่มฟอร์มตัว"
+        }
+        val entry = data["signal_anticipation_entry"]?.takeIf { it.isNotBlank() }
+        val entryMsg = if (entry != null) " ที่ระดับราคา $entry" else ""
         val zone = data["signal_anticipation_zone"]?.ifBlank { "โซนสำคัญ" } ?: "โซนสำคัญ"
-        return "คาดการณ์ $symTh ไทม์เฟรม $tfTh ที่$zone $dirTh ให้จับตาดูการปิดแท่งเทียนนะคะ"
+        return "แจ้งเตือนคาดการณ์ $symTh ไทม์เฟรม $tfTh $stageTh$entryMsg ที่$zone $dirTh ให้จับตาดูนะคะ"
     }
 
     /** ข้อความพูดสั้นๆ สำหรับ signal alert — ลดเวลา synthesize/ฟังของ Gemini TTS (ข้อความยาว = ดีเลย์สูง) */

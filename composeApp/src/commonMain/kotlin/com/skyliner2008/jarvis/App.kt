@@ -61,6 +61,7 @@ import com.skyliner2008.jarvis.ui.screen.LiveModePanel
 import com.skyliner2008.jarvis.ui.screen.AlwaysLiveScreen
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
+import com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState
 import com.skyliner2008.jarvis.ui.screen.SettingsDialog
 import com.skyliner2008.jarvis.ui.screen.ToolListScreen
 import com.skyliner2008.jarvis.ui.screen.TradingChartScreen
@@ -82,13 +83,17 @@ fun App(
     onStopAlwaysLive: () -> Unit = {},
     registerExpandAlwaysLive: (((() -> Unit) -> Unit))? = null,
     registerCloseAlwaysLive: (((() -> Unit) -> Unit))? = null,
+    registerProfileChange: ((((com.skyliner2008.jarvis.pet.AlwaysLiveProfile) -> Unit)) -> Unit)? = null,
+    onSetAlwaysLiveProfile: ((com.skyliner2008.jarvis.pet.AlwaysLiveProfile) -> Unit)? = null,
     registerTestEmotion: ((((String) -> Unit)) -> Unit)? = null,
+    registerNotificationAnnouncement: ((((String, String, String) -> Unit)) -> Unit)? = null,
     onKeepScreenOn: (Boolean) -> Unit = {},
     requestAllFilesPermission: () -> Unit = {},
     allFilesAccessGranted: Boolean = false,
     setupChecks: List<com.skyliner2008.jarvis.ui.screen.SetupCheckItem> = emptyList(),
     fileToolHandler: (suspend (String, Map<String, String>) -> String)? = null,
-    onDownloadLocalModel: (suspend (com.skyliner2008.jarvis.data.embedding.LocalOnnxEmbeddingProvider, (Float) -> Unit, Boolean) -> Unit)? = null
+    onDownloadLocalModel: (suspend (com.skyliner2008.jarvis.data.embedding.LocalOnnxEmbeddingProvider, (Float) -> Unit, Boolean) -> Unit)? = null,
+    onSetImmersiveMode: ((Boolean) -> Unit)? = null
 ) {
     val viewModel: JarvisViewModel = viewModel {
         JarvisViewModel(databaseDriverFactory, voiceManager, fileToolHandler, onDownloadLocalModel)
@@ -104,11 +109,15 @@ fun App(
     val isAiVisionRequested by viewModel.isAiVisionRequested.collectAsStateWithLifecycle()
     val voiceError by viewModel.voiceError.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
+    val lastToolResult by viewModel.lastToolResult.collectAsStateWithLifecycle()
     val audioLevel by viewModel.audioLevel.collectAsStateWithLifecycle()
     val isAiSpeaking by viewModel.isAiSpeaking.collectAsStateWithLifecycle()
     val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
     val testEmotionOverride by viewModel.testEmotionOverride.collectAsStateWithLifecycle()
     val testStatusOverride by viewModel.testStatusOverride.collectAsStateWithLifecycle()
+    val testFaceStateOverride by viewModel.testFaceStateOverride.collectAsStateWithLifecycle()
+    val alwaysLiveProfile by viewModel.alwaysLiveProfile.collectAsStateWithLifecycle()
+    val isDemoRunning by viewModel.isDemoRunning.collectAsStateWithLifecycle()
 
     var showSettings by remember { mutableStateOf(false) }
     var showAlwaysLive by remember { mutableStateOf(false) }
@@ -204,7 +213,12 @@ fun App(
 
     LaunchedEffect(Unit) {
         registerToggleLive {
-            if (viewModel.isListening.value) viewModel.stopVoiceInput() else viewModel.startVoiceInput()
+            if (viewModel.isListening.value) {
+                viewModel.stopVoiceInput()
+            } else {
+                viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
+                viewModel.startVoiceInput()
+            }
         }
         registerExpandAlwaysLive?.invoke {
             showAlwaysLive = true
@@ -216,16 +230,92 @@ fun App(
         registerCloseAlwaysLive?.invoke {
             showAlwaysLive = false
             onStopAlwaysLive()
+            viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
             viewModel.stopVoiceInput()
         }
+        registerProfileChange?.invoke { profile ->
+            viewModel.setAlwaysLiveProfile(profile)
+        }
         registerTestEmotion?.invoke { emotionCmd ->
-            showAlwaysLive = true
-            onStartAlwaysLive()
             val trimmed = emotionCmd.trim()
             if (trimmed.equals("DEMO", ignoreCase = true)) {
+                showAlwaysLive = true
+                onStartAlwaysLive()
                 viewModel.startEmotionDemo()
             } else if (trimmed.equals("RESET", ignoreCase = true) || trimmed.equals("AUTO", ignoreCase = true) || trimmed.equals("CLEAR", ignoreCase = true)) {
-                viewModel.setTestEmotion(null, null)
+                viewModel.stopEmotionDemo()
+            } else if (trimmed.startsWith("CUSTOM_PROP|")) {
+                showAlwaysLive = true
+                onStartAlwaysLive()
+                val parts = trimmed.split("|")
+                val args = mutableMapOf<String, String>()
+                for (i in 1 until parts.size) {
+                    val kv = parts[i].split("=", limit = 2)
+                    if (kv.size == 2) args[kv[0].trim()] = kv[1].trim()
+                }
+                val action = args["action"]?.lowercase() ?: "add"
+                when (action) {
+                    "clear" -> viewModel.clearCustomProps()
+                    "remove" -> viewModel.removeCustomProp(args["name"] ?: "")
+                    "add" -> {
+                        val name = args["name"] ?: "custom_prop"
+                        val svg = args["svg_path"]
+                        if (!svg.isNullOrBlank()) {
+                            val pos = try {
+                                com.skyliner2008.jarvis.ui.component.avatar.PropPosition.valueOf(args["position"]?.uppercase() ?: "FOREHEAD")
+                            } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.PropPosition.FOREHEAD }
+                            val anim = try {
+                                com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.valueOf(args["animation"]?.uppercase() ?: "FLOAT_BOB")
+                            } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.FLOAT_BOB }
+                            val prop = com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp(
+                                id = name,
+                                name = name,
+                                svgPath = svg,
+                                fillColor = args["color"] ?: "#FFD700",
+                                strokeColor = args["stroke_color"],
+                                strokeWidth = args["stroke_width"]?.toFloatOrNull() ?: 0f,
+                                position = pos,
+                                sizeDp = args["size"]?.toFloatOrNull() ?: 0f,
+                                animation = anim
+                            )
+                            viewModel.addCustomProp(prop)
+                        } else {
+                            val existing = com.skyliner2008.jarvis.pet.PetCustomPropStore.findPropByNameOrId(name)
+                            if (existing != null) {
+                                val pos = args["position"]?.let {
+                                    try { com.skyliner2008.jarvis.ui.component.avatar.PropPosition.valueOf(it.uppercase()) } catch (_: Exception) { null }
+                                } ?: existing.position
+                                val anim = args["animation"]?.let {
+                                    try { com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.valueOf(it.uppercase()) } catch (_: Exception) { null }
+                                } ?: existing.animation
+                                val size = args["size"]?.toFloatOrNull() ?: existing.sizeDp
+                                val color = args["color"] ?: existing.fillColor
+                                val prop = existing.copy(
+                                    position = pos,
+                                    animation = anim,
+                                    sizeDp = size,
+                                    fillColor = color
+                                )
+                                viewModel.addCustomProp(prop)
+                            }
+                        }
+                    }
+                }
+            } else if (trimmed.contains("|") || trimmed.startsWith("{")) {
+                showAlwaysLive = true
+                onStartAlwaysLive()
+                if (trimmed.startsWith("{")) {
+                    viewModel.setTestFaceState(RobotFaceState.fromJson(trimmed))
+                } else {
+                    val parts = trimmed.split("|")
+                    val emotionName = parts.firstOrNull() ?: "idle"
+                    val args = mutableMapOf("emotion" to emotionName)
+                    for (i in 1 until parts.size) {
+                        val kv = parts[i].split("=", limit = 2)
+                        if (kv.size == 2) args[kv[0].trim()] = kv[1].trim()
+                    }
+                    viewModel.setTestFaceState(RobotFaceState.fromArgs(args))
+                }
             } else {
                 val emotion = try {
                     AvatarEmotion.valueOf(trimmed.uppercase())
@@ -234,6 +324,9 @@ fun App(
                 }
                 viewModel.setTestEmotion(emotion, if (emotion != null) "🧪 โหมดทดสอบ: ${emotion.name}" else null)
             }
+        }
+        registerNotificationAnnouncement?.invoke { appName, sender, content ->
+            viewModel.announceNotification(appName, sender, content)
         }
     }
 
@@ -337,7 +430,10 @@ fun App(
                             onToggleCamera = { viewModel.toggleCamera() },
                             onSwitchCamera = { viewModel.switchCamera() },
                             onToggleMute = { viewModel.toggleMute() },
-                            onEndLive = { viewModel.stopVoiceInput() },
+                            onEndLive = {
+                                viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
+                                viewModel.stopVoiceInput()
+                            },
                             onFrameCapture = { jpeg, raw -> viewModel.onCameraFrame(jpeg, raw) },
                             onAlwaysLive = {
                                 showAlwaysLive = true
@@ -347,7 +443,10 @@ fun App(
                     } else {
                         ChatInputBar(
                             onSend = { msg, atts -> viewModel.sendMessage(msg, attachments = atts) },
-                            onStartLive = { viewModel.startVoiceInput() },
+                            onStartLive = {
+                                viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
+                                viewModel.startVoiceInput()
+                            },
                             enabled = !isTyping,
                             voiceAvailable = voiceManager.isAvailable()
                         )
@@ -624,12 +723,13 @@ fun App(
             )
         }
 
-        val avatarState = remember(avatarEmotion, audioLevel, isAiSpeaking, isTyping, userSpeakingHold, statusText) {
+        val avatarState = remember(avatarEmotion, audioLevel, isAiSpeaking, isTyping, userSpeakingHold, statusText, testFaceStateOverride) {
             AvatarState(
                 emotion = avatarEmotion,
                 audioLevel = if (isAiSpeaking || userSpeakingHold) audioLevel else 0f,
                 isSpeaking = isAiSpeaking || isTyping,
-                statusText = statusText
+                statusText = statusText,
+                faceState = testFaceStateOverride ?: RobotFaceState()
             )
         }
         AlwaysLiveScreen(
@@ -646,8 +746,27 @@ fun App(
             onEndLive = {
                 showAlwaysLive = false
                 onStopAlwaysLive()
+                viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                 viewModel.stopVoiceInput()
-            }
+            },
+            currentProfile = alwaysLiveProfile,
+            onSelectProfile = { profile ->
+                viewModel.setAlwaysLiveProfile(profile)
+                onSetAlwaysLiveProfile?.invoke(profile)
+            },
+            onLiveVideoFrame = { jpeg -> viewModel.sendLiveCameraFrame(jpeg) },
+            isDemoRunning = isDemoRunning,
+            onToggleDemo = {
+                if (isDemoRunning) {
+                    viewModel.stopEmotionDemo()
+                } else {
+                    viewModel.startEmotionDemo()
+                }
+            },
+            onSetImmersiveMode = onSetImmersiveMode,
+            activeToolName = activeToolName,
+            lastToolResult = lastToolResult,
+            onDismissToolCard = { viewModel.dismissToolCard() }
         )
     }
 }

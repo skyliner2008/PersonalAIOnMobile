@@ -48,6 +48,17 @@ class DeviceControlTest {
         // System Info
         assertTrue("device_battery_status" in names)
         assertTrue("device_wifi_status" in names)
+
+        // Avatar Emotion & Custom Props
+        assertTrue("device_avatar_emotion" in names)
+        assertTrue("device_custom_prop" in names)
+
+        // Smart Notifications (Driving Mode)
+        assertTrue("device_notification_read" in names)
+        assertTrue("device_notification_reply" in names)
+
+        // Location
+        assertTrue("device_location" in names)
     }
 
     @Test
@@ -58,6 +69,11 @@ class DeviceControlTest {
         assertTrue(ToolRegistry.isDeviceTool("device_navigate"))
         assertTrue(ToolRegistry.isDeviceTool("device_read_screen"))
         assertTrue(ToolRegistry.isDeviceTool("device_battery_status"))
+        assertTrue(ToolRegistry.isDeviceTool("device_avatar_emotion"))
+        assertTrue(ToolRegistry.isDeviceTool("device_custom_prop"))
+        assertTrue(ToolRegistry.isDeviceTool("device_notification_read"))
+        assertTrue(ToolRegistry.isDeviceTool("device_notification_reply"))
+        assertTrue(ToolRegistry.isDeviceTool("device_location"))
 
         // allToolNames
         val allNames = ToolRegistry.allToolNames()
@@ -71,6 +87,7 @@ class DeviceControlTest {
         assertTrue("device_flashlight" in geminiDeclNames)
         assertTrue("device_volume" in geminiDeclNames)
         assertTrue("device_navigate" in geminiDeclNames)
+        assertTrue("device_custom_prop" in geminiDeclNames)
 
         // Categories check
         val categories = ToolRegistry.getToolCategories()
@@ -91,6 +108,12 @@ class DeviceControlTest {
                     "device_volume" -> "🔊 เพิ่มเสียงมีเดีย: 10/15"
                     "device_navigate" -> "🗺️ กำลังเปิด Google Maps นำทางไป ${args["destination"]}"
                     "device_read_screen" -> "📱 ตรวจพบ 5 องค์ประกอบบนหน้าจอ"
+                    "device_avatar_emotion" -> "🎭 แสดงเดโม่อารมณ์ 10 แบบแล้ว"
+                    "device_always_live" -> "🤖 เปิดโหมด Always AI Live (โหมดควบคุม) เรียบร้อยแล้วค่ะ"
+                    "device_notification_read" -> "📬 ตรวจพบข้อความล่าสุด 1 รายการ"
+                    "device_notification_reply" -> "💬 ส่งข้อความตอบกลับเรียบร้อยแล้วค่ะ"
+                    "device_location" -> "🌐 พิกัดปัจจุบัน: Lat 13.75630, Lng 100.50180"
+                    "device_media_control" -> "🎵 เพลง: Starboy - The Weeknd"
                     else -> "OK"
                 }
             }
@@ -123,11 +146,54 @@ class DeviceControlTest {
             )
             assertTrue(screenRes.result.contains("ตรวจพบ 5 องค์ประกอบ"))
 
-            assertEquals(4, executedCalls.size)
+            // Avatar Emotion
+            val emoRes = ToolExecutor.execute(
+                ToolCall("device_avatar_emotion", mapOf("action" to "demo"))
+            )
+            assertTrue(emoRes.result.contains("แสดงเดโม่อารมณ์"))
+
+            // Always Live (Control Mode)
+            val liveRes = ToolExecutor.execute(
+                ToolCall("device_always_live", mapOf("action" to "on", "mode" to "control"))
+            )
+            assertTrue(liveRes.result.contains("โหมดควบคุม"))
+
+            // Notification Read
+            val notifReadRes = ToolExecutor.execute(
+                ToolCall("device_notification_read", mapOf("app_filter" to "line"))
+            )
+            assertTrue(notifReadRes.result.contains("ตรวจพบข้อความล่าสุด"))
+
+            // Notification Reply
+            val notifReplyRes = ToolExecutor.execute(
+                ToolCall("device_notification_reply", mapOf("message" to "กำลังขับรถอยู่ครับ"))
+            )
+            assertTrue(notifReplyRes.result.contains("ส่งข้อความตอบกลับ"))
+
+            // Location
+            val locRes = ToolExecutor.execute(
+                ToolCall("device_location", mapOf("action" to "get_current"))
+            )
+            assertTrue(locRes.result.contains("พิกัดปัจจุบัน"))
+
+            // Media Control (Now Playing)
+            val mediaRes = ToolExecutor.execute(
+                ToolCall("device_media_control", mapOf("action" to "now_playing"))
+            )
+            assertTrue(mediaRes.result.contains("Starboy"))
+
+            assertEquals(10, executedCalls.size)
             assertEquals("device_flashlight", executedCalls[0].first)
             assertEquals("device_volume", executedCalls[1].first)
             assertEquals("device_navigate", executedCalls[2].first)
             assertEquals("device_read_screen", executedCalls[3].first)
+            assertEquals("device_avatar_emotion", executedCalls[4].first)
+            assertEquals("device_always_live", executedCalls[5].first)
+            assertEquals("control", executedCalls[5].second["mode"])
+            assertEquals("device_notification_read", executedCalls[6].first)
+            assertEquals("device_notification_reply", executedCalls[7].first)
+            assertEquals("device_location", executedCalls[8].first)
+            assertEquals("device_media_control", executedCalls[9].first)
         }
     }
 }

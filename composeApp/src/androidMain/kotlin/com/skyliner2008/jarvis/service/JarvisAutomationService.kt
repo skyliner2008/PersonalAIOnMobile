@@ -345,6 +345,35 @@ class JarvisAutomationService : Service() {
                     }
                 }
             }
+        } else if (isSignalAlert && isAnticipationAlert && delivery != "direct") {
+            val sup = runCatching { evaluator.runAnticipationSupervisor(job, effData) }
+                .onFailure { logError("AutomationService", "🧑‍✈️ Anticipation Supervisor error: ${it.message}", it) }
+                .getOrNull()
+            if (sup != null) {
+                when (sup.decision) {
+                    "VETO" -> {
+                        logDebug("AutomationService",
+                            "🧑‍✈️ Supervisor VETO Anticipation ${effData["signal_anticipation_side"]} ${job.symbol} conf=${sup.confidence}% — ${sup.reasonTh} (ไม่แจ้งผู้ใช้)")
+                        return
+                    }
+                    "ADJUST" -> {
+                        logDebug("AutomationService",
+                            "🧑‍✈️ Supervisor ADJUST Anticipation ${job.symbol}: SL ${sup.adjSl ?: effData["signal_anticipation_sl"]} TP1 ${sup.adjTp ?: effData["signal_anticipation_tp1"]} (conf=${sup.confidence}%)")
+                        val adjMap = mutableMapOf<String, String>()
+                        if (sup.adjSl != null) adjMap["signal_anticipation_sl"] = "%.2f".format(sup.adjSl)
+                        if (sup.adjTp != null) adjMap["signal_anticipation_tp1"] = "%.2f".format(sup.adjTp)
+                        adjMap["signal_anticipation_desc"] = "${effData["signal_anticipation_desc"]} | Supervisor ปรับ SL/TP ตามโครงสร้าง"
+                        adjMap["signal_supervisor"] = "ADJUST ${sup.confidence}%"
+                        effData = effData + adjMap
+                        supervisorNote = "Supervisor (${sup.confidence}%): ${sup.reasonTh}"
+                    }
+                    else -> {
+                        logDebug("AutomationService", "🧑‍✈️ Supervisor APPROVE Anticipation ${effData["signal_anticipation_side"]} ${job.symbol} conf=${sup.confidence}%")
+                        effData = effData + mapOf("signal_supervisor" to "APPROVE ${sup.confidence}%")
+                        supervisorNote = "Supervisor (${sup.confidence}%): ${sup.reasonTh}"
+                    }
+                }
+            }
         }
         // ── บันทึก signal ลงสถิติ (ทั้ง 2 โหมด) — tracker จะตามเช็ก TP/SL ทุก cycle ──
         if (isSignalAlert) {

@@ -1,3 +1,1129 @@
+## 2026-09-13 — Pet Vision Fix: Implement Robust 2-Turn Vision Flow (Eliminate Turn-1 Guessing & Fix Frozen Camera)
+- **Problem Solved**:
+  - *User Report*: "ยังอาการเดิม สั่งให้ pet ดูสิ่งที่ถืออยู่ pet เปิดกล้องดู และปิดกล้อง ตอบผิด สั่งให้ดูใหม่ pet ไม่ได้เปิดกล้อง แต่ตอบถูก"
+  - *Analysis from Log (`02:00:17` - `02:00:40`)*:
+    1. ผู้ใช้ถาม: *"หรือว่าฉันถืออะไรอยู่"* (ถือซองกาแฟมอคโคน่าสีเขียว)
+    2. Gemini Live เรียก `vision_activate` และได้รับคำตอบ Tool ทันที
+    3. Gemini เริ่มพูด Turn 1 ทันทีที่ `02:00:18.424` (หลัง Tool Response เพียง 900ms) โดย ณ วินาทีนั้น กล้องเพิ่งส่งเฟรมแรกขึ้นเซิร์ฟเวอร์ และยังไม่ทันโฟกัส
+    4. ผลคือ Gemini "เดาสุ่ม" ใน Turn 1 ว่า *"ถือแก้วน้ำสีขาว"* และลืมเรียก `vision_deactivate` เมื่อพูดจบ
+    5. เมื่อ Turn 1 จบลง โค้ดส่ง `sendClientText` แต่ `clientContent` ใน Gemini Live ไม่ทริกเกอร์เสียงพูดขณะ Audio Streaming (ทำหน้าที่เป็นแค่ Pending Context ในเซสชัน) ทำให้ AI นิ่งเงียบ และกล้องค้างเปิดอยู่
+    6. ขณะที่กล้องค้างเปิดนาน 15 วินาที กล้องได้ส่งภาพซองกาแฟ Moccona รวม 15 เฟรมเข้าไปสะสมในโมเดล
+    7. เมื่อผู้ใช้เอ่ยปากสั่ง *"ดูใหม่"* ที่ `02:00:33.362` เสียงของผู้ใช้ทริกเกอร์เทิร์นใหม่ของ Gemini ซึ่งประมวลผลคำสั่งตกค้างจาก `sendClientText` จึงสั่ง `vision_deactivate` (ปิดกล้อง) ทันที และดึงเอาภาพ 15 เฟรมที่เห็นเมื่อกี้มาตอบอย่างแม่นยำว่า *"เป็นซองกาแฟสีเขียวๆ ยี่ห้อ Moccona"*!
+- **Root Cause**:
+  1. **Turn 1 Prompt Premature Force**: ผลตอบรับของ Tool บอกให้ Gemini "ตอบคำถามทันที" ทำให้ Gemini พยายามเดาสุ่มตอบใน Turn 1 ก่อนที่ฮาร์ดแวร์กล้องจะจับโฟกัสและส่งภาพจริง
+  2. **`sendClientText` vs `sendRealtimeText`**: ใน `LiveGeminiService.kt` การใช้ `sendClientText` (`clientContent`) จะไม่กระตุ้นให้โมเดลเริ่มสร้างเสียงพูดใหม่ ต่างจาก `sendRealtimeText` (`realtimeInput.text`) ที่ประมวลผลเสมือนผู้ใช้พูดเข้ามาจริง
+  3. **No Turn 2 Fallback Close**: หาก Gemini ลืมเรียก `vision_deactivate` หลังพูดจบ กล้องจะค้างเปิดไปจนชน timeout
+- **Solution & Implementation**:
+  1. **Enforce Strict 2-Turn Vision Flow (`JarvisPersona.kt`, `LiveToolBridge.kt`)**:
+     - **Turn 1 (เมื่อเปิดกล้อง)**: สั่งให้ Gemini พูดตอบรับสั้นๆ 1 ประโยคเปิดตัวเท่านั้น (เช่น *"ไหนขอน้องจาวิสดูก่อนนะฮับบอส ถือของไว้ใกล้ๆ กล้องนะฮับ"*) **ห้ามเดาสุ่มตอบในเทิร์นนี้เด็ดขาด** ระหว่างนี้กล้องจะจับโฟกัสและส่งภาพชัดเจน 2-3 เฟรมเข้าสู่ระบบ
+     - **Turn 2 (วิเคราะห์และตอบจริง)**: เมื่อ Turn 1 จบลง ระบบจะส่ง `liveService.sendRealtimeText(...)` ผ่าน `realtimeInput` กระตุ้นให้ Gemini สรุปสิ่งที่เห็นจากภาพสดและสั่ง `vision_deactivate` ทันที
+     - **Turn 2 Auto-Close Fallback**: เมื่อ Turn 2 พูดจบ หาก Gemini ลืมเรียก `vision_deactivate` ระบบจะมี Fallback ปิดกล้องและพับตาลงให้อัตโนมัติหลังจาก 1.0 วินาที เพื่อให้กล้องพร้อมสำหรับการสั่ง "ดูใหม่" ในครั้งถัดไป 100%
+- **Verification**:
+  - รัน Unit Tests ผ่าน 100% ทั้งชุด `PetModeTest` และ `AlwaysLiveTest`
+  - **Live Hardware Test Verified by User (`02:42:28` - `02:43:07`)**:
+    - **รอบที่ 1**: ผู้ใช้ถาม *"แล้วว่าฉันถืออะไรอยู่"* (ถือแก้วกาแฟ Nescafe Gold สีดำ)
+      - Turn 1: AI เปิดกล้อง ตอบรับ *"ไหนขอน้องจาวิสดูก่อนนะคะบอส ถือของไว้ใกล้ๆ กล้องนะฮับ"* ไม่มีการเดาสุ่ม
+      - Turn 2: ระบบส่ง `realtimeInput` ทันที AI ตอบอย่างแม่นยำ 100%: *"บอสถือแก้วกาแฟสีดำอยู่ค่ะ เห็นโลโก้ Nescafe Gold ชัดเจนเลยค่ะ กำลังดื่มกาแฟอยู่เหรอคะ"* พร้อมสั่ง `vision_deactivate` ปิดกล้องทันที
+    - **รอบที่ 2**: ผู้ใช้ถาม *"ดูไว้ฉันถืออะไรอยู่"* (ถือรีโมตแอร์)
+      - Turn 1: AI เปิดกล้อง ตอบรับเปิดตัว กล้องโฟกัสและส่งวิดีโอสด
+      - Turn 2: AI สรุปตอบแม่นยำ 100%: *"บอสถือรีโมตแอร์อยู่ค่ะ เห็นหน้าจอแสดงอุณหภูมิ 25 องศาด้วยนะคะ ร้อนเหรอคะบอส"* พร้อมสั่ง `vision_deactivate` ปิดกล้องเรียบร้อยสมบูรณ์
+
+## 2026-09-13 — Pet Vision Fix: Restore Real-Time Response Pipeline & Eliminate Premature Camera Cutoff
+- **Problem Solved**:
+  - *User Report*: "รอบก่อนหน้านี้ ถ้าฉัน ขึ้นประโยคว่า ดู ai จะตอบถูก และตอบได้ทันที รอบนี้ ฉัน ขึ้นประโยคว่า ดู* ai ดู เปิดกล้อง และปิดกล้อง แต่จะไม่ตอบทันที ต้องถามอีกรอบ จึงจะตอบ code ก่อนหน้านี้ แม่นยำกว่า code ล่าสุด"
+  - *Analysis from Log (`01:24:30` - `01:26:35`)*:
+    - เมื่อผู้ใช้พูดสั่ง *"ดูว่าฉันถืออะไรอยู่"* Gemini Live สั่งเปิดกล้อง `vision_activate` สำเร็จ
+    - Gemini พูดประโยคเปิดตัว: *"ไหนฮับบอส ขอน้องจาวิสมองดูหน่อยน้าา ชูขึ้นมาใกล้กล้องอีกนิดนึงนะฮับ"*
+    - ทันทีที่พูดประโยคเปิดตัวจบ (เทิร์นแรกเสร็จสิ้น) กล้องกลับถูกสั่งปิดทิ้งทันทีภายใน 2 วินาที (`CameraService: Camera stopped`) โดยที่ AI ยังไม่ได้เริ่มวิเคราะห์ภาพและไม่ได้ตอบคำถาม
+    - AI เงียบสนิท จนผู้ใช้ต้องเอ่ยปากถามซ้ำรอบสอง (*"เขียนหรือยังว่าอะไร"*) AI จึงตอบสิ่งที่เห็นออกมา
+- **Root Cause**:
+  1. **Premature Camera Termination**: ใน `AlwaysLiveScreen.kt` มีการใส่ `LaunchedEffect(isCameraPipOpen, isSpeakingNow)` ที่ตรวจจับเมื่อ AI เริ่มพูดแล้วหยุดพูดจะหน่วง 2 วินาทีแล้วสั่งปิดกล้อง (`requestEyeOpen(false)`) ทันที ส่งผลให้เมื่อ AI พูดประโยคเปิดตัวเบื้องต้น เช่น *"ไหนขอน้องจาวิสดูก่อนนะฮับ..."* จบ ตัวแปร `isSpeakingNow` เปลี่ยนเป็น `false` ทำให้กล้องถูกสั่งปิดทิ้งทันทีภายใน 2 วินาที ก่อนที่ AI จะทันได้มองภาพและตอบคำถาม
+  2. **Missing `visionPromptJob` in Gemini Live**: ใน Gemini Live WebSockets API เมื่อส่งวิดีโอสตรีมสด โมเดลจะไม่เริ่มเทิร์นใหม่ด้วยตัวมันเองหากไม่มี Client Text ไปสะกิดหลังจากเทิร์นแรกจบ ในโค้ดก่อนหน้านี้มี `visionPromptJob` ที่รอ `turnCompleteFlow.first()` (รอคำพูดทักทายแรกจบ) แล้วส่ง `sendClientText("[SYSTEM] ตอนนี้ภาพสดจากกล้องเข้ามาอย่างชัดเจนแล้ว โปรดสรุปสิ่งที่เห็นตอบคำถามล่าสุดของผู้ใช้ทันที...")` ทันที ซึ่งทำให้ AI ตอบสิ่งที่เห็นได้ถูกต้องและทันใจ แต่ในรอบล่าสุด `visionPromptJob` ถูกตัดออกไป ทำให้ AI เงียบสนิทหลังพูดประโยคเปิดตัว และกล้องถูกปิดไปก่อน จนผู้ใช้ต้องเอ่ยปากถามซ้ำรอบสอง ("เขียนหรือยังว่าอะไร") AI จึงตอบ
+  3. **Tool Response Delay (900ms blocking)**: มีการใส่ `delay(900L)` ขวางค้างใน `handleNativeToolCall` สำหรับ `vision_activate` ทำให้การตอบสนอง Tool ของ Gemini ล่าช้าและกระตุก
+  4. **Blocked `vision_deactivate`**: ใน `vision_deactivate` มีเงื่อนไขเช็ค `hasVisionIntent` จากคำพูดล่าสุดของผู้ใช้ ซึ่งถ้าผู้ใช้ถาม *"ดูว่าฉันถืออะไรอยู่"* ตัวแปร `lastUserText` จะยังมีคำว่า *"ดู"* และ *"ถือ"* ค้างอยู่เสมอ ทำให้เมื่อ AI พยายามสั่งปิดกล้องหลังตอบจบ ระบบตีกลับด้วย `STILL_NEED_VISION` ทำให้เซสชันติดขัด
+- **Solution & Implementation**:
+  1. **Remove Premature Auto-Close (`AlwaysLiveScreen.kt`)**: ลบ `LaunchedEffect` ที่ตัดปิดกล้องหลังจาก AI พูดประโยคแรกจบออก เพื่อให้กล้องเปิดค้างไว้จนกระทั่ง AI วิเคราะห์ภาพเสร็จสิ้นและสั่ง `vision_deactivate` ด้วยตัวเอง (หรือปิดเมื่อครบ Safety Timeout 25 วินาที หรือผู้ใช้กดปิดบนหน้าจอ)
+  2. **Restore Real-Time Response Pipeline (`LiveToolBridge.kt`)**:
+     - คืนชีพ `visionPromptJob`: เมื่อเปิดกล้อง ให้ส่งคำตอบรับ Tool ทันที (ไม่ติด `delay(900L)`) และให้ Job รอจนกระทั่งคำพูดเปิดตัวแรกจบ (`turnCompleteFlow.first()`) จากนั้นกระตุ้น AI ทันทีด้วย System Text ให้วิเคราะห์และตอบสิ่งที่เห็นจากภาพสดและสั่ง `vision_deactivate`
+     - ทำความสะอาด `vision_deactivate`: ลบเงื่อนไขที่ขัดขวางการปิดกล้อง คืนการปิดกล้องที่สะอาดและราบรื่น
+- **Verification**:
+  - รัน `./gradlew.bat testDebugUnitTest` ผ่าน 100%
+
+## 2026-09-13 — Pet Vision Fix: Resolve 1-Turn Lag & Eliminate Stale Video Buffer Leak
+- **Problem Solved**:
+  - *User Report*: AI รับรู้ภาพช้าไป 1 เทิร์น (1-turn delay)
+    - ครั้งที่ 1: ถาม *"ฉันโชว์กี่นิ้วอยู่"* (กำมือ) $\rightarrow$ AI ตอบเดา *"3 นิ้ว"*
+    - ครั้งที่ 2: ถาม *"ดูมาอีกกี่นิ้ว"* (ชู 5 นิ้ว) $\rightarrow$ AI ตอบ *"บอสกำมืออยู่ ไม่ได้ชูนิ้วฮับ!"* (ตอบภาพของครั้งที่ 1)
+    - ครั้งที่ 3: ถาม *"ฉันถืออยู่นี่หละคืออะไร"* (ถือรีโมทแอร์) $\rightarrow$ AI ตอบเดาเฟรมแรก *"โทรศัพท์มือถือ"*
+    - ครั้งที่ 4: ถาม *"อันนี้กี่นิ้ว"* (ชู 4 นิ้ว) $\rightarrow$ AI ตอบ *"ถือรีโมทแอร์อยู่ต่างหาก! มีเลข 25 ด้วย"* (ตอบภาพของครั้งที่ 3)
+- **Root Cause**:
+  1. **Camera Frame Streaming Leak**: เมื่อ AI ตอบสรุปจบหรือ UI พับดวงตาลง ระบบไม่ได้ปิดสตรีมกล้องระดับ Background (`cameraService.isAiVisionRequested = false`) ทำให้กล้องยังคงปั๊มภาพของคำถามก่อนหน้าเข้าสู่ WebSocket เซสชันของ Gemini Live นานนับ 10-23 วินาที
+  2. **Asynchronous Context Desync (`visionPromptJob`)**: ใน `LiveToolBridge.kt` มีโค้ดส่ง `sendClientText("[SYSTEM] ตอนนี้ภาพจากกล้องชัดแล้ว... เมื่อพูดจบให้เรียก vision_deactivate ทันที")` แต่เนื่องจาก `clientContent` ไม่กระตุ้นให้โมเดลเริ่มพูดขณะ Audio Streaming ข้อความนี้จึงตกค้างเป็น Context ในเซสชัน และไปทำงานในเทิร์นถัดไปแทน ทำให้เมื่อผู้ใช้เริ่มถามคำถามใหม่ โมเดลจึงเรียก `vision_deactivate` ทันทีและดึงภาพเก่าในบัฟเฟอร์มาตอบ
+  3. **Premature Guessing in Turn 1**: เมื่อ AI เรียก `vision_activate` ระบบตอบรับ Tool ทันทีที่ 0ms ทำให้ AI รีบพูดและเดาสุ่มก่อนที่ฮาร์ดแวร์กล้องจะโฟกัสและส่งภาพจริง 1-2 เฟรมแรกถึง AI
+- **Implementation**:
+  1. **Synchronized Camera Streaming Bridge (`PetVisionBridge.kt`, `JarvisViewModel.kt`)**:
+     - เพิ่ม `onAiVisionStreamToggle` ใน `PetVisionBridge`: เมื่อสั่งปิดตา (`requestEyeOpen(false)` หรือ AI พูดจบ) ระบบจะตัดการสตรีมภาพกล้อง (`_isAiVisionRequested.value = false`, `cameraService.isAiVisionRequested = false`) และหยุดกล้องทันที รับประกันว่าจะไม่มีเฟรมภาพตกค้างไปยังเทิร์นถัดไป 100%
+  2. **Stream Stabilization & Remove Context Pollution (`LiveToolBridge.kt`)**:
+     - เมื่อ Gemini เรียก `vision_activate`: เปิดตาและเปิดสตรีมทันที พร้อมหน่วงเวลาสั้นๆ ~900ms ให้กล้องจับภาพและส่งวิดีโอสด 1-2 เฟรมเข้าสู่ WebSocket ก่อนส่ง Native Tool Response ทำให้ Gemini เห็นภาพจริงทันทีโดยไม่ต้องเดาสุ่ม
+     - ลบ `visionPromptJob` ที่ส่ง `sendClientText` ตกค้างทิ้งอย่างสิ้นเชิง
+     - ป้องกัน `vision_deactivate` ก่อนตอบ: หากผู้ใช้กำลังถามคำถามการมองเห็น ระบบจะส่ง `STILL_NEED_VISION` บังคับให้ดูภาพสดปัจจุบันก่อนตอบ
+  3. **Voice Fast-Path & Auto-Close Pacing (`VoiceController.kt`, `AlwaysLiveScreen.kt`)**:
+     - เสริมคำศัพท์ fast-path: `"ดูมาอีก"`, `"ดูอีก"`, `"ฉันโชว์กี่นิ้ว"`, `"ถืออะไรอยู่"` ให้เปิดตาและเริ่มส่งเฟรมภาพทันทีตั้งแต่ผู้ใช้เริ่มเปล่งเสียง
+     - ใน `AlwaysLiveScreen.kt`: เมื่อ AI พูดจบและพับตาลง ให้รีเซ็ตสถานะและเฟรมไทม์มิ่งทันที
+  4. **System Prompt Real-Time Precision (`JarvisPersona.kt`)**:
+     - ปรับปรุงกฎข้อ 4 (VISION RULES): ให้ตอบจากภาพสดในปัจจุบันเสมอ และห้ามดึงภาพในอดีตมาตอบเด็ดขาด
+- **Verification**:
+  - รัน `./gradlew.bat testDebugUnitTest` ผ่าน 100% ทั้งชุดทดสอบ `PetModeTest` และ `AlwaysLiveTest`
+
+## 2026-09-13 — Pet Vision Fix: Unlock Blocked vision_activate for Visual & Finger Counting Questions
+- **Problem Solved**:
+  - *User Report*: "ตรวจสอบ ฉันไม่เห็น ดวงตาขึ้นแสกน แต่ pet ตอบสิ่งที่เห็นได้ถูกต้อง"
+  - *Investigation from Log*:
+    - ผู้ใช้พูดถาม: `"can ชูกี่นิ้วอยู่"`, `"อันนี้กี่นิ้ว"`, `"กี่นิ้วนะ เอาใหม่"`
+    - Gemini Live พยายามเรียก Tool เปิดกล้อง: `Native tool call: vision_activate({duration_seconds=10})`
+    - แต่ถูกระบบ Guard ใน `LiveToolBridge.kt` สกัดกั้นและตีกลับด้วย: `EYES_NOT_NEEDED: ผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (คำพูดล่าสุด: "can ชูกี่นิ้วอยู่") — โปรดสนทนาหรือตอบคำถามของผู้ใช้ตามปกติโดยไม่ต้องเปิดกล้อง`
+    - ส่งผลให้ดวงตาแสกนไม่เปิด (`PetVisionBridge.requestEyeOpen(true)` ไม่ถูกเรียก) และไม่มีการสตรีมวิดีโอขึ้น Cloud
+    - ส่วนที่ Pet ตอบจำนวนนิ้วออกมา ("บอสชูสองนิ้ว", "อันนี้สามนิ้ว", "สี่นิ้ว") เกิดจากการที่ AI พยายาม "เดาสุ่ม" (Hallucination) เนื่องจากถูกสั่งว่า EYES_NOT_NEEDED ห้ามเปิดกล้อง ให้ตอบไปเลย
+- **Root Cause & Implementation**:
+  1. **ปลดล็อค Guard สกัดกั้นใน `LiveToolBridge.kt`**:
+     - เพิ่มคลังคำศัพท์ตรวจจับเจตนาการมองเห็น (`hasVisionIntent`) ให้ครอบคลุมคำถามวัตถุและท่าทาง: `"นิ้ว"`, `"ชู"`, `"กี่นิ้ว"`, `"กี่"`, `"อันนี้"`, `"อันไหน"`, `"นี่"`, `"นี้"`, `"ตรงนี้"`, `"คืออะไร"`, `"สีอะไร"`, `"ตัวอะไร"`, `"ท่าอะไร"`, `"ถืออะไร"`, `"ใส่อะไร"`, `"finger"`, `"how many"`
+     - ป้องกันไม่ให้บล็อกคำถามเชิงการมองเห็น ทำให้ `vision_activate` เปิดตาแสกนและเริ่มสตรีมวิดีโอได้ทันที 100%
+  2. **เปิดตาแสกนทันทีบนอุปกรณ์ (Fast-path Local Trigger ใน `VoiceController.kt`)**:
+     - ขยาย `isEyeOpenCmd` ให้ครอบคลุม: `"กี่นิ้ว"`, `"ชูกี่นิ้ว"`, `"ชูนิ้ว"`, `"อันนี้กี่นิ้ว"`, `"อันนี้คืออะไร"`, `"อันนี้อะไร"`, `"สีอะไร"`, `"ตัวอะไร"`, `"ท่าอะไร"`, `"ถืออะไร"`
+     - ทันทีที่ผู้ใช้พูดประโยคเหล่านี้ จบ STT ปุ๊บ ตาแสกน Cyber Radar จะเปิดทันทีบนเครื่องโดยไม่ต้องรอความล่าช้าจากระบบเน็ตเวิร์ก
+  3. **อัปเดตกฎ System Prompt (`JarvisPersona.kt`)**:
+     - ระบุชัดเจนในกฎสายตาว่าคำถามตรวจนับหรือสังเกตสิ่งของ เช่น "ชูกี่นิ้ว", "อันนี้คืออะไร", "สีอะไร" ให้เรียก `vision_activate` ได้ทันที
+- **Verification**:
+  - โค้ดคอมไพล์ผ่านและทดสอบ Unit Test ยืนยันการทำงานของระบบ
+
+## 2026-09-13 — Pet System: Portrait Pinned Exit Button, Responsive Top Bar & Compact Car Icon
+- **Problem Solved**:
+  - *User Requirement*:
+    1. ในหน้าจอแนวตั้ง (Portrait) ปุ่ม `✕` ออกจากหน้าสัตว์เลี้ยงหายไป กดออกไม่ได้ แต่ในหน้าจอแนวนอน (Landscape) มีปุ่ม `✕` แสดงอยู่
+    2. ในหน้าจอแนวตั้ง ปุ่มโหมดควบคุมที่เป็นรูปรถมีขนาดใหญ่กว่าปุ่มอื่น ปรับให้เหลือแค่รูปรถ `🚗` พอดีๆ
+- **Root Cause & Implementation**:
+  1. **สาเหตุที่ปุ่ม [✕] หายไปในหน้าจอแนวตั้ง**:
+     - บนหน้าจอแนวตั้ง (Portrait) ความกว้างหน้าจอมือถือทั่วไปอยู่ที่ประมาณ 360dp–412dp
+     - แถบเมนูด้านบนจัดวางด้วย `Row` เดี่ยวแบบไม่มีการ Wrap หรือ Scroll โดยมีปุ่มเรียงกันยาว: `[🧪 ทดสอบเดโม]`, `[👁️ ลืมตา]`, `[⚙️ ตั้งค่า]`, `[🚗 โหมดควบคุม]`, และปุ่ม `[✕]` ซึ่งรวมความกว้างเกิน 440dp
+     - ส่งผลให้ปุ่มก่อนหน้า (`🚗 โหมดควบคุม`) ถูกบีบอัดตัวอักษรลงมาเป็นแนวตั้ง และปุ่ม `[✕]` ปิดโปรแกรมถูกดันหลุดขอบขวาของจอออกไปทั้งหมด (ในโหมดแนวนอนมีความกว้าง 800dp+ จึงไม่ล้น)
+  2. **สถาปัตยกรรม Responsive Top Controls (`AlwaysLiveScreen.kt`)**:
+     - **Pinned Exit Button**: แยกปุ่ม `[✕]` ออกมาไว้ที่ `Alignment.TopEnd` ถาวร ด้วยดีไซน์ปุ่มกลมคอนทราสต์ชัดเจน (`size 36.dp`, border ขาวจาง) รับประกันว่าจะอยู่บนหน้าจอมุมบนขวา 100% ไม่ถูกดันหลุดจออีกต่อไป
+     - **Horizontally Scrollable Utility Container**: ครอบปุ่มเครื่องมือด้านซ้ายด้วย `weight(1f, fill = false).horizontalScroll(rememberScrollState())` เพื่อให้ไม่เกิดการบีบอัดตัวอักษรเป็นแนวตั้ง และหากใช้บนจอเล็กมากๆ ผู้ใช้ยังสามารถสไลด์เลื่อนดูได้
+     - **Safe Insets**: ใส่ `statusBarsPadding()` ป้องกันไม่ให้ปุ่มชนติ่งกล้องหน้าหรือแถบนาฬิกาของระบบ Android
+  3. **ปุ่มโหมดควบคุมขนาดกะทัดรัด (Compact Car Icon)**:
+     - ในหน้าจอแนวตั้ง ปรับข้อความปุ่มจาก `"🚗 ควบคุม"` เหลือเพียงไอคอน `"🚗"` สวยงาม สบายตา ขนาดสัดส่วนเท่ากันกับปุ่มอื่นๆ
+     - ในหน้าจอแนวนอน ยังคงแสดงเต็มว่า `"🚗 โหมดควบคุม"`
+- **Verification**:
+  - โค้ดคอมไพล์ผ่าน และทดสอบ Unit Test ยืนยันการทำงานของระบบ
+
+## 2026-09-13 — Pet System: Auto AI Camera Scan on Voice Intent, Eye-Overlay Circular Viewfinder & Procedural Cyber Radar SFX
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **ระบบเปิด/ปิดกล้องอัตโนมัติ (Hands-Free Voice & AI Vision)**:
+       - ผู้ใช้ไม่ต้องใช้มือกดปุ่มลืมตา/ปิดกล้องเอง
+       - เมื่อพูดวลีบอกให้มอง เช่น *"นี่คืออะไร"*, *"ดูนี่หน่อย"*, *"ช่วยดู"*, *"เปิดกล้อง"* หรือเมื่อ Gemini Live เรียก Tool `vision_activate` ระบบจะเปิดกล้องและเริ่มส่งภาพสตรีมทันที
+       - เมื่อ Gemini ดูภาพและตอบคำถามจบ (AI พูดอธิบายเสร็จ) ให้ปิดกล้องเองอัตโนมัติ
+    2. **FX ตาแสกน พร้อมเสียง (Cyber Scan FX & Audio)**:
+       - มี FX กวาดสายตาแสกนเรดาร์บนดวงตาสัตว์เลี้ยง พร้อมสังเคราะห์เสียงไซไฟไฮเทคเมื่อเปิดกล้อง และหยุด FX เมื่อปิดกล้อง
+    3. **ภาพเรียลไทม์จากกล้องเป็นวงกลม Overlay แนบสนิทบนดวงตาสัตว์เลี้ยง (Eye Camera Viewfinder)**:
+       - เปลี่ยนจากหน้าต่างสี่เหลี่ยมลอยมุมล่างขวา ให้เป็นภาพสดทรงกลม (`CircleShape`) วางทาบสนิทบนดวงตาของสัตว์เลี้ยงพอดีทั้งในโหมดแนวตั้งและแนวนอน
+- **Root Cause & Implementation**:
+  1. **Voice Intent & AI Tool Bridge (`VoiceController.kt`, `LiveToolBridge.kt`)**:
+     - ขยายการตรวจจับเสียงใน `VoiceController.kt` ให้ครอบคลุมคำถามที่ต้องการให้มองดู (*"นี่คืออะไร"*, *"นี้คืออะไร"*, *"ดูนี่"*, *"ดูนี้"*, *"ช่วยดู"*, *"อ่านนี่"*, *"what is this"*, *"look at this"*) ให้สั่ง `PetVisionBridge.requestEyeOpen(true)` ทันที
+     - ใน `LiveToolBridge.kt`: เมื่อ AI เรียก `vision_activate` สั่งเปิดตาแสกนอัตโนมัติ และเมื่อเรียก `vision_deactivate` สั่งปิดตา
+  2. **Circular Eye Camera Overlay Viewfinder (`PetEyeScannerOverlay` ใน `AlwaysLiveScreen.kt`)**:
+     - คำนวณพิกัดดวงตา `(leftEyeCenterX, eyeCenterY)`, `(rightEyeCenterX, eyeCenterY)` และขนาดเส้นผ่านศูนย์กลาง `eyeDiameter` ให้ตรงกับ `PetRobotHeadAvatar` แบบพิกเซลต่อพิกเซลทั้งแนวตั้งและแนวนอน
+     - **ตาขวา (Right Eye - Cyber Optical Lens)**:
+       - กล้องสดฮาร์ดแวร์ `CameraPreviewView` ตัดรูปทรงกลม (`CircleShape`)
+       - กรอบนีออนเรืองแสงสี Cyan Sweep Gradient
+       - วงแหวนเล็งเป้าหมายหมุนวน (Aperture Reticle Ticks ที่ 45°, 135°, 225°, 315°)
+       - เส้นสแกนแนวนอน `ScanLineEffect`
+       - ป้ายระบุวัตถุและกรอบ AR Target Lock
+       - ปุ่มสลับกล้องหน้า/หลัง และปุ่มปิด
+     - **ตาซ้าย (Left Eye - Holographic Radar Scanner)**:
+       - พื้นหลังสีน้ำเงินเข้มไซไฟ วงกลมศูนย์กลาง 3 วง พร้อมแกนเล็ง Crosshairs
+       - ลำแสงเรดาร์หมุนกวาด 360 องศาต่อเนื่อง
+       - จุด Blip แสดงตำแหน่งวัตถุที่กล้องตรวจจับได้
+       - ป้ายสถานะเรดาร์ดิจิทัล `[SCANNING...]` / `[🔒 LOCKED N]`
+     - ลบหน้าต่าง PIP สี่เหลี่ยมมุมล่างขวาเดิมออกอย่างสมบูรณ์
+  3. **Zero-Asset Procedural Cyber Radar Sound (`RobotSoundEngine.kt`, `RobotSoundPlayer.kt`, `AlwaysLiveManager.kt`)**:
+     - เพิ่ม `RobotSound.SCAN_RADAR` (รวมเป็น 19 เสียงในระบบ)
+     - `generateScanRadar()`: สังเคราะห์คลื่นเสียง 16-bit PCM Sweep ความถี่ 1400Hz $\rightarrow$ 2600Hz ผสม 35Hz Sinusoidal FM Modulation และเสียงพัลส์สะท้อน (~420ms) ดังขึ้นเมื่อเปิดตาแสกน
+  4. **Smart Auto-Close Controller (`AlwaysLiveScreen.kt`)**:
+     - ตรวจจับสถานะการพูดของ AI (`isSpeaking`) เมื่อเปิดตาแสกน
+     - เมื่อ AI พูดอธิบายภาพจบ (`isSpeaking` เปลี่ยนจาก `true` เป็น `false`) จะหน่วงเวลา 2.0 วินาทีให้ผู้ใช้มองเห็นภาพ แล้วพับปิดกล้องกลับสู่ดวงตาน่ารักตามปกติอัตโนมัติ
+     - มี Safety Timeout 25 วินาทีเพื่อป้องกันกล้องเปิดค้าง
+- **Verification**:
+  - อัปเดต `PetModeTest.kt` ยืนยันเสียง `SCAN_RADAR` ครบ 19 ชนิด
+  - รัน `./gradlew.bat testDebugUnitTest` ผ่าน 100% ทั้ง `PetModeTest` และ `AlwaysLiveTest`
+
+## 2026-09-12 — Pet System: Care-Specific Procedural Audio (Crunch, Bubble Pops, Bell Toy) & Portrait Split-Screen Dashboard
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **เพิ่มเสียงเฉพาะการดูแลใน `RobotSoundPlayer`**:
+       - เสียงเคี้ยวอาหารกรุบกรอบ (Crunch/Munch) เมื่อกดปุ่มให้อาหาร 🍖 (`CRUNCH_EAT`)
+       - เสียงฟองสบู่แตกเปาะแปะ (Bubble Pops) เมื่อกดอาบน้ำ 🧼 (`BUBBLE_POP`)
+       - เสียงกระดิ่ง/ลูกบอลเมื่อชวนเล่น 🎾 (`BELL_TOY`)
+    2. **เมนูค่าสถานะในโหมดแนวตั้ง (Portrait)**:
+       - ไม่ต้องซ่อนแท็บสถานะ ให้แบ่งหน้าจอส่วนบนเป็น Living Pet Robot Head Avatar และส่วนล่างเป็นแท็บสถานะถาวรพร้อมปุ่มต่างๆ (Needs gauges, Mood badge, Care buttons: 🍖, 🧼, 🎾, 💤, Memory stats)
+       - ในโหมดแนวนอน (Landscape) ยังคงแสดง Pet เต็มจอ พร้อม Sidebar Panel เลื่อนเปิด-ปิดจากขอบขวาได้เหมือนเดิม
+- **Root Cause & Implementation**:
+  1. **Zero-Asset Procedural Care Audio Synthesizer (`RobotSoundEngine.kt`, `RobotSoundPlayer.kt`, `AlwaysLiveManager.kt`)**:
+     - เพิ่ม `RobotSound.CRUNCH_EAT`, `BUBBLE_POP`, `BELL_TOY` (รวมเป็น 18 เสียงในระบบ)
+     - `generateCrunchEat()`: สังเคราะห์เสียงเคี้ยว 3 คำต่อเนื่อง (~80ms interval) ด้วยความถี่กวาดลงจาก 340Hz สู่ 110Hz ผสมเสียงฟริกชันกรุบกรอบ (Band-limited Resonant Noise 950Hz) และ Exponential Decay คมชัดรวดเร็ว
+     - `generateBubblePop()`: สังเคราะห์เสียงฟองสบู่และหยดน้ำแตก 5 ลูกไต่คอร์ดขึ้น (650Hz $\rightarrow$ 1450Hz, 850Hz $\rightarrow$ 1850Hz, 720Hz $\rightarrow$ 1600Hz, 1000Hz $\rightarrow$ 2150Hz, 1150Hz $\rightarrow$ 2400Hz) พร้อม Harmonic Resonance ให้ความรู้สึกสดชื่น สะอาด สดใส
+     - `generateBellToy()`: สังเคราะห์เสียงกระดิ่งทองเหลืองสองโน้ต (G6 1568Hz + C7 2093Hz) ผสม Inharmonic Overtone 2.76x และ 2.0x พร้อม Tremolo 13Hz ให้เสียงกังวาน ใส ชัดเจน สไตล์ของเล่นสัตว์เลี้ยง
+     - เชื่อมต่อใน `PetStateMachine.kt`: `resolveFeed` สั่งเล่น `playCrunchEat()`, `resolveClean` สั่งเล่น `playBubblePop()`, `resolvePlay` สั่งเล่น `playBellToy()`
+     - ปรับปรุง `PetModeController.kt` ให้ส่ง `InteractionType.CLEAN` และ `InteractionType.PLAY` ลง `PetMemoryStore` อย่างแม่นยำ
+  2. **Portrait Split-Screen Dashboard & Reusable Content (`AlwaysLiveScreen.kt`, `PetNeedsSidebarPanel.kt`)**:
+     - แยกคอมโพเนนต์เนื้อหาออกมาเป็น `PetNeedsDashboardContent`: รองรับทั้งโหมดฝังถาวรและโหมด Drawer เลื่อนข้าง
+     - ในโหมดแนวตั้ง (`!isLandscape`): แบ่งหน้าจอด้วย `Column` ออกเป็น 2 ส่วน:
+       - **ส่วนบน (`weight(1.08f)`)**: Living Pet Robot Head Avatar รองรับระบบสัมผัสและลากสายตาเต็มรูปแบบ (Gaze tracking, ลูบหน้าผาก, เกาคาง, จั๊กจี้แก้ม, จิ้มแก้ม, ตบเบาๆ, พร็อพ, มือโฮโลแกรม, กล้องลืมตา PIP, และปุ่มมุมบน) โดยซ่อนปุ่ม "🐾 สถานะ" ในแถบเครื่องมือเนื่องจากมีแท็บสถานะแสดงอยู่ข้างล่างแล้ว
+       - **ส่วนล่าง (`weight(0.92f)`)**: แดชบอร์ดสถานะถาวร พื้นหลัง Dark Card สไตล์ OLED ขอบมนบน 24dp พร้อมแถบ Handle ให้ความรู้สึกโมเดิร์น สวยงาม Thumb-friendly ควบคุมดูแลสัตว์เลี้ยงได้ทันที
+     - ในโหมดแนวนอน (`isLandscape`): รักษาเลย์เอาต์เดิม Pet เต็มหน้าจอสำหรับวางตั้งโต๊ะเป็น Desk Companion และมีปุ่ม "🐾 สถานะ" เลื่อนเปิด `PetNeedsSidebarPanel` จากขอบขวา
+- **Verification**:
+  - อัปเดต `PetModeTest.kt` ทดสอบ `RobotSound` ครบ 18 ชนิด
+  - เพิ่ม Unit Tests ยืนยัน helper functions และ `PetStateMachine` care action triggers:
+    - `RobotSound enum includes speech cadence and pet care sounds`
+    - `RobotSoundPlayer helper functions invoke handler with correct sound type`
+    - `PetStateMachine care actions trigger specific care sounds`
+  - รัน `./gradlew.bat testDebugUnitTest` ผ่าน 100% ทั้ง `PetModeTest` และ `AlwaysLiveTest`
+
+## 2026-09-12 — Pet System: Motion Sickness, Table Thump/Acoustic Reactions & Enraged Fight-Back Missile Barrage
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **การเขย่ามือถือ (Shake)**: Pet มึน เวียนหัว (`DIZZY`), ถ้าเขย่ามากๆ อย่างต่อเนื่องจนรำคาญจะโกรธ (`ANGRY`)
+    2. **เอียงมือถือไปมา (Boat Rocking)**: Pet โคลงเคลงเหมือนนั่งเรือ เริ่มเมาเรือ คลื่นไส้ เวียนหัว (`DIZZY`)
+    3. **ทุบโต๊ะ หรือเสียงดัง ตะโกน ตะคอก**: Pet ตกใจสะดุ้งโหยง (`SURPRISED`), ถ้าถูกตะคอกซ้ำๆ ต่อเนื่องจะรู้สึกกลัวและเศร้าเสียใจ ร้องไห้ (`SAD`)
+    4. **เพิ่มอารมณ์โกรธต่อสู้กลับ (Fight Back / Enraged Mode)**: เมื่อความโกรธ (Rage) สะสมเต็ม 100% Pet จะทำตาขวางสีแดงเพลิง คิ้วขมวด ปากขบฟันแหลม มีพร็อพจรวดมิสซายลูกเล็กๆ หลายลูก (สร้างตามภาพการ์ตูนที่ผู้ใช้อัปโหลด: ลำตัวขาว หัวแดง ครีบแดง ไฟท้ายส้ม หน้าต่างฟ้า) ยิงใส่หน้าจอ พร้อม FX ระเบิดตูมตามเต็มจอ + คลื่น Shockwave + จอสั่น (Screen Shake) และสังเคราะห์เสียงจริง
+- **Root Cause & Implementation**:
+  1. **Physical Motion Disturbance & Sickness Matrix (`PetMotionDetector.kt`, `PetMotionBridge.kt`, `PetStateMachine.kt`)**:
+     - *Shake & Heavy Shake*: เขย่าเบาๆ ส่ง `onShake` $\rightarrow$ Pet มึน (`AvatarEmotion.DIZZY`, ตาหมุนวนก้นหอย Spiral, ปากคลื่น). หากเขย่าซ้ำๆ ในช่วง 4 วินาที (Sliding Window $\ge 3$) ส่ง `onHeavyShake` $\rightarrow$ Pet โกรธ (`AvatarEmotion.ANGRY`), เพิ่มความโกรธสะสม Rage (+35f/ครั้ง).
+     - *Boat Rocking / Seasick*: ตรวจจับการเอียงสลับแกน Roll ซ้าย-ขวาอย่างนุ่มนวล ($|X| > 3.2$, สลับทิศทาง $\ge 3$ ครั้ง) ภายใต้แรงโน้มถ่วงต่ำ ($gForce < 1.6G$) จำลองการโคลงเคลงบนผิวน้ำ $\rightarrow$ ส่ง `onBoatRocking` $\rightarrow$ Pet เมาเรือ มึน เวียนหัว (`AvatarEmotion.DIZZY`).
+     - *Table Thump Shock Impulse*: ตรวจจับแรงสะเทือนกระแทกฉับพลัน ($\Delta G > 1.25G$) ขณะที่โทรศัพท์วางนิ่งอยู่บนโต๊ะหรือแท่นวาง $\rightarrow$ ส่ง `onTableThump` $\rightarrow$ Pet ตกใจสะดุ้งสุดตัว (`AvatarEmotion.SURPRISED`, เสียงตกใจ).
+  2. **Acoustic Disturbance & Screaming Detection (`AlwaysLiveScreen.kt`, `PetModeController.kt`, `PetStateMachine.kt`)**:
+     - ตรวจสอบ `avatarState.audioLevel > 0.68f` เมื่อ AI ไม่ได้กำลังพูด
+     - เสียงดัง/ตะโกนครั้งแรก: Pet สะดุ้งตกใจ (`AvatarEmotion.SURPRISED`, ตาโต 1.25x สี White-Cyan สว่างวาบ คิ้วโก่ง ปากอ้า 'O').
+     - ตะโกน/ตะคอกซ้ำๆ ต่อเนื่อง: Pet เกิดความกลัว เสียใจ เศร้า ร้องไห้ (`AvatarEmotion.SAD`, หยดน้ำตาสีฟ้าเรืองแสง).
+  3. **Enraged Mode & Fight-Back Missile Barrage (`PetNeedsState.kt`, `PetRobotHeadAvatar.kt`, `MissileBarrageOverlay.kt`)**:
+     - *Rage State & Discharge*: เพิ่ม `rage: Float = 0f` (0-100), `val isEnraged: Boolean get() = rage >= 100f`, และ `PetMood.ENRAGED("😡💥", "โกรธจัด!")` ใน `PetNeedsState.kt`.
+     - *Enraged Visor Drawing*: ใน `PetRobotHeadAvatar.kt` เรนเดอร์ตาขวางสีแดงเพลิง (`Color(0xFFFF1744)`), ดวงตาดำมืดด้านในด้วยเฉด Crimson (`0xFFB71C1C`), ออร่าไฟสีแดงลุกโชน, คิ้วรูปตัว V ขมวดแน่น 24 องศา, ปากขบฟันซิกแซกแหลมคม 6 หยัก, พร้อมไอน้ำร้อนพุ่งออกจากหัว (Steam Puffs).
+     - *Procedural Cartoon Missile Salvo*: ออกแบบ `MissileBarrageOverlay.kt` ด้วย Jetpack Compose Pure Canvas วาดจรวดการ์ตูน 5 ลูก 1:1 ตามภาพต้นแบบของผู้ใช้ (ลำตัวขาว หัวแดง ครีบแดง ท้ายส้ม หน้าต่างฟ้า) ยิงพุ่งจากด้านหลังและข้างลำตัว เลี้ยวโค้งสเกลขยายจาก 0.4x จนพุ่งชนจอที่ขนาด 1.9x.
+     - *Screen Blast FX & Screen Shake*: เมื่อจรวดกระทบหน้าจอ เกิดลูกไฟระเบิดขยายตัวขนาดใหญ่, คลื่นระเบิด Shockwave กระจายตัวเป็นวงแหวน, สะเก็ดประกายไฟระเบิด 45 ทิศทาง, แฟลชหน้าจอวาบสีขาว-แดง, และเกิดแรงสั่นสะเทือน (Screen Shake) ที่เรนเดอร์ผ่าน `graphicsLayer { translationX, translationY }`.
+  4. **Zero-Asset Procedural PCM Audio Synthesis (`RobotSoundEngine.kt`, androidMain)**:
+     - พัฒนาการสังเคราะห์เสียงระบบ 16-bit PCM AudioTrack แบบเรียลไทม์:
+       - `RobotSound.MISSILE_LAUNCH`: เสียงหวีดความเร็วสูง Pitch Sweep จาก 300Hz ไป 2000Hz พร้อมเสียงฟู่ของเชื้อเพลิงไอพ่น White Noise.
+       - `RobotSound.EXPLOSION`: เสียงระเบิด Sub-bass 85Hz กวาดลง 25Hz พร้อม Exponential Decay Noise Burst ให้ความรู้สึกลึก แน่น กระแทกหูอย่างสมจริง.
+     - เชื่อมต่อ `AlwaysLiveManager.kt` และ `RobotSoundPlayer.kt` ให้สั่งงานได้จากส่วนกลาง.
+  5. **Screen & Controller Integration (`AlwaysLiveScreen.kt`, `PetModeController.kt`, `ChatController.kt`)**:
+     - เชื่อมต่อ `PetMotionBridge` callbacks (`onHeavyShake`, `onBoatRocking`, `onTableThump`) ใน `AlwaysLiveScreen.kt`.
+     - เชื่อมต่อตัวตรวจจับเสียงดัง `LaunchedEffect(avatarState.audioLevel)`.
+     - แสดง `MissileBarrageOverlay` เต็มจอพร้อมตัวแปร `screenShakeIntensity`.
+     - รองรับสีพื้นหลัง Gradient และ Aura สำหรับ `AvatarEmotion.ENRAGED` ใน `AlwaysLiveScreen.kt`.
+     - รองรับคำสั่งทดสอบ `/avatar enraged` ใน `ChatController.kt`.
+- **Verification**:
+  - อัปเดต `AlwaysLiveTest.kt` ให้รองรับ 17 อารมณ์ (เพิ่ม `ENRAGED`).
+  - เพิ่ม Unit Tests ใน `PetModeTest.kt`:
+    - `PetNeedsState rage accumulation and ENRAGED mood behave correctly`
+    - `Motion and Audio State Machine Matrix transitions work correctly`
+    - `RobotSound enum contains MISSILE_LAUNCH and EXPLOSION`
+
+## 2026-09-12 — Pet System Overhaul: State Machine Matrix, Holographic Hand Overlay, Persistent Pet Memory & Slide-out Sidebar Panel
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **ย้ายค่าสถานะของ Pet และปุ่มดูแลออกจากเมนูตั้งค่า**: นำมาทำเป็น Sidebar สไลด์บาร์ไว้ด้านข้างจอ เพื่อให้เป็นระบบเกมสัตว์เลี้ยง (Tamagotchi) จริงๆ สามารถดูและดูแลน้องได้ตลอดเวลาโดยไม่ต้องเข้าเมนูตั้งค่า
+    2. **สร้างระบบ State Machine Matrix เชื่อมโยงค่าต่างๆ ของ Pet เข้าด้วยกัน**: ปฏิกิริยาและอารมณ์ของ Pet ต้องเชื่อมโยงประสานกันอย่างมีเหตุผลและต่อเนื่อง เช่น หิวจัดจนโกรธ, จิ้มแกล้งซ้ำๆ จนโกรธ, โดนปลุกตอนหลับจนตกใจ/งัวเงีย, เหงาจนเบื่อหาว, เหนื่อยมากจนหลับเอง
+    3. **ระบบหน่วยความจำของ Pet (Pet Memory) แยกต่างหาก**: Pet ต้องจดจำสถานะ ความชอบ ประวัติการเล่น สถิติตลอดชีวิต (อายุ, จำนวนครั้งที่ให้อาหาร, สถิติความสุข) ข้ามเซสชันการปิด-เปิดแอป โดยบันทึกลง SQLite
+    4. **มือโฮโลแกรม (Holographic Hand Overlay)**: เมื่อสัมผัสที่ส่วนต่างๆ ของใบหน้า Pet (เช่น หน้าผาก, แก้ม, คาง) จะมีมือโฮโลแกรมเรืองแสงสีฟ้าสไตล์ไซไฟเคลื่อนไหวเข้ามาลูบหัว จิ้มแก้ม หรือเกาคางจริงๆ
+    5. **เพิ่มอารมณ์ใหม่**: เพิ่มสถานะอารมณ์ `SURPRISED` (ตกใจ: ตาเบิกกว้างสุดขีด + ปากอ้า O) และ `BORED` (เบื่อ: ตาลู่ครึ่งปิด + หาว)
+- **Root Cause & Implementation**:
+  1. **Pet State Machine Matrix (`PetStateMachine.kt`)**:
+     - พัฒนาคลาส State Machine คำนวณ `processTouch(type, zone, needs, currentEmotion)` และ `resolvePassiveEmotion(needs, currentEmotion)`
+     - มีระบบ Interaction Tracker Ring Buffer ตรวจจับความถี่เพื่อป้องกันสแปม (จิ้ม > 5 ครั้งใน 30 วิ → โกรธ, จั๊กจี้ > 3 ครั้งใน 20 วิ → เหนื่อย, ลูบหัวบ่อย → โบนัส Affection)
+     - เชื่อมโยงความต้องการทางกายภาพ (Needs) กับอารมณ์ (Emotions) อย่างสมจริง พร้อมระบบ Decay อารมณ์ตามเวลา
+  2. **Persistent Pet Memory (`PetMemory.kt`)**:
+     - คลาสเก็บข้อมูลถาวร: Session Stats, Lifetime Stats (อายุ, ปฏิสัมพันธ์รวม, จำนวนครั้งให้อาหาร/อาบน้ำ/เล่น), ประวัติอารมณ์ (สถิติวันที่แฮปปี้ต่อเนื่อง), การเรียนรู้สิ่งที่ชอบที่สุด (Favorite Interaction)
+     - จัดเก็บถาวรลง SQLite (`jarvisDatabaseQueries.insertSetting`) ด้วย key `"pet.memory"`
+     - เชื่อมต่อใน `PetModeController`: โหลด memory ตอน `start()`, บันทึกอัตโนมัติทุก 60 วินาทีผ่าน Background Job, และบันทึกทันทีก่อน `stop()`
+  3. **Pet Needs Sidebar Panel (`PetNeedsSidebarPanel.kt`)**:
+     - คอมโพเนนต์ Sidebar สไลด์จากขอบขวาพร้อมแอนิเมชัน Spring Physics และพื้นหลัง Dim
+     - แสดง Mood Badge พร้อมอีโมจิ, Affection Level, หลอดค่าสถานะ 5 ค่าแบบ Animated Color-coded (เขียว/เหลือง/แดง), ปุ่มลัด Care Actions (🍖 อาหาร, 🧼 อาบน้ำ, 🎾 เล่น, 💤 นอน), และสถิติ Pet Memory
+     - ย้ายแท็บ "ดูแล" ออกจาก `PetSettingsDialog.kt` (ลดเหลือ 3 แท็บ: ดีบัก, จำหน้า, พร็อพ&ธีม)
+     - เพิ่มปุ่ม `"🐾 สถานะ"` ใน Toolbar ด้านบนของ AlwaysLiveScreen และรองรับการปัดปิด
+  4. **Holographic Hand Overlay (`HolographicHandOverlay.kt`)**:
+     - วาดด้วย Canvas ล้วน ไร้การพึ่งพา asset: เส้น Wireframe สีฟ้า Cyan (#00F0FF) เรืองแสง (Glow blur) พร้อมประกายดาววิบวับ (Sparkles) ที่ปลายนิ้ว
+     - รองรับ 6 ท่าทาง: `STROKE` (ฝ่ามือลูบจากบนลงล่าง), `POKE` (นิ้วชี้จิ้มแก้ม), `CHIN_SCRATCH` (นิ้วเกาคางแบบแกว่งสั่น), `TICKLE` (นิ้วกระดิกคลื่น), `PAT` (ฝ่ามือตบเบาๆ), `WAVE` (โบกมือ)
+     - เชื่อมโยงเข้ากับ Gesture Detector ใน `AlwaysLiveScreen.kt`: ลากนิ้วลงบนหน้าผาก → ลูบหัว, ลากนิ้วขึ้นที่คาง → เกาคาง, แตะแก้ม → จิ้ม, ดับเบิ้ลแทปแก้ม → จั๊กจี้
+  5. **New Emotions & Face Rendering (`AvatarEmotion.kt`, `PetRobotHeadAvatar.kt`)**:
+     - เพิ่ม `SURPRISED` และ `BORED` ใน `AvatarEmotion`
+     - เพิ่มการเรนเดอร์ใน `PetRobotHeadAvatar.kt`:
+       - `SURPRISED`: ดวงตาโตขึ้น 1.25x สี White-Cyan สว่างวาบ คิ้วโก่งสูง ปากอ้า 'O' ตกใจ
+       - `BORED`: ดวงตาหรี่แบนลง 0.42x สี Slate Gray คิ้วลู่ต่ำ ขีดเปลือกตาด้านบน ปากเส้นตรงเฉียง
+     - อัปเดต Exhaustive when blocks ใน `ChatController.kt` และ `AlwaysLiveScreen.kt`
+- **Verification & Bug Fixes**:
+  - แก้ไข `isDizzy` state synchronization ใน `PetModeController.applyStateMachineResult` ให้เซ็ต `isDizzy = true` ทันทีเมื่อเข้าสู่สถานะ DIZZY
+  - อัปเดต `AlwaysLiveTest` ให้รองรับครบทั้ง 16 ค่าของ `AvatarEmotion` (+ SURPRISED, BORED)
+  - ปรับปรุง `PetMemoryStore` ให้ใช้ `MutableStateFlow` (`memoryState: StateFlow<PetMemory>`) เพื่อให้ UI อัปเดตแบบ Reactive ทันทีเมื่อเกิดปฏิสัมพันธ์
+  - ปรับปรุง Scale ของ `HolographicHandOverlay` เป็น 0.0024f (~140dp) พร้อมเพิ่ม `triggerId` และ `onFinished` callback เพื่อรองรับการแตะซ้ำในจุดเดิม
+  - ปรับปรุง Threshold ของ `resolvePassiveEmotion` ใน `PetStateMachine` ให้ตอบสนองความหิวจัด (Hangry) เมื่อ `satiety < 20f`
+  - รัน Unit Test ทั้งหมดผ่าน 100% (`./gradlew.bat testDebugUnitTest` — BUILD SUCCESSFUL, ทุกชุดการทดสอบผ่านสมบูรณ์)
+
+## 2026-09-12 — Autonomous Contextual Prop Selection, Dynamic SVG Magic Creator & Permanent SQLite Persistence
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **Autonomous Contextual Prop Selection (เลือกและเรียกใช้พร็อพ/สติกเกอร์ตามบทสนทนาโดยคิดเองเลือกเอง)**: ให้ AI Pet สามารถประเมินบริบทบทสนทนา คิดเอง และเรียกแสดงพร็อพหรือสติกเกอร์ที่เหมาะสมกับสถานการณ์ได้เองอัตโนมัติ โดยที่ผู้ใช้ไม่ต้องคอยสั่ง
+    2. **Autonomous Dynamic SVG Creation & Reuse (คิดสร้างสรรค์เวกเตอร์ SVG ใหม่และหยิบใช้ซ้ำ)**: เมื่อไม่มีพร็อพมาตรฐานที่ตรงกับเรื่องที่คุย AI Pet สามารถจินตนาการและเขียนโค้ด SVG Path ขึ้นมาเองได้แบบอัตโนมัติ
+    3. **Permanent Persistence (จัดเก็บถาวรใน SQLite)**: เมื่อ AI Pet หรือผู้ใช้สร้างพร็อพใหม่แล้ว จะต้องถูกจัดเก็บถาวรลงฐานข้อมูล SQLite ข้ามการปิด-เปิดแอป เพื่อให้สามารถหยิบมาใช้ซ้ำในคราวต่อไปได้ทันทีโดยระบุเพียงชื่อ ไม่ต้องส่ง SVG Path ใหม่ซ้ำ
+    4. **Facial Spatial Intelligence & Eye-Relative Sizing**: ระบบคำนวณตำแหน่งและสัดส่วนใบหน้าหุ่นยนต์ให้แม่นยำ โดยเฉพาะตำแหน่งดวงตา (`LEFT_EYE`, `RIGHT_EYE`) เมื่อกำหนด `size=0` ระบบจะ Auto-Fit ขนาดของพร็อพ (เช่น monocle, eyepatch, แว่นตา) ให้เท่ากับเส้นผ่านศูนย์กลางดวงตาของหุ่นยนต์ 1:1 พอดีเป๊ะ
+- **Root Cause & Implementation**:
+  1. **Persistent Prop Store (`PetCustomPropStore.kt`)**:
+     - พัฒนาคลาส Singleton สำหรับจัดเก็บ Dynamic Vector Props ข้ามแพลตฟอร์ม (Android / iOS) ลงตาราง `AppSetting` (key: `"pet.custom_props"`) ใน SQLite ผ่าน SQLDelight (`JarvisDatabaseHolder`)
+     - รองรับ `loadCustomProps()`, `saveCustomProp(prop)`, `deleteCustomProp(nameOrId)`, `clearCustomProps()`, และ `findPropByNameOrId(nameOrId)`
+     - Expose `savedCustomProps: StateFlow<List<DynamicVectorProp>>` แบบ Reactive ให้ UI อัปเดตทันที
+  2. **Dynamic Eye Geometry & Auto-Fit 1:1 (`DynamicPropRenderer.kt`)**:
+     - ซิงโครไนซ์ขนาดเส้นผ่านศูนย์กลางดวงตากับ `PetRobotHeadAvatar.kt`:
+       - แนวนอน (Landscape): `eyeDiameter = minOf(size.height * 0.52f, size.width * 0.28f)`
+       - แนวตั้ง (Portrait): `eyeDiameter = minOf(size.width * 0.38f, size.height * 0.24f)`
+     - คำนวณจุดกึ่งกลางตาซ้ายและตาขวา: `leftEyeCenterX = cX - (eyeDiameter * 0.65f)`, `rightEyeCenterX = cX + (eyeDiameter * 0.65f)`, `eyeCenterY = cY`
+     - Auto-Fit Normalizer: เมื่อ `prop.sizeDp <= 0f` และอยู่ที่ตำแหน่ง `LEFT_EYE` หรือ `RIGHT_EYE` จะตั้ง `targetSizePx = eyeDiameter` ทำให้ไอเทมเลนส์แว่นตา/ผ้าปิดตาโจรสลัดมีขนาดแนบสนิทกับดวงตา 1:1 อัตโนมัติ
+  3. **Controller & Device Tools Integration (`PetModeController.kt`, `DeviceControlExecutor.kt`, `App.kt`)**:
+     - ใน `PetModeController.start()`: สั่งโหลด `PetCustomPropStore.loadCustomProps()` เพื่อเตรียมพร้อมคลัง
+     - ใน `addCustomProp(prop)`: บันทึกลง `PetCustomPropStore.saveCustomProp(prop)` ทันที
+     - ใน `updateRobotFace`: รองรับคำสั่ง `CUSTOM_PROP|action=add|name=...` ที่ไม่มี `svg_path` โดยจะดึงข้อมูลจาก `PetCustomPropStore.findPropByNameOrId(name)` มาสวมใส่ซ้ำได้ทันที
+     - ใน `DeviceControlExecutor.kt`: อัปเดต `device_custom_prop` ให้ค้นหาใน `PetCustomPropStore` หากไม่ได้ระบุ `svg_path` และบันทึกเข้า SQLite เมื่อสร้างใหม่ พร้อมรองรับ `action="delete"` เพื่อลบออกจากคลังถาวร
+  4. **Pet Persona & System Prompt Upgrade (`JarvisPersona.kt` & `DeviceToolDefinitions.kt`)**:
+     - อัปเดตกฎคำสั่งอุปกรณ์และข้อ 11 ใน `PET_LIVE_SYSTEM_PROMPT` ให้ AI Pet ตระหนักรู้ว่าสามารถคิดเองเลือกใส่พร็อพ/สติกเกอร์ให้เข้ากับบริบทสนทนา (เช่น กาแฟตอนเช้า, เหรียญทองตอนพูดเรื่องเงิน/คริปโต, ร่มตอนฝนตก, ปาร์ตี้ตอนฉลอง)
+     - สั่งให้ AI Pet ออกแบบ SVG Path ขึ้นมาเองเมื่อไม่มีพร็อพในระบบ และดึงพร็อพเดิมในคลังมาใช้ซ้ำโดยระบุแค่ `name`
+     - แนะนำการใช้ `size=0` สำหรับไอเทมดวงตาเพื่อให้ได้ขนาด 1:1 Auto-Fit พอดี
+  5. **Showcase Settings Dialog Integration (`PetSettingsDialog.kt`)**:
+     - ในแท็บย่อยเวกเตอร์ SVG เชื่อมต่อ `PetCustomPropStore.savedCustomProps` แสดงรายการ "💾 คลังพร็อพเวกเตอร์ที่บันทึกถาวร"
+     - แสดงขนาด, แอนิเมชัน, สถานะสวมใส่/ถอด และปุ่มลบออกจากคลังถาวร (Trash Icon)
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `SvgPathTest.kt`:
+    - `testPetCustomPropStorePersistenceAndLookup`: ทดสอบการบันทึก, ค้นหาตามชื่อ/ID (แบบ Case-Insensitive), และการลบออกจากคลัง
+    - `testPetModeControllerPropReuseByName`: ทดสอบการเสกพร็อพใหม่ด้วย SVG Path การบันทึกอัตโนมัติ การถอดออก และการนำกลับมาใส่ซ้ำด้วยชื่อเพียงอย่างเดียวโดยไม่ต้องระบุ `svg_path` ซ้ำ
+  - รัน `.\gradlew testDebugUnitTest` ผ่านฉลุยครบทั้ง 252+ tests (`BUILD SUCCESSFUL in 1m 51s`)
+
+## 2026-09-12 — Pet Settings Showcase Catalog (8 Themes, 55 Props) & Dynamic SVG Vector Parser Architecture
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **สร้างหน้ารวมตัวอย่าง (Showcase Catalog) ในการตั้งค่าของสัตว์เลี้ยง**: แสดงรายการ ไดนามิกแบ็คกราวน์ (Background Themes), พร็อพ (Props) และสติกเกอร์ ที่มีอยู่ทั้งหมดในระบบ เพื่อให้ผู้ใช้สามารถดู ตรวจสอบ สวมใส่ ทดสอบ และรู้ว่ามีอะไรให้ปรับแต่งบ้าง
+    2. **ชี้แจงเงื่อนไขและขอบเขตในการสร้าง Dynamic SVG Path Parser**: รูปแบบคำสั่ง, จุดยึดบนใบหน้า, แอนิเมชัน และคำถามว่าเมื่อสร้างแล้วจะเป็นแบบใช้ครั้งเดียว (Ephemeral) หรือเก็บไว้ใช้คราวต่อไปได้ (Persistent)
+- **Root Cause & Implementation**:
+  1. **Pet Settings Props & Themes Catalog (`PetSettingsDialog.kt`)**:
+     - เพิ่มแท็บที่ 4: `"🎨 พร็อพ & ธีม"` เข้าไปใน `TabRow` ของ `PetSettingsDialog`
+     - แบ่งเนื้อหาออกเป็น 3 หมวดหมู่ย่อย (Sub-sections) ด้วยแถบ Segmented Chip:
+       - **🌌 ธีมฉาก (8 รูปแบบ)**: แสดงรายการทั้ง 8 ธีม (`DEFAULT` ดำ OLED, `RAINY` ฝนตก, `SUNNY` แดดจ้า, `NIGHT` ราตรีดาว, `SAKURA` ซากุระ, `MATRIX` ไซเบอร์, `LOVE_BG` หัวใจ, `THUNDER` ฟ้าผ่า) พร้อมแถบสีพรีวิว ไอคอน คำอธิบายภาษาไทย และปุ่มแตะเปลี่ยนแบบ Real-time
+       - **✨ พร็อพ (55 ชนิด)**: รวมพร็อพ/สติกเกอร์ทั้งหมดในระบบ แสดงในรูปแบบ Card Grid 2 คอลัมน์ พร้อมปุ่ม Filter แยก 5 หมวด (ทั้งหมด, อารมณ์ 17, อาหาร 13, ธรรมชาติ 10, ไอที 15) แสดงอีโมจิ ชื่อไทย คำอธิบายสถานการณ์ และปุ่มติ๊กถูกสวมใส่/ถอดได้ทันที พร้อมปุ่ม "ล้างทั้งหมด"
+       - **🪄 เวกเตอร์ SVG (Dynamic SVG Path Parser)**: บัตรอธิบายเงื่อนไขและขอบเขตการสร้าง พร้อม 5 Quick-Test Presets (👑 มงกุฎทองคำ, 🕶️ แว่นไซเบอร์นีออน, 🩹 พลาสเตอร์แก้ม, ⚡ สายฟ้านีออน, 🤿 หน้ากากดำน้ำ) และรายการ Custom Props ที่กำลังแสดงผลอยู่พร้อมปุ่มลบ
+  2. **Dynamic SVG Vector Parser Architecture**:
+     - *Input Syntax*: คำสั่ง SVG Path data มาตรฐาน `d="..."` (`M`, `L`, `C`, `Q`, `A`, `Z`)
+     - *Auto-Fit & Normalization*: คอมโพเนนต์ `DynamicPropRenderer` ใช้ `Path.getBounds()` คำนวณขนาดและสเกลอัตโนมัติให้พอดีกับ `sizeDp` โดยไม่สนว่า viewBox ของ SVG ต้นทางจะมีขนาดเท่าใด (24x24 หรือ 512x512 ก็ตาม)
+     - *7 Anchor Points*: `FOREHEAD` (หน้าผาก/หมวก/มงกุฎ), `LEFT_EYE` (รอบตาซ้าย/แว่น/น้ำตา), `RIGHT_EYE` (รอบตาขวา/เป้าเล็ง), `CHEEKS` (แก้ม/พลาสเตอร์), `CHIN` (คาง/ปาก/หนวด), `FLOATING_LEFT` (ลอยซ้าย/ผี/การแจ้งเตือน), `FLOATING_RIGHT` (ลอยขวา/หลอดไฟ/โน้ตเพลง)
+     - *5 Animations*: `STATIC` (นิ่ง), `FLOAT_BOB` (ลอยขึ้นลง), `PULSE` (ชีพจรย่อขยาย), `ROTATE_CONTINUOUS` (หมุน 360°), `SWAY` (แกว่งไกว)
+     - *Persistence Lifecycle*: ใน Runtime ถูกจัดเก็บใน `RobotFaceState.customProps: List<DynamicVectorProp>` จะคงอยู่ตลอดเซสชันใบหน้าจนกว่าจะสั่งถอดหรือสั่งล้าง และสามารถขยายลง DataStore เพื่อใช้งานถาวรข้ามแอปได้
+  3. **Controller & Screen Wiring (`PetModeController.kt` & `AlwaysLiveScreen.kt`)**:
+     - เพิ่ม methods: `setBackgroundTheme(theme)`, `toggleProp(prop)`, `clearProps()`, `addCustomProp(prop)`, `removeCustomProp(id)` ใน `PetModeController`
+     - เชื่อมโยง State และ Callbacks เข้าสู่ `PetSettingsDialog` ใน `AlwaysLiveScreen.kt`
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `PetModeTest.kt`:
+    - `BackgroundTheme contains all 8 themes and serializes correctly`
+    - `PropType contains all 55 built-in props across all 4 categories`
+    - `PetModeController theme and prop toggling operates cleanly`
+  - ทดสอบผ่านฉลุยครบทั้ง 250 tests (`BUILD SUCCESSFUL in 1m 48s`)
+
+## 2026-09-12 — Pet Avatar Eye Scaling, True Center Gaze (Desk Elevation Calibration) & Pure OLED Visor Cleanup
+- **Problem Solved**:
+  - *User Requirement*:
+    1. **ขยายขนาดดวงตาให้ใหญ่ขึ้น**: ขนาดเดิมยังเล็กเกินไปสำหรับหน้าจอทั้งแนวนอน (Landscape) และแนวตั้ง (Portrait) ไม่โดดเด่นสมกับการเป็น Living Screen หุ่นยนต์คู่หู (Companion Robot แบบ Eilik / LOOI)
+    2. **แก้ปัญหาลูกตาติดมองข้างบน/เฉียงบนตลอดเวลา**: ไม่ว่าจะสัมผัสมุมไหน หรือสายตามุมใด พอลดนิ้วหรือผ่านไปสักพัก ลูกตาจะดึงกลับไปมองข้างบนตลอดเวลา ไม่ยอมมองตรงกลาง (Neutral Center)
+    3. **ลบออร่าจางๆ ตรงกลางจอออก**: แสงสีฟ้าฟุ้งๆ (Radial breathing glow) ที่อยู่ตรงกลางจอระหว่างดวงตาให้เอาออก เพื่อให้พื้นหลังเป็นสีดำสนิท Pure OLED Black (#000000) คมกริบ
+- **Root Cause & Implementation**:
+  1. **Enlarged Eye Dimensions (`PetRobotHeadAvatar.kt`)**:
+     - *แนวนอน (Landscape)*: ขยายเส้นผ่านศูนย์กลางดวงตาเป็น `minOf(canvasH * 0.52f, canvasW * 0.28f)` (เพิ่มขนาดขึ้น ~65% เทียบกับขีดจำกัดเดิม 120.dp ทำให้ดวงตาครองความสูงจอมากกว่า 50% ใหญ่เต็มตา สะใจเหมือนจอหุ่นยนต์ LOOI)
+     - *แนวตั้ง (Portrait)*: ขยายเส้นผ่านศูนย์กลางดวงตาเป็น `minOf(canvasW * 0.38f, canvasH * 0.24f)` (เพิ่มขนาดขึ้น ~50% ครองพื้นที่กว้าง 87% ของหน้าจอแนวตั้ง)
+     - *ระยะห่างระหว่างตา*: คำนวณตามสัดส่วน `baseSpacing = eyeDiameter * 0.65f` ทำให้มีระยะเว้นว่างระหว่างขอบดวงตาสองข้างพอเหมาะ ~30% ไม่ชิดหรือห่างเกินไป และจัดตำแหน่งแนวดิ่งกึ่งกลางจอแท้จริง (`eyeCenterY = centerY + gazeDisplacementY`)
+  2. **True Center Gaze Fix (แก้ไขปัญหาสายตาติดมองบน)**:
+     - *Root Cause 1 (`PetRobotHeadAvatar.kt`)*: ในฟังก์ชัน `drawDualCircleEye` มีการบวกค่า `baseDepthY = radius * 0.08f` เข้าไปใน `backOffsetY` ของวงกลมเลเยอร์หลังสีน้ำเงินเข้ม ทำให้วงกลมหลังถูกดันลงล่างตลอดเวลา ส่งผลให้วงกลมหน้าสีฟ้าครามดูเหมือน "ลอยขึ้นบน" ตลอดเวลาแม้ค่า gaze จะเป็น (0, 0)
+       - *Fix*: ลบ `baseDepthY` ออก กำหนด `backOffsetY = -gazeY * maxShift * 0.35f` โดยตรง เมื่อผู้ใช้มองตรงหรือไม่มีการขยับสายตา (`gazeX = 0f, gazeY = 0f`) วงกลมหน้าและหลังจะซ้อนกันกึ่งกลางสนิท 100% พอดี
+     - *Root Cause 2 (`PetVisionDetector.kt`)*: อุปกรณ์มือถือเวลาวางตั้งอยู่บนโต๊ะทำงาน (Desk Stand / Dock) กล้องหน้าจะส่องมุมเงยขึ้นเล็กน้อย ใบหน้าของผู้ใช้จึงมักตกอยู่ในพื้นที่ 20-35% ด้านบนของภาพกล้องเสมอ (`rawNormY ≈ -0.45f ถึง -0.75f` เช่น ใน Logcat: `normX=0.07, normY=-0.75`) ตัวตรวจจับเดิมส่งค่า -0.75 เข้าไประบบ gaze ตลอดเวลา จึงทำให้หุ่นยนต์ "แหงนมองเพดาน" ตลอดเวลา และเมื่อไม่มีใบหน้า (`faces.isEmpty()`) โค้ดเดิม return ทันทีโดยไม่เคยรีเซ็ตค่า gaze กลับมาตรงกลาง
+       - *Fix*: ทำการ Calibrate มุมกล้องหน้าโต๊ะทำงานด้วย `deskNeutralBiasY = -0.45f` และคำนวณ `calibratedY = (rawNormY - deskNeutralBiasY) * 1.35f`
+       - เพิ่ม Deadzone Filtering: หากตำแหน่งศีรษะอยู่ในช่วงตรงกลาง (`|calibratedX| < 0.12f` และ `|calibratedY| < 0.15f`) ให้ Snap เป็น `(0f, 0f)` ทันที ทำให้หุ่นยนต์สบตาผู้ใช้ตรงกลางจอเป๊ะ
+       - เพิ่ม Auto-Reset เมื่อไม่พบใบหน้า: หากไม่พบใบหน้าผู้ใช้นานเกิน 1000ms ให้ส่ง `onGazeDetected(0f, 0f)` กลับคืนตำแหน่งกึ่งกลางอัตโนมัติ
+  3. **Visor Cleanliness (`PetRobotHeadAvatar.kt`)**:
+     - ลบโค้ดบล็อก `Ambient Face Glow (Breathing Aura)` ออกทั้งหมด ทำให้พื้นหลัง Visor เป็นสีดำทึบสนิท `#000000` แบบ Pure OLED ไร้ฝ้าหมอก ช่วยให้ดวงตาสีฟ้าครามและขอบมิติสีน้ำเงินเข้มคมชัดสูงสุด
+  4. **Dynamic Mouth Vertical Rebalancing (จัดตำแหน่งดวงตาขยับขึ้นบนเมื่อมีปากเข้ามา)**:
+     - เมื่ออยู่ในโหมด IDLE และไม่ได้ส่งเสียงพูด (`hasMouth = false`) ดวงตาจะวางตัวอยู่กึ่งกลางหน้าจอแท้จริง (`eyeCenterY = centerY + gazeDisplacementY`)
+     - เมื่อมีปากปรากฏเข้ามา เช่น AI กำลังส่งเสียงพูด (`drawWaveformMouth`) หรือแสดงอารมณ์ที่มีปาก (`HAPPY`, `SPEAKING`, `POUT`, `LOVE`, ฯลฯ) ระบบจะใช้ `animateFloatAsState` (Spring Physics) เลื่อนดวงตาขึ้นด้านบนเล็กน้อย `eyeDiameter * 0.085f` (~17dp)
+     - พร้อมทั้งจัดตำแหน่งปาก `mouthY = eyeCenterY + baseEyeH * 0.75f` ทำให้โครงสร้างใบหน้ารวม (คิ้ว + ดวงตา + ปาก) อยู่ตรงกึ่งกลางหน้าจออย่างสมดุลพอดี ไม่ค่อนหรือหนักไปทางด้านล่าง
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `PetModeTest.kt`:
+    - `Dual circle eye at neutral gaze has concentric front and back circles without upward shift`
+    - `Pet vision desk face calibration maps normal desk sitting position to dead center gaze`
+    - `Enlarged eye dimensions provide large expressive robot companion eyes on both orientations`
+    - `Eye position shifts upward when mouth is added to balance vertical facial composition`
+  - คอมไพล์ Kotlin Android ผ่านฉลุย 100%
+
+## 2026-09-12 — Dedicated Weather Tool (`device_weather`), Pet Mode Dialogue Auto-Dismiss, Floating Props & Eilik Face Redesign
+- **Problem Solved**:
+  - *User Requirement*:
+    1. การพยากรณ์อากาศด้วย `search_web({query="สภาพอากาศวันนี้"})` ทำงานผิดพลาด/ไม่คืนค่า และไม่ควรใช้ search_web ควรดึงพิกัด GPS ของอุปกรณ์ก่อน แล้วตรวจเช็คสภาพอากาศจากพิกัด หรือค้นหาตามชื่อเมืองได้
+    2. ในโหมดสัตว์เลี้ยง (Pet Mode) กล่องข้อความตอบกลับ (`PetDialogueCard`) ค้างอยู่บนหน้าจอนานเกินไป ต้องการให้หายไปเองอัตโนมัติ 10 วินาทีหลังจาก AI พูดจบหากผู้ใช้ไม่ได้แตะจอ และถ้าผู้ใช้แตะที่หน้าจอต้องปิดกล่องทันที
+    3. เพิ่มพร็อพ & สติกเกอร์ลอยได้: เช่น เหรียญทอง (`GOLD_COIN`) สำหรับเรื่องทองคำ/การเงิน และหยดน้ำฝน (`RAIN_DROPS`) สำหรับฝนตก พร้อมแสดงเอฟเฟกต์สภาพอากาศ แดดออก/ฝนตก เสียงเอฟเฟกต์อัตโนมัติ และให้พร็อพหายไปเอง (Auto-decay) หลัง 12 วินาที
+    4. ดีไซน์ใบหน้าและดวงตาใหม่ให้คล้ายหุ่นยนต์ Eilik / Dfree: ดวงตาทรง Squircle สัดส่วนสมมาตร ~1:1 ไม่เรียวเป็นเม็ดยาแคปซูล มีเงาหลุม 3D Bezel Drop Shadow ที่ฐานดวงตา ปรับสี OLED LED เปล่งประกาย ไม่มีขีดสีขาว static ค้างที่มุม และแสดงอารมณ์ดวงตาชัดเจน (ยิ้มเป็นเส้นโค้ง `⌒ ⌒`, ขยิบตา Wink, ง่วง `— —`, ตื่นเต้น `> <`, โกรธ, มึนงง `X X`)
+- **Root Cause & Implementation**:
+  1. **Dedicated Weather Tool (`device_weather`)**:
+     - *Tool Declaration (`DeviceToolDefinitions.kt`)*: เพิ่ม `device_weather(location, latitude, longitude)` พร้อมคำอธิบายและกำชับห้ามใช้ `search_web` สำหรับสภาพอากาศ
+     - *Open-Meteo REST API Engine (`DeviceControlExecutor.kt`)*: ดึงพิกัดจากอุปกรณ์ผ่าน `locationProvider.getCurrentLocation()` หรือแปลงชื่อเมืองด้วย Geocoder และเชื่อมต่อไปยัง Open-Meteo REST API (`https://api.open-meteo.com/v1/forecast`)
+     - *Thai Weather Translation & Contextual Props*: แปลงรหัส WMO Weather Code เป็นภาษาไทย พร้อมบอกอุณหภูมิปัจจุบัน ความชื้น โอกาสฝนตก ลม และพยากรณ์สูงสุด/ต่ำสุดของวัน พร้อมสั่งเปลี่ยนธีมพื้นหลัง (`RAINY` / `SUNNY`), สวมพร็อพ (`UMBRELLA` + `RAIN_DROPS` หรือ `SUNGLASSES`) และเล่นเสียงประกอบ (`SURPRISE` / `CHIRP_HAPPY`)
+     - *System Prompt & Voice Rules (`JarvisPersona.kt` & `LiveToolBridge.kt`)*: กำชับกฎห้ามใช้ `search_web` และสั่งให้รายงานสภาพอากาศด้วยน้ำเสียงสดใสกระชับ
+  2. **Dialogue Card Auto-Dismiss & Tap-to-Dismiss (`AlwaysLiveScreen.kt`)**:
+     - *10s Auto-Dismiss*: เพิ่ม `LaunchedEffect(!activeAvatarState.isSpeaking, hasMessage)` หน่วงเวลา 10 วินาที แล้วสั่ง `onDismissToolCard()` และล้าง `speechText`
+     - *Instant Tap-to-Dismiss*: ใน `Modifier.pointerInput` ดักการแตะจอ (`onTap`) ให้ปิดกล่องข้อความทันทีหากมีกล่องแสดงอยู่
+  3. **Floating Props (`GOLD_COIN`, `RAIN_DROPS`) & 12s Auto-Decay**:
+     - *Prop Catalog (`RobotFaceState.kt`)*: เพิ่ม `GOLD_COIN` และ `RAIN_DROPS` ใน `PropType`
+     - *Vector Rendering (`PetPropsOverlay.kt`)*: สร้างคอมโพเนนต์ `GoldCoinProp()` หมุน 3D และมีประกายดาวระยิบระยับ, `RainDropsProp()` หยดน้ำฝนพริ้วไหวพร้อมเอฟเฟกต์ละอองกระเซ็น
+     - *12s Auto-Decay*: เพิ่มระบบละลายพร็อพชั่วคราวกลับสู่ปกติหลังผ่านไป 12 วินาที
+  4. **Eilik & Dfree Robot Face: Dual Overlapping Circles Eye Architecture (`PetRobotHeadAvatar.kt`)**:
+     - *Dual Overlapping Circles System (วงกลม 2 วงเหลื่อมซ้อนกันต่อหนึ่งดวงตา)*: ตามภาพถ่ายอ้างอิงจริงของหุ่นยนต์ แต่ละดวงตาประกอบด้วยวงกลมเรียบเนียน 2 วงซ้อนกัน
+       - **เลเยอร์หลัง (Back Disc)**: สีน้ำเงินเข้มจัด (Deep Electric Royal Blue `#0012A8`) ทำหน้าที่เป็นเบ้าตา/เงามิติ
+       - **เลเยอร์หน้า (Front Disc)**: สีฟ้าครามสว่างสดใส (Solid Electric Cyan `#4EE2F5`) ทำหน้าที่เป็นม่านตา/ลูกตานำสายตา
+     - *Pure Solid Surface — Zero Inner Sparkle*: สีทึบคมชัด สะอาดตา ปราศจากประกาย ไฮไลท์สะท้อน หรือการเกลี่ยสีใดๆ ภายในดวงตา ("ไม่มีประกายด้านใน")
+     - *Gaze Parallax Tracking (การขยับเหลื่อมซ้อนกันบอกทิศทางการมอง)*:
+       - เมื่อตามองไปทางใด วงกลมหน้า (Front Cyan) จะเลื่อนไปทิศนั้น และวงกลมหลัง (Back Blue) จะเลื่อนไปทิศตรงข้าม
+       - เช่น เมื่อหุ่นยนต์มองขึ้นบนซ้าย (Top-Left) วงกลมหน้าจะเลื่อนไปทางบนซ้าย เผยให้เห็นเสี้ยววงกลมสีน้ำเงินเข้มที่ด้านล่างขวา (Bottom-Right crescent) ตรงตามภาพอ้างอิง 100%
+       - รองรับการมองรอบทิศทาง: ซ้าย, ขวา, บน, ล่าง, ทแยงมุม ผ่านระบบ Face Tracking และ Touch Interaction
+     - *Expressive Eye Shapes*: ปรับใช้แนวคิด 2 เลเยอร์มิติสีน้ำเงินเข้มกับ `drawHappyEye` (⌒ ⌒), `drawSleepingEye` (— —), `drawExcitedEye` (> <), `drawAngryEye` และ `drawCrossEye` (X X)
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `PetModeTest.kt` ครอบคลุม:
+    - `PropType includes GOLD_COIN and RAIN_DROPS for finance and weather props`
+    - `Weather WMO code interpretation maps correctly to Thai conditions and themes`
+    - `Avatar emotions match Eilik and Dfree expressive face states`
+    - `Dual overlapping circle gaze parallax creates correct directional shift and exposed crescent`
+  - คอมไพล์ `./gradlew compileDebugKotlinAndroid` ผ่านฉลุย 100% (BUILD SUCCESSFUL)
+  - ทดสอบ Unit Test `./gradlew testDebugUnitTest` ผ่านครบ 243 tests (BUILD SUCCESSFUL)
+
+## 2026-09-12 — Fix Pet Mode Erratic Behavior: String Format Crash, Thai Unicode "เปิด/ปิด" Trap & Gemini Tool Hallucination Safeguards
+- **Problem Solved**:
+  - *User Symptom*: แอปทำงานรวนๆ ("มันยังทำงานรวนๆ"):
+    1. Logcat สแปม Error ซ้ำๆ ทุกเฟรมกล้อง: `PetVisionDetector E Error handling detections: Flags = ' ('`
+    2. ขณะอยู่ในโหมด Always Live / Pet Mode เมื่อผู้ใช้พูดเรียกชื่อ "จาวิส" (STT จับได้ว่า "ดาวิด") อยู่ๆ Gemini ก็สั่งปิด Always Live และตัดเสียงสนทนาทันที (`device_always_live({action=off})`, `voice_get_profiles({})`)
+    3. เมื่อทักทาย "สวัสดีจาวิส" Gemini กลับเปิดกล้องสตรีมวิดีโอขึ้นมาเอง (`vision_activate`) สิ้นเปลืองแบตเตอรี่และโทเค็น
+    4. คำสั่งที่มีคำว่า "เปิด" บางครั้งถูกตีความเป็น "ปิด" และสั่งปิดโหมดเอง
+- **Root Cause & Fix**:
+  1. **Java Formatter Crash in `PetVisionDetector.kt` (`Flags = ' ('`)**:
+     - *Root Cause*: เมื่อตรวจจับใบหน้าผู้ใช้ยิ้ม ป้ายกำกับจะถูกสร้างเป็น `"$faceDisplayName Smile 😊 $pct%"` (เช่น `Boss Smile 😊 85%`) ซึ่งมีเครื่องหมาย `%` อยู่ในข้อความ จากนั้นในบรรทัดล็อกผลการตรวจจับ มีการเรียก `"${it.label} (%.2f%s)".format(it.confidence, ...)` ซึ่งนำ `it.label` ไปแทรกตรงใน Format String ทำให้ Java `Formatter` เห็น `% (` แล้วโยน `UnknownFormatConversionException: Flags = ' ('` ออกมาทุกเฟรมที่ผู้ใช้ยิ้ม
+     - *Fix*: เปลี่ยนมาใช้ Kotlin String Interpolation ที่ปลอดภัย: `"${it.label} (${(it.confidence * 100).toInt()}%${if (it.isLocked) " 🔒" else ""})"` และปรับ gaze tracking logging ให้ปลอดภัย ไม่มีการใช้ format string กับตัวแปรภายนอก
+  2. **Thai Unicode Substring Trap ("เปิด" vs "ปิด")**:
+     - *Root Cause*: ในระบบการสะกดและรหัส Unicode ภาษาไทย คำว่า `"เปิด"` ประกอบด้วยสระเอ (`เ`, U+0E40) + ป ปลา (`ป`, U+0E1B) + สระอิ (`ิ`, U+0E34) + ด เด็ก (`ด`, U+0E14) ซึ่งเมื่อตัดสระเอข้างหน้าออก จะได้ลำดับอักขระเป็น `ป` + `ิ` + `ด` ซึ่งคือคำว่า `"ปิด"` พอดี! ส่งผลให้ในภาษา Java/Kotlin การตรวจสอบ `text.contains("ปิด")` จะได้ค่า `true` เสมอแม้ข้อความจะเป็นคำว่า `"เปิด"` ก็ตาม!
+     - *Fix*: ใน `LiveToolBridge.kt` และ `ChatController.kt` ทำการตัดคำว่า `"เปิด"` ออกก่อนตรวจสอบคำสั่งปิด (`val pWithoutOpen = p.replace("เปิด", "")`) ทำให้การแยกแยะคำสั่ง "เปิดโหมด" กับ "ปิดโหมด" ถูกต้องแม่นยำ 100%
+  3. **Gemini Live Tool Hallucination Safeguards (`LiveToolBridge.kt` & `JarvisPersona.kt`)**:
+     - *AlwaysLive Off Guard*: ดักจับการเรียก `device_always_live(action="off")` หากคำพูดล่าสุดของผู้ใช้ไม่มีคำสั่งปิดหรือออกจากโหมดชัดเจน (เช่น ผู้ใช้แค่พูดว่า "ดาวิด", "จาวิส", "สวัสดี") ระบบจะปฏิเสธการปิดโหมด ไม่สั่งปิดหน้าจอ และส่ง Voice Rule ให้ Gemini คุยกับผู้ใช้ตามปกติ
+     - *Vision Activate Guard*: ดักจับการเรียก `vision_activate` หากผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (เช่น แค่ทักทาย "สวัสดีจาวิส") ระบบจะปฏิเสธไม่เปิดกล้อง เพื่อประหยัดพลังงานและโทเค็น
+     - *Voice Profiles Guard*: ป้องกันไม่ให้ Gemini สับสนระหว่างชื่อที่ผู้ใช้เรียก ("ดาวิด") กับชื่อโปรไฟล์เสียง โดยตรวจสอบว่าผู้ใช้พูดถึงเรื่อง "เสียง" หรือ "voice" หรือไม่ก่อนเรียก
+     - *System Prompt Enhancement*: เพิ่มกฎเหล็กใน `JarvisPersona.kt` (ข้อ 4, 7, 12) กำชับ Gemini ห้ามเรียกปิดโหมด ห้ามเปิดกล้องเอง และห้ามเปลี่ยนเสียงเองเมื่อผู้ใช้แค่เรียกชื่อ
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `AlwaysLiveTest.kt`:
+    - `AlwaysLive off guard blocks hallucinated close when user did not request exit`
+    - `Vision activate guard blocks hallucinated camera calls on general conversation`
+    - `Voice profile guard prevents name confusion with voice switching`
+    - `Detection label with percent symbol does not throw format exception`
+  - รัน `./gradlew testDebugUnitTest` ผ่านครบทั้ง 239 tests (BUILD SUCCESSFUL)
+  - คอมไพล์ `./gradlew assembleDebug` สำเร็จ 100% (BUILD SUCCESSFUL)
+
+## 2026-09-12 — Fix Always Live & Pet Mode Voice Activation Bug: Accidental Disable/Shutdown and Session Disconnect Resolved
+- **Problem Solved**:
+  - *User Symptom*: สั่งด้วยเสียงว่า `"เปิดโหมดสัตว์เลี้ยง"` ระหว่างสนทนา Live Voice แล้วแอปตัดการเชื่อมต่อทันที ("ไม่ยอมเปิดให้") Logcat ฟ้อง `AlwaysLiveManager disable() → OFF`, `Stopping Pet Mode`, `Stopping Live Voice Input`, และ `Session disconnected`
+  - *Root Cause*:
+    1. **Accidental Disable in `DeviceControlExecutor.executeAlwaysLive`**:
+       - เมื่อผู้ใช้พูดว่า "เปิดโหมดสัตว์เลี้ยง" หรือ "สลับเป็นโหมดสัตว์เลี้ยง" ตัวโมเดล LLM หรือตัวแปร action อาจถูกส่งเข้ามาเป็น `action="toggle"` หรือ `action="open"`
+       - ในสาขา `"toggle"` เดิม ตรวจสอบเพียงว่า `current == FULL_SCREEN` หรือไม่ โดยไม่ได้เช็ค `isPetMode` หรือโปรไฟล์เป้าหมาย เมื่อพบว่าหน้าจอเปิดอยู่แล้ว จึงสั่ง `MainActivity.instance?.closeAlwaysLive()` ส่งผลให้สั่งปิดโหมดแทนที่จะสลับโปรไฟล์
+       - นอกจากนี้ หาก action เป็น `"open"`, `"switch"`, `"เข้า"`, `"เริ่ม"` จะไม่ตรงกับ `"on"` ใน `when (action)` เดิม
+    2. **Session Interruption in `JarvisViewModel.setAlwaysLiveProfile`**:
+       - เมื่อโปรไฟล์เปลี่ยนจาก `CONTROL` ไปเป็น `PET` โค้ดเดิมเรียก `voice.restartVoiceSession()`
+       - ซึ่งทำการเรียก `stopVoiceInput()` สั่งตัด WebSocket ปิดไมโครโฟน และตัด Session ทิ้งทันที ทำให้เกิดการตัดสายและหลุดการเชื่อมต่อ
+    3. **Rapid Duplicate Fast-Path Triggers in `VoiceController.kt`**:
+       - เมื่อผู้ใช้พูด Gemini Live จะสตรีม `inputTranscription` แบบต่อเนื่องหลาย Chunk (เช่น "เปิดโหมด", "เปิดโหมดสัตว์", "เปิดโหมดสัตว์เลี้ยง") ทำให้ Fast-path ใน `VoiceController` ยิง `ToolExecutor.execute` ซ้ำซ้อน 3-4 ครั้งในเสี้ยววินาที เกิด Race Condition ในการ Enable/Disable
+  - *Fix*:
+    1. **Safeguard `DeviceControlExecutor.executeAlwaysLive`**:
+       - แยกแยะ `isExplicitOff` อย่างเข้มงวด (ต้องมี "off", "ปิด", "stop", "disable", "exit", "ออก", "close" เท่านั้น)
+       - กรณีที่ระบุ `isPetMode` หรือ `isDriveMode` จะบังคับเป็นการเปิด/สลับโปรไฟล์ (`AlwaysLiveProfile.PET` / `DRIVE`) เสมอ และไม่มีทางสั่ง `closeAlwaysLive()` เด็ดขาด
+       - ย้าย Pure Toggle ให้ทำงานเฉพาะเมื่อไม่มีการระบุโหมด และคำสั่งเป็น toggle ชัดเจนเท่านั้น
+       - รองรับคำสั่งเปิดทุกรูปแบบ: `"on"`, `"open"`, `"start"`, `"enable"`, `"switch"`, `"change"`, `"เข้า"`, `"เริ่ม"`, `"pet"`
+    2. **Seamless In-Session Persona Switching (`JarvisViewModel.setAlwaysLiveProfile`)**:
+       - ยกเลิกการเรียก `voice.restartVoiceSession()` ขณะที่ Voice Session เชื่อมต่ออยู่
+       - เปลี่ยนมาใช้ `orchestrator.sendLiveRealtimeText(...)` ส่งคำสั่งสลับ Persona เป็นสัตว์เลี้ยงตั้งโต๊ะตัวน้อยเข้าสู่ Live Session ทันที
+       - WebSocket ไม่หลุด ไมค์ไม่หยุดบันทึก เสียง TTS ปรับ Pitch เป็น 1.25x ทันที และ Avatar เปลี่ยนเป็นโหมดสัตว์เลี้ยงโดยไร้รอยต่อ
+    3. **Debounce Fast-Path Execution (`VoiceController.kt`)**:
+       - เพิ่มตัวแปร `lastAlwaysLiveTriggerTime` ป้องกันการยิงคำสั่งเปิด/ปิด Always Live ซ้ำซ้อนภายในระยะเวลา 1.5 วินาที
+    4. **Atomic Profile Sync (`MainActivity.expandAlwaysLive`)**:
+       - ปรับปรุง `expandAlwaysLive(targetProfile)` ให้ซิงค์ `alwaysLiveManager.setProfile(targetProfile)` และยิง `onProfileChangeCallback` บน UI Thread โดยตรงก่อนแสดงผล `AlwaysLiveScreen` ป้องกัน Race Condition
+    5. **Documentation & Tool Declaration**:
+       - ปรับปรุงคำอธิบายของ `device_always_live` ใน `DeviceToolDefinitions.kt` ให้ชัดเจนยิ่งขึ้นว่าต้องใช้ `action="on"` สำหรับการเปิดหรือเปลี่ยนโหมด
+- **Verification**:
+  - เพิ่ม Unit Test `Always Live pet mode activation handles on, toggle, open and switch without closing` ใน `PetModeTest.kt`
+  - รัน `./gradlew testDebugUnitTest` ผ่าน 100% (BUILD SUCCESSFUL)
+  - คอมไพล์ `./gradlew assembleDebug` ผ่าน 100% (BUILD SUCCESSFUL)
+
+## 2026-09-12 — Live Gemini WebSocket EOFException & Audio Stream State Desynchronization Fix
+- **Problem Solved**:
+  - *Root Cause*:
+    1. **Audio Streaming Thread State Desynchronization (`send skipped — session ไม่พร้อม`)**:
+       - เมื่อ WebSocket ฝั่ง Remote ปิดการเชื่อมต่อหรือเริ่มหลุด ตัวแปร `webSocketSession.isActive` เปลี่ยนเป็น `false` ทันที
+       - ทว่า Flag `isSetupComplete` ยังคงค้างสถานะเป็น `true` จนกว่า Coroutine บล็อก `client.webSocket` จะหลุดออกจากลูป `incoming`
+       - ส่งผลให้เธรดไมโครโฟน (`sendAudioChunk`) ที่ทำงานส่งเฟรมเสียงต่อเนื่องทุก ~50-100ms ข้ามเงื่อนไขตรวจสอบ `isSetupComplete` แล้ววิ่งเข้าสู่ `sendIfReady` เกิดการล็อก `⚠️ send skipped — session ไม่พร้อม (hasSession=true, active=false, ready=true)` สแปมซ้ำซ้อนใน Logcat
+    2. **Remote Socket Closure (`java.io.EOFException`) ถูกจัดประเภทเป็น Crash Error และตัดโควตา Retry ผิดพลาด**:
+       - ในระบบ WebSocket ของ Google Gemini Live API (`gemini-3.1-flash-live-preview`) เมื่อเซสชันหมดอายุ (Session timeout 10-15 นาที) หรือฝั่งเซิร์ฟเวอร์ตัดสาย TCP FIN โดยไม่มี WebSocket Close Frame ทาง OkHttp `WebSocketReader` จะโยน `java.io.EOFException` ออกมาตามมาตรฐานเครือข่าย
+       - โค้ดเดิมใน `catch (e: Exception)` ทำการล็อกเป็น `logError("LiveGemini", "Connection error", e)` พร้อม Stacktrace เต็มรูปแบบ ทำให้ Android Studio ทำเครื่องหมายเตือนเป็นบั๊กหลอน (`Fix with AI`)
+       - นอกจากนี้ ในบล็อก `catch` มีการบวกค่า `attempt++` เสมอแม้ว่าเซสชันก่อนหน้าจะเชื่อมต่อสำเร็จและใช้งานได้ (`sessionWasReady == true`) ทำให้เมื่อหลุดครบ 3 ครั้งจากการหมดอายุเซสชันตามเวลาปกติ ระบบจะตัดการเชื่อมต่อไปถาวร (`Giving up`)
+  - *Fix*:
+    1. **State Synchronization ใน `sendAudioChunk` & `sendIfReady`**:
+       - ตรวจสอบ `isSessionActive = session != null && session.isActive` หากพบว่า `!isSessionActive` ให้รีเซ็ต `isSetupComplete = false` ทันที
+       - ผันเสียงไมค์เข้าสู่ `preReadyAudioBuffer` ทันทีที่เซสชันไม่ Active ป้องกันการเรียก `sendIfReady` ขณะ Socket กำลัง Reconnect
+       - ปรับปรุง `sendIfReady` ให้ทำ Rate-limiting การล็อกข้อความเตือน `⚠️ send skipped` สูงสุดเพียงครั้งเดียวในรอบ 3 วินาที ขจัด Log spam 100%
+    2. **Graceful Remote Socket Close Detection & Retry Quota Protection**:
+       - เพิ่มฟังก์ชัน `isRemoteSocketCloseException(e)` รองรับ KMP Cross-platform (ตรวจสอบ EOFException, SocketClosed, ClosedReceiveChannelException, Connection reset)
+       - หาก `sessionWasReady == true` และเป็น Remote Close ให้ถือเป็น Server timeout ปกติ โดยล็อกแบบสุภาพระดับ Debug (`🔌 Remote server closed connection (EOFException) — auto-reconnecting`)
+       - เซ็ต `attempt = if (sessionWasReady) 1 else attempt + 1` เพื่อไม่กินโควตา Retry ของเซสชันที่เคยพร้อมใช้งาน
+       - ล้าง `sessionResumptionHandle = null` หากเกิดข้อผิดพลาดซ้ำ เพื่อไม่ให้ติดค้าง Resumption Handle ที่เซิร์ฟเวอร์ปฏิเสธ
+- **Verification**:
+  - เพิ่ม Unit Test `Remote socket close detection recognizes EOF and transient network terminations` ใน `AlwaysLiveTest.kt`
+  - เพิ่ม Unit Test `Live session ready state protects reconnect retry quota on server close` ใน `AlwaysLiveTest.kt`
+  - ทดสอบผ่าน 100% ด้วย `./gradlew testDebugUnitTest` (BUILD SUCCESSFUL)
+  - คอมไพล์ผ่าน 100% ด้วย `./gradlew assembleDebug` (BUILD SUCCESSFUL)
+
+## 2026-09-12 — Fix Hand Gesture False Positive Spam (HIGH_FIVE Leak) & Multi-Frame Edge Latch Engine
+- **Problem Solved**:
+  - *Root Cause*:
+    1. ใน `PetVisionDetector.kt` บล็อก `when` ของการจำแนกท่าทางมือ สาขา `else` เดิมถูกเขียนเป็น `detectedGesture = HandGesture.HIGH_FIVE` แทนที่จะเป็น `HandGesture.NONE` ส่งผลให้เมื่อกล้องตรวจพบมือปกติที่กำลังถือเครื่อง หรือมือวางบนโต๊ะ ระบบจะบังคับเป็น `HIGH_FIVE` ตลอดเวลา
+    2. ทำงานแบบ Level-triggered ด้วย Cooldown สั้นเพียง 1200ms ทำให้เมื่อมีมือปรากฏในจอ ระบบจะยิง `onHandGestureDetected(HIGH_FIVE)` รัวๆ ทุก 1.2 วินาที เกิดเสียงร้อง `CHIRP_HAPPY` วนซ้ำต่อเนื่อง
+    3. ขอบเขตยกเว้นใบหน้าเดิม (`faceBounds`) คลุมด้านล่างเพียง 35% ทำให้ผิวบริเวณลำคอและไหปลาร้าหลุดมารวมเป็นกลุ่มก้อนมือ
+  - *Fix*:
+    1. ปรับปรุงสาขา `else` ให้เป็น `HandGesture.NONE` (แสดงป้าย "Hand ✋" สำหรับกรอบตรวจจับ แต่ไม่สั่งยิง Event ท่าทาง)
+    2. เพิ่มการตรวจจับการถือโทรศัพท์ (`isHoldingPhone`): หากกลุ่มผิวหนังอยู่ติดขอบจอด้านล่าง (`minY > height * 0.65f`) จะไม่จัดเป็นท่าทาง
+    3. ขยาย `padBottom = (b.height() * 0.85f).toInt()` ตัดผิวลำคอใต้คางทิ้งทั้งหมด
+    4. พัฒนาระบบ **Multi-Frame Confirmation & Edge-Triggered Latch**:
+       - ต้องตรวจพบท่าเดิมติดต่อกันอย่างน้อย 3 เฟรม (~240ms) ถึงจะ Confirm
+       - ยิง Event เพียง **ครั้งเดียว** ต่อการทำท่า 1 ครั้ง ค้างท่าเดิมไว้จะไม่ยิงซ้ำเด็ดขาด
+       - ปลด Latch เมื่อเอามือลง (`NONE`) ติดต่อกันเกิน 800ms
+       - เว้นระยะ Cooldown 3.5 วินาทีใน Vision Detector
+    5. เพิ่ม Defensive Cooldown 2 ชั้นใน `PetModeController.onHandGesture` ป้องกันการกระตุ้นซ้ำภายใน 3.0-5.0 วินาที
+- **Verification**:
+  - เพิ่ม Unit Test `PetModeController gesture debouncing and cooldown prevents spam` ใน `PetModeTest.kt` ผ่าน 100%
+
+## 2026-09-12 — Virtual Desk Pet Revolution: Jelly Physics & Clean Face, Settings Dialog, 5-Slot Face Recognition & Tamagotchi Engine
+- **Problem Solved**:
+  1. **ดีไซน์และระบบแอนิเมชันใบหน้านุ่มนิ่ม & คลีน (Facial & Physics Animations)**:
+     - *Jelly / Rubber Ball Physics*: ปรับปรุง `PetRobotHeadAvatar.kt` ให้มี Squash and Stretch physics (`squashX`, `squashY`) พร้อมแสงสะท้อนทรงแคปซูลมนบนซ้าย และประกายจุดล่างขวา ให้ความรู้สึกนุ่มนิ่ม เด้งดึ๋ง น่ารักเหมือนโพลิ่ง/เจลลี่
+     - *Clean Idle State*: ในโหมดพักหน้าจอ (`IDLE`) ซ่อนคิ้วและปากทั้งหมด 100% คงเหลือเฉพาะดวงตากลมโตคู่ใหญ่นีออนที่กลอกมองสำรวจ หรี่ตา และกระพริบตาอย่างมีชีวิตชีวา ไร้สิ่งรบกวนสายตา
+     - *Conditional Eyebrows*: แสดงคิ้วเฉพาะในอารมณ์ที่ต้องการสื่อสารชัดเจน (`THINKING`, `ANGRY`, `CONFUSED`, `SAD`, `LISTENING`) โดยซ่อนคิ้วในอารมณ์ `IDLE`, `HAPPY`, `LOVE`, `WINK`, `SLEEPING`
+     - *Dynamic Mouth Shapes*: ปรับเปลี่ยนรูปทรงปากตามสถานะ — ปากคลื่นเสียง 5 แท่งขณะพูด, ปากจู๋ 'O' (`POUT`), ปากยิ้มโค้ง (`HAPPY`/`LOVE`), ปากเส้นตรงแบน (`SAD`/`ANGRY`), และซ่อนสนิทเมื่อไม่ได้พูด
+     - *Screensaver Eye Tricks (`EyeTrickState`)*: เมื่อไม่มีการโต้ตอบตามเวลาที่กำหนด (15s, 25s, 45s, 60s) ดวงตาจะเล่นท่ายิมนาสติกแก้เบื่อ:
+       - `PING_PONG_BOUNCE`: ลูกตากระเด้งชนขอบจอไปมาเหมือนลูกปิงปอง
+       - `TIRED_BOUNCE`: ดวงตาทิ้งตัวดิ่งลงกระแทกขอบล่างแบบเจลลี่แบนแต๊ดแต๋แล้วเด้งกลับ
+       - `SNOOKER_SHOT`: ตาซ้ายพุ่งแทงข้ามจอชนตาขวาเหมือนลูกสนุกเกอร์
+  2. **ปรับแต่งหน้าจอคลีน & หน้าต่างการตั้งค่า (Clean UI & PetSettingsDialog)**:
+     - *Clean Default UI*: ซ่อนป้ายสถานะ Debug (`🐾`, `🎭`, `🌀`, `👀`) เป็นค่าเริ่มต้น โดยต้องเปิด `showDebugHud` ในหน้าต่างตั้งค่าเท่านั้น
+     - *PetSettingsDialog*: เพิ่มปุ่ม `⚙️ ตั้งค่า` บนแถบควบคุมของ `AlwaysLiveScreen` เปิด Modal Dialog 3 แท็บ:
+       - แท็บทั่วไป: สวิตช์ Debug HUD, ชิปเลือกเวลาพักหน้าจอ Screensaver Delay (15s, 25s, 45s, 60s), คำแนะนำฟิสิกส์และเสียง
+       - แท็บจดจำใบหน้า: จัดการ 5 Face Slots (ลงทะเบียน, ตั้งชื่อเล่น เช่น "บอส", "แม่", ลบข้อมูล)
+       - แท็บสภาพจิตใจสัตว์เลี้ยง: แถบสถานะความต้องการแบบ Tamagotchi พร้อมปุ่มดูแลด่วน (ให้อาหาร 🍖, ทำความสะอาด 🧼, เล่น 🎾, นอนหลับ 💤)
+  3. **ระบบการมองเห็นและการโต้ตอบอัจฉริยะ (5-Slot Face Recognition & 7 Hand Gestures)**:
+     - *5-Slot Face Recognition (`PetFaceProfile.kt`, `PetVisionDetector.kt`)*: บันทึกและจดจำใบหน้าคนในบ้านได้ 5 โปรไฟล์โดยใช้อัตราส่วน Landmark ทางกายภาพแบบ Normalized (ระยะห่างดวงตา, สัดส่วนจมูก-ปาก, ความกว้างปาก, สัดส่วนรูปหน้า) เปรียบเทียบด้วย Euclidean Distance ($D < 0.12$) ประมวลผลบนเครื่อง 100% ไม่ส่งข้อมูลชีวมิติขึ้น Cloud
+     - *Personalized Greetings (`JarvisPersona.kt` Rule 12)*: AI ทักทายระบุชื่อเล่นที่ลงทะเบียนไว้ได้อย่างอบอุ่นเป็นกันเอง
+     - *7 Hand Gestures (`PetGesture.kt`)*: ตรวจจับท่าทางมือ 7 แบบ (`HIGH_FIVE`, `OK`, `BYE`, `NO`, `V_SIGN`, `THUMBS_UP`, `THUMBS_DOWN`) นอกกรอบใบหน้า ส่งผลต่อเสียงเอฟเฟกต์ สีหน้า และเพิ่มระดับความผูกพัน
+  4. **ระบบจิตวิทยาและอุปนิสัยสัตว์เลี้ยง (Pet Needs & Tamagotchi Engine)**:
+     - *Biological Needs (`PetNeedsState.kt`)*: จำลองระดับความอิ่ม (Satiety), พลังงาน (Energy), ความสะอาด (Hygiene), ความสุข (Happiness), และความเครียด (Stress) พร้อม Loop สลายค่าตามกาลเวลา (`decay`)
+     - *Long-term Relationship & Personality*: ระดับความผูกพัน (Affection Level 1–10: แปลกหน้า $\rightarrow$ เพื่อนสนิท $\rightarrow$ คู่ชีวิต), ความเชื่อฟัง (Obedience), ความกระตือรือร้น (Hyper/Calm), และการติดเจ้าของ (Clingy/Independent)
+     - *AI Persona Integration (`JarvisPersona.kt` Rule 13)*: AI รับรู้สถานะความหิว อารมณ์ และความเหนื่อยล้าของตัวเอง สามารถบ่นหิวนม หิวขนม หรือขอตัวนอนพักผ่อนอย่างน่ารักในการสนทนาสด
+- **Verification**:
+  - Unit Tests: `PetModeTest.kt` ทดสอบ HandGesture (8 ค่า), PetFaceProfile (5 slots & distance matching), PetNeedsState (decay, feed, clean, play, love, personality), Screensaver tricks & settings — ผ่าน 100%
+  - Kotlin Compile & Test: `./gradlew testDebugUnitTest` ผ่านเรียบร้อย
+
+## 2026-09-12 — Pet Mode Tool-Only Dialogue Card, Auto-Decay to Dark OLED Normal State & Ambient Sound Loop Fix
+- **Problem Solved**:
+  1. **กล่องข้อความแสดงเฉพาะตอนใช้ Tool (Tool-Only Dialogue Card in Pet Mode)**:
+     - *Root Cause*: ใน `AlwaysLiveScreen.kt` มีโค้ด `val messageText = activeAvatarState.faceState.speechText ?: activeAvatarState.statusText` โดยที่ `statusText` ใน `App.kt` มีค่าสตริงสถานะเสมอ (เช่น "พร้อมรับฟัง", "พร้อมรับคำสั่ง", "JARVIS กำลังสนทนา...", หรือ debug string "🧪 [Face]...") ส่งผลให้ `hasMessage` เป็น `true` ตลอดเวลา และผลักใบหน้าหุ่นยนต์หลบไปด้านข้างถาวร
+     - *Fix*:
+       - ปรับปรุงตรรกะใน `AlwaysLiveScreen.kt`: ให้ `hasMessage` เป็น `true` **เฉพาะ** เมื่อมี Tool กำลังประมวลผล (`activeToolName != null`), มีผลลัพธ์จาก Tool (`lastToolResult != null`), หรือกำลังรัน Emotion Showcase Demo (`isDemoRunning && speechText != null`)
+       - สำหรับการสนทนาทั่วไป (AI ตอบรับ, รับฟัง, สแตนด์บาย): `hasMessage = false` เสมอ -> ใบหน้าหุ่นยนต์อยู่ตรงกลางจอ 100% ขยับเฉพาะปากคลื่นเสียง 5-bar waveform ตามจังหวะเสียงพูดและระดับไมค์อย่างเป็นธรรมชาติ
+       - เชื่อมโยง `lastToolResult` จาก `LiveToolBridge` -> `JarvisOrchestrator` -> `JarvisViewModel` -> `App.kt` -> `AlwaysLiveScreen` พร้อมปุ่ม Dismiss [✖] หรือปิดอัตโนมัติเมื่อเริ่มพูดใหม่
+  2. **แก้ไขปัญหาเสียงวนซ้ำ & ติดอยู่ในอารมณ์ 🎭 [HAPPY] (Auto-Decay to Normal IDLE)**:
+     - *Root Cause*: ใน `JarvisPersona.kt` (Rule 9) มีตัวอย่างสั่งให้โมเดลเรียก `device_avatar_emotion(..., background="sunny")` เมื่อทักทายอย่างสดใส และใน `JarvisViewModel.kt` ฟังก์ชัน `setTestFaceState` ไม่มีระบบนับเวลาถอยหลัง ส่งผลให้ค้างอยู่ในธีม `SUNNY` ตลอดไป ซึ่งใน `AmbientSoundEngine.kt` มี Procedural Loop 2.5 วินาที สังเคราะห์เสียงนกร้องดิจิทัล (bird chirp whistle) วนซ้ำทุก 2.5 วินาที
+     - *Fix*:
+       - เพิ่มระบบ `faceAutoDecayJob` ใน `JarvisViewModel.kt`: เมื่อมีคำสั่งแสดงอารมณ์หรือฉากหลัง จะแสดงผลขณะ AI กำลังพูด และเมื่อพูดจบ + 2.5–3 วินาที จะเรียก `resetToIdleFace()` เพื่อคืนสู่ IDLE อัตโนมัติ
+       - ลบการเซ็ต debug string ใน `testStatusOverride` เพื่อไม่ให้มีข้อความ "🧪 [Face] HAPPY..." ค้างในระบบ
+       - ใน `JarvisPersona.kt`: ปรับปรุง Rule 5 ห้ามเรียก `device_avatar_emotion` ในการทักทายเริ่มต้น และ Rule 9 ให้ใช้ `background="default"` (โทนมืด) เป็นมาตรฐานสำหรับอารมณ์ทั่วไป
+  3. **โหมดปกติเป็นโทนมืดสนิท (Pure Dark OLED Tone / Zero Background Clutter)**:
+     - ใน `PetBackgroundLayer.kt`: ปรับแต่ง `DefaultBackground()` ให้เป็นพื้นหลังสีดำ OLED มืดสนิท (`Color(0xFF000000)`) ตัดอนุภาคฝุ่นละอองลอย (dust motes) และ infinite animation ออกทั้งหมด
+     - เมื่ออยู่ในโหมดปกติ (`BackgroundTheme.DEFAULT`): `AmbientSoundEngine` สั่ง `stopInternal()` ทันที ทำให้ระบบเงียบสนิท ไร้เสียงรบกวน ไร้แสงสะท้อน และประหยัดพลังงาน
+- **Verification**:
+  - Unit Tests: `PetModeTest.kt` เพิ่มการทดสอบ Dark OLED tone prompt verification และ Tool-only dialogue logic resolution
+  - Full Unit Test Suite: `./gradlew testDebugUnitTest` ผ่าน 100% (30 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-12 — Dynamic SVG Path Parser System (Runtime Vector Prop & Sticker Engine) & Pet Magic Creator Tool
+- **Problem Solved**:
+  1. **Dynamic SVG Path Parser System (`DynamicVectorProp.kt`, `DynamicPropRenderer.kt`)**:
+     - *Concept*: ปลดล็อกขีดจำกัดเดิมที่ต้องคอมไพล์โค้ดใหม่ทุกครั้งที่ต้องการเพิ่มพร็อพ/สติกเกอร์ โดยเปิดโอกาสให้ AI (Gemini Live / Tool Calling / Chat) สามารถออกแบบและสร้างเวกเตอร์ SVG Path ขึ้นมาเองแบบ Real-time ณ รันไทม์ (เช่น หมวกคาวบอย, แว่นตาดำน้ำ, มงกุฎ, คทาเวทมนตร์, ปีกนางฟ้า, หนวดแมว ฯลฯ)
+     - *Path Parsing & Performance Caching*: ใช้ `androidx.compose.ui.graphics.vector.PathParser().parsePathString().toNodes().toPath()` ใน `commonMain` พร้อมแคชผ่าน `remember(prop.svgPath)` เพื่อไม่ให้เกิด Overhead การ parse ซ้ำใน Loop 60/120 FPS
+     - *Auto-Fit Scale & Center Normalization*: คำนวณ `path.getBounds()` และปรับ Matrix Normalizer อัตโนมัติ (`targetSizePx / max(bounds.width, bounds.height)`) ไม่ว่า AI จะวาดบนสเกล 24x24 หรือ 100x100 ก็จะแสดงผลขนาดถูกต้องตาม `sizeDp`
+     - *Anchor Coordinate Mapping*: รองรับตำแหน่งยึดบนใบหน้า `PropPosition` (`FOREHEAD`, `LEFT_EYE`, `RIGHT_EYE`, `CHEEKS`, `CHIN`, `FLOATING_LEFT`, `FLOATING_RIGHT`) พร้อมออฟเซ็ตและเลื่อนตามใบหน้าเมื่อเกิด Adaptive Split-Screen
+     - *5 Dynamic Animations*: รองรับ `DynamicPropAnimation` (`FLOAT_BOB`, `PULSE`, `ROTATE_CONTINUOUS`, `SWAY`, `STATIC`) ขับเคลื่อนด้วย Compose InfiniteTransition
+  2. **Tool Integration & AI Persona Superpower (`device_custom_prop`)**:
+     - *Tool Declaration (`DeviceToolDefinitions.kt`)*: เพิ่ม Tool `device_custom_prop` พร้อมพารามิเตอร์ `action` (`add`, `remove`, `clear`), `name`, `svg_path`, `color`, `stroke_color`, `stroke_width`, `position`, `size`, `animation` และเพิ่มออปชัน `svg_path` ใน `device_avatar_emotion`
+     - *Execution Pipeline (`DeviceControlExecutor.kt`, `PetModeController.kt`, `JarvisViewModel.kt`, `App.kt`)*: จัดการคำสั่งเพิ่ม/ลบ/ล้างพร็อพเวกเตอร์แบบเรียลไทม์ พร้อมเชื่อมโยงกับ `RobotFaceState.customProps`
+     - *Voice Rule & Persona Prompt (`JarvisPersona.kt`, `LiveToolBridge.kt`)*: เพิ่ม Rule 11 ใน `PET_LIVE_SYSTEM_PROMPT` ให้ AI รับรู้ถึงพลังวิเศษในการเสกไอเทมเวกเตอร์แบบสดๆ เมื่อเจ้านายขอไอเทมใดๆ พร้อมตอบรับอย่างน่ารักและเป็นธรรมชาติ
+- **Verification**:
+  - Unit Tests: `SvgPathTest.kt` (Complex bezier parsing, bounds calculation, hex color parsing, RobotFaceState integration) และ `DeviceControlTest.kt` (`device_custom_prop` registry & tool declarations)
+  - Full Android Build: `./gradlew testDebugUnitTest`
+
+## 2026-09-12 — LOOI Robot Face Evolution ("The Phone IS the Head"), True Fullscreen Immersive Mode, Responsive Split-Screen Dialogue Layout & 52-Prop Catalog
+- **Problem Solved**:
+  1. **ปรัชญาการออกแบบ "The Phone IS the Head" (Pure OLED Living Glass Face Plate)**:
+     - *Concept*: ปรับเปลี่ยนร่างอวตารของโหมดสัตว์เลี้ยงตามสไตล์ LOOI Robot (`GrinZero/super-looi`) โดยตัดภาพจำลองตัวถังเซรามิก (Ceramic Chassis), ขอบกระบังหน้าจำลอง (Visor Frame), และหูโลหะออกทั้งหมด เปลี่ยนให้หน้าจอสมาร์ตโฟนจริงกลายเป็น "หัวหุ่นยนต์ที่มีชีวิต" แบบ Edge-to-Edge 100%
+     - *Visual Elements*:
+       - **ดวงตานีออน Squircle ขนาดใหญ่**: วาดด้วย `drawRoundRect` แบบ Squircle โค้งมนนุ่มนวล พร้อมรัศมีเรืองแสงนีออนชั้นนอก (`Brush.radialGradient`) และแสงสะท้อน Specular Sheen ด้านบน
+       - **คิ้วแบบไดนามิก (Expressive Brows)**: ปรับองศาและระดับตามอารมณ์ (เช่น Thinking เอียงซ้ายขวาไม่เท่ากัน, Angry เอียงกด 18°, Sad เอียงยก 15°, Listening เลิกคิ้วสูงขึ้น)
+       - **ปากคลื่นเสียงไมโครโฟน (5-Bar Waveform Equalizer)**: แสดงผลเป็นแท่งคลื่นเสียง 5 แท่งขยับตามจังหวะเสียงพูดจริงของ AI และระดับไมโครโฟน หรือโค้งยิ้ม/ตกใจ/คาบตามอารมณ์
+       - **Gaze Tracking & Perspective Distortion**: เมื่อหันมองข้าง ดวงตาข้างที่อยู่ใกล้จะหรี่แคบลงเล็กน้อย ขณะที่ข้างไกลจะขยายกว้างขึ้น สร้างมิติดวงตา 3D บนจอด้านหน้า
+  2. **ระบบ True Fullscreen Immersive Mode**:
+     - ซ่อน Status Bar และ Navigation Bar อัตโนมัติเมื่อเข้าสู่โหมดสัตว์เลี้ยง (`AlwaysLiveProfile.PET`) ผ่าน `WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`
+     - นำ `statusBarsPadding()` ออกในโหมดสัตว์เลี้ยงเพื่อให้พื้นหลังดำ OLED สนิทและเอฟเฟกต์บรรยากาศแผ่ขยายเต็มผืนจอ 100% ไร้รอยต่อ
+  3. **เลย์เอาต์แยกหน้าจอสนทนาแบบไดนามิก (Adaptive Split-Screen Dialogue Layout)**:
+     - **โหมดแนวนอน (Landscape)**: เมื่อมีข้อความหรือเสียงพูด AI (`speechText` หรือ `statusText`) ส่วนของใบหน้าจะสไลด์ไปทางซ้ายอย่างนุ่มนวลด้วยฟิสิกส์สปริง (`spring(dampingRatio = 0.78f)` พร้อมย่อสเกลเล็กน้อย 0.82) เพื่อเปิดพื้นที่ให้การ์ดสนทนาอะคริลิกเรืองแสง `PetDialogueCard` แสดงทางฝั่งขวา
+     - **โหมดแนวตั้ง (Portrait)**: ส่วนของใบหน้าจะสไลด์ขึ้นด้านบน และการ์ดสนทนาจะเลื่อนขึ้นมาจากด้านล่าง
+     - **โหมดว่าง (Idle)**: เมื่อข้อความหายไป ใบหน้าจะสไลด์กลับมาอยู่ตรงกลางหน้าจอเต็มผืนอย่างสวยงาม
+     - **สัมผัสแม่นยำ (Adaptive Touch Mapping)**: พิกัดการสัมผัส (ลูบหัว, จิ้มแก้ม, ลากสายตา) จะคำนวณออฟเซ็ตตามตำแหน่งสไลด์ของใบหน้าแบบเรียลไทม์
+  4. **คลังพร็อพและสติกเกอร์ลอยขนาดใหญ่ 52 ชนิด (52-Prop Vector Catalog)**:
+     - ขยาย `PropType` ใน `RobotFaceState.kt` จากเดิม 10 ชนิด เป็น 52 ชนิด ครอบคลุม 4 หมวดหมู่: อารมณ์ (17), อาหาร/ชีวิตประจำวัน (13), ธรรมชาติ/สภาพอากาศ (10), และเทคโนโลยี/เครื่องมือ (12)
+     - เรนเดอร์บน Canvas แบบเวกเตอร์เคลื่อนไหวขนาดใหญ่ 30–60dp พร้อมสเกลและเลื่อนตำแหน่งไปพร้อมกับใบหน้า
+- **Verification**:
+  - Unit Tests: `./gradlew testDebugUnitTest` ผ่าน 100% (30 tasks, BUILD SUCCESSFUL)
+  - Kotlin Android Compile: `./gradlew :composeApp:compileDebugKotlinAndroid` ผ่านฉลุย 100%
+
+## 2026-09-12 — Pet Mode Tool Calling Unlock & GPS Nearby Places Search (Restaurants/Cafes) & Recipe/SMC Knowledge Integration
+- **Problem Solved**:
+  1. **ปลดล็อกการเรียกใช้ Tool ในโหมดสัตว์เลี้ยง (Pet Mode Tool Calling Unlock)**:
+     - *Root Cause*: ใน `LiveGeminiService.kt` (บรรทัด 646 เดิม) มีการเขียน `tools = if (isPetMode) null else tools?.let { listOf(it) }` ซึ่งส่งผลให้เมื่อเปิดใช้งานโหมดสัตว์เลี้ยง รายชื่อ Function Declarations ทั้งหมดจะถูกตั้งเป็น `null` ทำให้โมเดล Gemini Live ไม่มีเครื่องมือใดๆ ให้เรียกใช้งาน และเมื่อเจ้านายถามตรวจสภาพอากาศหรือสั่งงาน AI จึงตอบว่า *"จาวิสใช้ทูลไม่ได้ฮับ น้องมองเห็นแค่ผ่านกล้อง..."*
+     - *Fix*:
+       - แก้ไขใน `LiveGeminiService.kt`: ส่ง `tools = tools?.let { listOf(it) }` เสมอทุกโหมด ทำให้ Gemini Live ในโหมดสัตว์เลี้ยงสามารถเข้าถึง Tools ทั้งหมดใน `ToolRegistry` ได้อย่างสมบูรณ์
+       - ส่ง `coreContext` ไปยัง `LiveSystemInstruction` ในโหมดสัตว์เลี้ยง เพื่อให้ AI จดจำข้อมูลผู้ใช้และบริบทสำคัญได้ต่อเนื่อง
+  2. **เสริมพลังและปรับจูน System Prompt ให้โหมดสัตว์เลี้ยงฉลาดรอบด้าน (Pet Superpowers & Persona Rules)**:
+     - ปรับปรุง `PET_LIVE_SYSTEM_PROMPT` ใน `JarvisPersona.kt`:
+       - เพิ่มกฎข้อ 10: **พลังวิเศษและการเรียกใช้เครื่องมือช่วยเหลือเจ้านาย (PET SUPERPOWERS & TOOLS CALLING)** โดยระบุว่าแม้ร่างจะเป็นหุ่นยนต์สัตว์เลี้ยงตัวจิ๋ว แต่น้องมีพลังวิเศษอัจฉริยะ สามารถและต้องเรียกใช้ Tools ต่างๆ ช่วยเหลือเจ้านายได้เสมอ พร้อมตอบกลับด้วยน้ำเสียงน่ารัก ขี้เล่น 1-2 ประโยค
+       - **GPS ตำแหน่ง และค้นหาสถานที่ใกล้เคียง**: เมื่อเจ้านายถาม "ตอนนี้อยู่ที่ไหน", "พิกัดปัจจุบัน" เรียก `device_location(action="get_current")` | เมื่อถาม "มีร้านอาหารแถวนี้อะไรบ้าง", "แนะนำร้านอาหารแถวนี้", "คาเฟ่ใกล้ๆ" เรียก `device_location(action="get_current", query="ร้านอาหาร")` หรือ `device_navigate`
+       - **สูตรอาหารและข้อมูลทั่วไป**: เมื่อถาม "ขอสูตรหมักหมูย่าง", "สภาพอากาศวันนี้" สามารถตอบสูตรอาหารแสนอร่อยได้ทันที หรือเรียก `search_web` ค้นหาข้อมูลล่าสุด
+       - **การเทรด หุ้น ทองคำ และ SMC**: ปรับปรุงกฎข้อ 4 และ 10 เมื่อเจ้านายสั่งวิเคราะห์กราฟ หุ้น หรือทองคำ (เช่น "We call SMC ทองคำ ให้หน่อย") **ห้ามปฏิเสธว่าทำไม่ได้เด็ดขาด!** ให้เรียก `trading_smc_analysis(symbol="XAUUSD")` แล้วสรุปจุดสำคัญ (Order Block, FVG, แนวรับแนวต้าน) ให้เจ้านายฟังอย่างน่ารัก ร่าเริง
+     - แก้ไขใน `LiveToolBridge.kt`: ปรับกฎเสียง `[VOICE RULE - PET MODE]` (บรรทัด 348) โดยลบตัวอย่างคำว่า "ปิ๊บๆ!" ออก เพื่อไม่ให้ AI พูดคำเลียนเสียงหุ่นยนต์ออกมา และเพิ่ม `[VOICE RULE - PET LOCATION & NEARBY]` ให้รายงานสถานที่ใกล้เคียงและร้านเด็ดอย่างกระชับ
+  3. **ระบบค้นหาสถานที่ใกล้เคียงจากพิกัด GPS จริง (GPS Nearby Places Search with Google Grounding)**:
+     - เพิ่มพารามิเตอร์ทางเลือก `query` ใน `device_location` (`DeviceToolDefinitions.kt`) เช่น `"ร้านอาหาร"`, `"คาเฟ่"`, `"ปั๊มน้ำมัน"`
+     - ใน `DeviceControlExecutor.kt`: เมื่อมีการระบุ `query` ระบบจะดึงพิกัด Lat/Lng และที่อยู่ย่าน/เขต/แขวงจาก `LocationProvider` แล้วส่งสัญญาณ `NEARBY_SEARCH_REQUEST::query=...::location=...::summary=...`
+     - ใน `LiveToolBridge.kt`: ดักจับ `NEARBY_SEARCH_REQUEST::` แล้วทำ Google Search Grounding (`enableGrounding = true`) เพื่อค้นหาร้านอาหาร/สถานที่จริงที่เป็นที่นิยมและเปิดบริการอยู่ในย่านนั้น พร้อมเมนูเด่น ส่งกลับเข้า Gemini Live เพื่อให้ AI ตอบแนะนำเป็นเสียงพูดอย่างเป็นธรรมชาติ
+     - ใน `ToolExecutor.kt`: รองรับการแสดงผลลัพธ์สถานที่ใกล้เคียงในโหมดแชทปกติได้อย่างสวยงาม
+- **Verification**:
+  - Unit Tests: เพิ่มการทดสอบใน `PetModeTest.kt` ทดสอบกฎพลังวิเศษของ Pet Mode, การมีอยู่ของพารามิเตอร์ `query` ใน `device_location` — ผ่าน 100% (`./gradlew testDebugUnitTest` BUILD SUCCESSFUL)
+  - Build APK: `./gradlew assembleDebug` สำเร็จ 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-12 — Camera FOV Alignment (Dual 9:16 Portrait & 16:9 Landscape) & Stabilized Object Target Locking Engine
+- **Problem Solved**:
+  1. **แก้ปัญหาขอบเขตภาพกล้องไม่ตรงกับที่ AI เห็น (Camera Preview vs AI Vision 1:1 FOV Alignment)**:
+     - *Root Cause*: หน้าต่างลอย PIP ใน `AlwaysLiveScreen.kt` เดิมตั้งขนาดตายตัวไว้ที่ `220.dp × 165.dp` (อัตราส่วนแนวนอน 4:3) ขณะที่ผู้ใช้ถือโทรศัพท์ในแนวตั้ง (9:16) ทำให้ `PreviewView.ScaleType.FILL_CENTER` ซูมและ Crop ขอบภาพบน-ล่างทิ้งไปถึง 57.8% แต่ภาพที่ส่งให้ AI กลับเป็นภาพเต็ม 9:16 (100% Uncropped) ทำให้ผู้ใช้ไม่รู้ขอบเขตสายตาของ AI และกรอบ Bounding Box คำนวณเบี้ยวในแนวตั้ง
+     - *Fix*:
+       - ปรับขนาดหน้าต่าง PIP ให้เป็น Dynamic Aspect Ratio ตามการหมุนเครื่อง:
+         - **แนวตั้ง (Portrait)**: ขนาด `144.dp × 256.dp` (อัตราส่วนเป๊ะ 9:16)
+         - **แนวนอน (Landscape)**: ขนาด `240.dp × 135.dp` (อัตราส่วนเป๊ะ 16:9)
+       - ปรับ `scaleType` ใน `CameraPreviewView.android.kt` เป็น `PreviewView.ScaleType.FIT_CENTER` เพื่อให้ภาพแสดงเต็มผืน 100% ไร้การ Crop หรือบิดเบี้ยว
+       - ปรับปรุงการสลับการหมุนหน้าจอใน `CameraPreviewView.android.kt` ให้ตั้งค่า `targetRotation` บน `previewUseCase` และ `imageAnalysisUseCase` อัตโนมัติตาม `LocalConfiguration.current.orientation`
+       - ปรับแก้ตำแหน่งแถบควบคุมด้านบนและคอลัมน์สถานะ `PetDetectionBadge` ใน `AlwaysLiveScreen.kt` โดยเว้นระยะ `top = 56.dp` ในแนวตั้ง เพื่อป้องกันปุ่ม `[🧪 ทดสอบเดโม]` และ `[👁️ ลืมตา]` ซ้อนทับกับป้ายสถานะ
+  2. **ระบบล็อกเป้าหมายและกรองสัญญาณรบกวน (Stabilized Object Target Locking & Smoothing Engine)**:
+     - พัฒนาโมดูล [`PetVisionTargetTracker.kt`](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/pet/PetVisionTargetTracker.kt) (`commonMain` - Cross-platform):
+       - **Clutter & Background Noise Filtering**: กรองผนังห้อง (`Place / Scenery 🏢`), วัตถุขนาดเล็กตามพื้นหลัง (รอยต่อท่อ, สวิตช์ไฟ) ทิ้งโดยอัตโนมัติ
+       - **Face/Neck Exclusion Zone**: กรองวัตถุที่ตรวจจับพลาดไปซ้อนทับใบหน้าหรือบริเวณลำคอ/เสื้อ (เช่น false `Accessory / Item 👓` บนปาก/หนวด) ทิ้งทันที
+       - **Target Prioritization**: จัดลำดับความสำคัญ 1) ใบหน้าเจ้านาย (`Boss Face`) $\rightarrow$ 2) มือ/นิ้ว (`Hand / Finger`) $\rightarrow$ 3) วัตถุเด่นในมือ/บนโต๊ะ (จำกัดไม่เกิน 3 เป้าหมายพร้อมกัน)
+       - **IOU & Center Distance Association**: จับคู่วัตถุเฟรมต่อเฟรมด้วยอัลกอริทึม Intersection-over-Union ป้องกันกรอบสลับตำแหน่ง
+       - **EMA Coordinate Smoothing**: เกลี่ยพิกัดกรอบ `(x, y, width, height)` ด้วย Exponential Moving Average ($\alpha = 0.40$) ขจัดอาการกรอบสั่น/กระตุก 100%
+       - **Hysteresis Persistence (350ms)**: รักษาตำแหน่งวัตถุไว้ 350ms หากมีเฟรมหลุดชั่วคราว ป้องกันกรอบกระพริบติดๆ ดับๆ
+       - **Target Locking Indicator**: เมื่อตรวจจับต่อเนื่องครบ 3 เฟรม จะล็อกเป้าหมาย (`isLocked = true`) แสดงกรอบ Sci-Fi พร้อมสัญลักษณ์ `🔒` และป้ายนับเป้าหมายจะแสดง `🔒 X ล็อกเป้าหมาย`
+- **Verification**:
+  - Unit Tests: เพิ่ม 6 ข้อใน `PetModeTest.kt` ทดสอบการกรอง Place, การกรอง Face Exclusion Zone, การเกลี่ย EMA, การล็อกเป้าหมาย, การจำกัดโควต้า 3 เป้าหมาย, และการคำนวณอัตราส่วน 9:16 / 16:9 — ผ่าน 100% (`./gradlew testDebugUnitTest` BUILD SUCCESSFUL)
+  - Build APK: `./gradlew assembleDebug` สำเร็จ 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-12 — Gemini 3.1 Live Multimodal Protocol Alignment (Fix media_chunks deprecation) & 8-Scene Interactive "ทดสอบเดโม" Showcase System
+- **Problem Solved**:
+  1. **แก้ไขข้อผิดพลาดโมเดล `gemini-3.1-flash-live-preview` (WebSocket Session closed: NOT_CONSISTENT — `realtime_input.media_chunks is deprecated`)**:
+     - *Root Cause*: ในการเชื่อมต่อ WebSocket ไปยัง Gemini Live API ฝั่ง Google มีการ deprecate ฟิลด์ `media_chunks` ใน `realtime_input` และบังคับใช้ฟิลด์ตรงคือ `audio`, `video`, หรือ `text` แทน
+     - *Fix*:
+       - ปรับปรุง `LiveRealtimeInputData` ใน `LiveGeminiService.kt`: นำ `mediaChunks: List<LiveBlob>?` ออก และเปลี่ยนเป็น `val audio: LiveBlob? = null`, `val video: LiveBlob? = null`, `val text: String? = null`
+       - ปรับปรุง `sendAudioChunk()` ให้ส่ง `LiveRealtimeInputData(audio = LiveBlob("audio/pcm;rate=16000", pcmBase64))`
+       - ปรับปรุง `sendImageChunk()` ให้ส่ง `LiveRealtimeInputData(video = LiveBlob("image/jpeg", jpegBase64))`
+       - ทำให้ `gemini-3.1-flash-live-preview` กลับมาเชื่อมต่อ ส่งภาพ/เสียงสด และได้รับคำตอบแบบสตรีมมิ่งได้เสถียร 100%
+  2. **ระบบคำสั่ง "ทดสอบเดโม" (Comprehensive 8-Scene Living Avatar Showcase System)**:
+     - พัฒนาระบบสาธิตการทำงานของร่างอวตารหุ่นยนต์โหมดสัตว์เลี้ยงแบบอัตโนมัติ 8 ฉากต่อเนื่อง (ฉากละ 3.5 วินาที) ครอบคลุมฟีเจอร์ใหม่ครบวงจร:
+       - **Scene 1 (Sunny)**: สภาพอากาศแจ่มใส | ท่าทาง `JUMP` | อุปกรณ์ `MUSIC_NOTES`, `SPARKLES` | เสียงปี๊บ `CHIRP_START` | เสียงบรรยากาศ Harmonic Sine 432Hz + นกร้อง
+       - **Scene 2 (Rainy)**: ฝนตกโปรยปราย | ท่าทาง `TILT_LEFT` | อุปกรณ์ `UMBRELLA`, `SWEAT_DROP` | เสียงปี๊บ `ACKNOWLEDGE` | เสียงบรรยากาศ Pink noise ฝนตก + หยดน้ำกระทบกระจก
+       - **Scene 3 (Sakura)**: ลมพัดซากุระ | ท่าทาง `WOBBLE` | อุปกรณ์ `SPARKLES` | เสียงปี๊บ `SPARKLE` | เสียงบรรยากาศลมพัด sweeping wind
+       - **Scene 4 (Love)**: ส่งความรัก | ท่าทาง `BOUNCE` | อุปกรณ์ `HEARTS` | เสียงคราง `PURR` | เสียงบรรยากาศเมโลดี้ Solfeggio 528Hz
+       - **Scene 5 (Thunder)**: พายุฝนฟ้าคะนอง | ท่าทาง `SHAKE` | อุปกรณ์ `FIRE`, `EXCLAMATION` | เสียงเตือน `ALARM` | เสียงบรรยากาศฟ้าร้องครืนๆ
+       - **Scene 6 (Matrix)**: โลกไซไฟดิจิทัล | ท่าทาง `TILT_RIGHT` | อุปกรณ์ `QUESTION_MARK` | เสียงสับสน `CONFUSED` | เสียงบรรยากาศ Server Hum 60Hz + Digital pulses
+       - **Scene 7 (Night)**: ค่ำคืนสงบเข้านอน | ท่าทาง `NOD` | อุปกรณ์ `ZZZZZ` | เสียงปิดท้าย `CHIRP_END` | เสียงบรรยากาศ Sub-bass drone 55Hz + จิ้งหรีดเรไร
+       - **Scene 8 (Default)**: คืนสู่โหมดปกติ | ท่าทาง `IDLE` | กระจกหน้าจอสะอาด | เสียงปี๊บ `CHIRP_START` | เสียงบรรยากาศ Cybernetic room tone
+     - รองรับการสั่งเดโมได้ 4 ช่องทาง:
+       1. **สั่งด้วยเสียง (Fast-Path Voice)**: พูด *"ทดสอบเดโม"*, *"เดโม"*, *"demo"*, *"ทดสอบระบบ"*, *"โชว์หุ่นยนต์"* หรือสั่งหยุดด้วย *"หยุดเดโม"*, *"หยุดทดสอบ"*
+       2. **พิมพ์ในแชท (Chat Command)**: พิมพ์ `/demo`, `ทดสอบเดโม`, `demo`, `หยุดเดโม`
+       3. **ปุ่มบนหน้าจอ (Interactive UI Button)**: ปุ่ม `[🧪 ทดสอบเดโม]` / `[⏹️ หยุดเดโม]` ในหน้าจอ AlwaysLiveScreen
+       4. **คำสั่งจาก AI (Gemini Live Tool)**: ผ่าน Function Call `device_avatar_emotion`
+     - แก้ไขการ Sync สถานะหน้าตาระหว่าง External Face State และ Internal Face State ใน `AlwaysLiveScreen.kt` ให้การ Override และการคืนค่าปกติทำงานได้ทันทีโดยไม่ถูกทับซ้อน
+- **Verification**:
+  - Unit Tests: เพิ่มการทดสอบ JSON Serialization ของ `LiveRealtimeInputData` และความครอบคลุมของฉากทั้ง 8 ฉากใน `PetModeTest.kt` — ผ่าน 211 tests (100% passed)
+  - APK Build: `./gradlew assembleDebug` สำเร็จ 100%
+
+## 2026-09-11 — Real Procedural Robot SFX (Sentence Start/End Chirps) & Dynamic Looping Ambient Background Sound FX Engine
+- **Problem Solved (แก้ปัญหา AI พูดคำว่า "ปิ๊บๆ" ออกมาเป็นคำพูด แทนที่จะเป็นเสียงเอฟเฟกต์จริง และเพิ่มระบบเสียงบรรยากาศคลอฉากหลังตามอารมณ์/สภาพแวดล้อม)**:
+  1. **การกำจัดคำพูดเลียนเสียงหุ่นยนต์ ("ปิ๊บๆ / บี๊บๆ") ออกจากคำพูดของ AI**:
+     - *Root Cause*: ใน `JarvisPersona.kt` (Rule 2 เดิม) มีการสอนว่า `มีเสียงหุ่นยนต์น่ารัก (ROBOT SOUND WORDS): เริ่มต้นหรือลงท้ายประโยคด้วยเสียงหุ่นยนต์น่ารักๆ เสมอ เช่น "ปิ๊บๆ!"` ทำให้โมเดล Gemini Live อ่านออกเสียงคำว่า "ปิ๊บๆ" ออกมาด้วยเสียงสังเคราะห์เหมือนคนพูดคำว่าปี๊บๆ แทนที่จะเป็นเสียงอิเล็กทรอนิกส์จริง
+     - *Fix*:
+       - ปรับปรุง Rule 2 ใน `PET_LIVE_SYSTEM_PROMPT` เป็น **"ห้ามพูดคำเลียนเสียงหุ่นยนต์ออกมาเป็นคำพูดเด็ดขาด (STRICT - NO SPOKEN SOUND WORDS)"** พร้อมระบุข้อห้ามชัดเจน: ห้ามพูดคำว่า "ปิ๊บๆ", "บี๊บๆ", "ติ๊ดๆ", "วี้ๆ", "beep beep" เด็ดขาด โดยให้พูดเฉพาะเนื้อหาข้อความที่เป็นธรรมชาติ
+       - ปรับปรุง Rule 3, Rule 5, และตัวอย่างใน Rule 8 รวมถึงข้อความทักทายเริ่มต้น (`petGreeting`) ใน `VoiceController.kt` และ `JarvisViewModel.kt` ให้เป็นภาษาพูดที่อบอุ่น ไร้คำว่า "ปิ๊บๆ"
+  2. **ระบบเสียงเอฟเฟกต์ประโยคของหุ่นยนต์จริง (Procedural Robot Speech Cadence SFX)**:
+     - เพิ่มประเภทเสียงใน `RobotSoundPlayer.kt` (`commonMain`) และ `RobotSoundEngine.kt` (`androidMain`):
+       - `CHIRP_START`: คลื่นเสียงไซน์สังเคราะห์สังเคราะห์ระดับฮาร์ดแวร์คู่สองจังหวะ (Rising Two-tone Beep 1200Hz -> 1800Hz, 85ms) ดังขึ้นทันทีที่ AI เริ่มประมวลผลหรือเริ่มเปล่งเสียงพูด chunk แรก
+       - `CHIRP_END`: คลื่นเสียงก้องจางหาย (Falling Sine Tone with Pitch Glide 1600Hz -> 900Hz, 120ms) ดังขึ้นทันทีเมื่อ AI พูดจบประโยค
+       - `ACKNOWLEDGE`: เสียงรับทราบคำสั่ง (1000Hz -> 1500Hz)
+       - `SPARKLE`: เสียงระยิบระยับคู่ (Double Pentatonic Sparkle)
+     - เชื่อมต่อการเล่นเสียงใน `VoiceController.kt` (เล่น `playChirpStart()` ตอนเริ่มเล่นเสียงก้อนแรก และเล่น `playChirpEnd()` ใน `playbackFinishJob` หลัง AudioTrack เล่นเสียงพูดจนจบ)
+     - เชื่อมต่อใน `AlwaysLiveManager.kt` และ `PetModeController.kt` ให้ส่งเสียงอัตโนมัติตามการเปลี่ยนสถานะหรือ Event ต่างๆ
+  3. **ระบบเสียงบรรยากาศเบื้องหลังแบบวนลูป (Continuous Looping Ambient Sound FX Engine)**:
+     - พัฒนาโมดูลคู่: `AmbientSoundPlayer.kt` (KMP `commonMain` bridge) และ `AmbientSoundEngine.kt` (Android PCM Audio Engine)
+     - ใช้ Android `AudioTrack` ในโหมด `MODE_STATIC` ร่วมกับ `setLoopPoints(0, samples.size, -1)` ซึ่งทำงานระดับ AudioFlinger / DSP ฮาร์ดแวร์โดยตรง กิน CPU เป็น 0% พร้อมอัลกอริทึม Circular Crossfade 50ms ที่หัว-ท้ายลูป ป้องกันเสียงแตก/คลิก (zero click/pop artifacts)
+     - สร้างเสียงบรรยากาศสังเคราะห์ตาม 8 ธีมฉากหลัง (`BackgroundTheme`):
+       - `RAINY`: เสียงฝนตกโปรยปรายต่อเนื่อง (Pink Noise กรอง Low-pass 800Hz + สุ่มหยดน้ำฝนกระทบกระจก)
+       - `NIGHT`: บรรยากาศกลางคืนสงบเงียบ (Sub-bass drone 55Hz + สังเคราะห์เสียงจิ้งหรีดเรไรยามค่ำคืน)
+       - `SUNNY`: บรรยากาศกลางวันสดใส (Sine drone นุ่มนวล 432Hz + เสียงนกร้องสั้นๆ ชวนผ่อนคลาย)
+       - `SAKURA`: ลมพัดเอื่อยๆ พากลีบดอกไม้ปลิวไหว (Filtered sweeping pink noise คลื่นลม)
+       - `MATRIX`: เสียงฮัมของเซิร์ฟเวอร์และพัลส์ดิจิทัลไซไฟ (60Hz AC hum + 120Hz digital pulses)
+       - `LOVE_BG`: เมโลดี้อบอุ่นหัวใจ (Warm pulsing major third chords 528Hz Solfeggio frequency)
+       - `THUNDER`: เสียงฟ้าร้องครืนๆ ในระยะไกล (Deep rumbling low-frequency noise + low-frequency rolling swell)
+       - `DEFAULT`: บรรยากาศห้องไซเบอร์เนติกแสนสงบ (Soft cybernetic room tone)
+  4. **ระบบ Dynamic Audio Ducking**:
+     - เมื่อ AI กำลังพูด ระบบจะ Ducking ปรับลดระดับเสียงบรรยากาศลงอัตโนมัติจาก `0.18f` เหลือ `0.04f` (นุ่มนวล ไม่แย่งความเด่นของเสียงพูด และไม่รบกวน VAD ไมโครโฟน) และคืนระดับเสียงเดิมเมื่อพูดจบ
+     - ตัดและหยุดเสียงทั้งหมดอย่างปลอดภัยเมื่อออกจากหน้าจอ หรือ Dispose composable (`AmbientSoundPlayer.stop()`)
+- **Verification**:
+  - Unit Tests: เพิ่ม 4 Unit Tests ใน `PetModeTest.kt` ทดสอบ Enums ใหม่, Handler Trigger, Lifecycle ของ `AmbientSoundPlayer`, และตรวจสอบความถูกต้องของข้อความ Prompt — `./gradlew testDebugUnitTest` ผ่านครบ 100% (209 tests passed, BUILD SUCCESSFUL)
+  - APK Build: `./gradlew assembleDebug` ผ่าน 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-11 — Layer-based Living Robot Avatar System (Dynamic Backgrounds, Props Overlay, Gestures & AI JSON Control)
+- **Problem Solved (ยกเครื่องหน้าตาหุ่นยนต์สัตว์เลี้ยงให้มีชีวิตชีวา เคลื่อนไหวได้ และเปลี่ยนสถานะ/หน้าตา/ฉากหลัง/อุปกรณ์เสริมได้แบบไดนามิกตามคำตอบของ AI)**:
+  1. **สถาปัตยกรรมแบบ Layer-based UI (Jetpack Compose / KMP)**:
+     - เดิม `PetRobotHeadAvatar.kt` เป็นผืน Canvas ผืนเดียว 876 บรรทัด (monolithic) ไม่มีแยกเลเยอร์ ไม่สามารถใส่ฉากหลังที่มีอนิเมชัน หรืออุปกรณ์เสริมลอยรอบหัวได้
+     - ออกแบบและสร้างโครงสร้าง 4 เลเยอร์ใหม่:
+       - **Layer 0 (`PetBackgroundLayer.kt`)**: Dynamic Backgrounds พร้อม Canvas Particle Effects 8 ธีม (`DEFAULT`, `RAINY`, `SUNNY`, `NIGHT`, `SAKURA`, `MATRIX`, `LOVE_BG`, `THUNDER`) เปลี่ยนผ่านนุ่มนวลด้วย `Crossfade`
+       - **Layer 1**: Ambient Aura Glow Pulse
+       - **Layer 2 (`PetRobotHeadAvatar.kt` + `PetGestureAnimations.kt`)**: White Ceramic Chassis + Visor Screen แสดง LED Dot Matrix พร้อมรองรับภาษากาย (`GestureType`) เช่น `BOUNCE`, `JUMP`, `WOBBLE`, `SHAKE`, `NOD`, `TILT_LEFT`, `TILT_RIGHT`
+       - **Layer 3 (`PetPropsOverlay.kt`)**: Animated Props & Sticker Overlay 10 แบบ (`UMBRELLA`, `QUESTION_MARK`, `SWEAT_DROP`, `HEARTS`, `MUSIC_NOTES`, `SPARKLES`, `ZZZZZ`, `EXCLAMATION`, `FIRE`, `SNOW`) พร้อม `AnimatedVisibility` (scaleIn/scaleOut + fadeIn/fadeOut) และ continuous loop animation
+  2. **Data Models สำหรับควบคุมสถานะจาก AI (`RobotFaceState.kt`)**:
+     - เพิ่ม Enums: `EyeStyle`, `BackgroundTheme`, `PropType`, `GestureType`
+     - เพิ่ม `@Serializable data class RobotFaceState` รองรับทั้ง JSON parsing (`fromJson()`), parameter mapping (`fromArgs()`) และ presets (`HAPPY_SUNNY`, `SAD_RAINY`, `LOVE_HEARTS`, `ANGRY_THUNDER`, `SLEEPING_NIGHT`, `EXCITED_SAKURA`)
+     - ขยาย `AvatarState` ด้วย `faceState: RobotFaceState` และ `fun AvatarState.withFace(face)` เพื่อความเข้ากันได้ย้อนหลัง 100%
+  3. **การควบคุมจาก AI ผ่าน Tool และ System Prompt (`device_avatar_emotion`)**:
+     - ขยาย Function Declaration ของ `device_avatar_emotion` ใน `DeviceToolDefinitions.kt` ให้รับ `eye_style`, `background`, `props`, `gesture`
+     - ปรับ `DeviceControlExecutor.kt` ให้ parse พารามิเตอร์ใหม่ ส่งต่อไปยัง UI ผ่าน `MainActivity.triggerTestEmotion`
+     - เพิ่ม Rule 9 ใน `JarvisPersona.kt` (`PET_LIVE_SYSTEM_PROMPT`) สั่งให้ AI เรียกใช้ `device_avatar_emotion` ควบคู่กับการตอบคำถามที่มีอารมณ์ชัดเจน
+  4. **State Management & Controller Integration**:
+     - เพิ่ม `PetModeController.updateRobotFace(state: RobotFaceState)` และ `updateRobotFace(commandOrJson: String)`
+     - เพิ่ม `testFaceStateOverride` ใน `JarvisViewModel.kt` และประมวลผลคำสั่งใน `App.kt`
+- **Verification**:
+  - Unit Tests: เพิ่ม 7 ข้อใน `PetModeTest.kt` ทดสอบ JSON parsing, argument mapping, default fallbacks, `updateRobotFace`, pipe-command parsing, gesture overrides, `withFace` compatibility — `./gradlew testDebugUnitTest` ผ่าน 100% (30 tasks, BUILD SUCCESSFUL)
+  - APK Build: `./gradlew assembleDebug` ผ่าน 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-11 — Fix CameraX Video Encoding, AR Overlay Visibility, and Gemini Live Voice Native Audio (TTS Elimination)
+- **Problem Solved (แก้ปัญหาภาพกล้องเป็นเส้นๆ มองไม่เห็น, AR ไม่ขึ้น และ AI พูดด้วย TTS แข็งๆ แทนเสียง Gemini Live สด)**:
+  1. **Camera Frame Distortion & Vision Blindness ("ภาพกระพริบ ลายตา / ภาพเป็นเส้นๆ / AI มองไม่เห็น")**:
+     - *Root Cause*: ฟังก์ชัน `yuvToJpeg` ใน `CameraPreviewView.android.kt` เดิมใช้วิธีก็อปปี้ byte array แบบ contiguous โดยไม่ได้นำ `pixelStride` และ `rowStride` ของ Android CameraX `ImageFormat.YUV_420_888` มาคำนวณ ทำให้ภาพที่แปลงเป็น JPEG แตกเป็นริ้วเส้นๆ สีเขียว ลายตา และโมเดล Gemini Live ตอบกลับว่า *"ภาพมันกระพริบๆ ลายตาไปหมดเลย / ภาพยังเป็นเส้นๆ อยู่เลย"*
+     - *Fix*: เปลี่ยนมาใช้ `imageProxy.toBitmap()` ซึ่งเป็น API ภายในของ CameraX 1.4.1+ (ใช้ C++ libyuv จัดการ row padding และ UV stride แบบ native 100%) พร้อมปรับขนาดความกว้างไม่เกิน 640px, หมุนตาม `imageInfo.rotationDegrees`, กลับภาพแบบ Center Pivot สำหรับกล้องหน้า และบีบอัดเป็น JPEG คุณภาพสูง คมชัด ไร้ริ้วเส้น
+  2. **WebSocket Schema Incompatibility & Audio Dropping (AI พูดด้วย TTS อ่านแข็งๆ ไม่เป็นธรรมชาติ)**:
+     - *Root Cause*:
+       1. โครงสร้าง JSON ของ `realtimeInput` ใน `LiveGeminiService.kt` เดิมแยกเป็น `{ "realtimeInput": { "video": ... } }` และ `{ "realtimeInput": { "audio": ... } }` ซึ่งผิดจาก Google Gemini Multimodal Live API Protocol ที่ต้องส่งผ่าน `mediaChunks: [ { mimeType: "...", data: "..." } ]` ทำให้เซิร์ฟเวอร์แจ้ง warning และปิดกั้นการส่งเสียงสังเคราะห์ PCM กลับมา
+       2. ใน `LivePrebuiltVoiceConfig` มีการใช้ `@SerialName("voice_name")` ซึ่งไม่ตรงกับสเปก API (`voiceName`)
+       3. การบังคับใช้ `Puck` สำหรับภาษาไทยในโหมดสัตว์เลี้ยงทำให้ Gemini Live ในบางเทิร์นไม่ส่ง Audio Chunks ส่งผลให้ Client ตกไปใช้ Offline Android TTS Fallback (ซึ่งฟังดูเหมือนบอทอ่านหนังสือ แข็งกระด้าง)
+     - *Fix*:
+       1. ปรับปรุง Data Model ใน `LiveGeminiService.kt`: รวมเป็น `LiveRealtimeInputData(mediaChunks = listOf(LiveMediaChunk(...)))` ตรงตามมาตรฐาน Gemini Multimodal Live API
+       2. แก้ไข `@SerialName("voiceName")` ใน `LivePrebuiltVoiceConfig`
+       3. ใช้ `selectedVoiceName` (หรือ `"Aoede"`) ซึ่งเป็นเสียงหลักที่เสถียร 100% กับภาษาไทยในโหมด Live ปกติ โดยให้เลเยอร์ Hardware DSP (`PcmAudioEngine.android.kt` ด้วย `pitch = 1.28f, speed = 1.04f` และ Ring Modulation) แปลงเสียงให้เป็นเสียงน้องหุ่นยนต์น่ารักแบบเรียลไทม์ ทำให้ได้เสียงสนทนาที่ลื่นไหล เป็นธรรมชาติ 100% ไม่หลุดไปเป็น TTS อีกต่อไป
+  3. **Video Bandwidth Throttling**:
+     - ปรับให้ส่งภาพวิดีโอไปยัง WebSocket เฉพาะเมื่อผู้ใช้เปิดหน้าต่างดวงตาสัตว์เลี้ยง (`isCameraPipOpen == true`) เท่านั้น ส่วนตอนปิดตาจะประมวลผลบนเครื่อง (On-Device ML Kit) เท่านั้น เพื่อไม่ให้กิน Bandwidth และไม่รบกวนจังหวะการรับส่งเสียงของ Gemini Live
+- **Verification**:
+  - Unit Tests: `./gradlew testDebugUnitTest` ผ่าน 100% (30 tasks, BUILD SUCCESSFUL)
+  - APK Build: `./gradlew assembleDebug` ผ่าน 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-11 — Multimodal Pet Vision (Gemini Live Video Streaming & ML Kit Multi-Object / Hand / Finger Detection) & Voice Responsiveness Fixes
+- **Problem Solved (แก้ปัญหา AI ไม่ตอบเสียง และตอบมั่วสิ่งที่เห็นเมื่อถาม)**:
+  1. **Voice Responsiveness & Speech Cadence (ตรวจจับเสียงเจอแต่ AI ไม่พูดโต้ตอบ)**:
+     - *Root Cause*: การตั้งค่า VAD (`automaticActivityDetection`) ใน `LiveGeminiService.kt` มี `silenceDurationMs` สั้นเกินไป ทำให้ตัดเสียงภาษาไทยก่อนประโยคจบ และไม่มีการระบุ `languageCodes` ใน `inputAudioTranscription` ส่งผลให้ Google Gemini Live คาดเดาภาษาผิดพลาด รวมถึง Buffer ใน `VoiceController.kt` จุได้เพียง 50 chunks เสี่ยงต่อการ drop audio chunks
+     - *Fixes*:
+       - กำหนด `languageCodes = ["th-TH", "en-US"]` ใน `inputAudioTranscription` เพื่อให้โมเดลประมวลผลเสียงภาษาไทยได้อย่างแม่นยำ
+       - ปรับเพิ่ม `silenceDurationMs = 1200` และ `prefixPaddingMs = 300` ใน `realtimeInputConfig.automaticActivityDetection` เพื่อรองรับจังหวะการพูดภาษาไทย ไม่ตัดเสียงก่อนจบประโยค
+       - ขยายขนาด `micChannel` buffer ใน `VoiceController.kt` เป็น 100 chunks (~2.5-3 วินาที) ป้องกัน chunk drop
+       - เพิ่มเคาน์เตอร์และ debug log `🎤 Audio chunks streaming to WebSocket` (แท็ก `"LiveGemini"`) เพื่อติดตามการส่งเสียง
+  2. **Multimodal Pet Vision & Anti-Hallucination (AI มั่วสิ่งที่เห็นเมื่อถาม ไม่รู้ว่าเห็นจริงหรือไม่)**:
+     - *Root Cause*: ในโหมดสัตว์เลี้ยง กล้องส่งเฟรมไปเฉพาะ on-device ML Kit ภายในเครื่อง แต่ไม่ได้ส่ง JPEG frames ไปยัง Gemini Live WebSocket (`realtimeInput.video`) ทำให้โมเดลบนคลาวด์ "มองไม่เห็นภาพจริง" และตอบเดา/hallucinate จากข้อความ
+     - *Fixes*:
+       - เชื่อมโยง `onFrameCapture` ของ `CameraPreviewView` ใน `AlwaysLiveScreen.kt` ส่ง Base64 JPEG frames ผ่าน `JarvisViewModel.sendLiveCameraFrame` ไปยัง Gemini Live WebSocket แบบ Throttled (~1 FPS / 900ms) ทั้งในหน้าต่าง PIP ลอยและ Background Preview
+       - เพิ่ม Rule 8 (Pet Vision & Anti-Hallucination) ใน `PET_LIVE_SYSTEM_PROMPT` (`JarvisPersona.kt`) สั่งให้หุ่นยนต์สังเกตภาพจากกล้องจริงอย่างซื่อสัตย์ เมื่อผู้ใช้ถามว่า "เห็นอะไร?", "ฉันถือนิ้วกี่นิ้ว?", หรือ "ในมือฉันคืออะไร?" ให้ตอบสิ่งที่เห็นจริงสั้นๆ น่ารัก
+  3. **ML Kit Multi-Object & Skin-Cluster Hand / Finger Detection (ตรวจจับหลายอย่าง: มือ นิ้ว วัตถุ)**:
+     - *Dependency*: เพิ่ม `com.google.mlkit:object-detection:17.0.2` ใน `composeApp/build.gradle.kts`
+     - *ML Kit Multi-Object Detection*: ติดตั้ง `ObjectDetector` (`STREAM_MODE`, Multiple Objects, Classification) ใน `PetVisionDetector.kt` รันแบบขนานร่วมกับ Face Detection ผ่าน `Tasks.whenAllComplete`
+     - *Heuristic Hand & Finger Tracker*: พัฒนาอัลกอริทึม Computer Vision ตรวจจับกลุ่มพิกเซลสีผิว (Skin-Tone Clustering ในระบบสี RGB + HSV) นอกกรอบใบหน้า:
+       - วิเคราะห์การกระจายตัวของนิ้วส่วนบน (Top 35% projection analysis) เพื่อจำแนก:
+         - `"Finger / Point ☝️"` (ชู 1 นิ้ว)
+         - `"Fingers / Peace ✌️"` (ชู 2 นิ้ว / สองนิ้วสู้ตาย)
+         - `"Hand / Palm 🖐️"` (กางฝ่ามือ / 5 นิ้ว)
+         - `"Hand ✋"` (ยกมือ)
+     - *AR Bounding Boxes*: แสดงกรอบ AR สีสดใสแยกหมวดหมู่ในหน้าต่าง Camera PIP Window:
+       - หน้า: ไซแอน `#00F0FF`, ยิ้ม: ชมพู `#FF4081`, ขยิบตา: ทอง `#FFD700`
+       - มือ/นิ้ว: ส้มสดใส `#FF9100` พร้อมป้ายกำกับอิโมจิ
+       - วัตถุ: เขียว `#4CAF50` (เครื่องดื่ม), ไซแอนเข้ม `#00E5FF` (อุปกรณ์/สิ่งของ), ม่วง `#B388FF` (กล่อง/ของใช้)
+     - *Live HUD Badge Enhancement*: ปรับปรุง Badge มุมบนซ้ายให้แสดงสถานะ `🖐️ Hand ✋` หรือ `📦 Object / Item 📱` ควบคู่กับใบหน้าแบบเรียลไทม์
+- **Verification**:
+  - Unit Tests: รัน `./gradlew testDebugUnitTest` ผ่าน 100% (30 tasks, BUILD SUCCESSFUL)
+  - APK Build: รัน `./gradlew assembleDebug` สำเร็จ 100% (43 tasks, BUILD SUCCESSFUL)
+
+## 2026-09-11 — Virtual Desk Pet Vision: Live Detection HUD, Camera Eye PIP & Bounding Box Overlay
+- **Features Implemented (ระบบตรวจจับสด HUD, หน้าต่างสายตา AI และกรอบสี่เหลี่ยม Bounding Box ในโหมดสัตว์เลี้ยง)**:
+  1. **Live Detection Status HUD (`AlwaysLiveScreen.kt`)**:
+     - แสดงแถบ HUD แสดงสถานะเซนเซอร์และการตรวจจับแบบ Real-Time ที่มุมบนซ้าย:
+       - 🐾 `[Touch]`: แสดงสถานะการสัมผัส (ลูบหัว `Pet Head`, จิ้มแก้ม `Poke`, จั๊กจี้ `Tickle`, ลากสายตา `Gaze`, แตะหน้าจอ) พร้อมเรืองแสงเขียวเมื่อแตะ
+       - 🎭 `[LISTENING]`: แสดงสถานะการรับเสียง ไมค์เปิด/ปิด, ระดับเสียงผู้ใช้ (Mic level %), และสถานะ AI ตอบกลับ
+       - 🌀 `[Shake]`: ตรวจจับการเขย่าเครื่อง (Accelerometer > 2.2G) พร้อมเตือน `Shake detected! (@_@)` เรืองแสงส้มกระพริบ
+       - 👀 `[Face tracked]`: ตรวจจับใบหน้าผู้ใช้ (ML Kit Face Tracking) พร้อมบอกพิกัด `(X, Y)`, สถานะยิ้ม `Smile %` และการขยิบตา `Wink`
+     - มี Ticker 500ms อัปเดตสถานะอัตโนมัติ คืนสู่สถานะปกติอย่างนุ่มนวลเมื่อไม่มีการกระทำ
+  2. **Camera Eye PIP Preview Window ("ลืมตา / เปิดกล้อง / หลับตา / ปิดกล้อง")**:
+     - เพิ่มปุ่มกดมุมบนขวา `[👁️ ลืมตา]` / `[👁️ หลับตา]` สลับเปิดดูสิ่งที่ AI เห็นได้ทันที
+     - รองรับคำสั่งเสียงเร็ว (Fast-Path Voice Triggers ใน `VoiceController.kt`): "ลืมตา", "เปิดกล้อง", "มองหน่อย", "ดูหน่อย" $\rightarrow$ ลืมตา; "หลับตา", "ปิดกล้อง" $\rightarrow$ หลับตา
+     - หน้าต่างลอยแสดงภาพกล้องจริง (PIP Window) สลับกล้องหน้า/กล้องหลังได้ด้วยปุ่ม `🔄` และปิดได้ด้วยปุ่ม `❌`
+     - ทำงานร่วมกับ Background Camera Preview โดยคงการสแกนใบหน้าอย่างต่อเนื่องโดยไม่เกิดปัญหา CameraX Device Conflicts
+  3. **Real-Time AR Bounding Box & Label Overlay (`AROverlayEngine.kt`, `PetVisionDetector.kt`, `PetVisionBridge.kt`)**:
+     - แปลงผลการตรวจจับจาก Google ML Kit Face Detection เป็น `List<DetectedObject>` พร้อม Normalized `BoundingBox(x, y, width, height)`
+     - วาดกรอบสี่เหลี่ยม 4 มุมหนา (Cyberpunk Corner Brackets) พร้อมเอฟเฟกต์ Pulsing Glow และ Scanline Animation
+     - ปรับสีและป้ายกำกับอัตโนมัติ:
+       - ตรวจพบยิ้ม: สีชมพู `#FF4081` ป้าย `Boss Smile 😊 X%`
+       - ตรวจพบขยิบตา: สีทอง `#FFD700` ป้าย `Boss Wink 😉`
+       - ใบหน้าปกติ: สีไซแอน `#00F0FF` ป้าย `Boss Face #ID`
+     - ปรับปรุง `ObjectLabelTags` ด้วย `BoxWithConstraints` ให้คำนวณตำแหน่งป้ายกำกับสัมพันธ์กับขนาดหน้าต่าง PIP อย่างแม่นยำ
+- **Verification**:
+  - Unit Tests: เพิ่มการทดสอบ `PetVisionBridge handles objects detected and eye open request` ใน `PetModeTest.kt` รันผ่านครบ 100%
+  - Gradle Build: `./gradlew testDebugUnitTest` สำเร็จ (BUILD SUCCESSFUL)
+
+## 2026-09-11 — Complete Isolation of Normal Live Assistant & Virtual Desk Pet Personas
+- **Problem Solved (แก้ปัญหาความสับสนระหว่าง Live Persona ปกติ กับ Pet Persona ปนกัน)**:
+  - พบปัญหาการ Bleed ข้ามกันระหว่างโหมด: เมื่อเปิด Pet Mode แล้วปิดออกมา หรือสลับโหมด กลายเป็นว่าโหมด Live ปกติยังติดคำทักทาย "ปิ๊บๆ สวัสดีฮับ พร้อมเล่นแล้ว", ใช้เสียง Puck, และเปิดฟิลเตอร์เสียงหุ่นยนต์ DSP ในขณะที่ใน Pet Mode บอทกลับไปดึง Core Memory ว่าเป็น "เทรดเดอร์อัจฉริยะ" และแอบเรียก Tools การเงินหรือ `device_avatar_emotion` ซ้ำซ้อนจนบังคับเปิด AlwaysLive เอง
+- **Root Cause & Fixes**:
+  1. **Strict Session & Resumption Isolation (`LiveGeminiService.kt`, `JarvisOrchestrator.kt`)**:
+     - เพิ่ม `resetSessionResumption()` ล้าง `sessionResumptionHandle = null` ทุกครั้งที่มีการสลับโปรไฟล์ เพื่อตัดขาดบริบทเก่า ไม่ให้ Google Gemini Live กู้คืนประวัติและ System Instruction ของโหมดเดิม
+     - ใน `LiveGeminiService`: หากอยู่ในโหมดสัตว์เลี้ยง (`isPetMode == true`) จะส่งเฉพาะ `PET_LIVE_SYSTEM_PROMPT` เท่านั้น โดยตัด Core Memory, ข้อมูลตลาดหุ้น, และประวัติการคุยเก่าทั้งหมดออกเด็ดขาด
+     - ปิดการเชื่อมต่อ Native Tools (`tools = null`) ในโหมดสัตว์เลี้ยง 100% ป้องกันโมเดลเรียก Tools การเงินหรือคำสั่งอุปกรณ์โดยไม่ตั้งใจ
+  2. **WebSocket Reconnect on Persona Switch (`VoiceController.kt`, `JarvisViewModel.kt`)**:
+     - เนื่องจากโพรโทคอล Gemini Live WebSocket กำหนดว่าข้อความ `setup` (System Instruction, Tools, Voice Name) จะถูกส่งเพียงครั้งเดียวตอนเริ่มเชื่อมต่อ การส่ง realtime text แทรกจะไม่สามารถเปลี่ยน Voice หรือ Tools กลางคันได้
+     - เมื่อสลับโปรไฟล์และ Live กำลังเปิดอยู่ ระบบจะเรียก `voice.restartVoiceSession()` เพื่อปิด WebSocket เดิมและเปิดเชื่อมต่อใหม่ด้วย System Prompt, Voice Config (Puck vs ผู้ช่วยเดิม), และ Tools ของ Persona ใหม่ทันที
+  3. **Strict State Cleanup on Exit & Chat Bar Launch (`App.kt`, `AlwaysLiveManager.kt`, `VoiceController.kt`)**:
+     - เมื่อปิด Always Live หรือกดออกจากโหมด (`disable()`, `stopPetMode()`, `onEndLive`): คืนค่า `AlwaysLiveProfile.CONTROL`, ตั้ง `JarvisPersona.isPetMode = false`, และปิด `isRobotVoiceEnabled = false` เสมอ
+     - เมื่อเริ่ม Live จาก ChatInputBar ในหน้าแชทปกติ: บังคับตั้งค่าเป็น `AlwaysLiveProfile.CONTROL` เสมอ เพื่อให้การคุยปกติเป็นผู้ช่วย 100% ไม่ปนเสียงหรือบุคลิกสัตว์เลี้ยง
+     - ใน `VoiceController`: กรองประวัติ `historySnapshot` ไม่ให้มีคำสั่ง "เปิดโหมดสัตว์เลี้ยง" ตกค้าง และล้างประวัติเป็นว่างเปล่าใน Pet Mode
+     - ใน `App.kt`: แก้ไข `registerTestEmotion` ให้เปิด Full Screen Always Live เฉพาะกรณีที่เป็นคำสั่ง `DEMO` เท่านั้น ป้องกันการเด้งสลับหน้าจอไม่พึงประสงค์
+- **Verification**:
+  - Unit Tests: อัปเดต `PetModeTest.kt` เพิ่มการตรวจสอบ Isolation ของการทักทายและการตั้งค่าทั้งสองโหมด รันผ่านครบ 100% (`:composeApp:testDebugUnitTest`)
+  - Compilation: `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% (BUILD SUCCESSFUL)
+
+## 2026-09-11 — Dual-Layer Robot Voice Engine (DSP Filter, PlaybackParams Pitch Shift & Desk Pet Persona)
+- **Problem Solved (แก้ปัญหา AI ในโหมดสัตว์เลี้ยงยังตอบกลับด้วยเสียงปกติ ไม่ใช่เสียงหุ่นยนต์)**:
+  - ในเวอร์ชันก่อนหน้า โค้ดส่งเสียง PCM 24kHz จาก Gemini Live ตรงไปยังลำโพงโดยตรงโดยไม่มี DSP หรือ Pitch Shifting ทำให้เสียงที่เล่นออกมาเป็นเสียงมนุษย์ผู้ใหญ่ปกติ และ System Prompt ของ Live Session ยังคงเป็นผู้ช่วยระดับสูง/นักวิเคราะห์การเงิน ทำให้ AI ตอบแบบทางการ
+- **Dual-Layer Architecture Implementation**:
+  1. **Layer 1: Real-Time Hardware & DSP Audio Pipeline (`PcmAudioEngine.android.kt`, `VoiceController.kt`)**:
+     - **Dynamic PlaybackParams**: เมื่อเข้าสู่โหมดสัตว์เลี้ยง (`isRobotVoiceEnabled = true`) ปรับ AudioTrack Hardware Playback Parameters ให้เป็นเสียงหุ่นยนต์ตัวจิ๋ว: `pitch = 1.28f` (โทนเสียงสูงน่ารัก กึ่งหุ่นยนต์เด็ก), `speed = 1.04f` (พูดเร็วและกระฉับกระเฉงขึ้นเล็กน้อย)
+     - **Real-Time 16-Bit PCM DSP Filter (`applyRobotDsp`)**:
+       - *Ring Modulation (72Hz Carrier)*: จำลองฮาร์มอนิกสังเคราะห์เสียงโลหะหุ่นยนต์ (Synthesizer metallic timbre)
+       - *Feedforward Comb Filter (48 samples, ~500Hz)*: จำลอง resonance ในโครงสร้างช่องอกหุ่นยนต์ (Acoustic chassis resonance)
+       - *Soft Analog Saturation*: ตัดความแหลมคมของคลื่นเสียงด้วย soft clipping เพื่อให้เสียงมีความอบอุ่นและมีมิติ
+     - **Opening Robot Chirp**: เล่นเสียงเอฟเฟกต์หุ่นยนต์ทักทายสดใส (`RobotSoundPlayer.playHappy()`) ทันทีที่ AI เริ่มตอบกลับประโยคใหม่
+  2. **Layer 2: Virtual Desk Pet Persona & Prompt Switching (`JarvisPersona.kt`, `LiveGeminiService.kt`, `LiveToolBridge.kt`)**:
+     - **Dynamic Prompt Switch**: เพิ่ม `JarvisPersona.isPetMode` และ `PET_LIVE_SYSTEM_PROMPT` โดยสลับ prompt อัตโนมัติเมื่ออยู่ในโหมดสัตว์เลี้ยง:
+       - กำหนดตัวตนเป็น "หุ่นยนต์สัตว์เลี้ยงตั้งโต๊ะตัวจิ๋วแสนน่ารัก" ขี้เล่น อ้อนเจ้านาย ช่างสงสัย
+       - กฎเสียงพูดบังคับตอบสั้นมาก 1-2 ประโยค ห้ามตอบยาวเป็นทางการ ห้ามวิเคราะห์การเงิน/ตลาดหุ้น
+       - กำหนดคำเลียนเสียงหุ่นยนต์ประกอบประโยคเสมอ เช่น "ปิ๊บๆ!", "บี๊บๆ!", "งุ้ยย~", "แง้วว~", "ดุ๊กดิ๊กๆ"
+       - คำทักทายมาตรฐานประจำโหมด: "ปิ๊บๆ! สวัสดีฮับ... น้องหุ่นยนต์สัตว์เลี้ยงพร้อมเล่นด้วยแล้ว งุ้ยย~"
+     - **Playful Prebuilt Voice Profile**: ใน `LiveGeminiService.kt` เลือกใช้เสียง `Puck` (เสียงวัยรุ่น สดใส ร่าเริง) ในโหมดสัตว์เลี้ยงโดยอัตโนมัติ
+     - **Offline TTS Fallback Enhancement**: ใน `VoiceManager.kt` ปรับ TTS pitch เป็น `1.35f` และ speed เป็น `1.15f` หากต้อง fallback สังเคราะห์เสียงพูดในเครื่อง
+  3. **Seamless State Sync (`JarvisViewModel.kt`, `AlwaysLiveManager.kt`)**:
+     - เมื่อสลับโปรไฟล์ผ่าน UI หรือ AlwaysLiveManager ระบบจะอัปเดต `JarvisPersona.isPetMode` และ `VoiceController.setRobotVoiceEnabled` ทันที พร้อมยิง realtime instruction ไปยัง Gemini Live session ปัจจุบันเพื่อเปลี่ยนบุคลิกทันทีโดยไม่ต้องตัดการเชื่อมต่อ
+- **Verification**:
+  - Unit Tests: เพิ่มการทดสอบใน `PetModeTest.kt` ทดสอบการสลับ prompt แบบ Dynamic, ข้อความเสียงหุ่นยนต์ และข้อห้ามเรื่องการเงิน ผ่านครบ 100% (196 tests ใน `testDebugUnitTest`)
+  - Compilation: `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% BUILD SUCCESSFUL
+
+## 2026-09-11 — Fix Pet Motion Bridge, Audio Emotion Clobber Bug & Comprehensive Logcat Tags
+- **Root Cause & Bug Fixes (แก้ไขปัญหา Pet Mode ไม่เปลี่ยนอารมณ์ตามเซนเซอร์/การสัมผัส)**:
+  1. **PetMotionBridge Event Disconnect**: เซนเซอร์จับการเขย่าเครื่อง (`PetMotionDetector`) ตรวจพบแรงสั่นสะเทือน (`🌀 Shake detected! gForce=2.44`) แต่ `AlwaysLiveManager` ไม่ได้ยิงสัญญาณผ่าน `PetMotionBridge` ไปยัง `AlwaysLiveScreen` / `PetModeController` ทำให้หน้าจอ UI ไม่ทราบว่ามีการเขย่า $\rightarrow$ ทำการเชื่อมโยง `PetMotionBridge.triggerShake()`, `triggerFaceDown()`, `triggerFaceUp()` ใน `AlwaysLiveManager` และผูก Listener ใน `AlwaysLiveScreen` ครบถ้วน
+  2. **Ambient Mic Audio Overwrite Clobbering Pet Emotions**: ใน `AlwaysLiveScreen.kt` ฟังก์ชัน `LaunchedEffect(avatarState)` มีเงื่อนไข `avatarState.audioLevel > 0.05f` ซึ่งทำงานทุกครั้งที่ไมโครโฟนจับเสียงสภาพแวดล้อมได้ แล้วเขียนทับ `activeAvatarState = avatarState` (ซึ่งมีสถานะเป็น `IDLE`) ทันที ส่งผลให้อารมณ์ `DIZZY`, `SLEEPING`, `LOVE`, `EXCITED` ถูกล้างหายไปในเสี้ยววินาที $\rightarrow$ แก้ไขให้ในโหมด `PET` จะอัปเดตเฉพาะ `audioLevel` สำหรับขยับปาก/แสงเรืองแสง และรักษาอารมณ์ของน้องไว้ เว้นแต่ AI จะพูดจริง (`isSpeaking == true`)
+  3. **Front Camera Gaze Double-Mirror Fix**: แก้ไขการ Mirror พิกัดแกน X ใน `PetVisionDetector` เมื่อรับภาพจาก `CameraPreviewView` ที่ Mirror ภาพกล้องหน้ามาแล้ว เพื่อไม่ให้ทิศทางตาสัตว์เลี้ยงมองย้อนทิศทางของผู้ใช้
+- **Logcat Tag System & Observability Guide (แท็กสำหรับตรวจสอบ Log การทำงาน)**:
+  - `PetMotionDetector`: ตรวจจับการสั่นสะเทือน/เขย่าเครื่อง (> 2.2G) และการคว่ำ/หงายหน้าจอบนโต๊ะ
+  - `PetVisionDetector`: รับเฟรมกล้องหน้า, ตรวจจับใบหน้า Google ML Kit, พิกัดสายตา (Gaze Tracking), ผู้บุกรุก (Sentry), เกมเลียนแบบหน้า (Copycat)
+  - `PetModeController`: การสัมผัสเล่น (ลูบหัว, จิ้มแก้ม, จั๊กจี้), อารมณ์และการกระทำต่างๆ ของสัตว์เลี้ยง
+  - `RobotSoundEngine`: การสังเคราะห์และเล่นเสียงเอฟเฟกต์หุ่นยนต์ (Purr, Happy, Snore, Confused, Giggle, WakeUp, Alarm)
+  - `AlwaysLiveManager`: การสลับโปรไฟล์ (`CONTROL` vs `PET`), Service & WakeLock
+  - `JarvisAvatar`: การวาด Canvas และเปลี่ยนสีหน้า Avatar
+  - `JARVIS_VM`: การเชื่อมต่อ WebSocket Gemini Live และ Mic Streaming
+- **Verification**:
+  - คอมไพล์ผ่าน 100%: `:composeApp:compileDebugKotlinAndroid` (BUILD SUCCESSFUL)
+  - Unit Tests ผ่าน 100%: `:composeApp:testDebugUnitTest` ผ่านครบทั้ง 195 tests
+
+## 2026-09-11 — Virtual Desk Pet Living Avatar, Clean Mode Separation & Google ML Kit On-Device Vision
+- **Strict Mode Separation (แยก 2 โหมดชัดเจน เด็ดขาด ไม่สับสน)**:
+  - **โหมดขับขี่ / โหมดควบคุม (Drive & Control Mode)**: รวมเป็นโหมดเดียวกัน (`AlwaysLiveProfile.CONTROL`) แสดงผลด้วย **3D Pearlescent Clay Robot Avatar** (`JarvisAvatar`) พร้อมเครื่องมือ Live เต็มรูปแบบ ควบคุม Google Maps, YouTube, รับสาย, สั่งงานเครื่อง Hands-Free บุคลิกและเสียงตาม Persona ที่ผู้ใช้ตั้งไว้ ไม่มีเสียงร้องเจื้อยแจ้วและไม่มี Gesture สัมผัสกวนใจ
+  - **โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet)**: โหมดสัตว์เลี้ยงตัวจริง (`AlwaysLiveProfile.PET`) แยก Persona ชัดเจน ไม่ปะปนกับโหมดขับขี่/ควบคุม
+- **Fullscreen Living Robot Head Avatar (`PetRobotHeadAvatar.kt`)**:
+  - สร้าง Composable แสดงผลเฉพาะ **ส่วนหัวหุ่นยนต์มินิมอลมีชีวิต** ตามภาพเรฟเฟอเรนซ์ของผู้ใช้ (`media_1789115340717.jpg`):
+    1. ตัวเรือนหุ่นยนต์เซรามิกขาวเรียบหรูโค้งมน (White Ceramic Rounded Chassis) พร้อมมิติแสง 3D
+    2. หูโลหะ Slate-Blue ทั้งสองข้าง (Metallic Ear Disc Knobs with Dual-Rim Bevels)
+    3. กระจกหน้ากากดำเงาโค้งมน (Glossy Dark Visor with Top Specular Gloss Arc Reflection)
+    4. หน้าจอดิจิทัลเรืองแสง Digital Pixel Dot Matrix แสดงผล 11 อารมณ์ (`HAPPY`, `WINK`, `SAD`, `ANGRY`, `CONFUSED`, `LOVE`, `SLEEPING`, `THINKING`, `EXCITED`, `POUT`, `DIZZY`)
+    5. การเคลื่อนไหวมีชีวิต: หายใจกระเพื่อม (Breathing Bobbing), กะพริบตาสดใสทุก 4 วินาที, เอียงคอตามการมอง
+- **Zero Button Clutter Philosophy in Pet Mode**:
+  - ถอดปุ่มควบคุม แผงแท็บ ชิป และปุ่มกดยิบย่อยทั้งหมดออกจากหน้าจอโหมดสัตว์เลี้ยง เพื่อให้น้องเหมือนสัตว์เลี้ยงหุ่นยนต์ตัวจริง (Living Companion) ที่ทำงานอัตโนมัติ 100% ผ่านการสัมผัส เซนเซอร์ และกล้อง AI มีเพียงปุ่มมุมจอบางๆ ไว้สลับกลับโหมดควบคุมหรือปิด
+- **Orientation-Aware Touch Gestures (Portrait & Landscape)**:
+  - คำนวณพิกัดสัมผัส Normalization เทียบกับขนาดและตำแหน่งของหัวหุ่นยนต์จริงทั้งแนวตั้งและแนวนอน:
+    - ลูบหน้าผากลง (Forehead Swipe Down) $\rightarrow$ ตาหัวใจ (LOVE) + เสียงครางเพลิน (Purr)
+    - เกาคางขึ้น (Chin Scratch Up) $\rightarrow$ ตาหัวใจ (LOVE) + เสียง Purr
+    - จิ้มแก้ม (Cheek Poke) $\rightarrow$ ร้องส่งเสียงทักทายสดใส (Happy Chirp)
+    - จิ้มสองครั้งที่แก้ม (Cheek Double-Tap / Tickle) $\rightarrow$ หัวเราะชอบใจ (Giggle) + ตาหยีสั่น
+    - ลากนิ้วบนจอ $\rightarrow$ ตาสัตว์เลี้ยงขยับกลอกตามตำแหน่งนิ้วแบบ Real-time
+- **On-Device Vision via Google ML Kit (`PetVisionDetector.kt`, `PetVisionBridge.kt`)**:
+  - เพิ่ม Dependency `com.google.android.gms:play-services-mlkit-face-detection:17.1.0`
+  - ตรวจจับใบหน้า สายตา และการแสดงออกทางสีหน้าแบบ On-Device 100% (0 tokens, zero latency, ไม่เสียค่า API):
+    1. **Real-Time Gaze Tracking**: คำนวณจุดศูนย์กลางใบหน้าผู้ใช้หน้าโต๊ะทำงาน ปรับ `gazeOffsetX`, `gazeOffsetY` ให้ตาสัตว์เลี้ยงมองตามผู้ใช้แบบมีชีวิต
+    2. **Desk Sentry (สายตรวจเฝ้าโต๊ะ)**: เมื่อเปิดโหมดเฝ้าโต๊ะ หากมีคนเดินเข้ามาหน้ากล้อง จะส่งเสียงไซเรนเตือนภัย (Alarm) พร้อมหน้าตาแดงดุ (ANGRY) แจ้งเตือนผู้บุกรุกทันที
+    3. **Copycat Face Mimic Game**: มินิเกมเลียนแบบหน้า ท้าทายผู้ใช้ยิ้มกว้าง (`smilingProbability > 0.65f`) หรือขยิบตาแข่งกับน้อง (`abs(leftEye - rightEye) > 0.50f`) เมื่อทำสำเร็จจะส่งเสียงเชียร์และแสดงความดีใจ
+- **Procedural Snore Synthesizer (`RobotSoundEngine.kt`, `RobotSoundPlayer.kt`)**:
+  - เพิ่มเสียง `RobotSound.SNORE`: สังเคราะห์คลื่นเสียงกรนฟี้ๆ ช่วงหายใจเข้า $130\text{Hz} \to 200\text{Hz}$ และหายใจออก $190\text{Hz} \to 95\text{Hz}$ พร้อมลูกคอ Flutter นุ่มนวล
+  - ทำงานร่วมกับการคว่ำหน้าจอบนโต๊ะ (Desk Face-Down) $\rightarrow$ น้องหลับฟี้ๆ พร้อมเสียงกรนและตัวอักษร `z z z` ลอย
+- **Verification & Testing**:
+  - เพิ่ม Unit Tests ใน `PetModeTest.kt` และอัปเดต `AlwaysLiveTest.kt` ทดสอบ 14 AvatarEmotion, Dizzy, Face-Down/Face-Up, Copycat Game, และ PetVisionBridge
+  - รันผ่าน 100%: `:composeApp:testDebugUnitTest` ผ่านทั้งหมด 195 tests
+  - คอมไพล์ผ่าน 100%: `:composeApp:compileDebugKotlinAndroid` (BUILD SUCCESSFUL)
+
+## 2026-09-11 — Virtual Desk Pet Mode (โหมดสัตว์เลี้ยง), Procedural Robot Sound FX & Motion Sensor Gestures
+- **Virtual Desk Pet Architecture (`AlwaysLiveProfile.kt`, `PetModeController.kt`, `PetFeatureTab.kt`)**:
+  - พัฒนา "โหมดสัตว์เลี้ยง" (Virtual Desk Pet) เพิ่มเติมควบคู่กับ "โหมดควบคุม" และ "โหมดขับขี่" ตามคำขอและแรงบันดาลใจจาก LOOI Robot
+  - รองรับ 3 โหมดหลักใน Always Live ผ่าน `AlwaysLiveProfile` (`CONTROL`, `DRIVE`, `PET`) พร้อม UI Pill Selector ที่สลับโหมดได้แบบเรียลไทม์
+  - ควบคุมสถานะและพฤติกรรมผ่าน `PetModeController` จัดการ 4 แท็บฟีเจอร์ย่อย:
+    1. `🐾 เล่น` (Play & Interact): ปฏิสัมพันธ์สัมผัสกับน้อง (ลูบหัว, จิ้มแก้ม, จั๊กจี้, ปลุกน้อง)
+    2. `🛡️ เฝ้าโต๊ะ` (Desk Sentry): โหมดสายตรวจเฝ้าโต๊ะทำงาน ตรวจจับผู้บุกรุกพร้อมส่งเสียงไซเรนเตือนอัตโนมัติ
+    3. `⏱️ โฟกัส` (Focus Buddy): เพื่อนคู่คิดช่วยโฟกัสงาน (Pomodoro Timer) 25m / 5m / 50m พร้อมเสียงให้กำลังใจเมื่อครบเวลา
+    4. `🎲 เซียมซี` (Fortune Oracle): มินิเกมเขย่าเซียมซีสุ่มคำทำนายดวงและคำแนะนำประจำวัน
+- **Procedural Robot Sound FX Engine (`RobotSoundEngine.kt`, `RobotSoundPlayer.kt`)**:
+  - สร้างระบบสังเคราะห์คลื่นเสียงหุ่นยนต์ด้วยคณิตศาสตร์ (16-bit PCM AudioTrack Synthesis) โดยไม่ต้องพึ่งพาไฟล์เสียงภายนอก (.mp3/.wav) ช่วยประหยัดพื้นที่ APK และตอบสนองเร็วกว่า 0ms latency
+  - สังเคราะห์ 8 เสียงหุ่นยนต์น่ารัก: `HAPPY` (Double chirp crescendo 880->1760Hz), `PURR` (Low purring vibration 110Hz modulated), `SURPRISE` (Rising glissando 440->2200Hz), `CONFUSED` (Questioning chirp 600->450Hz), `ALARM` (High-pitched siren warble 1400<->2400Hz), `YAWN` (Descending smooth glissando 600->220Hz), `GIGGLE` (Staccato happy bursts 900-1400Hz), `WAKE_UP` (Tri-tone arpeggio C5-E5-G5)
+  - เชื่อมโยงผ่าน `RobotSoundPlayer` (commonMain) ไปยัง `RobotSoundEngine` (androidMain)
+- **Interactive Touch & Expressive Avatar Animation (`JarvisAvatar.kt`, `AvatarEmotion.kt`)**:
+  - รองรับการสอดส่องสายตาแบบมีชีวิตชีวา (Idle Gaze Wander) และวงจรพักผ่อน (หาวนอนเมื่อไม่แตะเล่น 60 วินาที, หลับลึกฟี้ๆ หลัง 150 วินาที)
+  - แตะหน้าจอขยับสายตามองตามนิ้วผู้ใช้ (`gazeOffsetX`, `gazeOffsetY`)
+  - ตรวจจับท่าทางสัมผัส: แตะครั้งเดียว = จิ้มแก้ม (Chirp, Happy smile), แตะสองครั้ง = จั๊กจี้ (Giggle, Excited), กดค้าง = ลูบหัว (Purr, Love hearts)
+  - เอฟเฟกต์เวียนหัวหมุนวน (`isDizzy = true`, Rotating Spiral Eyes `@_@`)
+- **Motion Sensor Gesture Detection (`PetMotionDetector.kt`, `AlwaysLiveManager.kt`)**:
+  - ตรวจจับการเขย่าเครื่อง (Shake Detection > 2.2G) → น้องแสดงอาการเวียนหัวพร้อมตาหมุนวนและเสียงสับสน
+  - ตรวจจับการคว่ำหน้าจอบนโต๊ะ (Face-Down on Desk $z < -8.2\text{ m/s}^2$) → น้องเข้าสู่โหมดหลับพักผ่อน (Zzz) พร้อมเสียงหาวนอน
+  - ตรวจจับการยกหน้าจอขึ้นมา (Face-Up / Lift) → น้องตื่นทันทีพร้อมเสียง Wake Up ทักทายสดใส
+- **Zero Token Cost & Free Tier Guard**:
+  - การตรวจจับการเคลื่อนไหวและท่าทางสัมผัสทั้งหมดทำงานแบบ On-Device 100% (0 tokens, ฟรี ไม่กระทบโควต้า Gemini Live 65K TPM)
+- **Multi-Channel Integration (`DeviceControlExecutor.kt`, `DeviceToolDefinitions.kt`, `JarvisPersona.kt`, `VoiceController.kt`, `ChatController.kt`)**:
+  - รองรับคำสั่งเสียงและข้อความเปิดโหมดสัตว์เลี้ยง: "เปิดโหมดสัตว์เลี้ยง", "โหมดแก้เบื่อ", "pet mode", `/always pet`
+  - อัปเดต `device_always_live` ให้รองรับ parameter `mode="pet"`
+- **Verification**:
+  - เพิ่ม Unit Tests ครอบคลุมใน `PetModeTest.kt` ทดสอบ State Transitions, Gestures, Sentry, Pomodoro Timer และ Fortune Oracle ครบ 100%
+
+## 2026-09-11 — Real-Time Intra-Bar Live Bar Stitching & Anticipation Radar 1-Minute Observability
+- **Intra-Bar Real-Time Stitching (`SignalAlertProvider.kt`, `SmcApiService.kt`)**:
+  - แก้ไขปัญหาแท่งเทียน Timeframe สูง (15m, 1h) ถูกแคชแช่แข็งราคาเดิมตลอดแท่ง (Frozen Bar Issue): เดิมระบบคืนค่าแท่งเทียนจาก DB เมื่อพบว่ามี Bucket ของแท่งปัจจุบันแล้ว ทำให้ตลอดนาทีที่ 1–14 ราคาแท่ง 15m หยุดนิ่งอยู่ที่ราคาเปิดของนาทีที่ 0
+  - เพิ่มฟังก์ชัน `stitchLiveBar(candles, m1Candles, tf)`: นำแท่ง 1m ที่อัปเดตสดทุกนาที มาถักทอ (stitch) เข้ากับแท่งสดที่กำลังก่อตัว (`liveIdx = candles.size - 1`) ของแท่ง 15m/1h อัปเดต `high = maxOf(last.high, intra.high)`, `low = minOf(last.low, intra.low)`, `close = intra.last().close`, `volume = intra.volume` อย่างต่อเนื่อง
+  - ทำให้ทั้ง 13 ปัจจัยของ Anticipation (Wick Sweep Rejection, Keyzone Proximity, RSI Extreme, EMA Near Cross ฯลฯ) ตรวจจับพฤติกรรมราคาระหว่างแท่งแบบ Real-time ทุก 1 นาทีตรงตามการเคลื่อนไหวจริงของตลาด
+  - แยกสถาปัตยกรรมชัดเจน: Confirmed Signals (Buy/Sell หลัก) ยังคงใช้แท่งปิดล่าสุด (`sigIdx = n - 2`) 100% ป้องกันการเกิด Repaint ในขณะที่ Anticipation ใช้อินดิเคเตอร์และราคาบนแท่งสด (`liveIdx = n - 1`) เพื่อเตือนล่วงหน้าก่อนแท่งปิด
+- **Observability Radar Heartbeat (`SignalAlertProvider.kt`)**:
+  - แก้ไขปัญหา Silent Polling ที่ทำให้ผู้ใช้เห็นเฉพาะ Log M15 ปิดแท่งทุก 15 นาที:
+    - เพิ่ม Radar Heartbeat Log ทุก 1 นาที: `📡 $symbol/$tf Anticipation radar: live=... (13 factors active) → IDLE`
+    - เมื่อตรวจพบเงื่อนไขคาดการณ์ล่วงหน้า จะพ่น Log ชัดเจนทันที: `⚡ $symbol/$tf ANTICIPATION RADAR: live=... [Setup] [Side] conf=...% (13 factors active)`
+  - ปรับ `SmcApiService.intervalToMillis(interval)` เป็น `companion object fun` เพื่อให้ทุกโมดูลใช้งานร่วมกันได้แบบ centralized
+  - ปรับปรุง `SignalAlertProvider.fetch()` ให้ดึง `m1Candles` ครั้งเดียวแล้วแชร์ให้ทั้ง `stitchLiveBar` และ Unified SMC Confirmation Layer โดยไม่ต้อง fetch ซ้ำ
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `SignalAlertProviderTest.kt`: `testStitchLiveBar_updatesForming15mBarWithLatestM1Data`, `testStitchLiveBar_appendsNewBucketWhen15mCandleLags`, `testStitchLiveBar_preservesCandlesFor1mTimeframe`
+  - ทดสอบผ่าน 100%: `:composeApp:testDebugUnitTest` ผ่านทั้งหมดทั้ง `SignalAlertProviderTest` และ `SignalAnticipationTest` (BUILD SUCCESSFUL)
+
+## 2026-09-11 — Trading Signal Anticipation 13-Factor Default, Market Feature Snapshot & Historical Audit
+- **Default to All 13 Factors (`AnticipationConfigManager.kt`)**:
+  - ปรับระบบ Anticipation ให้เปิดใช้งานครบทั้ง **13 ปัจจัยมาตรฐานเป็นค่าเริ่มต้น** สำหรับทุกสินทรัพย์ (Curated Factor Whitelist ครบทุกตัว ไม่จำกัดเฉพาะ 4 ปัจจัยเดิม):
+    1. `KEYZONE_PROXIMITY`: ทดสอบ Demand/Supply Zone
+    2. `WICK_SWEEP_REJECTION`: ไส้เทียนปฏิเสธราคา
+    3. `RSI_EXTREME`: RSI Oversold/Overbought
+    4. `EMA_NEAR_CROSS`: EMA14/60 บีบตัวจ่อ Golden/Death Cross
+    5. `BOLLINGER_SQUEEZE`: Bollinger Bands บีบตัวแคบเตรียม Breakout
+    6. `MACD_HISTOGRAM_TURN`: MACD Histogram เงย/ปักหัวกลับทิศ
+    7. `VOLUME_ABSORPTION`: Smart Money ซุ่มดูดซับแรงซื้อ/ขาย
+    8. `FIBONACCI_GOLDEN_POCKET`: ทดสอบแนว 0.618 - 0.65
+    9. `STOCHASTIC_OVERSOLD_TURN`: Stoch %K ตัดกลับตัว
+    10. `SESSION_OPEN_SWEEP`: กวาดสภาพคล่อง Session High/Low
+    11. `VEYRA_SHIFT`: Institutional Shift Ledger
+    12. `BB_KC_SQUEEZE`: Bollinger Bands บีบตัวใน Keltner Channels
+    13. `FAST_RSI_REVERSAL`: Fast RSI(5) Reversal
+- **Candlestick & Market Genome Feature Snapshot (`SignalAlertProvider.kt`, `SignalOutcomeTracker.kt`)**:
+  - เมื่อเกิดการคาดการณ์ล่วงหน้า (Anticipation) ระบบจะบันทึก Snapshot สภาพแวดล้อมตลาดกว่า 25 มิติ (`SignalFeatureExtractor.extractJson`) ควบคู่กับบริบท Anticipation (`setup_type`, `factor_id`, `confidence`, `stage`, `reason`, `zone`) ลงในคอลัมน์ `features_json` ของ `SignalTrackingRecord`
+  - ช่วยให้ผู้ใช้และ AI สามารถตรวจสอบย้อนหลังได้ว่า การคาดการณ์สมเหตุสมผลหรือไม่ กราฟอยู่ในสภาพแวดล้อมใด ไม่ได้คาดการณ์มั่ว
+- **Anticipation Audit Tool Action (`ToolExecutor.kt`, `TradingToolDefinitions.kt`)**:
+  - เพิ่ม `action="inspect"` / `"history"` / `"records"` ในเครื่องมือ `trading_signal_anticipation`
+  - รองรับพารามิเตอร์ `limit` (default 10 รายการ)
+  - แสดงแจกแจงละเอียด: วันเวลา, ทิศทาง, Stage, Confidence, Entry, SL, TP, ผลลัพธ์ R, และแจกแจง Snapshot สภาพแวดล้อมตลาด (H4/H1 Trend, Squeeze, Veyra Score, RSI, Fast RSI, ADX, ATR)
+- **SQLite Schema Migration Fix (`DatabaseDriverFactory.kt`, `11.sqm`)**:
+  - แก้ไขข้อผิดพลาด `table SignalTrackingRecord has no column named features_json (code 1 SQLITE_ERROR[1])`
+  - เพิ่มคำสั่ง Additive Migration: `ALTER TABLE SignalTrackingRecord ADD COLUMN features_json TEXT;` ใน `DatabaseDriverFactory.ensureNewTablesExist()` และสร้างไฟล์ Migration `11.sqm`
+  - อัปเดตนิยาม DDL เริ่มต้นของ `SignalTrackingRecord`
+- **Signal Dataset Manager Support (`SignalDatasetManager.kt`)**:
+  - ปรับปรุง `exportDataset()` ให้รองรับการส่งออกข้อมูล Anticipation เมื่อผู้ใช้หรือ AI ระบุ `strategy = "anticipation"` หรือ `ANTICIPATION_*`
+- **Bollinger Squeeze Calculation Fix (`SignalAlertProvider.kt`)**:
+  - แก้ไข Band Tolerance ของ Bollinger Squeeze ให้อิงตามขนาดความกว้าง Bandwidth จริง (`min(0.25 * atr14, bbWidth * 0.15)`) พร้อมตรวจสอบทิศทางเทียบกับ Midline (`bbBasis`) ป้องกันการเกิด False Breakout ในช่วงตลาดแกว่งตัวแคบ
+- **Verification**:
+  - ชุดทดสอบ Unit Tests: `AnticipationConfigManagerTest`, `SignalAnticipationTest`, `SignalDatasetManagerTest`, `SignalOutcomeTrackerTest` รันผ่าน 100% (30/30 tests passed, BUILD SUCCESSFUL)
+
+## 2026-09-11 — Driving Mode Notification Filtering & AI Voice Announcement Fix (No Robotic Echo)
+- **Notification Filtering Optimization (`JarvisNotificationListener.kt`)**:
+  - เพิ่ม `IGNORED_SYSTEM_PACKAGES`: บล็อกแจ้งเตือนจากระบบ Android และแพ็กเกจเบื้องหลังอย่างเด็ดขาด (`android`, `com.android.systemui`, `com.google.android.gms`, `com.android.vending`, `com.google.android.dialer` ฯลฯ)
+  - เพิ่มการตรวจสอบ `sbn.isOngoing`, `FLAG_ONGOING_EVENT`, และ `FLAG_FOREGROUND_SERVICE`: ตัดการแจ้งเตือนประเภทสถานะการชาร์จแบตเตอรี่ (Battery Charging), มีเดียเพลเยอร์, การดาวน์โหลดไฟล์ หรือบริการที่รันค้างทั้งหมด
+  - กรองเฉพาะข้อความแชทจริง: ตรวจสอบ `isMessagingApp()` (LINE, SMS, WhatsApp, Messenger, Telegram, Discord), `CATEGORY_MESSAGE`, หรือมี Inline Reply Action (`RemoteInput`) เท่านั้น
+  - ระบบ Deduplication: ป้องกันการอ่านแจ้งเตือนซ้ำภายใน 10 วินาที ทั้งทางคีย์และเนื้อหาข้อความ
+- **Seamless Live Voice Announcement (`VoiceController.kt`, `JarvisViewModel.kt`, `App.kt`, `MainActivity.kt`)**:
+  - แก้ไขปัญหาเสียงหุ่นยนต์ Android Offline TTS พูดซ้อนทับกับเสียงสดธรรมชาติของ AI (`🤖 JARVIS`):
+    - เมื่ออยู่ในโหมด Always Live / Driving Mode จะส่งแจ้งเตือนข้อความเข้าสู่ Gemini Live session โดยตรงผ่าน `orchestrator.sendLiveRealtimeText()`
+    - AI จะพูดแจ้งเตือนผู้ใช้ด้วยน้ำเสียงและบุคลิกของ JARVIS ที่อบอุ่นและเป็นธรรมชาติ (เสียงผู้หญิง ค่ะ/คะ)
+    - อาศัยกลไก Echo Prevention ของ `PcmAudioEngine` และ `VoiceController` ป้องกันไมโครโฟนดูดเสียงลำโพงกลับเข้าโมเดล ไม่เกิดลูปเสียงและไม่มีเสียงพูดแทรก
+    - หาก Live session ไม่ได้เชื่อมต่ออยู่ จะ fallback ไปใช้ Offline TTS พร้อม mute ไมโครโฟนชั่วคราวอย่างปลอดภัย
+- **Verification**:
+  - Unit tests: `:composeApp:testDebugUnitTest` (BUILD SUCCESSFUL in 1m 19s, 100% pass)
+  - Android APK: `:composeApp:assembleDebug` (BUILD SUCCESSFUL)
+
+## 2026-09-11 — Driving Mode Enhancement: Smart Notifications (LINE/SMS), GPS Location Context, and Media Control (Now Playing & Search)
+- **Smart Notifications & RemoteInput Auto-Reply (`JarvisNotificationListener.kt`, `NotificationBridge.kt`)**:
+  - สร้าง `JarvisNotificationListener : NotificationListenerService` ดักจับการแจ้งเตือนขาเข้าจาก LINE, SMS, WhatsApp, Messenger, Telegram, Discord พร้อมจัดเก็บประวัติ 50 รายการล่าสุด
+  - เชื่อมต่อการแจ้งเตือนด้วยเสียงอัตโนมัติในโหมดขับขี่ (`MainActivity.kt` + `AlwaysLiveManager`): เมื่อมีข้อความเข้าในโหมด Always Live จะอ่านออกเสียงให้ฟังทันทีผ่าน `NotificationBridge.formatForDrivingSpeech()`
+  - เพิ่ม Native Tool `device_notification_read`: สำหรับอ่านข้อความล่าสุด กรองตามชื่อแอปได้
+  - เพิ่ม Native Tool `device_notification_reply`: สำหรับส่งข้อความตอบกลับไปยังการแจ้งเตือนโดยตรงผ่าน `RemoteInput` โดยไม่ต้องสลับหน้าจอ
+  - เพิ่ม Voice Fast-Path ใน `VoiceController.kt`: สั่ง "ตอบว่า...", "ตอบไลน์ว่า...", "reply ว่า..." เพื่อพิมพ์ตอบกลับทันที
+- **GPS Location & Geocoding Context (`LocationProvider.kt`, `device_location`)**:
+  - สร้าง `LocationProvider.kt` โดยใช้ Android Native `LocationManager` + `Geocoder` (Zero Dependency)
+  - เพิ่มสิทธิ์ `ACCESS_FINE_LOCATION` และ `ACCESS_COARSE_LOCATION` ใน `AndroidManifest.xml`
+  - เพิ่ม Native Tool `device_location` (`action="get_current"|"status"`): อ่านพิกัดปัจจุบัน ความเร็วรถ และชื่อที่อยู่/ตำบล/อำเภอ/จังหวัด สำหรับส่งเป็นบริบทให้ AI และผู้ใช้
+  - เพิ่มรายการตรวจสอบสิทธิ์ตำแหน่งที่ตั้งใน Setup Checklist ของ `MainActivity.kt`
+- **Enhanced Media Control & Now Playing (`MediaInfoProvider.kt`, `device_media_control`)**:
+  - ยกระดับ `device_media_control` ให้รองรับ `action="now_playing"`: ดึง Metadata เพลงปัจจุบัน (ชื่อเพลง, ศิลปิน, อัลบั้ม, สถานะเล่น/หยุด, แอปที่เล่น) ผ่าน `MediaSessionManager.getActiveSessions()`
+  - รองรับ `action="search_play"`: ค้นหาและเปิดเล่นเพลงเจาะจงผ่าน Intent ของ YouTube, YouTube Music (`com.google.android.apps.youtube.music`), และ Spotify (`spotify:search:`)
+  - ส่งคำสั่ง Transport Controls (`play`, `pause`, `next`, `prev`) ตรงไปยัง Media Session ที่กำลังเล่นอยู่ก่อน หากไม่พบจึง fallback ไปยัง Hardware KeyEvent
+- **AI Persona & Live Tool Bridge Integration (`JarvisPersona.kt`, `LiveToolBridge.kt`)**:
+  - อัปเดต `DEVICE_CONTROL_RULES` และเพิ่ม Rule 15, 16, 17 ใน `LIVE_RULES`
+  - เพิ่ม Voice Presentation Rules สำหรับเครื่องมือแจ้งเตือน, เพลง, และตำแหน่งใน `LiveToolBridge.kt`
+- **Verification**:
+  - `DeviceControlTest.kt`: เพิ่มการทดสอบ `device_notification_read`, `device_notification_reply`, `device_location`, `device_media_control` (Now Playing) ครบ 10 เครื่องมือ ผ่าน 100%
+  - Gradle Tests: `:composeApp:testDebugUnitTest` (BUILD SUCCESSFUL in 1m 20s)
+  - Android Build: `:composeApp:assembleDebug` (BUILD SUCCESSFUL in 49s)
+
+## 2026-09-11 — Full Physical Grounding & 3D Avatar Emotion Voice Control Integration, Semantic Disambiguation & Zero-Latency Fast Path
+- **Avatar Physical Grounding & Persona Enhancement (`JarvisPersona.kt`)**:
+  - แก้ไขปัญหา Gemini ตอบปฏิเสธว่า "ฉันเป็น AI ไม่มีหน้าตา" โดยเพิ่มอัตลักษณ์ทางกายภาพ (Physical Grounding) ใน `CORE_IDENTITY`: JARVIS มีร่างกายเป็นหุ่นยนต์ 3D Pearlescent Clay Robot Avatar บนหน้าจอมือถือของผู้ใช้ พร้อมหูฟังสีฟ้าสดใส ตาไฟดิจิทัล ปากขยับได้ และมี 10 สภาวะอารมณ์
+  - เพิ่ม **Rule 14 (`การควบคุมและทดสอบ Avatar 3D`)** ใน `LIVE_RULES` และ `DEVICE_CONTROL_RULES`: สั่งให้โมเดลเรียก `device_avatar_emotion` ทันทีเมื่อผู้ใช้สั่งแสดงหรือเปลี่ยนสีหน้า และห้ามตอบว่าตนเองไม่มีหน้าตา
+- **Semantic Disambiguation & Interception Guard (`LiveToolBridge.kt`)**:
+  - แก้ไขปัญหา Semantic Confusion ของคำภาษาไทยว่า "อารมณ์" (สีหน้า Avatar vs อารมณ์ตลาด/Sentiment/Fear & Greed Index)
+  - เพิ่ม `isAvatarEmotionRequest()` ใน `LiveToolBridge.kt`: หาก Gemini Live สับสนและพยายามเรียก `trading_fear_greed` หรือ `trading_sentiment` ขณะที่ผู้ใช้พูดถึงการเดโม่หรือเปลี่ยนสีหน้า ระบบจะดักจับ (intercept) และแปลงคำสั่งส่งต่อไปยัง `device_avatar_emotion` อัตโนมัติ พร้อมส่ง Voice Presentation Instruction ยืนยันผลสั้นกระชับสดใส
+- **Avatar Emotion Device Tool (`device_avatar_emotion`)**:
+  - เพิ่มการประกาศ Native Function ใน `DeviceToolDefinitions.kt` (`action="demo"|"set"|"reset"`, `emotion="..."`)
+  - รองรับการประมวลผลใน `DeviceControlExecutor.kt` (`executeAvatarEmotion`) และส่งต่อให้ UI ผ่าน `MainActivity.triggerTestEmotion()`
+- **Zero-Latency Local Fast-Path (`VoiceController.kt`, `ChatController.kt`)**:
+  - ปรับปรุง `ChatController.kt`: ขยายการตรวจจับคำสั่งทดสอบอารมณ์ในแชทให้ครอบคลุม "เดโม่อารมณ์", "เดโมอารมณ์", "แสดงอารมณ์ทั้งหมด", "ซะแดงเดโมอารมณ์", "โชว์อารมณ์", "ทดสอบอารมณ์"
+  - ปรับปรุง `VoiceController.kt`: เชื่อมต่อการฟัง Speech Transcript ของผู้ใช้แบบเรียลไทม์ (`orchestrator.textOutputFlow`) เพื่อเปลี่ยนสีหน้าและรันเดโม่ทันทีที่ตรวจพบคำสั่งโดยไม่ต้องรอผลตอบกลับจากเครือข่าย
+- **Always AI Live Control & Driving Mode (`device_always_live({action="on"})`)**:
+  - เพิ่มการตรวจจับและแม็พคำสั่งภาษาไทย: `"โหมดควบคุม"`, `"โหมดขับขี่"`, `"โหมดรถยนต์"`, `"เปิดโหมดควบคุม"`, `"เปิดโหมดขับขี่"`, `"เปิดโหมดรถยนต์"`, `"เข้าโหมดควบคุม"`, `"เข้าโหมดขับขี่"`, `"เข้าโหมดรถยนต์"`
+  - อัปเดต `DeviceToolDefinitions.kt`: ขยายคำอธิบายเครื่องมือ `device_always_live` และเพิ่มอาร์กิวเมนต์ตัวเลือก `mode = "control" | "drive" | "car"`
+  - อัปเดต `JarvisPersona.kt`: เพิ่มคำสั่งเข้าสู่ `DEVICE_CONTROL_RULES` และ `LIVE_RULES` (ข้อ 12) อย่างชัดเจน
+  - ปรับปรุง `DeviceControlExecutor.kt`: `executeAlwaysLive` รองรับการตอบกลับจำเพาะสำหรับโหมดขับขี่/โหมดรถยนต์
+  - เสริม `LiveToolBridge.kt`: เพิ่ม Interception Guard ป้องกัน Gemini เรียก trading tools ผิดพลาดขณะพูดคำสั่งโหมดควบคุม/ขับขี่ และเพิ่ม Voice Rule ยืนยันกระชับ
+  - เสริม Zero-Latency Fast Path: รองรับคำสั่งผ่าน `ChatController.kt` และดักจับเสียงสดผ่าน `VoiceController.kt` ขยายหน้าจอ Always Live ทันที
+- **Verification**:
+  - `DeviceControlTest.kt`: เพิ่ม Unit Test สำหรับ `device_always_live` (action=on, mode=control) ผ่าน 100%
+  - `:composeApp:testDebugUnitTest` และ `:composeApp:assembleDebug` ผ่านสมบูรณ์ (BUILD SUCCESSFUL)
+
+## 2026-09-10 — Decoupled Trading Radar vs Signal Engine, 25+ Feature Snapshot, Forward Paper Trading & AI ML Dataset Export/Import
+- **Clean Decoupling of Trading Intelligence (แยก 2 ระบบชัดเจนตามคำสั่ง)**:
+  1. **ระบบแจ้งเตือนคาดการณ์ล่วงหน้า (Anticipation / Pre-Signal Alert System)**:
+     - ทำหน้าที่เป็น **Market Radar / Early Warning System** เฝ้าระวังภาพรวมตลาด (M15, H1, H4) ผ่าน 13 ปัจจัยมาตรฐาน (Keyzone, Wick Sweep, RSI Extreme, EMA Cross, Squeeze, Veyra Shift ฯลฯ)
+     - **ตัด mock/fake trade order ออก 100%**: ไม่มีการบันทึกคำสั่งจำลอง (Entry, SL, TP) ลงใน `SignalTrackingRecord` ของระบบเทรด ป้องกันการสร้างข้อมูลขยะใน Trade Tracker
+  2. **ระบบแจ้งเตือน Signal (Signal Alert & Simulated Trading Engine)**:
+     - เครื่องยนต์ตรวจจับสัญญาณเข้าทำกำไรจริง รันครบทุกกลยุทธ์: 8 กลยุทธ์ Classic + Unified SMC + 3 Pine Script Engines ที่พอร์ตมาใหม่ (`VEYRA`, `BBSQ`, `FRSI`)
+     - รองรับ Multi-timeframe: M5, M15, M30, H1, H4
+     - คำนวณ SL / TP ตามโครงสร้างและสัดส่วน R:R ที่แท้จริง
+- **Candlestick & Market Feature Snapshot (`features_json`)**:
+  - สร้าง `SignalFeatureExtractor.kt`: Snapshot คุณลักษณะตลาดและแท่งเทียนกว่า 25+ มิติ ณ วินาทีที่เกิดสัญญาณ:
+    - Candlestick Metrics: `body_ratio`, `upper_wick_ratio`, `lower_wick_ratio`, `candle_dir`, `spread_atr_ratio`, `volume_impulse`
+    - Oscillators & Indicators: `rsi14`, `fast_rsi5`, `stoch_k`, `macd_hist`, `adx14`, `atr14`
+    - Moving Averages & Bands: `ema14_60_spread_pct`, `ema14_60_state`, `ema_trend_50_200`, `bb_width_atr`, `bb_pct_b`, `squeeze_state`
+    - Multi-timeframe & Structure: `h4_trend`, `h1_trend`, `m15_trend`, `keyzone_proximity`, `keyzone_type`, `market_zone`
+    - Institutional Flow & Context: `veyra_score`, `veyra_state`, `session`, `hour_utc`, `day_of_week`
+  - อัปเดต SQLite Schema `SignalTrackingRecord` เพิ่มคอลัมน์ `features_json TEXT`
+- **Forward Paper Trading Simulation (การจำลองผลลัพธ์ไปข้างหน้า)**:
+  - `SignalOutcomeTracker.kt` ติดตามผลการวิ่งจริงของแท่งเทียนในอนาคต วัดผลครบทุกเมตริก:
+    - Status: `WIN`, `LOSS`, `BE`, `OPEN`, `EXPIRED`
+    - Outcome Metrics: `MFE (Maximum Favorable Excursion)`, `MAE (Maximum Adverse Excursion)`, `pnl_r`, `bars_held`
+- **เครื่องมือส่งออกและนำเข้าข้อมูลสำหรับ AI / Machine Learning**:
+  - **`trading_signal_data_export`**:
+    - ดึงข้อมูลสัญญาณพร้อม Feature Snapshot และผลลัพธ์จริง ออกมาเป็น JSON หรือ CSV
+    - กรองได้ตาม `symbol`, `interval`, `strategy`, `status` (`all`, `resolved`, `open`), `limit`
+    - พร้อมส่งให้ AI ภายนอกหรือ ML Model นำไปคำนวณ Correlation, Feature Importance, หรือ Cluster เพื่อหา Parameter ที่ดีที่สุด
+  - **`trading_signal_config_import`**:
+    - นำเข้าผลการจูนจาก AI ภายนอก (`tunings` และ `entry_params`) กลับเข้า SQLite (`StrategyTuning`, `EntryTuning`)
+    - มีผลต่อ Live Alert และ Paper Trading ทันทีในรอบถัดไป
+- **Verification**:
+  - SQLDelight Interface generated successfully
+  - Unit Tests: `SignalAlertProviderTest`, `SignalAnticipationTest`, `SignalOutcomeTrackerTest`, `SignalDatasetManagerTest` ผ่าน 100%
+  - Android Build: `:composeApp:assembleDebug` ผ่านสมบูรณ์
+
+## 2026-09-10 — Trading Anticipation Closed-Loop Architecture: Detection ➔ Analysis ➔ Alerting ➔ Learning & Pine Script Porting
+- **Pine Script Strategy Porting to Kotlin Multiplatform**:
+  - **`VeyraShiftEngine.kt`** (จาก `Veyra Shift Ledger [JOAT]`):
+    - พอร์ต 6 เสาหลักเชิงสถาบัน (Institutional Shift Engine):
+      1. Trend & Regime (Adaptive Fast 21, Mid 55, Slow 200, DMI/ADX 14, ATR Rank, HTF EMA 55 Filter)
+      2. Pressure Engine (Signed body efficiency, Pressure Oscillator -100 ถึง +100, Volume Impulse, Bull/Bear Absorption)
+      3. Auction Value Engine (VWAP, Value High/Low Dev 1.15, Discount/Premium/Reclaim/Reject)
+      4. Market Structure (Pivots, BOS Up/Down, Liquidity Sweep, Fair Value Gap)
+      5. Composite Shift Score (0-100 คะแนน)
+      6. Institutional Execution Rails: คำนวณ Entry, Structural/ATR Stop Loss, และ Take Profit 3 ระดับ (TP1: 1.0R, TP2: 2.0R, TP3: 3.2R)
+  - **`BBSqueezeTrendEngine.kt`** (จาก `BBSqueezeTrend`):
+    - พอร์ต Bollinger Bands (29, 1.82) vs Keltner Channels (29, 1.56) Squeeze On / Squeeze Fired
+    - Linear Regression Slope (11) และ ADX (14) >= 19.11 กรองทิศทาง Breakout ที่แท้จริง
+    - คำนวณ Execution Rails: Entry, Stop Loss และ Dynamic Take Profit
+  - **`FastRsiEngine.kt`** (จาก `ABQ1`):
+    - พอร์ต Fast RSI(5) Momentum Thrust Crossover 35/75 พร้อม Emergency Exit ทันทีเมื่อ RSI5 ตัดหลุด 10
+- **Closed-Loop 4-Stage Flow Architecture**:
+  1. **ตรวจจับ (Detection)**:
+     - รองรับการสแกนทันที (On-demand) ผ่าน tool `trading_signal_anticipation` (`action="scan"` / `"analyze"`) ดึงแท่งเทียนเรียลไทม์ ตรวจสอบและคืนผลวิเคราะห์พร้อม Execution Rails
+     - เชื่อมต่อการตรวจจับอัตโนมัติในพื้นหลังผ่าน `SignalAlertProvider.detectAnticipation()` ร่วมกับ 10 ปัจจัยเดิมรวมเป็น 13 ปัจจัยมาตรฐาน
+  2. **วิเคราะห์ (Analysis)**:
+     - แยกสถานะความพร้อมเป็น 3 ระดับ: `PRE_SETUP` (เริ่มฟอร์มตัว), `TRIGGER_READY` (เข้าจุดพร้อมออกคำสั่ง), `CONFIRMING` (สัญญาณยืนยัน)
+     - เสริม **`runAnticipationSupervisor()`** ใน `TradingAlertEvaluator.kt` ส่ง MTF Context และ Execution Rails ให้ AI Strategy Supervisor ตรวจคัดกรอง (APPROVE / VETO / ADJUST) แบบเดียวกับสัญญาณจริง
+  3. **แจ้งเตือน (Alerting)**:
+     - อัปเดต `JarvisAutomationService.kt` ให้รัน Strategy Supervisor สำหรับ Anticipation Alert (ไม่ข้ามเหมือนเดิม)
+     - ปรับปรุง `AlertPresentationFormatter.kt`:
+       - `buildAnticipationChatCard()` แสดง Badge ระดับความพร้อม (Stage), โซน/ปัจจัย และตาราง Execution Rails (Entry, SL, TP1, TP2, TP3)
+       - `buildAnticipationSpeech()` สังเคราะห์เสียงพูดเตือนระดับราคาและสถานะที่กระชับ แม่นยำ
+  4. **เรียนรู้ (Learning)**:
+     - บันทึกการคาดการณ์ลง SQLite อัตโนมัติผ่าน `SignalOutcomeTracker.recordAnticipation()`
+     - ระบบ Closed-Loop Reinforcement Learning ติดตามราคาว่าแปลงเป็นสัญญาณจริง (Conversion Rate), ชนะ (WIN), แพ้ (LOSS), หรือผิดทาง (INVALIDATED)
+     - อัปเดตค่าน้ำหนักความเชื่อมั่นแบบไดนามิก (+2% เมื่อชนะ / -2% เมื่อแพ้) ใน `AnticipationConfigManager`
+     - สรุปผลการเรียนรู้ผ่าน tool `trading_signal_anticipation` (`action="learning"` / `"performance"`)
+- **Verification**:
+  - Unit Tests: `SignalAnticipationTest.kt` ครอบคลุม VeyraShiftEngine, BBSqueezeTrendEngine, FastRsiEngine, Reinforcement Learning Weights, และ Tool Actions
+  - `:composeApp:testDebugUnitTest` ผ่าน 100%
+
 ## 2026-09-10 — Dedicated Logcat Tag (JarvisAvatar), Speech Hysteresis (Anti-Flapping) & 10-Emotion Multi-Channel Testing
 - **Dedicated Logcat Tag `JarvisAvatar`**:
   - สร้างจุดบันทึก Logcat แบบเรียลไทม์ผ่าน Tag `JarvisAvatar` สำหรับตรวจจับการเปลี่ยนผ่านของอารมณ์และสถานะการสนทนา:

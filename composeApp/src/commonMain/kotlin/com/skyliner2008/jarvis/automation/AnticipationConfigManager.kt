@@ -20,7 +20,7 @@ object AnticipationConfigManager {
         val defaultConfidence: Int
     )
 
-    // ─── Curated Factor Whitelist (10 ปัจจัยมาตรฐาน) ───────────────────────────
+    // ─── Curated Factor Whitelist (13 ปัจจัยมาตรฐาน) ───────────────────────────
 
     val FACTOR_KEYZONE_PROXIMITY = FactorDefinition(
         id = "KEYZONE_PROXIMITY",
@@ -63,7 +63,7 @@ object AnticipationConfigManager {
         name = "Bollinger Bands Squeeze & Compression",
         category = "Volatility",
         description = "Bollinger Bandwidth บีบตัวแคบผิดปกติ (Bandwidth <= 2.2x ATR) สภาวะสะสมพลังเตรียมระเบิด Breakout รุนแรง",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 74
     )
 
@@ -72,7 +72,7 @@ object AnticipationConfigManager {
         name = "MACD Histogram Momentum Turn",
         category = "Momentum",
         description = "MACD Histogram หดตัวกลับทิศใกล้เส้น Zero Line (จุดเริ่มต้นของการหมุนรอบ Momentum ใหม่)",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 72
     )
 
@@ -81,7 +81,7 @@ object AnticipationConfigManager {
         name = "Smart Money Volume Absorption",
         category = "Volume Spread Analysis",
         description = "ปริมาณ Volume สูงกว่าค่าเฉลี่ย 1.8 เท่า แต่สเปรดแท่งเทียนแคบ (Doji / Absorption) แสดงถึงการซุ่มเก็บของหรือรับแรงขาย",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 77
     )
 
@@ -90,7 +90,7 @@ object AnticipationConfigManager {
         name = "Fibonacci Golden Pocket Touch",
         category = "Market Geometry",
         description = "ราคาย่อตัวลงมาแตะแนวรับ/แนวต้าน Fibonacci Golden Pocket (0.618 - 0.650) ในรอบ Swing ปัจจุบัน",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 75
     )
 
@@ -99,7 +99,7 @@ object AnticipationConfigManager {
         name = "Stochastic Extreme Reversal",
         category = "Cycle Oscillator",
         description = "Stochastic (%K, %D) ตัดขึ้นจากโซนต่ำกว่า 20 หรือตัดลงจากโซนสูงกว่า 80 ชี้จุดกลับตัวของรอบระยะสั้น",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 71
     )
 
@@ -108,8 +108,35 @@ object AnticipationConfigManager {
         name = "Session High/Low Liquidity Sweep",
         category = "Session Timing",
         description = "ราคา Sweep กวาด High หรือ Low ของ Session ก่อนหน้า (เช่น Asia High/Low Sweep ในช่วง London/US Session)",
-        isCoreDefault = false,
+        isCoreDefault = true,
         defaultConfidence = 79
+    )
+
+    val FACTOR_VEYRA_SHIFT = FactorDefinition(
+        id = "VEYRA_SHIFT",
+        name = "Veyra Institutional Shift Ledger",
+        category = "Institutional Engine",
+        description = "ระบบประเมิน 6 เสาหลักเชิงสถาบัน (Trend, Pressure, Auction, Structure, Volatility, HTF) Shift Score >= 70 คะแนน",
+        isCoreDefault = true,
+        defaultConfidence = 84
+    )
+
+    val FACTOR_BB_KC_SQUEEZE = FactorDefinition(
+        id = "BB_KC_SQUEEZE",
+        name = "Bollinger vs Keltner Channels Squeeze",
+        category = "Volatility Breakout",
+        description = "Bollinger Bands บีบตัวแคบใน Keltner Channels สะสมพลังเตรียมระเบิด หรือเพิ่งระเบิด Fired ตามทิศทาง LinReg Slope",
+        isCoreDefault = true,
+        defaultConfidence = 80
+    )
+
+    val FACTOR_FAST_RSI_REVERSAL = FactorDefinition(
+        id = "FAST_RSI_REVERSAL",
+        name = "Fast RSI(5) Momentum Thrust (ABQ1)",
+        category = "Momentum Reversal",
+        description = "Fast RSI(5) ตัดทะลุ 35 ขึ้น (จุดกลับตัวฉับไว) หรือตัดหลุด 75 ลง (ล็อกกำไร)",
+        isCoreDefault = true,
+        defaultConfidence = 76
     )
 
     val ALL_FACTORS: List<FactorDefinition> = listOf(
@@ -122,12 +149,45 @@ object AnticipationConfigManager {
         FACTOR_VOLUME_ABSORPTION,
         FACTOR_FIBONACCI_GOLDEN_POCKET,
         FACTOR_STOCHASTIC_OVERSOLD_TURN,
-        FACTOR_SESSION_OPEN_SWEEP
+        FACTOR_SESSION_OPEN_SWEEP,
+        FACTOR_VEYRA_SHIFT,
+        FACTOR_BB_KC_SQUEEZE,
+        FACTOR_FAST_RSI_REVERSAL
     )
 
     private val FACTOR_MAP: Map<String, FactorDefinition> = ALL_FACTORS.associateBy { it.id.uppercase() }
 
     val CORE_DEFAULT_FACTOR_IDS: Set<String> = ALL_FACTORS.filter { it.isCoreDefault }.map { it.id }.toSet()
+
+    // ─── Dynamic Factor Reinforcement Learning State ──────────────────────────
+
+    private val factorConfidenceAdjustments = mutableMapOf<String, Int>()
+
+    /**
+     * คืนค่าความเชื่อมั่นหลังคำนวณการเรียนรู้แบบ Closed-Loop
+     */
+    fun getEffectiveConfidence(factorId: String): Int {
+        val def = findFactor(factorId) ?: return 70
+        val adj = factorConfidenceAdjustments[factorId.trim().uppercase()] ?: 0
+        return (def.defaultConfidence + adj).coerceIn(50, 98)
+    }
+
+    /**
+     * ปรับค่าน้ำหนักความเชื่อมั่นของ Factor จากสถิติ Win/Loss จริง (Reinforcement Learning)
+     */
+    fun applyFactorWeightAdjustment(factorId: String, delta: Int) {
+        val cleanId = factorId.trim().uppercase()
+        val current = factorConfidenceAdjustments[cleanId] ?: 0
+        factorConfidenceAdjustments[cleanId] = (current + delta).coerceIn(-25, 25)
+    }
+
+    fun getDynamicWeight(factorId: String): Int =
+        factorConfidenceAdjustments[factorId.trim().uppercase()] ?: 0
+
+    /**
+     * ดึงค่าการปรับแต่งทั้งหมด
+     */
+    fun getFactorAdjustments(): Map<String, Int> = factorConfidenceAdjustments.toMap()
 
     // ─── Per-Symbol Factor Configuration State ────────────────────────────────
 
@@ -234,17 +294,20 @@ object AnticipationConfigManager {
         val isCrypto = sym.contains("BTC") || sym.contains("ETH") || sym.contains("USDT")
 
         val rec = CORE_DEFAULT_FACTOR_IDS.toMutableSet()
+        rec.add("VEYRA_SHIFT")
+        rec.add("BB_KC_SQUEEZE")
         if (isGold) {
-            // ทองคำเคลื่อนไหวตาม SMC Liquidity และ Session ได้ดีมาก
+            // ทองคำเคลื่อนไหวตาม SMC Liquidity, Veyra Shift และ Session ได้ดีมาก
             rec.add("FIBONACCI_GOLDEN_POCKET")
             rec.add("SESSION_OPEN_SWEEP")
         }
         if (isCrypto) {
-            // คริปโตตอบสนองต่อ Volume Absorption และ Bollinger Squeeze ดี
-            rec.add("BOLLINGER_SQUEEZE")
+            // คริปโตตอบสนองต่อ Volume Absorption, BB Squeeze และ Fast RSI ดี
             rec.add("VOLUME_ABSORPTION")
+            rec.add("FAST_RSI_REVERSAL")
         }
         if (regime.contains("CHAOTIC", ignoreCase = true) || regime.contains("COMPRESSION", ignoreCase = true)) {
+            rec.add("BB_KC_SQUEEZE")
             rec.add("BOLLINGER_SQUEEZE")
         }
         return rec

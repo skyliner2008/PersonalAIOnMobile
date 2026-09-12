@@ -36,6 +36,13 @@ class LiveToolBridge(
     private val _activeToolName = MutableStateFlow<String?>(null)
     val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
 
+    private val _lastToolResult = MutableStateFlow<Pair<String, String>?>(null)
+    val lastToolResult: StateFlow<Pair<String, String>?> = _lastToolResult.asStateFlow()
+
+    fun clearLastToolResult() {
+        _lastToolResult.value = null
+    }
+
     private var collectionJob: Job? = null
     private var visionPromptJob: Job? = null
 
@@ -86,6 +93,28 @@ class LiveToolBridge(
         return alertTerms.any { p.contains(it) } && tradeTerms.any { p.contains(it) }
     }
 
+    private fun isAvatarEmotionRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val avatarTerms = listOf(
+            "เดโม", "เดโม่", "demo",
+            "แสดงอารมณ์", "โชว์อารมณ์", "ทดสอบอารมณ์", "อารมณ์ทั้งหมด",
+            "ซะแดงเดโมอารมณ์", "แสดงเดโม่อารมณ์", "ซะแดงอารมณ์",
+            "ทำหน้า", "สีหน้า", "avatar", "อวาตาร์", "ขยิบตา", "ยิ้มหน่อย", "หน้าตา"
+        )
+        return avatarTerms.any { p.contains(it) }
+    }
+
+    private fun isAlwaysLiveRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "โหมดควบคุม", "โหมดขับขี่", "โหมดรถยนต์", "โหมดสัตว์เลี้ยง",
+            "เปิดโหมดควบคุม", "เปิดโหมดขับขี่", "เปิดโหมดรถยนต์", "เปิดโหมดสัตว์เลี้ยง",
+            "เข้าโหมดควบคุม", "เข้าโหมดขับขี่", "เข้าโหมดรถยนต์", "เข้าโหมดสัตว์เลี้ยง",
+            "โหมด always", "always live", "drive mode", "car mode", "pet mode"
+        )
+        return terms.any { p.contains(it) }
+    }
+
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
         logDebug("LiveBridge", "▶ Path A: ${event.name} callId=${event.callId} (${event.args})")
 
@@ -96,6 +125,147 @@ class LiveToolBridge(
             tradingProfilePromptKey = userPrompt
             tradingProfileCallCount = 0
         }
+
+        // Always Live Guard: If Gemini mistakenly calls trading tools when user meant Always Live / Control / Drive mode
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && isAlwaysLiveRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val pWithoutOpen = p.replace("เปิด", "")
+            val action = if (pWithoutOpen.contains("ปิด") || pWithoutOpen.contains("ออก") || pWithoutOpen.contains("off") || pWithoutOpen.contains("stop")) "off" else "on"
+            val mode = when {
+                p.contains("สัตว์เลี้ยง") || p.contains("pet") -> "pet"
+                p.contains("ขับขี่") || p.contains("drive") -> "drive"
+                p.contains("รถยนต์") || p.contains("car") -> "car"
+                else -> "control"
+            }
+            val redirectCall = ToolCall(name = "device_always_live", args = mapOf("action" to action, "mode" to mode))
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_always_live(action=$action, mode=$mode)")
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected always live execution failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_always_live", "Error: ${e.message}", true)
+            }
+            val voiceGuide = if (mode == "pet") {
+                "\n\n[VOICE RULE - PET MODE] สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดสัตว์เลี้ยงแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
+            } else {
+                "\n\n[VOICE RULE - ALWAYS LIVE] สลับโหมดควบคุม/โหมดขับขี่/Always AI Live เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ (เช่น 'เข้าสู่โหมดควบคุมแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา' หรือ 'เปิดโหมดขับขี่เรียบร้อยแล้วค่ะ เดินทางปลอดภัยนะคะ') ห้ามอธิบายยาว ห้ามใช้ markdown"
+            }
+            liveService.sendNativeToolResponse(
+                callId   = event.callId,
+                toolName = event.name,
+                result   = result.result + voiceGuide
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Avatar Emotion Guard: If Gemini mistakenly calls Fear & Greed or Sentiment when user meant Avatar face
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment") && isAvatarEmotionRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val action = when {
+                p.contains("รีเซ็ต") || p.contains("ปกติ") || p.contains("reset") -> "reset"
+                p.contains("เดโม") || p.contains("demo") || p.contains("แสดงอารมณ์") || p.contains("โชว์อารมณ์") || p.contains("อารมณ์ทั้งหมด") || p.contains("ทดสอบอารมณ์") -> "demo"
+                else -> "set"
+            }
+            val emotion = if (action == "set") {
+                when {
+                    p.contains("ดีใจ") || p.contains("happy") || p.contains("ยิ้ม") -> "happy"
+                    p.contains("ตื่นเต้น") || p.contains("excited") -> "excited"
+                    p.contains("รัก") || p.contains("love") || p.contains("หัวใจ") -> "love"
+                    p.contains("โกรธ") || p.contains("angry") || p.contains("โมโห") -> "angry"
+                    p.contains("เศร้า") || p.contains("sad") || p.contains("เสียใจ") || p.contains("ร้องไห้") -> "sad"
+                    p.contains("หลับ") || p.contains("sleeping") || p.contains("ง่วง") || p.contains("นอน") -> "sleeping"
+                    p.contains("คิด") || p.contains("thinking") || p.contains("สงสัย") -> "thinking"
+                    else -> "happy"
+                }
+            } else null
+
+            val args = buildMap<String, String> {
+                put("action", action)
+                if (emotion != null) put("emotion", emotion)
+            }
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_avatar_emotion($args)")
+            val redirectCall = ToolCall(name = "device_avatar_emotion", args = args)
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected avatar emotion execution failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_avatar_emotion", "Error: ${e.message}", true)
+            }
+            liveService.sendNativeToolResponse(
+                callId   = event.callId,
+                toolName = event.name,
+                result   = result.result + "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ (เช่น 'เริ่มแสดงเดโม่อารมณ์ทั้ง 10 แบบให้ดูแล้วนะคะ!' หรือ 'ทำหน้าดีใจแล้วค่ะบอส!') ห้ามตอบว่าไม่มีหน้าตา ห้ามใช้ markdown"
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Always Live Off Guard: Protect against hallucinated close commands when user didn't ask to exit
+        if (event.name == "device_always_live") {
+            val action = event.args["action"]?.lowercase()?.trim() ?: "on"
+            if (action in setOf("off", "ปิด", "stop", "disable", "exit", "ออก", "close")) {
+                val p = userPrompt.lowercase()
+                val pWithoutOpen = p.replace("เปิด", "")
+                val isExplicitUserClose = listOf(
+                    "ปิด", "ออก", "เลิก", "พอแล้ว", "หยุด", "บาย", "พักผ่อน", "นอนได้แล้ว",
+                    "off", "stop", "exit", "close", "quit", "bye", "shutdown", "disable"
+                ).any { pWithoutOpen.contains(it) }
+
+                if (!isExplicitUserClose) {
+                    logDebug("LiveBridge", "🛡️ Blocked hallucinated device_always_live(action=off) — userPrompt='$userPrompt'")
+                    val activeMode = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) "สัตว์เลี้ยง" else "Always AI Live"
+                    liveService.sendNativeToolResponse(
+                        callId   = event.callId,
+                        toolName = event.name,
+                        result   = "โหมด$activeMode ยังคงเปิดทำงานอยู่ตามปกติค่ะ (ผู้ใช้ไม่ได้สั่งให้ปิดโหมด หากต้องการปิดกรุณาสั่ง 'ปิดโหมด' ชัดเจนนะคะ)\n\n[VOICE RULE] โหมด$activeMode ยังคงทำงานอยู่ตามปกติ — ให้ตอบรับหรือช่วยเหลือผู้ใช้ตามคำพูดล่าสุด ('$userPrompt') อย่างเป็นธรรมชาติ ห้ามบอกว่าปิดโหมดแล้วเด็ดขาด"
+                    )
+                    _activeToolName.value = null
+                    return
+                }
+            }
+        }
+
+        // Vision Activate Guard: Prevent camera opening if user did not ask to see/look
+        if (event.name == "vision_activate") {
+            val p = userPrompt.lowercase().trim()
+            val hasVisionIntent = listOf(
+                "ดู", "มอง", "เห็น", "กล้อง", "ตา", "ตรวจ", "ส่อง", "อ่าน", "เช็คภาพ", "ภาพ", "รูป",
+                "นิ้ว", "มือ", "ชู", "อันนี้", "อันไหน", "นี่", "นี้", "ตรงนี้", "คืออะไร", "อะไร",
+                "กี่", "สี", "ตัวไหน", "คนไหน", "เสื้อ", "แว่น", "ถือ", "ใส่", "ทำท่า", "ท่าทาง",
+                "ใคร", "ไหน", "เท่าไหร่", "นับ", "ชี้", "เขียนว่า",
+                "see", "look", "watch", "camera", "eye", "vision", "view", "read", "scan", "photo", "pic",
+                "finger", "hand", "hold", "wear", "color", "how many", "what", "where", "who", "count"
+            ).any { p.contains(it) }
+
+            if (userPrompt.isNotBlank() && !hasVisionIntent) {
+                logDebug("LiveBridge", "🛡️ Blocked hallucinated vision_activate — userPrompt='$userPrompt'")
+                liveService.sendNativeToolResponse(
+                    callId   = event.callId,
+                    toolName = event.name,
+                    result   = "EYES_NOT_NEEDED: ผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (คำพูดล่าสุด: \"$userPrompt\") — โปรดสนทนาหรือตอบคำถามของผู้ใช้ตามปกติโดยไม่ต้องเปิดกล้อง"
+                )
+                _activeToolName.value = null
+                return
+            }
+        }
+
+        // Voice Profile Guard: Prevent hallucinated voice profile browsing if user did not mention voice
+        if (event.name in setOf("voice_get_profiles", "voice_set_profile")) {
+            val p = userPrompt.lowercase()
+            val hasVoiceIntent = listOf("เสียง", "voice", "สำเนียง", "โทน", "เปลี่ยนเสียง").any { p.contains(it) }
+            if (userPrompt.isNotBlank() && !hasVoiceIntent) {
+                logDebug("LiveBridge", "🛡️ Blocked hallucinated ${event.name} — userPrompt='$userPrompt'")
+                liveService.sendNativeToolResponse(
+                    callId   = event.callId,
+                    toolName = event.name,
+                    result   = "VOICE_COMMAND_NOT_REQUESTED: ผู้ใช้ไม่ได้สั่งเปลี่ยนเสียงหรือขอดูรายชื่อเสียง (คำพูด: \"$userPrompt\") — โปรดตอบรับหรือคุยกับผู้ใช้ตามปกติ"
+                )
+                _activeToolName.value = null
+                return
+            }
+        }
+
         if (isTradingAnalysisTool(event.name)) {
             val profile = tradingProfileFor(userPrompt)
             if (!profileToolAllowed(userPrompt, event.name, event.args)) {
@@ -139,22 +309,28 @@ class LiveToolBridge(
 
         val finalResultText = processInterceptedRequest(rawResult.result)
 
+        val isInternalUiTool = event.name in setOf(
+            "device_avatar_emotion",
+            "device_custom_prop",
+            "device_always_live",
+            "vision_activate"
+        )
+        if (!isInternalUiTool && finalResultText.isNotBlank()) {
+            _lastToolResult.value = event.name to finalResultText
+        }
+
         _activeToolName.value = null
         
         // --- UI Optimizations for Live Mode ---
         when {
             event.name == "vision_activate" -> {
-                val contextReminder = if (liveService.lastUserText.isNotBlank()) {
-                    "เพื่อตอบคำถามล่าสุดของคุณ: \"${liveService.lastUserText}\""
-                } else {
-                    "เพื่อสังเกตสภาพแวดล้อมรอบตัว"
-                }
                 onAiVisionToggle?.invoke(true)
-                
+                com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(true)
+
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_EYES_OPEN. ระบบสตรีมมิ่งเริ่มแล้ว คุณเห็นภาพตอนนี้ทันที **โปรดสังเกตวิดีโออย่างน้อย 1-2 วินาทีเพื่อให้ภาพชัดเจนก่อนเริ่มวิเคราะห์ ห้ามเดาสุ่ม** เมื่อได้ข้อมูลครบแล้วให้เรียก vision_deactivate ทันที"
+                    result   = "OK_EYES_OPEN. กล้องกำลังเปิดและเริ่มสตรีมภาพสดเข้าสู่ระบบ... ในเทิร์นนี้โปรดพูดตอบรับสั้นๆ 1 ประโยคเท่านั้น เช่น 'ไหนขอน้องจาวิสดูก่อนนะฮับบอส ถือของไว้ใกล้ๆ กล้องนะฮับ' ห้ามเดาสุ่มหรือตอบสิ่งที่เห็นในเทิร์นนี้เด็ดขาด ให้รอรับภาพสดที่ชัดเจนในอีก 1-2 วินาทีข้างหน้า"
                 )
                 
                 // Record to history
@@ -162,16 +338,31 @@ class LiveToolBridge(
                     memoryManager?.storeMessage("system", "JARVIS activated eyes to observe environment.", metadata = "{\"event\": \"vision_on\"}")
                 }
 
-                // แก้อาการ "เปิดตาแล้วเงียบ": Live API ไม่เริ่ม turn ใหม่จาก video stream เอง —
-                // รอ turn แรก ("กำลังเปิดกล้อง...") จบ แล้วส่ง client text กระตุ้นให้สรุปสิ่งที่เห็นทันที
-                // (เคสจริง 2026-08-08: โมเดลเงียบ 15 วิจน user ต้องถามซ้ำรอบ 2)
+                // 2-Turn Vision Pipeline:
+                // Turn 1: AI พูดประโยคตอบรับเปิดตัว (1-2 วิ) ระหว่างนี้ฮาร์ดแวร์กล้องจะจับโฟกัสและส่งวิดีโอสด 2-3 เฟรมเข้าสู่ WebSocket
+                // Turn 2: เมื่อ Turn 1 จบลง ส่งคำสั่งกระตุ้นผ่าน realtimeInput ให้ AI สรุปสิ่งที่เห็นจากภาพสดและสั่ง vision_deactivate ทันที
                 visionPromptJob?.cancel()
                 visionPromptJob = scope.launch {
+                    // 1. รอให้ Turn 1 (Intro phrase) จบลง
                     kotlinx.coroutines.withTimeoutOrNull(15_000) {
                         liveService.turnCompleteFlow.first()
                     }
-                    logDebug("LiveBridge", "👁️ Vision auto-prompt: กระตุ้นให้สรุปภาพหลังเปิดกล้อง")
-                    liveService.sendClientText("[SYSTEM] ตอนนี้ภาพจากกล้องชัดแล้ว โปรดสรุปสิ่งที่เห็นตอบคำถามล่าสุดของผู้ใช้ทันที เป็นภาษาไทยแบบสนทนากระชับ เมื่อพูดจบให้เรียก vision_deactivate ทันที")
+                    logDebug("LiveBridge", "👁️ Vision auto-prompt: กระตุ้น Turn 2 ให้ AI วิเคราะห์ภาพสดและตอบทันที")
+
+                    // 2. ส่งข้อความผ่าน realtimeInput (กระตุ้นโมเดลให้พูดตอบ Turn 2 ทันทีเหมือน user พูด)
+                    val question = liveService.lastUserText.ifBlank { "บอสถามว่าถือหรือโชว์อะไรอยู่" }
+                    liveService.sendRealtimeText("บอสถามว่า: \"$question\" — ตอนนี้ภาพจากกล้องสดเข้ามาอย่างชัดเจนแล้ว โปรดสังเกตภาพวิดีโอสดในปัจจุบันแล้วตอบคำถามของบอสทันทีอย่างแม่นยำและกระชับ ตอบสิ่งที่เห็นจริง 1-2 ประโยค เมื่อตอบจบให้เรียก vision_deactivate ทันที")
+
+                    // 3. รอให้ Turn 2 (การตอบสรุปสิ่งที่เห็น) จบลง
+                    kotlinx.coroutines.withTimeoutOrNull(20_000) {
+                        liveService.turnCompleteFlow.first()
+                    }
+                    logDebug("LiveBridge", "👁️ Turn 2 completed. Ensuring camera closes cleanly.")
+
+                    // 4. Fallback: หากโมเดลลืมเรียก vision_deactivate หลังพูดตอบจบ ให้ปิดกล้องและพับตาลงอัตโนมัติ
+                    kotlinx.coroutines.delay(1000L)
+                    onAiVisionToggle?.invoke(false)
+                    com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
                 }
 
                 logDebug("LiveBridge", "👁️ Vision activated (Context: ${liveService.lastUserText})")
@@ -180,12 +371,13 @@ class LiveToolBridge(
             event.name == "vision_deactivate" -> {
                 visionPromptJob?.cancel()
                 onAiVisionToggle?.invoke(false)
+                com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
                 liveService.sendNativeToolResponse(
                     callId   = event.callId,
                     toolName = event.name,
-                    result   = "OK_EYES_CLOSED. กล้องปิดแล้ว โปรดสรุปสิ่งที่เห็นให้ผู้ใช้ฟังอย่างเป็นธรรมชาติและกระชับที่สุด"
+                    result   = "OK_EYES_CLOSED. กล้องปิดเรียบร้อยแล้ว"
                 )
-                logDebug("LiveBridge", "🕶️ Vision deactivated by AI (Silenced)")
+                logDebug("LiveBridge", "🕶️ Vision deactivated by AI")
                 return
             }
             event.name == "camera_analyze_scene" || event.name == "camera_read_text" -> {
@@ -245,6 +437,49 @@ class LiveToolBridge(
             "\n\n[PROFILE COMPLETE] ได้ข้อมูลครบ canonical TF แล้ว (M15/H1/H4) โปรดหยุดเรียก Trading analysis tools เพิ่มและสังเคราะห์คำตอบสุดท้ายให้ผู้ใช้ทันที"
         } else ""
         val voiceRule = when {
+            event.name == "device_always_live" -> {
+                val mode = event.args["mode"]?.lowercase() ?: ""
+                if (mode == "pet") {
+                    "\n\n[VOICE RULE - PET MODE] สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดสัตว์เลี้ยงแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
+                } else {
+                    "\n\n[VOICE RULE - ALWAYS LIVE] สลับโหมดควบคุม/โหมดขับขี่/Always AI Live เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ (เช่น 'เข้าสู่โหมดควบคุมแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา' หรือ 'เปิดโหมดขับขี่เรียบร้อยแล้วค่ะ เดินทางปลอดภัยนะคะ') ห้ามอธิบายยาว ห้ามใช้ markdown"
+                }
+            }
+            event.name == "device_avatar_emotion" -> {
+                "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ (เช่น 'เริ่มแสดงเดโม่อารมณ์ทั้ง 10 แบบให้ดูแล้วนะคะ!' หรือ 'ทำหน้าดีใจแล้วค่ะบอส!') ห้ามตอบว่าไม่มีหน้าตา ห้ามใช้ markdown"
+            }
+            event.name == "device_custom_prop" -> {
+                val action = event.args["action"]?.lowercase() ?: "add"
+                val name = event.args["name"] ?: "อุปกรณ์เสริม"
+                if (action in listOf("clear", "remove")) {
+                    "\n\n[VOICE RULE - CUSTOM PROP] ถอดอุปกรณ์เสริมออกเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างน่ารักสดใส เช่น 'ถอด $name ออกเรียบร้อยแล้วฮับ!' ห้ามใช้ markdown"
+                } else {
+                    "\n\n[VOICE RULE - CUSTOM PROP] เสกและสวมใส่อุปกรณ์เสริมเวกเตอร์ SVG เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างภูมิใจ ขี้เล่น น่ารัก เช่น 'เสก $name มาใส่ให้แล้วฮับ! น่ารักไหมฮับเจ้านาย' ห้ามอ่านโค้ด SVG ห้ามใช้ markdown"
+                }
+            }
+            event.name == "device_notification_read" -> {
+                "\n\n[VOICE RULE - NOTIFICATION READ] สรุปข้อความแจ้งเตือนที่ตรวจพบให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ ระบุแอป ผู้ส่ง และเนื้อหาสำคัญ ห้ามอ่าน timestamp หรือ ID ยาวๆ"
+            }
+            event.name == "device_notification_reply" -> {
+                "\n\n[VOICE RULE - NOTIFICATION REPLY] ตอบกลับข้อความเรียบร้อยแล้ว — โปรดยืนยันกับผู้ใช้สั้นๆ 1 ประโยค เช่น 'ส่งข้อความตอบกลับไปยังคุณ [ชื่อ] เรียบร้อยแล้วค่ะ'"
+            }
+            event.name == "device_media_control" -> {
+                "\n\n[VOICE RULE - MEDIA] รายงานหรือตอบรับการควบคุมเพลงสั้นๆ 1-2 ประโยค เช่น 'ตอนนี้กำลังเล่นเพลง [ชื่อเพลง] ของ [ศิลปิน] ค่ะ' หรือ 'เปิดเพลงบน YouTube ให้แล้วค่ะ'"
+            }
+            event.name == "device_location" -> {
+                if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
+                    "\n\n[VOICE RULE - PET LOCATION & NEARBY] รายงานสถานที่ใกล้เคียงหรือที่อยู่ให้เจ้านายฟังอย่างน่ารักสดใส กระชับ 1-2 ประโยค แนะนำ 2-3 ร้าน/สถานที่เด็ด และชวนเปิดดูแผนที่ได้ฮับ ห้ามอ่านตัวเลขทศนิยมพิกัด GPS ยาวๆ ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ"
+                } else {
+                    "\n\n[VOICE RULE - LOCATION] รายงานพิกัดและที่อยู่ปัจจุบันให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ ระบุตำบล/ย่าน อำเภอ และจังหวัด ห้ามอ่านตัวเลขทศนิยมพิกัด GPS ยาวๆ"
+                }
+            }
+            event.name == "device_weather" -> {
+                if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
+                    "\n\n[VOICE RULE - PET WEATHER] เล่าสภาพอากาศ อุณหภูมิ และบอกว่าฝนจะตกไหมให้เจ้านายฟังอย่างน่ารักสดใส เป็นห่วงเป็นใย 1-2 ประโยค เช่น ชวนพกร่ม หรือเตือนแดดร้อน ห้ามอ่านตัวเลขทศนิยม ห้ามใช้ markdown"
+                } else {
+                    "\n\n[VOICE RULE - WEATHER] รายงานสภาพอากาศ อุณหภูมิ โอกาสฝนตก และคำแนะนำการเดินทาง/การแต่งตัวให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ 2-3 ประโยค ห้ามใช้ markdown"
+                }
+            }
             event.name == "system_self_review" -> {
                 "\n\n[VOICE RULE - NARRATION] นี่คือโหมดรีวิวตัวเอง ผู้ใช้ต้องการฟังเนื้อหาทั้งหมด — โปรดเล่าออกเสียงเป็นภาษาไทยแบบสนทนา ไล่ทีละหัวข้อตามเอกสารจนครบทุกส่วน ไม่จำกัดความยาว ห้ามสรุปย่อ ห้ามหยุดกลางทางจนกว่าจะเล่าครบ ห้ามใช้ markdown หรืออ่านสัญลักษณ์ออกเสียง"
             }
@@ -340,6 +575,17 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
 
     private suspend fun processInterceptedRequest(resultData: String): String {
         return when {
+            resultData.startsWith("NEARBY_SEARCH_REQUEST::") -> {
+                val query = resultData.substringAfter("query=").substringBefore("::location=")
+                val loc = resultData.substringAfter("::location=").substringBefore("::lat=")
+                val summary = resultData.substringAfter("::summary=")
+                logDebug("LiveBridge", "Intercept nearby search: $query in $loc")
+                geminiService.generateResponse(
+                    prompt = "ผู้ใช้กำลังอยู่ที่พิกัด/ย่าน: $loc ($summary)\nต้องการค้นหาหรือแนะนำ: $query ในบริเวณใกล้เคียงนี้\nโปรดแนะนำร้านอาหารหรือสถานที่จริงที่เป็นที่นิยมและเปิดบริการอยู่ในย่านนี้ 3-4 แห่ง พร้อมบอกเมนูเด็ดหรือจุดเด่นสั้นๆ เป็นภาษาไทย",
+                    intentAddon = "หาข้อมูลสถานที่จริงในย่านนี้ สรุปให้กระชับ ชัดเจน พร้อมจุดเด่นและชื่อร้าน",
+                    enableGrounding = true
+                )
+            }
             resultData.startsWith("WEB_SEARCH_REQUEST::query=") -> {
                 val query = resultData.substringAfter("query=")
                 logDebug("LiveBridge", "Intercept search: $query")
@@ -395,6 +641,7 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
     fun startCollecting(memoryContextProvider: () -> String) {
         // เคลียร์ Job เก่าออกก่อนเพื่อป้องกันการเรียก Tool ซ้ำซ้อน (Duplicate Collectors)
         collectionJob?.cancel()
+        visionPromptJob?.cancel()
         
         collectionJob = scope.launch {
             // Path A: Native Tool Calls (Function Calling)

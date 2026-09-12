@@ -6,6 +6,7 @@ package com.skyliner2008.jarvis.voice
  */
 expect class PcmAudioEngine() {
     var onVolumeChanged: ((Float) -> Unit)?
+    var isRobotVoiceEnabled: Boolean
     fun startRecording(onAudioData: (ByteArray) -> Unit)
     fun stopRecording()
     fun playAudio(pcmBytes: ByteArray)

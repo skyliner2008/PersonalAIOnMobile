@@ -50,7 +50,9 @@ class MainActivity : ComponentActivity() {
     private var onWidgetClosedCallback: (() -> Unit)? = null
     private var onExpandAlwaysLiveCallback: (() -> Unit)? = null
     private var onCloseAlwaysLiveCallback: (() -> Unit)? = null
+    private var onProfileChangeCallback: ((com.skyliner2008.jarvis.pet.AlwaysLiveProfile) -> Unit)? = null
     private var onTestEmotionCallback: ((String) -> Unit)? = null
+    private var onNotificationAnnouncementCallback: ((String, String, String) -> Unit)? = null
     private var testEmotionReceiver: android.content.BroadcastReceiver? = null
     private lateinit var alwaysLiveManager: com.skyliner2008.jarvis.service.AlwaysLiveManager
 
@@ -111,6 +113,11 @@ class MainActivity : ComponentActivity() {
         _setupStatus["overlay"] = canDrawOverlay()
         _setupStatus["files"] = _allFilesAccessGranted.value
         _setupStatus["accessibility"] = com.skyliner2008.jarvis.service.JarvisAccessibilityService.isEnabled()
+        _setupStatus["notif_access"] = com.skyliner2008.jarvis.service.JarvisNotificationListener.isEnabled() ||
+            com.skyliner2008.jarvis.service.JarvisNotificationListener.isNotificationAccessGranted(this)
+        _setupStatus["location"] = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
         _setupStatus["battery"] = try {
             (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .isIgnoringBatteryOptimizations(packageName)
@@ -169,6 +176,23 @@ class MainActivity : ComponentActivity() {
                 } catch (_: Exception) {
                     startActivity(Intent(Settings.ACTION_SETTINGS))
                 }
+            },
+            com.skyliner2008.jarvis.ui.screen.SetupCheckItem(
+                "เข้าถึงแจ้งเตือน (Notification Listener)", "ให้อ่านแจ้งเตือน LINE/SMS และอ่านสถานะเพลงขณะขับขี่", granted("notif_access"),
+            ) {
+                try {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                }
+            },
+            com.skyliner2008.jarvis.ui.screen.SetupCheckItem(
+                "ตำแหน่งที่ตั้ง (GPS)", "สำหรับค้นหาสถานที่ นำทาง และระบุตำแหน่งปัจจุบัน", granted("location"),
+            ) {
+                requestPermissionLauncher.launch(arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ))
             },
         )
     }
@@ -252,7 +276,28 @@ class MainActivity : ComponentActivity() {
         val fileToolExecutor = FileToolExecutor(applicationContext)
         val deviceControlExecutor = com.skyliner2008.jarvis.tools.device.DeviceControlExecutor(applicationContext)
         com.skyliner2008.jarvis.tools.ToolExecutor.initDeviceExecutor(deviceControlExecutor)
+        com.skyliner2008.jarvis.pet.PetVisionDetector.installBridge()
         alwaysLiveManager = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstance(applicationContext)
+
+        lifecycleScope.launch {
+            alwaysLiveManager.currentProfile.collect { profile ->
+                onProfileChangeCallback?.invoke(profile)
+            }
+        }
+
+        // Smart Notification Voice Announcement in Driving / Always Live Mode
+        com.skyliner2008.jarvis.service.JarvisNotificationListener.onNotificationPostedListener = { record ->
+            val currentState = alwaysLiveManager.state.value
+            if (currentState != com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.OFF) {
+                val callback = onNotificationAnnouncementCallback
+                if (callback != null) {
+                    callback.invoke(record.appName, record.title, record.text)
+                } else {
+                    val speech = com.skyliner2008.jarvis.notification.NotificationBridge.formatForDrivingSpeech(record)
+                    voiceManager.speak(speech, null)
+                }
+            }
+        }
 
         testEmotionReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -306,14 +351,26 @@ class MainActivity : ComponentActivity() {
                 registerCloseAlwaysLive = { callback ->
                     onCloseAlwaysLiveCallback = callback
                 },
+                registerProfileChange = { callback ->
+                    onProfileChangeCallback = callback
+                },
+                onSetAlwaysLiveProfile = { profile ->
+                    alwaysLiveManager.setProfile(profile)
+                },
                 registerTestEmotion = { callback ->
                     onTestEmotionCallback = callback
+                },
+                registerNotificationAnnouncement = { callback ->
+                    onNotificationAnnouncementCallback = callback
                 },
                 requestAllFilesPermission = {
                     requestAllFilesPermission()
                 },
                 allFilesAccessGranted = _allFilesAccessGranted.value,
                 setupChecks = buildSetupChecks(),
+                onSetImmersiveMode = { immersive ->
+                    setImmersiveMode(immersive)
+                },
                 fileToolHandler = { name, args ->
                     fileToolExecutor.execute(name, args)
                 },
@@ -419,11 +476,13 @@ class MainActivity : ComponentActivity() {
         turnScreenOnTemporarily()
     }
 
-    fun expandAlwaysLive() {
+    fun expandAlwaysLive(targetProfile: com.skyliner2008.jarvis.pet.AlwaysLiveProfile? = null) {
         runOnUiThread {
             turnScreenOnTemporarily()
             setKeepScreenOn(true)
+            targetProfile?.let { alwaysLiveManager.setProfile(it) }
             alwaysLiveManager.enable()
+            onProfileChangeCallback?.invoke(alwaysLiveManager.currentProfile.value)
             onExpandAlwaysLiveCallback?.invoke()
         }
     }
@@ -433,6 +492,28 @@ class MainActivity : ComponentActivity() {
             alwaysLiveManager.disable()
             onCloseAlwaysLiveCallback?.invoke()
             clearScreenFlags()
+            setImmersiveMode(false)
+        }
+    }
+
+    fun setImmersiveMode(immersive: Boolean) {
+        runOnUiThread {
+            val windowInsetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            if (immersive) {
+                windowInsetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                windowInsetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                windowInsetsController.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    fun triggerTestEmotion(emotionCmd: String) {
+        runOnUiThread {
+            logDebug("JarvisAvatar", "🎭 triggerTestEmotion: $emotionCmd")
+            turnScreenOnTemporarily()
+            setKeepScreenOn(true)
+            onTestEmotionCallback?.invoke(emotionCmd)
         }
     }
 
@@ -444,6 +525,7 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) {}
         }
         testEmotionReceiver = null
+        com.skyliner2008.jarvis.service.JarvisNotificationListener.onNotificationPostedListener = null
         if (instance == this) {
             instance = null
             isActivityResumed = false

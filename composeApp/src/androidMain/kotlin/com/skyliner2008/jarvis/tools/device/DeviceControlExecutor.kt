@@ -18,8 +18,16 @@ import android.provider.Settings
 import android.util.Log
 import com.skyliner2008.jarvis.MainActivity
 import com.skyliner2008.jarvis.service.JarvisAccessibilityService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.coroutines.resume
 
 /**
@@ -39,6 +47,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         private const val TAG = "DeviceControl"
     }
 
+    private val locationProvider = com.skyliner2008.jarvis.location.LocationProvider(context)
+    private val mediaInfoProvider = com.skyliner2008.jarvis.media.MediaInfoProvider(context)
+
     override suspend fun execute(toolName: String, args: Map<String, String>): String {
         Log.d(TAG, "🔧 Execute tool: $toolName, args=$args")
         val result = try {
@@ -49,6 +60,16 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                 "device_brightness"    -> executeBrightness(args)
                 "device_media_control" -> executeMediaControl(args)
                 "device_always_live"   -> executeAlwaysLive(args)
+                "device_avatar_emotion" -> executeAvatarEmotion(args)
+                "device_custom_prop"   -> executeCustomProp(args)
+
+                // ── Smart Notifications (Driving Mode) ──
+                "device_notification_read"  -> executeNotificationRead(args)
+                "device_notification_reply" -> executeNotificationReply(args)
+
+                // ── Location & GPS & Weather ──
+                "device_location"           -> executeLocation(args)
+                "device_weather"            -> executeWeather(args)
 
                 // ── App Launcher ──
                 "device_open_app"      -> executeOpenApp(args)
@@ -242,7 +263,33 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
     private fun executeMediaControl(args: Map<String, String>): String {
         val action = args["action"]?.lowercase()?.trim() ?: "toggle"
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        // 1. Now Playing check
+        if (action == "now_playing" || action == "status" || action == "สถานะ" || action == "เพลงอะไร") {
+            val info = mediaInfoProvider.getNowPlaying()
+            return if (info != null) {
+                val state = if (info.isPlaying) "กำลังเล่น ▶️" else "หยุดชั่วคราว ⏸️"
+                "🎵 เพลง: ${info.title}\n👤 ศิลปิน: ${if (info.artist.isNotBlank()) info.artist else "ไม่ระบุ"}\n💿 อัลบั้ม: ${if (info.album.isNotBlank()) info.album else "ไม่ระบุ"}\n📱 เล่นผ่าน: ${info.appName} ($state)"
+            } else {
+                "📭 ไม่พบแอปเพลงที่กำลังเล่นอยู่ในขณะนี้ค่ะ"
+            }
+        }
+
+        // 2. Search & Play (YouTube / YouTube Music / Spotify)
+        if (action == "search_play" || action == "search" || action == "ค้นหา") {
+            val query = args["query"] ?: args["destination"] ?: ""
+            if (query.isBlank()) {
+                return "❌ กรุณาระบุชื่อเพลงหรือคำค้นหาที่ต้องการเล่น"
+            }
+            val app = args["app"]
+            return mediaInfoProvider.searchAndPlay(query, app)
+        }
+
+        // 3. Media control: Try targeted session first, fallback to hardware key
+        val (handled, sessionMsg) = mediaInfoProvider.controlPlayback(action)
+        if (handled) {
+            return sessionMsg
+        }
 
         return when (action) {
             "play", "เล่น"   -> {
@@ -269,7 +316,177 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                 dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_STOP)
                 "⏹️ หยุดเพลงทั้งหมด"
             }
-            else -> "❌ action ที่รองรับ: play, pause, toggle, next, previous, stop"
+            else -> "❌ action ที่รองรับ: play, pause, toggle, next, previous, stop, now_playing, search_play"
+        }
+    }
+
+    private fun executeNotificationRead(args: Map<String, String>): String {
+        val appFilter = args["app_filter"] ?: args["app"]
+        val count = args["count"]?.toIntOrNull() ?: 5
+        return com.skyliner2008.jarvis.notification.NotificationBridge.readRecent(appFilter, count)
+    }
+
+    private fun executeNotificationReply(args: Map<String, String>): String {
+        val message = args["message"] ?: args["text"] ?: ""
+        val key = args["notification_key"] ?: args["key"]
+        return com.skyliner2008.jarvis.notification.NotificationBridge.reply(message, key)
+    }
+
+    private suspend fun executeLocation(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim() ?: "get_current"
+        if (action == "status") {
+            val hasPerm = locationProvider.hasPermission()
+            val isGps = locationProvider.isGpsEnabled()
+            return "🛰️ สถานะ GPS: สิทธิ์เข้าถึง = ${if (hasPerm) "อนุญาตแล้ว ✅" else "ยังไม่อนุญาต ❌"}, เปิด GPS = ${if (isGps) "เปิดอยู่ ✅" else "ปิดอยู่ ❌"}"
+        }
+        val loc = locationProvider.getCurrentLocation()
+            ?: return if (!locationProvider.hasPermission()) {
+                "⚠️ ยังไม่ได้รับสิทธิ์เข้าถึงพิกัด GPS กรุณาเปิดสิทธิ์ 'ตำแหน่งที่ตั้ง' ในหน้าตั้งค่าก่อนนะคะ"
+            } else {
+                "❌ ไม่สามารถดึงพิกัด GPS ในขณะนี้ได้ กรุณาตรวจสอบว่าเปิด GPS แล้วหรือยังค่ะ"
+            }
+        val query = args["query"]?.trim()
+        val baseSummary = loc.formatSummary()
+        if (!query.isNullOrBlank()) {
+            val locationKeyword = loc.address ?: "Lat ${loc.latitude}, Lng ${loc.longitude}"
+            return "NEARBY_SEARCH_REQUEST::query=$query::location=$locationKeyword::lat=${loc.latitude}::lng=${loc.longitude}::summary=$baseSummary"
+        }
+        return baseSummary
+    }
+
+    private suspend fun executeWeather(args: Map<String, String>): String {
+        // 1. Resolve Location & Coordinates
+        var lat = args["latitude"]?.toDoubleOrNull()
+        var lng = args["longitude"]?.toDoubleOrNull()
+        val queryLoc = args["location"]?.trim()
+        var locationName: String? = queryLoc
+
+        if ((lat == null || lng == null) && !queryLoc.isNullOrBlank()) {
+            // Try resolving via Android Geocoder
+            try {
+                val geocoder = android.location.Geocoder(context, java.util.Locale("th", "TH"))
+                @Suppress("DEPRECATION")
+                val addresses = withContext(Dispatchers.IO) {
+                    geocoder.getFromLocationName(queryLoc, 1)
+                }
+                if (!addresses.isNullOrEmpty()) {
+                    val addr = addresses[0]
+                    lat = addr.latitude
+                    lng = addr.longitude
+                    locationName = addr.locality ?: addr.adminArea ?: queryLoc
+                    Log.d(TAG, "executeWeather: Resolved '$queryLoc' via Geocoder -> ($lat, $lng, $locationName)")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "executeWeather: Geocoder lookup failed: ${e.message}")
+            }
+        }
+
+        // If still null, query current GPS location
+        if (lat == null || lng == null) {
+            val curLoc = locationProvider.getCurrentLocation()
+            if (curLoc != null) {
+                lat = curLoc.latitude
+                lng = curLoc.longitude
+                locationName = curLoc.address ?: "พิกัดปัจจุบัน (Lat %.3f, Lng %.3f)".format(lat, lng)
+            } else {
+                // Fallback default: Bangkok, Thailand
+                lat = 13.7563
+                lng = 100.5018
+                locationName = if (!queryLoc.isNullOrBlank()) queryLoc else "กรุงเทพมหานคร (พิกัดเริ่มต้น)"
+            }
+        }
+
+        // 2. Fetch Open-Meteo Weather Forecast (Free, No Key Needed, Global Coverage)
+        return withContext(Dispatchers.IO) {
+            try {
+                val urlString = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng" +
+                        "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m" +
+                        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                        "&timezone=auto"
+                val connection = java.net.URL(urlString).openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 6000
+                connection.readTimeout = 6000
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("User-Agent", "JARVIS-Android/1.0")
+
+                val responseCode = connection.responseCode
+                if (responseCode != 200) {
+                    return@withContext "❌ ไม่สามารถดึงข้อมูลสภาพอากาศได้ (HTTP $responseCode)"
+                }
+
+                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                val rootJson = Json.parseToJsonElement(responseText).jsonObject
+                val current = rootJson["current"]?.jsonObject
+                val daily = rootJson["daily"]?.jsonObject
+
+                if (current == null) {
+                    return@withContext "❌ ข้อมูลสภาพอากาศไม่สมบูรณ์"
+                }
+
+                val temp = current["temperature_2m"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                val apparentTemp = current["apparent_temperature"]?.jsonPrimitive?.doubleOrNull ?: temp
+                val humidity = current["relative_humidity_2m"]?.jsonPrimitive?.intOrNull ?: 0
+                val precipitation = current["precipitation"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                val weatherCode = current["weather_code"]?.jsonPrimitive?.intOrNull ?: 0
+                val windSpeed = current["wind_speed_10m"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+
+                val maxTemp = daily?.get("temperature_2m_max")?.jsonArray?.firstOrNull()?.jsonPrimitive?.doubleOrNull ?: temp
+                val minTemp = daily?.get("temperature_2m_min")?.jsonArray?.firstOrNull()?.jsonPrimitive?.doubleOrNull ?: temp
+                val rainProb = daily?.get("precipitation_probability_max")?.jsonArray?.firstOrNull()?.jsonPrimitive?.intOrNull ?: 0
+
+                // WMO Weather Interpretation Codes
+                val weatherDesc: String
+                val emoji: String
+                val isRain: Boolean
+                val isThunder: Boolean
+                val isSunny: Boolean
+
+                when (weatherCode) {
+                    0 -> { weatherDesc = "ท้องฟ้าแจ่มใส แดดออก"; emoji = "☀️"; isRain = false; isThunder = false; isSunny = true }
+                    1, 2, 3 -> { weatherDesc = if (weatherCode == 1) "ท้องฟ้าโปร่ง มีเมฆเล็กน้อย" else "มีเมฆเป็นส่วนมาก"; emoji = "⛅"; isRain = false; isThunder = false; isSunny = false }
+                    45, 48 -> { weatherDesc = "มีหมอกลง ทัศนวิสัยลดลง"; emoji = "🌫️"; isRain = false; isThunder = false; isSunny = false }
+                    51, 53, 55 -> { weatherDesc = "มีฝนละออง/ฝนปรอยๆ"; emoji = "🌦️"; isRain = true; isThunder = false; isSunny = false }
+                    61, 63, 65 -> { weatherDesc = if (weatherCode == 65) "มีฝนตกหนัก" else "มีฝนตก"; emoji = "🌧️"; isRain = true; isThunder = false; isSunny = false }
+                    71, 73, 75 -> { weatherDesc = "มีหิมะตก"; emoji = "❄️"; isRain = false; isThunder = false; isSunny = false }
+                    80, 81, 82 -> { weatherDesc = "ฝนฟ้าคะนองสั้นๆ/ฝนซู่"; emoji = "🌧️"; isRain = true; isThunder = false; isSunny = false }
+                    95, 96, 99 -> { weatherDesc = "พายุฝนฟ้าคะนองและลมกระโชกแรง"; emoji = "⛈️"; isRain = true; isThunder = true; isSunny = false }
+                    else -> { weatherDesc = "สภาพอากาศปกติ"; emoji = "🌤️"; isRain = false; isThunder = false; isSunny = false }
+                }
+
+                // Trigger contextual props and background on Pet/Avatar
+                val mainActivity = MainActivity.instance
+                if (isRain || isThunder) {
+                    val cmd = "SPEAKING|background=rainy|props=umbrella,cloud,rain_drops"
+                    mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.SURPRISE)
+                } else if (isSunny || temp >= 33.0) {
+                    val cmd = "SPEAKING|background=sunny|props=sun,sunglasses"
+                    mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.CHIRP_HAPPY)
+                } else {
+                    com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.SPARKLE)
+                }
+
+                buildString {
+                    appendLine("$emoji สภาพอากาศ: $locationName")
+                    appendLine("🌡️ อุณหภูมิ: ${temp.toInt()}°C (รู้สึกเหมือน ${apparentTemp.toInt()}°C)")
+                    appendLine("☁️ ลักษณะอากาศ: $weatherDesc")
+                    appendLine("💧 ความชื้นสัมพัทธ์: $humidity%")
+                    if (rainProb > 0 || precipitation > 0.0) {
+                        appendLine("☔ โอกาสฝนตก: $rainProb% (ปริมาณน้ำฝน: ${precipitation} มม.)")
+                    }
+                    appendLine("📈 สูงสุด/ต่ำสุดวันนี้: ${maxTemp.toInt()}°C / ${minTemp.toInt()}°C")
+                    appendLine("💨 ความเร็วลม: ${windSpeed.toInt()} กม./ชม.")
+                    if (isRain || rainProb >= 50) {
+                        appendLine("💡 ข้อแนะนำ: วันนี้มีแนวโน้มฝนตก อย่าลืมพกร่มติดตัวด้วยนะคะ!")
+                    } else if (temp >= 35.0) {
+                        appendLine("💡 ข้อแนะนำ: อากาศค่อนข้างร้อน ดื่มน้ำเยอะๆ และหลีกเลี่ยงแดดจัดนะคะ!")
+                    }
+                }.trim()
+            } catch (e: Exception) {
+                Log.e(TAG, "executeWeather error: ${e.message}", e)
+                "❌ ไม่สามารถตรวจสอบสภาพอากาศได้ในขณะนี้: ${e.message}"
+            }
         }
     }
 
@@ -282,35 +499,242 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
     }
 
     private fun executeAlwaysLive(args: Map<String, String>): String {
-        val action = args["action"]?.lowercase()?.trim() ?: "on"
-        return when (action) {
-            "on", "เปิด", "start", "enable" -> {
-                val mgr = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()
-                mgr?.wakeScreen()
-                mgr?.enable()
-                MainActivity.instance?.expandAlwaysLive()
-                "🤖 เปิดโหมด Always AI Live (โหมดควบคุม) เรียบร้อยแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา"
-            }
-            "off", "ปิด", "stop", "disable" -> {
-                MainActivity.instance?.closeAlwaysLive()
-                    ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.disable()
+        val rawAction = args["action"]?.lowercase()?.trim() ?: "on"
+        val mode = args["mode"]?.lowercase()?.trim()
+        val isDriveMode = mode in setOf("drive", "car", "ขับขี่", "รถยนต์") || rawAction in setOf("drive", "car")
+        val isPetMode = mode in setOf("pet", "animal", "สัตว์เลี้ยง", "แก้เบื่อ", "desk_pet", "toy") || rawAction in setOf("pet", "สัตว์เลี้ยง")
+
+        val isExplicitOff = rawAction in setOf("off", "ปิด", "stop", "disable", "exit", "ออก", "close")
+
+        Log.i(TAG, "🐾 executeAlwaysLive: rawAction=$rawAction, mode=$mode, isPetMode=$isPetMode, isDriveMode=$isDriveMode, isExplicitOff=$isExplicitOff")
+
+        if (isExplicitOff) {
+            MainActivity.instance?.closeAlwaysLive()
+                ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.disable()
+            return if (isPetMode) {
+                "🐾 ปิดโหมดสัตว์เลี้ยงเรียบร้อยแล้วค่ะ ไว้มาเล่นกับน้องใหม่น้าา บ๊ายบายค่ะ"
+            } else if (isDriveMode) {
+                "🚗 ปิดโหมดขับขี่เรียบร้อยแล้วค่ะ"
+            } else {
                 "🤖 ปิดโหมด Always AI Live (โหมดควบคุม) เรียบร้อยแล้วค่ะ"
             }
-            "toggle", "สลับ" -> {
-                val current = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.state?.value
-                if (current == com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.FULL_SCREEN ||
-                    current == com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.MINI_FLOATING) {
-                    MainActivity.instance?.closeAlwaysLive()
-                        ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.disable()
-                    "🤖 ปิดโหมด Always AI Live เรียบร้อยแล้วค่ะ"
+        }
+
+        // Pure toggle ONLY when no specific mode or profile is requested
+        if (!isPetMode && !isDriveMode && (mode == null || mode == "control") && rawAction in setOf("toggle", "สลับ")) {
+            val current = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.state?.value
+            return if (current == com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.FULL_SCREEN ||
+                current == com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.MINI_FLOATING) {
+                MainActivity.instance?.closeAlwaysLive()
+                    ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.disable()
+                "🤖 ปิดโหมด Always AI Live เรียบร้อยแล้วค่ะ"
+            } else {
+                MainActivity.instance?.expandAlwaysLive(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
+                    ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.enable()
+                "🤖 เปิดโหมด Always AI Live เรียบร้อยแล้วค่ะ"
+            }
+        }
+
+        // All other actions (on, open, start, enable, switch, change, or any call specifying a mode like pet/drive)
+        // MUST open or switch profile into Always Live FULL_SCREEN without disconnecting or closing.
+        val mgr = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()
+        val profile = when {
+            isPetMode -> com.skyliner2008.jarvis.pet.AlwaysLiveProfile.PET
+            isDriveMode -> com.skyliner2008.jarvis.pet.AlwaysLiveProfile.DRIVE
+            else -> com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL
+        }
+        mgr?.setProfile(profile)
+        mgr?.wakeScreen()
+        mgr?.enable()
+        MainActivity.instance?.expandAlwaysLive(profile)
+
+        return if (isPetMode) {
+            "🐾 เปิดโหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) เรียบร้อยแล้วค่ะ! พร้อมเล่น ลูบหัว และอยู่เป็นเพื่อนแล้วน้า งุ้ยย ✨"
+        } else if (isDriveMode) {
+            "🚗 เปิดโหมดขับขี่ / โหมดรถยนต์ (โหมดควบคุม) เรียบร้อยแล้วค่ะ พร้อมดูแลและรับคำสั่งด้วยเสียงตลอดการเดินทางนะคะ"
+        } else {
+            "🤖 เปิดโหมด Always AI Live (โหมดควบคุม) เรียบร้อยแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา"
+        }
+    }
+
+    private fun executeAvatarEmotion(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim() ?: "demo"
+        val rawEmotion = (args["emotion"] ?: args["name"])?.lowercase()?.trim()
+
+        val mainActivity = MainActivity.instance
+        return when (action) {
+            "demo", "โชว์", "แสดงทั้งหมด", "all" -> {
+                mainActivity?.triggerTestEmotion("DEMO")
+                    ?: broadcastEmotionIntent("DEMO")
+                "🎭 เริ่มโหมด Emotion Showcase Demo แล้วค่ะ! Avatar กำลังแสดงสีหน้า แววตา และสีพื้นหลังครบทั้ง 10 อารมณ์บนหน้าจอเรียบร้อยแล้วค่ะ"
+            }
+            "reset", "clear", "ปกติ", "รีเซ็ต", "auto" -> {
+                mainActivity?.triggerTestEmotion("RESET")
+                    ?: broadcastEmotionIntent("RESET")
+                "🎭 รีเซ็ตเรียบร้อยค่ะ Avatar กลับสู่โหมดตรวจจับอัตโนมัติตามธรรมชาติแล้วค่ะ"
+            }
+            "set", "ตั้งค่า", "เปลี่ยน", "ทำหน้า" -> {
+                val emotionKey = when {
+                    rawEmotion.isNullOrBlank() -> "HAPPY"
+                    rawEmotion.contains("happy") || rawEmotion.contains("ดีใจ") || rawEmotion.contains("ยิ้ม") -> "HAPPY"
+                    rawEmotion.contains("excited") || rawEmotion.contains("ตื่นเต้น") -> "EXCITED"
+                    rawEmotion.contains("love") || rawEmotion.contains("รัก") || rawEmotion.contains("หัวใจ") -> "LOVE"
+                    rawEmotion.contains("angry") || rawEmotion.contains("โกรธ") || rawEmotion.contains("โมโห") -> "ANGRY"
+                    rawEmotion.contains("sad") || rawEmotion.contains("เศร้า") || rawEmotion.contains("ร้องไห้") -> "SAD"
+                    rawEmotion.contains("sleeping") || rawEmotion.contains("หลับ") || rawEmotion.contains("นอน") -> "SLEEPING"
+                    rawEmotion.contains("listening") || rawEmotion.contains("ฟัง") -> "LISTENING"
+                    rawEmotion.contains("thinking") || rawEmotion.contains("คิด") -> "THINKING"
+                    rawEmotion.contains("speaking") || rawEmotion.contains("พูด") -> "SPEAKING"
+                    rawEmotion.contains("idle") || rawEmotion.contains("พร้อม") -> "IDLE"
+                    rawEmotion.contains("wink") || rawEmotion.contains("ขยิบ") -> "WINK"
+                    rawEmotion.contains("confused") || rawEmotion.contains("งง") || rawEmotion.contains("สงสัย") -> "CONFUSED"
+                    rawEmotion.contains("pout") || rawEmotion.contains("บูด") || rawEmotion.contains("หน้าบูด") -> "POUT"
+                    rawEmotion.contains("dizzy") || rawEmotion.contains("เวียนหัว") -> "DIZZY"
+                    else -> rawEmotion.uppercase()
+                }
+
+                // Build extended face state command with layer parameters
+                val eyeStyle = args["eye_style"]?.lowercase()?.trim() ?: ""
+                val background = args["background"]?.lowercase()?.trim() ?: ""
+                val props = args["props"]?.lowercase()?.trim() ?: ""
+                val gesture = args["gesture"]?.lowercase()?.trim() ?: ""
+
+                // Encode all parameters into the emotion command string as JSON-like
+                val faceCmd = buildString {
+                    append(emotionKey)
+                    val extras = mutableListOf<String>()
+                    if (eyeStyle.isNotBlank()) extras.add("eye_style=$eyeStyle")
+                    if (background.isNotBlank()) extras.add("background=$background")
+                    if (props.isNotBlank()) extras.add("props=$props")
+                    if (gesture.isNotBlank()) extras.add("gesture=$gesture")
+                    val svgPath = args["svg_path"]?.trim()
+                    if (!svgPath.isNullOrBlank()) {
+                        extras.add("svg_path=$svgPath")
+                        args["prop_name"]?.let { extras.add("prop_name=$it") }
+                        args["prop_color"]?.let { extras.add("prop_color=$it") }
+                        args["prop_position"]?.let { extras.add("prop_position=$it") }
+                        args["prop_anim"]?.let { extras.add("prop_anim=$it") }
+                        args["prop_size"]?.let { extras.add("prop_size=$it") }
+                    }
+                    if (extras.isNotEmpty()) {
+                        append("|")
+                        append(extras.joinToString("|"))
+                    }
+                }
+
+                mainActivity?.triggerTestEmotion(faceCmd)
+                    ?: broadcastEmotionIntent(faceCmd)
+
+                val desc = buildString {
+                    append("🎭 ปรับ Avatar: อารมณ์=$emotionKey")
+                    if (eyeStyle.isNotBlank()) append(" ตา=$eyeStyle")
+                    if (background.isNotBlank()) append(" ฉากหลัง=$background")
+                    if (props.isNotBlank()) append(" Props=$props")
+                    if (gesture.isNotBlank()) append(" ท่าทาง=$gesture")
+                    if (!args["svg_path"].isNullOrBlank()) append(" CustomProp=${args["prop_name"] ?: "SVG"}")
+                    append(" เรียบร้อยแล้วค่ะบอส!")
+                }
+                desc
+            }
+            else -> {
+                if (!rawEmotion.isNullOrBlank()) {
+                    mainActivity?.triggerTestEmotion(rawEmotion.uppercase())
+                        ?: broadcastEmotionIntent(rawEmotion.uppercase())
+                    "🎭 ปรับสีหน้า Avatar เป็นโหมด ${rawEmotion.uppercase()} เรียบร้อยแล้วค่ะบอส!"
                 } else {
-                    MainActivity.instance?.expandAlwaysLive()
-                        ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.enable()
-                    "🤖 เปิดโหมด Always AI Live เรียบร้อยแล้วค่ะ"
+                    mainActivity?.triggerTestEmotion("DEMO")
+                        ?: broadcastEmotionIntent("DEMO")
+                    "🎭 เริ่มโหมด Emotion Showcase Demo เรียบร้อยแล้วค่ะ!"
                 }
             }
-            else -> "❌ action ที่รองรับ: on (เปิด), off (ปิด), toggle (สลับ)"
         }
+    }
+
+    private fun executeCustomProp(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim() ?: "add"
+        val name = args["name"]?.trim() ?: "custom_prop"
+        val mainActivity = MainActivity.instance
+
+        return when (action) {
+            "clear", "ล้าง", "ถอดหมด", "reset" -> {
+                val cmd = "CUSTOM_PROP|action=clear"
+                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                "✨ ล้างอุปกรณ์เสริมเวกเตอร์ทั้งหมดเรียบร้อยแล้วค่ะ"
+            }
+            "remove", "ถอด", "ลบ" -> {
+                val cmd = "CUSTOM_PROP|action=remove|name=$name"
+                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                "✨ ถอดอุปกรณ์เสริม '$name' ออกเรียบร้อยแล้วค่ะ"
+            }
+            "delete", "ลบถาวร" -> {
+                com.skyliner2008.jarvis.pet.PetCustomPropStore.deleteCustomProp(name)
+                val cmd = "CUSTOM_PROP|action=remove|name=$name"
+                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                "🗑️ ลบอุปกรณ์เสริม '$name' ออกจากคลังถาวรเรียบร้อยแล้วค่ะ"
+            }
+            "add", "ใส่", "เพิ่ม", "สวม", "set" -> {
+                val svgPath = args["svg_path"]?.trim()
+                val existingProp = if (svgPath.isNullOrBlank()) {
+                    com.skyliner2008.jarvis.pet.PetCustomPropStore.findPropByNameOrId(name)
+                } else null
+
+                if (svgPath.isNullOrBlank() && existingProp == null) {
+                    return "❌ ไม่พบอุปกรณ์เสริม '$name' ในคลัง และไม่ได้ระบุ svg_path สำหรับการสร้างใหม่"
+                }
+
+                val finalSvg = svgPath ?: existingProp?.svgPath ?: ""
+                val color = args["color"] ?: args["fill_color"] ?: existingProp?.fillColor ?: "#FFD700"
+                val strokeColor = args["stroke_color"] ?: existingProp?.strokeColor ?: ""
+                val strokeWidth = args["stroke_width"] ?: existingProp?.strokeWidth?.toString() ?: "0"
+                val position = args["position"] ?: existingProp?.position?.name?.lowercase() ?: "forehead"
+                val size = args["size"] ?: existingProp?.sizeDp?.toString() ?: "0"
+                val animation = args["animation"] ?: args["anim"] ?: existingProp?.animation?.name?.lowercase() ?: "float_bob"
+
+                val posEnum = try {
+                    com.skyliner2008.jarvis.ui.component.avatar.PropPosition.valueOf(position.uppercase())
+                } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.PropPosition.FOREHEAD }
+                val animEnum = try {
+                    com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.valueOf(animation.uppercase())
+                } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.FLOAT_BOB }
+
+                val propToSave = com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp(
+                    id = existingProp?.id ?: name,
+                    name = name,
+                    svgPath = finalSvg,
+                    fillColor = color,
+                    strokeColor = strokeColor.ifBlank { null },
+                    strokeWidth = strokeWidth.toFloatOrNull() ?: 0f,
+                    position = posEnum,
+                    sizeDp = size.toFloatOrNull() ?: 0f,
+                    animation = animEnum
+                )
+                com.skyliner2008.jarvis.pet.PetCustomPropStore.saveCustomProp(propToSave)
+
+                val cmd = buildString {
+                    append("CUSTOM_PROP|action=add")
+                    append("|name=$name")
+                    append("|svg_path=$finalSvg")
+                    append("|color=$color")
+                    if (strokeColor.isNotBlank()) append("|stroke_color=$strokeColor")
+                    append("|stroke_width=$strokeWidth")
+                    append("|position=$position")
+                    append("|size=$size")
+                    append("|animation=$animation")
+                }
+                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                val sourceMsg = if (svgPath.isNullOrBlank()) "จากคลังถาวร" else "และบันทึกเข้าคลังถาวร"
+                "✨ เสกและสวมใส่อุปกรณ์เสริมเวกเตอร์ '$name' $sourceMsg ที่ตำแหน่ง $position ให้หุ่นยนต์เรียบร้อยแล้วค่ะ!"
+            }
+            else -> "❌ action ที่รองรับ: add, remove, delete, clear"
+        }
+    }
+
+    private fun broadcastEmotionIntent(cmd: String) {
+        val intent = android.content.Intent("com.skyliner2008.jarvis.TEST_EMOTION").apply {
+            putExtra("emotion", cmd)
+            setPackage(context.packageName)
+        }
+        context.sendBroadcast(intent)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -415,6 +839,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             "email" to "com.google.android.gm",
             "youtube" to "com.google.android.youtube",
             "ยูทูป" to "com.google.android.youtube",
+            "youtube music" to "com.google.android.apps.youtube.music",
+            "ยูทูปมิวสิค" to "com.google.android.apps.youtube.music",
+            "yt music" to "com.google.android.apps.youtube.music",
             "chrome" to "com.android.chrome",
             "โครม" to "com.android.chrome",
             "camera" to "com.android.camera",

@@ -5,12 +5,15 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.PlaybackParams
 import android.os.Build
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.logError
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import kotlin.concurrent.thread
+import kotlin.math.PI
+import kotlin.math.sin
 
 actual class PcmAudioEngine {
     private var audioRecord: AudioRecord? = null
@@ -19,6 +22,16 @@ actual class PcmAudioEngine {
     private var ns: NoiseSuppressor? = null
     private var isRecording = false
     actual var onVolumeChanged: ((Float) -> Unit)? = null
+
+    actual var isRobotVoiceEnabled: Boolean = false
+        set(value) {
+            field = value
+            updatePlaybackParameters()
+        }
+
+    private var robotCarrierPhase = 0.0
+    private val robotCombBuffer = FloatArray(48) // ~500Hz metallic chamber resonance at 24kHz
+    private var robotCombIndex = 0
 
     init {
         logDebug("PcmAudio", "Initializing AudioTrack (Speaker)")
@@ -53,6 +66,7 @@ actual class PcmAudioEngine {
                 .build()
                 
             audioTrack?.play()
+            updatePlaybackParameters()
             logDebug("PcmAudio", "AudioTrack Ready")
         } catch (e: Exception) {
             logError("PcmAudio", "Failed to init AudioTrack", e)
@@ -144,9 +158,77 @@ actual class PcmAudioEngine {
         ns = null
     }
 
+    private fun updatePlaybackParameters() {
+        try {
+            val track = audioTrack ?: return
+            if (isRobotVoiceEnabled) {
+                val params = PlaybackParams().apply {
+                    pitch = 1.28f
+                    speed = 1.04f
+                }
+                track.playbackParams = params
+                logDebug("PcmAudio", "🤖 Robot Voice PlaybackParams applied: pitch=1.28, speed=1.04")
+            } else {
+                val params = PlaybackParams().apply {
+                    pitch = 1.0f
+                    speed = 1.0f
+                }
+                track.playbackParams = params
+                logDebug("PcmAudio", "Standard Voice PlaybackParams restored: pitch=1.0")
+            }
+        } catch (e: Exception) {
+            logError("PcmAudio", "Failed to update PlaybackParams: ${e.message}")
+        }
+    }
+
+    private fun applyRobotDsp(pcmBytes: ByteArray): ByteArray {
+        val outBytes = ByteArray(pcmBytes.size)
+        val numSamples = pcmBytes.size / 2
+        val phaseStep = 2.0 * PI * 72.0 / 24000.0
+
+        for (i in 0 until numSamples) {
+            val byteIdx = i * 2
+            val low = pcmBytes[byteIdx].toInt() and 0xFF
+            val high = pcmBytes[byteIdx + 1].toInt()
+            val raw = (high shl 8) or low
+            val sample = raw.toShort()
+            val x = sample / 32768.0f
+
+            // 1. Ring modulation with 72Hz carrier
+            robotCarrierPhase += phaseStep
+            if (robotCarrierPhase >= 2.0 * PI) {
+                robotCarrierPhase -= 2.0 * PI
+            }
+            val carrier = sin(robotCarrierPhase).toFloat()
+            // 55% dry + 45% ring-modulated (retains clear speech intelligibility with rich metallic robot timbre)
+            val ringMod = x * (0.55f + 0.45f * carrier)
+
+            // 2. Robot Chassis Resonator (Feedforward comb filter)
+            val delayed = robotCombBuffer[robotCombIndex]
+            robotCombBuffer[robotCombIndex] = x
+            robotCombIndex = (robotCombIndex + 1) % robotCombBuffer.size
+            val withResonance = ringMod + delayed * 0.35f
+
+            // 3. Soft analog saturation (warm synth crunch)
+            val saturated = (withResonance * 1.12f).coerceIn(-1.0f, 1.0f)
+            val sOut = (saturated * 32767.0f).toInt().coerceIn(-32768, 32767).toShort()
+
+            val sInt = sOut.toInt()
+            outBytes[byteIdx] = (sInt and 0xFF).toByte()
+            outBytes[byteIdx + 1] = ((sInt shr 8) and 0xFF).toByte()
+        }
+
+        return outBytes
+    }
+
     actual fun playAudio(pcmBytes: ByteArray) {
         try {
-            audioTrack?.write(pcmBytes, 0, pcmBytes.size)
+            val bufferToWrite = if (isRobotVoiceEnabled) {
+                applyRobotDsp(pcmBytes)
+            } else {
+                pcmBytes
+            }
+            audioTrack?.write(bufferToWrite, 0, bufferToWrite.size)
         } catch (e: Exception) {
             logError("PcmAudio", "AudioTrack write error", e)
         }
@@ -158,6 +240,8 @@ actual class PcmAudioEngine {
             audioTrack?.flush()
             // กลับสู่สถานะพร้อมเล่นทันที — ไม่งั้น chunk ถัดไปหลัง flush (เช่นหลัง interrupted) จะไม่มีเสียง
             audioTrack?.play()
+            robotCombBuffer.fill(0f)
+            robotCombIndex = 0
         } catch (e: Exception) {
             logError("PcmAudio", "stopPlaying error", e)
         }

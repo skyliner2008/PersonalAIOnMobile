@@ -1,0 +1,2 @@
+-- P11: Add features_json to SignalTrackingRecord for AI Snapshot feature capture
+ALTER TABLE SignalTrackingRecord ADD COLUMN features_json TEXT;

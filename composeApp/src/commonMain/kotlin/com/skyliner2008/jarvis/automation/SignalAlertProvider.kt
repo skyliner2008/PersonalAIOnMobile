@@ -1,8 +1,15 @@
 package com.skyliner2008.jarvis.automation
 
+import com.skyliner2008.jarvis.automation.strategy.BBSqueezeTrendEngine
+import com.skyliner2008.jarvis.automation.strategy.FastRsiEngine
+import com.skyliner2008.jarvis.automation.strategy.VeyraShiftEngine
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.tools.trading.Candle
 import com.skyliner2008.jarvis.tools.trading.SmcApiService
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -42,7 +49,7 @@ import kotlin.math.sqrt
  */
 internal fun signalKindOf(label: String): String {
     val base = label.trimEnd('▲', '▼')
-    return if (base.startsWith("E")) "E" else base
+    return if (base.startsWith("E14") || base == "E") "E" else base
 }
 
 /** Runtime source policy for signal alerts.
@@ -112,12 +119,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
     private val lastLoggedSignalBar = mutableMapOf<String, Long>()
     private val lastLoggedGateBar = mutableMapOf<String, Long>()
     private val lastLoggedTunedEntryBar = mutableMapOf<String, Long>()
+    private val lastLoggedAnticipationRadarTime = mutableMapOf<String, Long>()
 
     private val markerProvider = SignalMarkerProvider(smcApi)
 
     suspend fun fetch(rawSymbol: String): Map<String, String> {
         val (symbol, tf) = IndicatorAlertProvider.splitSymbolAndTf(rawSymbol)
-        val (candles, candleSource, candleSourceReason) = runCatching {
+        val (rawCandles, candleSource, candleSourceReason) = runCatching {
             TradingSignalMarketDataRouter.fetch(
                 symbol = symbol,
                 timeframe = tf,
@@ -125,11 +133,21 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 tvProvider = { smcApi.fetchCandlesWithSource(symbol, tf, 300).candles }
             )
         }.getOrElse { return mapOf("error" to (it.message ?: "fetch failed")) }
-        if (candles.size < 62) return mapOf(
-            "error" to "bars=${candles.size} < 62",
+        if (rawCandles.size < 62) return mapOf(
+            "error" to "bars=${rawCandles.size} < 62",
             "signal_data_source" to candleSource,
             "signal_data_source_reason" to candleSourceReason
         )
+
+        // ── Real-Time Intra-Bar Stitching: นำแท่ง 1m สดมารวมเข้ากับแท่งกำลังวิ่ง (Live Bar) ──
+        // ป้องกันแท่ง 15m/1h แช่แข็งราคาเก่าตลอดแท่ง ทำให้ Anticipation ตรวจจับ Real-time ทุก 1 นาที
+        val m1Candles = if (tf == "1m") rawCandles else runCatching {
+            TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
+                smcApi.fetchCandlesWithSource(symbol, "1m", 500).candles
+            }.first
+        }.getOrElse { emptyList() }
+
+        val candles = stitchLiveBar(rawCandles, m1Candles, tf)
 
         // ── Closed-Loop Learning: Evaluate active open signals against current candles ──
         runCatching { SignalOutcomeTracker.evaluateOpenSignals(symbol, candles) }
@@ -169,18 +187,24 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         run {
             var m15c: List<Candle> = emptyList()
             val ures = runCatching {
-                m15c = if (tf == "15m") candles else TradingSignalMarketDataRouter.fetch(symbol, "15m", 300) {
-                    smcApi.fetchCandlesWithSource(symbol, "15m", 300).candles
-                }.first
+                m15c = if (tf == "15m") candles else stitchLiveBar(
+                    TradingSignalMarketDataRouter.fetch(symbol, "15m", 300) {
+                        smcApi.fetchCandlesWithSource(symbol, "15m", 300).candles
+                    }.first,
+                    m1Candles,
+                    "15m"
+                )
                 val h1 = if (tf == "1h") candles else TradingSignalMarketDataRouter.fetch(symbol, "1h", 500) {
                     smcApi.fetchCandlesWithSource(symbol, "1h", 500).candles
                 }.first
                 val m5 = if (tf == "5m") candles else TradingSignalMarketDataRouter.fetch(symbol, "5m", 500) {
                     smcApi.fetchCandlesWithSource(symbol, "5m", 500).candles
                 }.first
-                val m1 = if (tf == "1m") candles else TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
-                    smcApi.fetchCandlesWithSource(symbol, "1m", 500).candles
-                }.first
+                val m1 = if (tf == "1m") candles else (m1Candles.ifEmpty {
+                    TradingSignalMarketDataRouter.fetch(symbol, "1m", 500) {
+                        smcApi.fetchCandlesWithSource(symbol, "1m", 500).candles
+                    }.first
+                })
                 val r = com.skyliner2008.jarvis.automation.smc.UnifiedSmcSignals.evaluate(h1, m15c, m5, m1)
                 // โครงสร้างตลาด 5TF (deterministic — AI อ่าน digest แทนการเดาเอง)
                 mtfDigest = runCatching {
@@ -331,6 +355,81 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             val isAnticipation = anticipation != null
             val stage = if (isAnticipation) "ANTICIPATION" else "NONE"
             val liveTime = candles.last().timestamp
+            val liveClose = candles.last().close
+            val activeFactorsCount = AnticipationConfigManager.getActiveFactors(symbol).size
+
+            // ── Observability Radar Heartbeat: พ่น Log ทุก 1 นาที หรือเมื่อพบสัญญาณ ──
+            // ยืนยันว่าระบบสแกนครบ 13 ปัจจัยอย่างต่อเนื่อง ไม่ได้แช่แข็งหรือรอปิดแท่ง 15 นาที
+            val antRadarKey = "$symbol/$tf/ANT_RADAR"
+            val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val lastRadarLog = lastLoggedAnticipationRadarTime[antRadarKey] ?: 0L
+            if (anticipation != null || (nowMs - lastRadarLog) >= 60_000L) {
+                lastLoggedAnticipationRadarTime[antRadarKey] = nowMs
+                if (anticipation != null) {
+                    logDebug(
+                        "SignalAlert",
+                        "⚡ $symbol/$tf ANTICIPATION RADAR: live=${fmt(liveClose)} ${anticipation.setupType} ${anticipation.side} conf=${anticipation.confidence}% ($activeFactorsCount factors active)"
+                    )
+                } else {
+                    logDebug(
+                        "SignalAlert",
+                        "📡 $symbol/$tf Anticipation radar: live=${fmt(liveClose)} ($activeFactorsCount factors active) → IDLE"
+                    )
+                }
+            }
+
+            if (anticipation != null) {
+                val antLogKey = "$symbol/$tf/ANT/${anticipation.side}"
+                val previousAntTime = lastLoggedSignalBar[antLogKey]
+                if (previousAntTime != liveTime) {
+                    lastLoggedSignalBar[antLogKey] = liveTime
+                    logDebug(
+                        "SignalAlert",
+                        "⚡ $symbol/$tf NEW ANTICIPATION RADAR: ${anticipation.setupType} ${anticipation.side} @ ${fmt(anticipation.entryPrice)} SL=${fmt(anticipation.stopLoss)} TP1=${fmt(anticipation.tp1)} Conf=${anticipation.confidence}% bar=$liveTime"
+                    )
+
+                    // ── Record Anticipation to persistent SignalOutcomeTracker (Closed-Loop Learning) ──
+                    val antId = "${symbol}_${tf}_ANT_${anticipation.side}_${liveTime}"
+                    val risk = abs(anticipation.entryPrice - anticipation.stopLoss)
+                    val rr = if (risk > 0.0) abs(anticipation.tp1 - anticipation.entryPrice) / risk else 1.5
+                    val featuresJson = runCatching {
+                        val baseJson = SignalFeatureExtractor.extractJson(
+                            candles = candles,
+                            sigIdx = candles.size - 1,
+                            symbol = symbol,
+                            interval = tf,
+                            strategy = "ANTICIPATION_${anticipation.factorId}",
+                            side = anticipation.side,
+                            mtfDigest = mtfDigest
+                        )
+                        val map = Json.decodeFromString<Map<String, JsonElement>>(baseJson).toMutableMap()
+                        map["anticipation_setup_type"] = JsonPrimitive(anticipation.setupType)
+                        map["anticipation_factor_id"] = JsonPrimitive(anticipation.factorId)
+                        map["anticipation_confidence"] = JsonPrimitive(anticipation.confidence)
+                        map["anticipation_stage"] = JsonPrimitive(anticipation.stage)
+                        map["anticipation_reason"] = JsonPrimitive(anticipation.reason)
+                        map["anticipation_zone"] = JsonPrimitive(anticipation.zone)
+                        JsonObject(map).toString()
+                    }.getOrNull()
+
+                    runCatching {
+                        SignalOutcomeTracker.recordAnticipation(
+                            anticipationId = antId,
+                            symbol = symbol,
+                            interval = tf,
+                            factorId = anticipation.factorId,
+                            side = anticipation.side,
+                            entryPrice = anticipation.entryPrice,
+                            stopLoss = anticipation.stopLoss,
+                            takeProfit = anticipation.tp1,
+                            rr = rr,
+                            featuresJson = featuresJson,
+                            createdAt = liveTime
+                        )
+                    }
+                }
+            }
+
             return mapOf(
                 "signal_buy" to "0",
                 "signal_sell" to "0",
@@ -344,6 +443,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                 "signal_anticipation_zone" to (anticipation?.zone ?: ""),
                 "signal_anticipation_confidence" to (anticipation?.confidence?.toString() ?: "0"),
                 "signal_anticipation_id" to if (isAnticipation) liveTime.toString() else "0",
+                "signal_anticipation_entry" to if (isAnticipation) fmt(anticipation!!.entryPrice) else "",
+                "signal_anticipation_sl" to if (isAnticipation) fmt(anticipation!!.stopLoss) else "",
+                "signal_anticipation_tp1" to if (isAnticipation) fmt(anticipation!!.tp1) else "",
+                "signal_anticipation_tp2" to if (isAnticipation) fmt(anticipation!!.tp2) else "",
+                "signal_anticipation_tp3" to if (isAnticipation) fmt(anticipation!!.tp3) else "",
+                "signal_anticipation_factor" to (anticipation?.factorId ?: ""),
+                "signal_anticipation_stage" to (anticipation?.stage ?: "PRE_SETUP"),
                 "signal_mix_score" to mixScore.toString(),
                 "signal_mix_votes" to mixVoteDetail,
                 "signal_gated" to gatedKinds.joinToString(","),
@@ -430,8 +536,20 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             lastLoggedSignalBar[signalLogKey] = sigTime
             logDebug("SignalAlert", "$symbol/$tf NEW $side signal: $strategies @ ${fmt(close)} SL=${fmt(sl)} TP=${fmt(tp)} source=$candleSource reason=$candleSourceReason bar=$sigTime")
 
-            // ── Record confirmed signal to persistent SignalOutcomeTracker (บันทึกครั้งเดียวต่อแท่งสัญญาณใหม่) ──
+            // ── Record confirmed signal to persistent SignalOutcomeTracker (บันทึกครั้งเดียวต่อแท่งสัญญาณใหม่ พร้อม Features Snapshot) ──
             val signalId = "${symbol}_${tf}_${side}_${effSigTime}"
+            val featuresJson = runCatching {
+                SignalFeatureExtractor.extractJson(
+                    candles = candles,
+                    sigIdx = sigIdx,
+                    symbol = symbol,
+                    interval = tf,
+                    strategy = kind,
+                    side = side,
+                    mtfDigest = mtfDigest
+                )
+            }.getOrNull()
+
             runCatching {
                 SignalOutcomeTracker.recordSignal(
                     signalId = signalId,
@@ -443,6 +561,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                     stopLoss = sl,
                     takeProfit = tp,
                     rr = rr,
+                    featuresJson = featuresJson,
                     createdAt = effSigTime
                 )
             }
@@ -499,7 +618,14 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         val setupType: String,
         val reason: String,
         val zone: String,
-        val confidence: Int
+        val confidence: Int,
+        val entryPrice: Double = 0.0,
+        val stopLoss: Double = 0.0,
+        val tp1: Double = 0.0,
+        val tp2: Double = 0.0,
+        val tp3: Double = 0.0,
+        val factorId: String = "",
+        val stage: String = "PRE_SETUP"
     )
 
     data class AnticipationHit(
@@ -508,8 +634,70 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         val setupType: String,
         val reason: String,
         val zone: String,
-        val confidence: Int
+        val confidence: Int,
+        val entryPrice: Double = 0.0,
+        val stopLoss: Double = 0.0,
+        val tp1: Double = 0.0,
+        val tp2: Double = 0.0,
+        val tp3: Double = 0.0,
+        val stage: String = "PRE_SETUP"
     )
+
+    /**
+     * ถักทอแท่งราคาแบบ Real-time (Intra-Bar Live Bar Stitching):
+     * นำแท่ง 1m ล่าสุดมาอัปเดตแท่งกำลังวิ่ง (Live Bar ที่ n-1) ของ Timeframe ที่ใหญ่กว่า (เช่น 15m, 1h)
+     * เพื่อให้ระบบ Anticipation ได้ราคา High, Low, Close, Volume ปัจจุบันของนาทีนั้นๆ
+     * ป้องกันการแช่แข็งราคาเก่าที่ค้างตั้งแต่ต้นแท่ง 15m
+     */
+    internal fun stitchLiveBar(
+        candles: List<Candle>,
+        m1Candles: List<Candle>,
+        tf: String
+    ): List<Candle> {
+        if (tf.equals("1m", ignoreCase = true) || candles.isEmpty() || m1Candles.isEmpty()) {
+            return candles
+        }
+        val tfMs = SmcApiService.intervalToMillis(tf).coerceAtLeast(60_000L)
+        val latestM1 = m1Candles.last()
+        val latestM1Ts = latestM1.timestamp
+        val lastBar = candles.last()
+
+        val isLastBarCurrentBucket = lastBar.timestamp == (latestM1Ts / tfMs) * tfMs ||
+            (latestM1Ts >= lastBar.timestamp && latestM1Ts < lastBar.timestamp + tfMs)
+
+        return if (isLastBarCurrentBucket) {
+            val bucketStart = lastBar.timestamp
+            val intraBars = m1Candles.filter { it.timestamp in bucketStart until (bucketStart + tfMs) }
+            if (intraBars.isEmpty()) return candles
+            val stitched = lastBar.copy(
+                open = lastBar.open,
+                high = maxOf(lastBar.high, intraBars.maxOf { it.high }),
+                low = minOf(lastBar.low, intraBars.minOf { it.low }),
+                close = intraBars.last().close,
+                volume = maxOf(lastBar.volume, intraBars.sumOf { it.volume })
+            )
+            candles.dropLast(1) + stitched
+        } else if (latestM1Ts >= lastBar.timestamp + tfMs) {
+            val bucketStart = if (lastBar.timestamp > 0L && (latestM1Ts - lastBar.timestamp) < 2 * tfMs) {
+                lastBar.timestamp + tfMs
+            } else {
+                (latestM1Ts / tfMs) * tfMs
+            }
+            val intraBars = m1Candles.filter { it.timestamp in bucketStart until (bucketStart + tfMs) }
+            if (intraBars.isEmpty()) return candles
+            val stitched = Candle(
+                timestamp = bucketStart,
+                open = intraBars.first().open,
+                high = intraBars.maxOf { it.high },
+                low = intraBars.minOf { it.low },
+                close = intraBars.last().close,
+                volume = intraBars.sumOf { it.volume }
+            )
+            candles + stitched
+        } else {
+            candles
+        }
+    }
 
     internal fun detectAnticipation(
         candles: List<Candle>,
@@ -667,7 +855,8 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             val bbLower = bbBasis - 2 * bbSd
             val bbWidth = bbUpper - bbLower
             if (bbWidth <= 2.2 * atr14 && bbSd > 0) {
-                if (live.close >= bbUpper - 0.25 * atr14) {
+                val bandTolerance = min(0.25 * atr14, bbWidth * 0.15)
+                if (live.close >= bbUpper - bandTolerance && live.close > bbBasis) {
                     hits.add(AnticipationHit(
                         factorId = "BOLLINGER_SQUEEZE",
                         side = "BUY",
@@ -676,7 +865,7 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                         zone = "Upper Band: ${"%.2f".format(bbUpper)}",
                         confidence = 74
                     ))
-                } else if (live.close <= bbLower + 0.25 * atr14) {
+                } else if (live.close <= bbLower + bandTolerance && live.close < bbBasis) {
                     hits.add(AnticipationHit(
                         factorId = "BOLLINGER_SQUEEZE",
                         side = "SELL",
@@ -840,7 +1029,13 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                     setupType = "SESSION_OPEN_SWEEP",
                     reason = "ราคา Sweep กวาดสภาพคล่องหลุด Session Low (${"%.2f".format(sLow)}) แล้วดีดกลับขึ้นมาอย่างรวดเร็ว",
                     zone = "Session Low Sweep: ${"%.2f".format(sLow)}",
-                    confidence = 79
+                    confidence = 79,
+                    entryPrice = live.close,
+                    stopLoss = sLow - atr14 * 0.5,
+                    tp1 = live.close + atr14 * 1.5,
+                    tp2 = live.close + atr14 * 3.0,
+                    tp3 = live.close + atr14 * 4.5,
+                    stage = "TRIGGER_READY"
                 ))
             } else if (live.high > sHigh && live.close < sHigh) {
                 hits.add(AnticipationHit(
@@ -849,7 +1044,83 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
                     setupType = "SESSION_OPEN_SWEEP",
                     reason = "ราคา Sweep กวาดสภาพคล่องทะลุ Session High (${"%.2f".format(sHigh)}) แล้วถูกกดกลับลงมาอย่างรวดเร็ว",
                     zone = "Session High Sweep: ${"%.2f".format(sHigh)}",
-                    confidence = 79
+                    confidence = 79,
+                    entryPrice = live.close,
+                    stopLoss = sHigh + atr14 * 0.5,
+                    tp1 = live.close - atr14 * 1.5,
+                    tp2 = live.close - atr14 * 3.0,
+                    tp3 = live.close - atr14 * 4.5,
+                    stage = "TRIGGER_READY"
+                ))
+            }
+        }
+
+        // 11. VEYRA_SHIFT (Institutional Shift Engine)
+        if ("VEYRA_SHIFT" in activeFactors && candles.size >= 70) {
+            val veyra = VeyraShiftEngine.evaluate(candles)
+            if (veyra != null && veyra.dominantScore >= 66.0 && veyra.dominantDir != 0) {
+                val side = if (veyra.dominantDir == 1) "BUY" else "SELL"
+                val stage = if (veyra.longSignal || veyra.shortSignal) "CONFIRMING"
+                else if (veyra.bosUp || veyra.bosDown || veyra.isAbsorptionBull || veyra.isAbsorptionBear) "TRIGGER_READY"
+                else "PRE_SETUP"
+                hits.add(AnticipationHit(
+                    factorId = "VEYRA_SHIFT",
+                    side = side,
+                    setupType = "VEYRA_SHIFT",
+                    reason = veyra.reasonTh,
+                    zone = "Shift Score ${"%.0f".format(veyra.dominantScore)}/100 (${veyra.auctionState})",
+                    confidence = AnticipationConfigManager.getEffectiveConfidence("VEYRA_SHIFT"),
+                    entryPrice = veyra.entry,
+                    stopLoss = veyra.stopLoss,
+                    tp1 = veyra.tp1,
+                    tp2 = veyra.tp2,
+                    tp3 = veyra.tp3,
+                    stage = stage
+                ))
+            }
+        }
+
+        // 12. BB_KC_SQUEEZE (Bollinger vs Keltner Channels Breakout)
+        if ("BB_KC_SQUEEZE" in activeFactors && candles.size >= 35) {
+            val bbkc = BBSqueezeTrendEngine.evaluate(candles)
+            if (bbkc != null && bbkc.signalSide != "NONE") {
+                val side = if (bbkc.signalSide.contains("BUY")) "BUY" else "SELL"
+                val stage = if (bbkc.isSqueezeFired) "CONFIRMING" else "PRE_SETUP"
+                hits.add(AnticipationHit(
+                    factorId = "BB_KC_SQUEEZE",
+                    side = side,
+                    setupType = "BB_KC_SQUEEZE",
+                    reason = bbkc.reasonTh,
+                    zone = "BB [${"%.2f".format(bbkc.bbLower)} - ${"%.2f".format(bbkc.bbUpper)}]",
+                    confidence = AnticipationConfigManager.getEffectiveConfidence("BB_KC_SQUEEZE"),
+                    entryPrice = bbkc.entryPrice,
+                    stopLoss = bbkc.stopLoss,
+                    tp1 = bbkc.entryPrice + (bbkc.takeProfit - bbkc.entryPrice) * 0.4,
+                    tp2 = bbkc.takeProfit,
+                    tp3 = bbkc.entryPrice + (bbkc.takeProfit - bbkc.entryPrice) * 1.5,
+                    stage = stage
+                ))
+            }
+        }
+
+        // 13. FAST_RSI_REVERSAL (ABQ1 Fast RSI Reversal)
+        if ("FAST_RSI_REVERSAL" in activeFactors && candles.size >= 10) {
+            val frsi = FastRsiEngine.evaluate(candles)
+            if (frsi != null && (frsi.signalSide == "BUY" || frsi.signalSide == "ANTICIPATE_BUY")) {
+                val stage = if (frsi.signalSide == "BUY") "TRIGGER_READY" else "PRE_SETUP"
+                hits.add(AnticipationHit(
+                    factorId = "FAST_RSI_REVERSAL",
+                    side = "BUY",
+                    setupType = "FAST_RSI_REVERSAL",
+                    reason = frsi.reasonTh,
+                    zone = "Fast RSI(5): ${"%.1f".format(frsi.rsi5)}",
+                    confidence = AnticipationConfigManager.getEffectiveConfidence("FAST_RSI_REVERSAL"),
+                    entryPrice = frsi.entryPrice,
+                    stopLoss = frsi.stopLoss,
+                    tp1 = frsi.takeProfit,
+                    tp2 = frsi.entryPrice * 1.15,
+                    tp3 = frsi.entryPrice * 1.20,
+                    stage = stage
                 ))
             }
         }
@@ -889,14 +1160,31 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             dominantHits.first().reason
         }
 
-        val primaryZone = dominantHits.first().zone
+        val primaryHit = dominantHits.first()
+        val primaryZone = primaryHit.zone
+        val entryPrice = dominantHits.firstOrNull { it.entryPrice > 0.0 }?.entryPrice ?: live.close
+        val stopLoss = dominantHits.firstOrNull { it.stopLoss > 0.0 }?.stopLoss ?: (if (dominantSide == "BUY") entryPrice - 1.5 * atr14 else entryPrice + 1.5 * atr14)
+        val tp1 = dominantHits.firstOrNull { it.tp1 > 0.0 }?.tp1 ?: (if (dominantSide == "BUY") entryPrice + 1.5 * atr14 else entryPrice - 1.5 * atr14)
+        val tp2 = dominantHits.firstOrNull { it.tp2 > 0.0 }?.tp2 ?: (if (dominantSide == "BUY") entryPrice + 3.0 * atr14 else entryPrice - 3.0 * atr14)
+        val tp3 = dominantHits.firstOrNull { it.tp3 > 0.0 }?.tp3 ?: (if (dominantSide == "BUY") entryPrice + 4.5 * atr14 else entryPrice - 4.5 * atr14)
+        val factorId = if (dominantHits.size > 1) "CONFLUENCE" else primaryHit.factorId
+        val stage = if (dominantHits.any { it.stage == "CONFIRMING" }) "CONFIRMING"
+        else if (dominantHits.any { it.stage == "TRIGGER_READY" }) "TRIGGER_READY"
+        else "PRE_SETUP"
 
         return AnticipationSignal(
             side = dominantSide,
             setupType = setupType,
             reason = combinedReason,
             zone = primaryZone,
-            confidence = finalConfidence
+            confidence = finalConfidence,
+            entryPrice = entryPrice,
+            stopLoss = stopLoss,
+            tp1 = tp1,
+            tp2 = tp2,
+            tp3 = tp3,
+            factorId = factorId,
+            stage = stage
         )
     }
 
@@ -926,6 +1214,9 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
         "3BR" -> "3-Bar Reversal"
         "SMC" -> "SMC (MT5 Engine)"
         "MIX" -> "Mix Voting (ผสมกลยุทธ์)"
+        "VEYRA" -> "Veyra Institutional Shift"
+        "BBSQ" -> "BB/KC Squeeze Breakout"
+        "FRSI" -> "Fast RSI Momentum Thrust"
         else -> kind
     }
 
@@ -951,6 +1242,9 @@ class SignalAlertProvider(private val smcApi: SmcApiService) {
             "UT" -> if (up) "ราคาปิดเหนือ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาขึ้น" else "ราคาปิดใต้ UT Bot trailing stop (ATR${ep?.utAtrPeriod ?: 6}×${ep?.utKey ?: 2.0}) — flip เป็นขาลง"
             "3BR" -> if (up) "รูปแบบ 3-Bar Reversal ขาขึ้น (แท่ง 3 กลืนกิน high แท่งแรก)" else "รูปแบบ 3-Bar Reversal ขาลง (แท่ง 3 กลืนกิน low แท่งแรก)"
             "MIX" -> if (up) "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งขึ้น (confluence หลายระบบ)" else "คะแนนโหวตรวมของหลายกลยุทธ์ข้ามเกณฑ์ฝั่งลง (confluence หลายระบบ)"
+            "VEYRA" -> if (up) "Veyra Shift Ledger สถาบันฝั่งซื้อหนุนแรง (คะแนน ≥65)" else "Veyra Shift Ledger สถาบันฝั่งขายกดดันแรง (คะแนน ≥65)"
+            "BBSQ" -> if (up) "Bollinger Squeeze ระเบิดพลัง Fired ขาขึ้นพร้อมโมเมนตัม" else "Bollinger Squeeze ระเบิดพลัง Fired ขาลงพร้อมโมเมนตัม"
+            "FRSI" -> if (up) "Fast RSI(5) ดีดทะลุ 35 ขึ้น (จุดกลับตัวฉับไว)" else "Fast RSI(5) หลุด 75 ลง (ล็อกกำไร/พักตัว)"
             else -> "สัญญาณ $kind $side"
         }
     }

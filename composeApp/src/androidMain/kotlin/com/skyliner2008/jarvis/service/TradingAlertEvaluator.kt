@@ -303,6 +303,69 @@ internal class TradingAlertEvaluator(
         return SupervisorResult(decision, priceField("ADJUST_SL"), priceField("ADJUST_TP"), conf, reason)
     }
 
+    suspend fun runAnticipationSupervisor(job: AlertJob, data: Map<String, String>): SupervisorResult? {
+        val side = data["signal_anticipation_side"] ?: data["signal_side"] ?: "BUY"
+        val factor = data["signal_anticipation_factor"] ?: "ANTICIPATION"
+        val stage = data["signal_anticipation_stage"] ?: "PRE_SETUP"
+        val entry = data["signal_anticipation_entry"] ?: data["close"] ?: "-"
+        val sl = data["signal_anticipation_sl"] ?: "-"
+        val tp1 = data["signal_anticipation_tp1"] ?: "-"
+        val tp2 = data["signal_anticipation_tp2"] ?: "-"
+        val desc = data["signal_anticipation_desc"] ?: "-"
+        val zone = data["signal_anticipation_zone"] ?: "-"
+        val mtf = data["signal_mtf_context"]?.takeIf { it.isNotBlank() } ?: (data["signal_context"] ?: "-")
+
+        val prompt = buildString {
+            appendLine("บทบาท: คุณคือ AI Strategy Supervisor — วิเคราะห์และคัดกรองการคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ก่อนแจ้งเตือนผู้ใช้")
+            appendLine()
+            appendLine("══ สัญญาณคาดการณ์ล่วงหน้า ══")
+            appendLine("สินทรัพย์: ${job.symbol} | ทิศทางคาดการณ์: $side | ขั้นตอน: $stage")
+            appendLine("ปัจจัยกระตุ้น: $factor | โซน/ระดับ: $zone")
+            appendLine("Execution Rails คาดหมาย: Entry $entry | SL $sl | TP1 $tp1 | TP2 $tp2")
+            appendLine("รายละเอียดเหตุผล: $desc")
+            appendLine()
+            appendLine("══ โครงสร้างตลาด MTF Context (คำนวณจากแท่งเทียนจริง) ══")
+            appendLine(mtf)
+            appendLine()
+            appendLine("แนวทางตัดสิน:")
+            appendLine("- VETO เมื่อการคาดการณ์นี้เสี่ยงสูงเกินไป เช่น สัญญาณขัดแย้งเทรนด์ใหญ่ H1/H4 ชัดเจน, ตลาดผันผวนผิดปกติ, หรือแนวต้าน/รับขวางทาง")
+            appendLine("- ADJUST เมื่อการคาดการณ์ถูกต้อง แต่วางระดับ SL หรือ TP กว้าง/แคบเกินไปเทียบกับโซนโครงสร้าง")
+            appendLine("- APPROVE เมื่อการคาดการณ์สอดคล้องกับพฤติกรรมราคาและ MTF Context สมควรแจ้งเตือนล่วงหน้า")
+            appendLine("ใช้เฉพาะข้อมูลด้านบน ห้ามสมมติข่าว/ตัวเลขอื่น")
+            appendLine()
+            appendLine("ตอบตามรูปแบบนี้เท่านั้น 5 บรรทัด ห้ามมีข้อความอื่น:")
+            appendLine("DECISION: APPROVE หรือ VETO หรือ ADJUST")
+            appendLine("ADJUST_SL: ราคาใหม่ หรือ -")
+            appendLine("ADJUST_TP: ราคาใหม่ หรือ -")
+            appendLine("CONFIDENCE: ตัวเลข 0-100")
+            appendLine("REASON_TH: เหตุผลภาษาไทยสั้นๆ 1-2 ประโยค")
+        }
+        val waitStart = System.currentTimeMillis()
+        alertAiMutex.lock()
+        val raw = try {
+            val waitedMs = System.currentTimeMillis() - waitStart
+            if (waitedMs > 0L) logDebug("AutomationService", "🧑‍✈️ Anticipation Supervisor queued — waited ${waitedMs}ms")
+            generateAiText(prompt)
+        } finally {
+            alertAiMutex.unlock()
+        } ?: return null
+
+        val decisionRaw = Regex("DECISION:\\s*(\\w+)", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)?.uppercase() ?: return null
+        val decision = when {
+            decisionRaw.contains("VETO") -> "VETO"
+            decisionRaw.contains("ADJUST") -> "ADJUST"
+            else -> "APPROVE"
+        }
+        fun priceField(name: String): Double? =
+            Regex("$name:\\s*([0-9][0-9,]*\\.?[0-9]*)", RegexOption.IGNORE_CASE).find(raw)
+                ?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+        val conf = Regex("CONFIDENCE:\\s*(\\d{1,3})", RegexOption.IGNORE_CASE).find(raw)
+            ?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100) ?: 50
+        val reason = Regex("REASON_TH:\\s*(.+)$", RegexOption.IGNORE_CASE).find(raw)
+            ?.groupValues?.get(1)?.trim()?.take(300)?.takeIf { it.isNotBlank() } ?: "ผ่านเกณฑ์ Anticipation Supervisor"
+        return SupervisorResult(decision, priceField("ADJUST_SL"), priceField("ADJUST_TP"), conf, reason)
+    }
+
 
     fun validateSupervisorAdjustment(data: Map<String, String>, sup: SupervisorResult): Map<String, String>? {
         val entry = data["signal_entry"]?.replace(",", "")?.toDoubleOrNull() ?: return null

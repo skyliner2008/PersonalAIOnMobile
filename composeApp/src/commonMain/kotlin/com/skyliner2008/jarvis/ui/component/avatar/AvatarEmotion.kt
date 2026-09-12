@@ -26,7 +26,21 @@ enum class AvatarEmotion {
     /** Screen off / idle นาน — ตาปิด + ZZZ floating */
     SLEEPING,
     /** Breakthrough / success — ตาดาว + jump + spin */
-    EXCITED
+    EXCITED,
+    /** แอบขยิบตาข้างเดียว (Wink) */
+    WINK,
+    /** สับสน / สงสัย ตาโตข้างเล็กข้าง พร้อมเครื่องหมาย ? (Confused) */
+    CONFUSED,
+    /** หน้าบูด แก้มป่อง มีสีแดงที่แก้ม (Pout / Hmph) */
+    POUT,
+    /** วิงเวียน ตาลายก้นหอยหมุนๆ เมื่อถูกเขย่า (Dizzy) */
+    DIZZY,
+    /** ตกใจ: ตาเบิกกว้างสุด + กระดอนขึ้น + ปากอ้า O + เสียงตกใจ */
+    SURPRISED,
+    /** เบื่อ: ตาลู่ครึ่งปิด + กะพริบช้า + หาวบ่อย + เอียงหัว */
+    BORED,
+    /** โกรธจัด ต่อสู้กลับ (Fight Back): ตาขวางแดงเข้มเพลิง + จรวดมิสซายยิงถล่มหน้าจอ + ระเบิด */
+    ENRAGED
 }
 
 /**
@@ -43,5 +57,10 @@ data class AvatarState(
     val audioLevel: Float = 0f,
     val isSpeaking: Boolean = false,
     val glowIntensity: Float = 0.5f,
-    val statusText: String? = null
+    val statusText: String? = null,
+    val gazeOffsetX: Float = 0f,
+    val gazeOffsetY: Float = 0f,
+    val isDizzy: Boolean = false,
+    /** Dynamic face state from AI (background, props, gesture, eye style) */
+    val faceState: RobotFaceState = RobotFaceState()
 )

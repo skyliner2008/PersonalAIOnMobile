@@ -139,6 +139,15 @@ actual class VoiceManager(private val context: Context) {
             if (cleanText.length > 500) "$it..." else it
         }
 
+        // ปรับระดับเสียงพูด (pitch) ตามโหมด: โหมดสัตว์เลี้ยงจะใช้เสียงสูงและร่าเริง
+        if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
+            tts?.setPitch(1.35f)
+            tts?.setSpeechRate(1.15f)
+        } else {
+            tts?.setPitch(0.95f)
+            tts?.setSpeechRate(1.1f)
+        }
+
         tts?.speak(trimmed, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 

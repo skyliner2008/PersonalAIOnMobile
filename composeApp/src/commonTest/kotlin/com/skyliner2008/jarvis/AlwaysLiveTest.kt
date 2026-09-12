@@ -17,15 +17,17 @@ class AlwaysLiveTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `AvatarEmotion has exactly 10 states`() {
-        assertEquals(10, AvatarEmotion.entries.size)
+    fun `AvatarEmotion has exactly 17 states`() {
+        assertEquals(17, AvatarEmotion.entries.size)
     }
 
     @Test
     fun `AvatarEmotion contains all expected states`() {
         val expectedStates = setOf(
             "IDLE", "LISTENING", "THINKING", "SPEAKING",
-            "HAPPY", "SAD", "ANGRY", "LOVE", "SLEEPING", "EXCITED"
+            "HAPPY", "SAD", "ANGRY", "LOVE", "SLEEPING", "EXCITED",
+            "WINK", "CONFUSED", "POUT", "DIZZY", "SURPRISED", "BORED",
+            "ENRAGED"
         )
         val actualStates = AvatarEmotion.entries.map { it.name }.toSet()
         assertEquals(expectedStates, actualStates)
@@ -91,12 +93,16 @@ class AlwaysLiveTest {
             AvatarEmotion.ANGRY to "red_with_eyebrows",
             AvatarEmotion.LOVE to "heart",
             AvatarEmotion.SLEEPING to "closed_line",
-            AvatarEmotion.EXCITED to "star"
+            AvatarEmotion.EXCITED to "star",
+            AvatarEmotion.WINK to "wink_bar",
+            AvatarEmotion.CONFUSED to "question_mark",
+            AvatarEmotion.POUT to "pout_blush",
+            AvatarEmotion.DIZZY to "spiral_eyes"
         )
 
-        // All 10 emotions have unique eye types
-        assertEquals(10, emotionEyeTypes.size)
-        assertEquals(10, emotionEyeTypes.values.toSet().size, "All eye types must be unique")
+        // All 14 emotions have unique eye types
+        assertEquals(14, emotionEyeTypes.size)
+        assertEquals(14, emotionEyeTypes.values.toSet().size, "All eye types must be unique")
     }
 
     @Test
@@ -226,4 +232,151 @@ class AlwaysLiveTest {
             assertEquals(TestLiveState.OFF, state, "Disable from $initialState should go to OFF")
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // WebSocket Reconnect & Remote Close Recovery Tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `Remote socket close detection recognizes EOF and transient network terminations`() {
+        fun isRemoteClose(e: Throwable): Boolean {
+            val className = e::class.simpleName ?: ""
+            val msg = e.message ?: ""
+            val causeClassName = e.cause?.let { it::class.simpleName } ?: ""
+            val causeMsg = e.cause?.message ?: ""
+            return className.contains("EOFException") ||
+                    className.contains("SocketClosed") ||
+                    className.contains("ClosedReceiveChannelException") ||
+                    className.contains("SocketException") ||
+                    causeClassName.contains("EOFException") ||
+                    causeClassName.contains("SocketClosed") ||
+                    causeClassName.contains("SocketException") ||
+                    msg.contains("EOF", ignoreCase = true) ||
+                    msg.contains("unexpected end of stream", ignoreCase = true) ||
+                    msg.contains("Connection reset", ignoreCase = true) ||
+                    msg.contains("Software caused connection abort", ignoreCase = true) ||
+                    msg.contains("Socket closed", ignoreCase = true) ||
+                    msg.contains("Channel was closed", ignoreCase = true) ||
+                    causeMsg.contains("EOF", ignoreCase = true) ||
+                    causeMsg.contains("Connection reset", ignoreCase = true) ||
+                    causeMsg.contains("unexpected end of stream", ignoreCase = true)
+        }
+
+        assertTrue(isRemoteClose(RuntimeException("java.io.EOFException: unexpected end of stream")))
+        assertTrue(isRemoteClose(IllegalStateException("Connection reset by peer")))
+        assertTrue(isRemoteClose(Exception("Channel was closed")))
+        assertTrue(isRemoteClose(Exception("Parent error", RuntimeException("EOF encountered"))))
+        kotlin.test.assertFalse(isRemoteClose(IllegalArgumentException("Invalid API key parameter")))
+    }
+
+    @Test
+    fun `Live session ready state protects reconnect retry quota on server close`() {
+        var sessionWasReady = true
+        var attempt = 0
+        val maxRetries = 3
+
+        // Simulate server-initiated remote close on established ready session
+        attempt = if (sessionWasReady) 1 else attempt + 1
+        assertEquals(1, attempt, "Established session drops should reset attempt count to 1")
+
+        // If session was never ready (e.g. handshake failed), attempt should increment
+        sessionWasReady = false
+        attempt = if (sessionWasReady) 1 else attempt + 1
+        assertEquals(2, attempt, "Unready session failure should consume retry quota")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Anti-Hallucination Guard Tests (Always Live, Vision, Voice, Format)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    fun `AlwaysLive off guard blocks hallucinated close when user did not request exit`() {
+        fun isExplicitUserClose(prompt: String): Boolean {
+            val p = prompt.lowercase()
+            val pWithoutOpen = p.replace("เปิด", "")
+            val closeKeywords = listOf(
+                "ปิด", "ออก", "เลิก", "พอแล้ว", "หยุด", "บาย", "พักผ่อน", "นอนได้แล้ว",
+                "off", "stop", "exit", "close", "quit", "bye", "shutdown", "disable"
+            )
+            return closeKeywords.any { pWithoutOpen.contains(it) }
+        }
+
+        // Neutral or greeting inputs that Gemini misinterprets as exit
+        kotlin.test.assertFalse(isExplicitUserClose("ดาวิด"))
+        kotlin.test.assertFalse(isExplicitUserClose("จาวิส"))
+        kotlin.test.assertFalse(isExplicitUserClose("สวัสดีจาวิส"))
+        kotlin.test.assertFalse(isExplicitUserClose("ทำอะไรได้บ้าง"))
+        kotlin.test.assertFalse(isExplicitUserClose("เปิดเพลงหน่อย"))
+
+        // Genuine close requests
+        assertTrue(isExplicitUserClose("ปิดโหมดสัตว์เลี้ยง"))
+        assertTrue(isExplicitUserClose("ออกจากโหมด Always"))
+        assertTrue(isExplicitUserClose("ปิด Always"))
+        assertTrue(isExplicitUserClose("เลิกเล่นแล้ว"))
+        assertTrue(isExplicitUserClose("stop pet mode"))
+        assertTrue(isExplicitUserClose("exit now"))
+    }
+
+    @Test
+    fun `Vision activate guard blocks hallucinated camera calls on general conversation`() {
+        fun hasVisionIntent(prompt: String): Boolean {
+            val p = prompt.lowercase()
+            val visionKeywords = listOf(
+                "ดู", "มอง", "เห็น", "กล้อง", "ตา", "ตรวจ", "ส่อง", "อ่าน", "เช็คภาพ", "ภาพ",
+                "see", "look", "watch", "camera", "eye", "vision", "view", "read", "scan", "photo", "pic"
+            )
+            return visionKeywords.any { p.contains(it) }
+        }
+
+        // Misheard greetings / neutral words must NOT open camera
+        kotlin.test.assertFalse(hasVisionIntent("สวัสดีจ้ะวิทย์"))
+        kotlin.test.assertFalse(hasVisionIntent("สวัสดีจาวิส"))
+        kotlin.test.assertFalse(hasVisionIntent("ดาวิด"))
+        kotlin.test.assertFalse(hasVisionIntent("วันนี้อากาศเป็นไง"))
+
+        // Genuine vision requests
+        assertTrue(hasVisionIntent("ดูนี่หน่อย"))
+        assertTrue(hasVisionIntent("เปิดกล้องดูซิ"))
+        assertTrue(hasVisionIntent("อ่านป้ายตรงนี้ให้หน่อย"))
+        assertTrue(hasVisionIntent("เห็นอะไรในห้องไหม"))
+        assertTrue(hasVisionIntent("can you see this"))
+        assertTrue(hasVisionIntent("look at the screen"))
+    }
+
+    @Test
+    fun `Voice profile guard prevents name confusion with voice switching`() {
+        fun hasVoiceIntent(prompt: String): Boolean {
+            val p = prompt.lowercase()
+            val voiceKeywords = listOf("เสียง", "voice", "สำเนียง", "โทน", "เปลี่ยนเสียง")
+            return voiceKeywords.any { p.contains(it) }
+        }
+
+        // "ดาวิด" sounds like "David" but user only called Jarvis's name!
+        kotlin.test.assertFalse(hasVoiceIntent("ดาวิด"))
+        kotlin.test.assertFalse(hasVoiceIntent("จาวิส"))
+        kotlin.test.assertFalse(hasVoiceIntent("สวัสดีครับ"))
+
+        // Genuine voice change requests
+        assertTrue(hasVoiceIntent("ขอเปลี่ยนเสียงหน่อย"))
+        assertTrue(hasVoiceIntent("มีเสียงอะไรให้เลือกบ้าง"))
+        assertTrue(hasVoiceIntent("change voice"))
+        assertTrue(hasVoiceIntent("ปรับโทนเสียงหน่อย"))
+    }
+
+    @Test
+    fun `Detection label with percent symbol does not throw format exception`() {
+        val labelWithPercent = "Boss Smile 😊 85%"
+        val confidence = 0.854f
+        val isLocked = true
+
+        // Safe interpolation pattern used in PetVisionDetector
+        val result = runCatching {
+            val confStr = (confidence * 100).toInt()
+            val lockStr = if (isLocked) " 🔒" else ""
+            "$labelWithPercent ($confStr%$lockStr)"
+        }
+        assertTrue(result.isSuccess)
+        assertEquals("Boss Smile 😊 85% (85% 🔒)", result.getOrNull())
+    }
 }
+

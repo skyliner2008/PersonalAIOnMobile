@@ -53,7 +53,8 @@ fun BoundingBoxOverlay(
 
         objects.forEach { obj ->
             val bbox = obj.boundingBox ?: return@forEach
-            val color = parseColor(obj.color).copy(alpha = pulseAlpha)
+            val baseColor = parseColor(obj.color)
+            val color = if (obj.isLocked) baseColor else baseColor.copy(alpha = pulseAlpha)
 
             // วาดกรอบ bounding box
             val left = bbox.x * canvasW
@@ -66,12 +67,12 @@ fun BoundingBoxOverlay(
                 color = color,
                 topLeft = Offset(left, top),
                 size = Size(width, height),
-                style = Stroke(width = 3f)
+                style = Stroke(width = if (obj.isLocked) 3.5f else 2.5f)
             )
 
-            // Corner markers (มุมทั้ง 4 หนาขึ้น)
-            val cornerLen = minOf(width, height) * 0.15f
-            val cornerStroke = Stroke(width = 5f)
+            // Corner markers (มุมทั้ง 4 สไตล์ Sci-Fi HUD)
+            val cornerLen = minOf(width, height) * (if (obj.isLocked) 0.22f else 0.15f)
+            val cornerStroke = Stroke(width = if (obj.isLocked) 6f else 4.5f)
 
             // Top-left corner
             drawLine(color, Offset(left, top), Offset(left + cornerLen, top), cornerStroke.width)
@@ -100,26 +101,38 @@ fun ObjectLabelTags(
     objects: List<DetectedObject>,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val parentW = maxWidth
+        val parentH = maxHeight
         objects.forEach { obj ->
             val bbox = obj.boundingBox ?: return@forEach
             val color = parseColor(obj.color)
 
+            val baseText = if (obj.label.contains("%") || obj.label.contains("Wink")) {
+                obj.label
+            } else {
+                "${obj.label} ${(obj.confidence * 100).toInt()}%"
+            }
+            val tagText = if (obj.isLocked) "🔒 $baseText" else baseText
+
+            // Clamp tag placement: if near top edge, render right below top-border
+            val tagY = if (parentH * bbox.y < 22.dp) {
+                (parentH * bbox.y + 4.dp).coerceAtLeast(0.dp)
+            } else {
+                (parentH * bbox.y - 19.dp).coerceAtLeast(0.dp)
+            }
+            val tagX = (parentW * bbox.x).coerceIn(4.dp, (parentW - 90.dp).coerceAtLeast(4.dp))
+
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(
-                        x = (bbox.x * 1000).dp / 10,   // approximate positioning
-                        y = (bbox.y * 1000).dp / 10
-                    )
+                modifier = Modifier.offset(x = tagX, y = tagY)
             ) {
                 Text(
-                    text = "${obj.label} ${(obj.confidence * 100).toInt()}%",
+                    text = tagText,
                     color = Color.White,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .background(color.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                        .background(color.copy(alpha = if (obj.isLocked) 0.95f else 0.85f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
