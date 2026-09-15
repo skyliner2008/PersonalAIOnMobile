@@ -49,9 +49,8 @@ class DeviceControlTest {
         assertTrue("device_battery_status" in names)
         assertTrue("device_wifi_status" in names)
 
-        // Avatar Emotion & Custom Props
+        // Avatar Emotion (Smart Scenes & Face)
         assertTrue("device_avatar_emotion" in names)
-        assertTrue("device_custom_prop" in names)
 
         // Smart Notifications (Driving Mode)
         assertTrue("device_notification_read" in names)
@@ -70,7 +69,6 @@ class DeviceControlTest {
         assertTrue(ToolRegistry.isDeviceTool("device_read_screen"))
         assertTrue(ToolRegistry.isDeviceTool("device_battery_status"))
         assertTrue(ToolRegistry.isDeviceTool("device_avatar_emotion"))
-        assertTrue(ToolRegistry.isDeviceTool("device_custom_prop"))
         assertTrue(ToolRegistry.isDeviceTool("device_notification_read"))
         assertTrue(ToolRegistry.isDeviceTool("device_notification_reply"))
         assertTrue(ToolRegistry.isDeviceTool("device_location"))
@@ -80,6 +78,7 @@ class DeviceControlTest {
         assertTrue("device_flashlight" in allNames)
         assertTrue("device_navigate" in allNames)
         assertTrue("device_read_screen" in allNames)
+        assertTrue("device_avatar_emotion" in allNames)
 
         // Gemini tool declaration check
         val geminiTool = ToolRegistry.getGeminiTool()
@@ -87,7 +86,7 @@ class DeviceControlTest {
         assertTrue("device_flashlight" in geminiDeclNames)
         assertTrue("device_volume" in geminiDeclNames)
         assertTrue("device_navigate" in geminiDeclNames)
-        assertTrue("device_custom_prop" in geminiDeclNames)
+        assertTrue("device_avatar_emotion" in geminiDeclNames)
 
         // Categories check
         val categories = ToolRegistry.getToolCategories()
@@ -108,7 +107,7 @@ class DeviceControlTest {
                     "device_volume" -> "🔊 เพิ่มเสียงมีเดีย: 10/15"
                     "device_navigate" -> "🗺️ กำลังเปิด Google Maps นำทางไป ${args["destination"]}"
                     "device_read_screen" -> "📱 ตรวจพบ 5 องค์ประกอบบนหน้าจอ"
-                    "device_avatar_emotion" -> "🎭 แสดงเดโม่อารมณ์ 10 แบบแล้ว"
+                    "device_avatar_emotion" -> "🎭 แสดงเดโม่อารมณ์ LOOI Moodset ทั้ง 50 หน้าแล้ว"
                     "device_always_live" -> "🤖 เปิดโหมด Always AI Live (โหมดควบคุม) เรียบร้อยแล้วค่ะ"
                     "device_notification_read" -> "📬 ตรวจพบข้อความล่าสุด 1 รายการ"
                     "device_notification_reply" -> "💬 ส่งข้อความตอบกลับเรียบร้อยแล้วค่ะ"

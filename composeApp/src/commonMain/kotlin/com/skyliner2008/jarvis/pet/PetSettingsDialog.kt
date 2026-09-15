@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.skyliner2008.jarvis.ui.component.avatar.AvatarEngineType
 import com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp
@@ -32,7 +33,7 @@ import com.skyliner2008.jarvis.ui.component.avatar.PropType
 /**
  * PetSettingsDialog — เมนูตั้งค่าระบบสัตว์เลี้ยงครบวงจร
  *
- * 1. แท็บหน้าจอ & ดีบัก: เปิด/ปิด HUD ข้อมูลเซนเซอร์ + ตั้งเวลา Idle Screensaver Trick
+ * 1. แท็บหน้าจอ & ดีบัก: เปิด/ปิด HUD ข้อมูลเซนเซอร์ + ตั้งเวลา Idle Screensaver Trick + เอนจิน Avatar (Canvas / Rive)
  * 2. แท็บจดจำใบหน้า: จัดการ 5 สล็อตใบหน้า (สแกนจำหน้าเจ้านาย, ลบ, แก้ไขชื่อ)
  * 3. แท็บจิตวิทยา & การดูแล: หลอดค่าความต้องการ (อิ่ม, พลัง, สะอาด, สุข, เครียด) + ปุ่มดูแลด่วน
  * 4. แท็บคลังพร็อพ & ธีมฉาก: ตัวอย่างธีมฉากหลัง 8 รูปแบบ + พร็อพ/สติกเกอร์ 54 ชนิด + Dynamic SVG Parser
@@ -43,6 +44,8 @@ fun PetSettingsDialog(
     onDismissRequest: () -> Unit,
     showDebugHud: Boolean,
     onToggleDebugHud: (Boolean) -> Unit,
+    avatarEngineType: AvatarEngineType = AvatarEngineType.COMPOSE_CANVAS,
+    onSelectAvatarEngine: (AvatarEngineType) -> Unit = {},
     screensaverDelaySeconds: Int,
     onSetScreensaverDelay: (Int) -> Unit,
     faceProfiles: List<PetFaceProfile>,
@@ -165,7 +168,9 @@ fun PetSettingsDialog(
                             showDebugHud = showDebugHud,
                             onToggleDebugHud = onToggleDebugHud,
                             screensaverDelaySeconds = screensaverDelaySeconds,
-                            onSetScreensaverDelay = onSetScreensaverDelay
+                            onSetScreensaverDelay = onSetScreensaverDelay,
+                            avatarEngineType = avatarEngineType,
+                            onSelectAvatarEngine = onSelectAvatarEngine
                         )
                         1 -> TabFaceProfiles(
                             faceProfiles = faceProfiles,
@@ -279,9 +284,88 @@ private fun TabDisplayAndScreensaver(
     showDebugHud: Boolean,
     onToggleDebugHud: (Boolean) -> Unit,
     screensaverDelaySeconds: Int,
-    onSetScreensaverDelay: (Int) -> Unit
+    onSetScreensaverDelay: (Int) -> Unit,
+    avatarEngineType: AvatarEngineType = AvatarEngineType.COMPOSE_CANVAS,
+    onSelectAvatarEngine: (AvatarEngineType) -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
+        // Avatar Engine Selector
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFF1E2436),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "เอนจินเรนเดอร์ Avatar (Rendering Engine)",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "เลือกรูปแบบการประมวลผลกราฟิกหุ่นยนต์ AI",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isCanvas = avatarEngineType == AvatarEngineType.COMPOSE_CANVAS
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onSelectAvatarEngine(AvatarEngineType.COMPOSE_CANVAS) },
+                        color = if (isCanvas) Color(0xFF00F0FF).copy(alpha = 0.2f) else Color(0xFF151928),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isCanvas) Color(0xFF00F0FF) else Color.White.copy(alpha = 0.15f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("🎨 Compose Canvas", color = if (isCanvas) Color(0xFF00F0FF) else Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("50 LOOI Moodsets / Zero Binary", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, textAlign = TextAlign.Center)
+                        }
+                    }
+
+                    val isRive = avatarEngineType == AvatarEngineType.RIVE_STATE_MACHINE
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onSelectAvatarEngine(AvatarEngineType.RIVE_STATE_MACHINE) },
+                        color = if (isRive) Color(0xFF00F0FF).copy(alpha = 0.2f) else Color(0xFF151928),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isRive) Color(0xFF00F0FF) else Color.White.copy(alpha = 0.15f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("⚡ Rive (.riv)", color = if (isRive) Color(0xFF00F0FF) else Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("State Machine / 60fps Native", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         // Debug HUD Toggle
         Surface(
             modifier = Modifier.fillMaxWidth(),

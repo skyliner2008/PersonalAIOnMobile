@@ -3,6 +3,7 @@ package com.skyliner2008.jarvis.pet
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.sound.RobotSoundPlayer
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
+import kotlinx.datetime.Clock
 
 /**
  * TouchZone — โซนสัมผัสบนใบหน้า Pet (normalized coordinates)
@@ -111,7 +112,7 @@ class PetStateMachine {
      * บันทึก interaction ใหม่
      */
     fun logInteraction(type: InteractionType, zone: TouchZone = TouchZone.FACE_CENTER) {
-        val entry = InteractionLog(type, zone, System.currentTimeMillis())
+        val entry = InteractionLog(type, zone, kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
         interactionHistory.add(entry)
         if (interactionHistory.size > maxHistorySize) {
             interactionHistory.removeAt(0)
@@ -122,7 +123,7 @@ class PetStateMachine {
      * นับ interaction ชนิดที่กำหนดภายใน window เวลา
      */
     fun countRecentInteractions(type: InteractionType, windowMs: Long): Int {
-        val cutoff = System.currentTimeMillis() - windowMs
+        val cutoff = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - windowMs
         return interactionHistory.count { it.type == type && it.timestamp > cutoff }
     }
 
@@ -330,7 +331,8 @@ class PetStateMachine {
                 statusText = "จิ้มเยอะจังง เขินแล้วน้าา! 😤✨",
                 holoGesture = HoloHandGesture.POKE,
                 soundAction = { RobotSoundPlayer.playConfused() },
-                needsUpdate = { it.interactLove() },
+                // annoyed, so no affection bonus (spamming pokes used to level the bond up)
+                needsUpdate = { it.copy(stress = (it.stress + 3f).coerceIn(0f, 100f)) },
                 durationMs = 2000L
             )
             else -> EmotionTransitionResult(
@@ -450,7 +452,8 @@ class PetStateMachine {
                 emotion = AvatarEmotion.CONFUSED,
                 statusText = "อิ่มแล้วนะฮับ... กินอีกก็ท้องแตกนะ 🤔🍖",
                 soundAction = { RobotSoundPlayer.playConfused() },
-                needsUpdate = { it.feed() },
+                // it refuses: only a nibble, no happiness / affection reward for overfeeding
+                needsUpdate = { it.copy(satiety = (it.satiety + 5f).coerceIn(0f, 100f)) },
                 durationMs = 2500L
             )
             else -> EmotionTransitionResult(
@@ -476,7 +479,7 @@ class PetStateMachine {
                 emotion = AvatarEmotion.POUT,
                 statusText = "สะอาดอยู่แล้วนะ! ไม่ต้องอาบอีกก็ได้น้าา 😤🧼",
                 soundAction = { RobotSoundPlayer.playConfused() },
-                needsUpdate = { it.clean() },
+                needsUpdate = { it.copy(hygiene = 100f, stress = (it.stress + 3f).coerceIn(0f, 100f)) },
                 durationMs = 2500L
             )
             else -> EmotionTransitionResult(
@@ -504,7 +507,7 @@ class PetStateMachine {
                 emotion = AvatarEmotion.CONFUSED,
                 statusText = "หิวอยู่นะ ให้กินก่อนค่อยเล่นได้ป่ะ 🍖🤔",
                 soundAction = { RobotSoundPlayer.playConfused() },
-                needsUpdate = { it.play() },
+                needsUpdate = { it.copy(stress = (it.stress + 3f).coerceIn(0f, 100f)) },
                 durationMs = 2500L
             )
             else -> EmotionTransitionResult(
@@ -652,7 +655,7 @@ class PetStateMachine {
                 soundAction = { RobotSoundPlayer.playSurprise() },
                 needsUpdate = { it.copy(
                     stress = (it.stress + 12f).coerceIn(0f, 100f),
-                    rage = (it.rage + 15f).coerceIn(0f, 100f)
+                    rage = newRage
                 ) },
                 durationMs = 2500L
             )

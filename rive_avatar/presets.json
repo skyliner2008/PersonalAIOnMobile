@@ -1,0 +1,1632 @@
+{
+  "faces": [
+    "Neutral",
+    "Happy",
+    "Angry",
+    "Sleepy",
+    "Curious",
+    "Wink",
+    "Dead",
+    "Laughing",
+    "Evil",
+    "Focused",
+    "Excited",
+    "Shy",
+    "Shock",
+    "Disgusted",
+    "Love",
+    "Crying",
+    "Sad",
+    "Thinking",
+    "Listening",
+    "Confused",
+    "Pout",
+    "Dizzy",
+    "Bored",
+    "Scared",
+    "Tired",
+    "Blank",
+    "Money",
+    "Grin",
+    "Smug",
+    "Determined",
+    "Calm",
+    "Rage",
+    "OneEye",
+    "Recognized",
+    "Starry",
+    "Weepy",
+    "Quizzical",
+    "Fume",
+    "Beam",
+    "Glad",
+    "Bashful",
+    "Fluster",
+    "Haughty"
+  ],
+  "props": [
+    "None",
+    "Zzz",
+    "Question",
+    "Burger",
+    "Beer",
+    "Sparkle",
+    "Headphones",
+    "VR",
+    "Snorkel",
+    "Devil",
+    "Sparkles",
+    "Blush",
+    "Exclaim",
+    "Trash",
+    "Camera",
+    "AngryMark",
+    "Hearts",
+    "Tears",
+    "ThinkDots",
+    "SoundWave",
+    "Questions",
+    "Steam",
+    "DizzyStars",
+    "Sweat",
+    "Shiver",
+    "Medal",
+    "BatteryLow",
+    "Mic",
+    "Sunglasses",
+    "Missiles",
+    "SLTag",
+    "Turrets",
+    "Snore",
+    "HoloPat",
+    "HoloPokeL",
+    "HoloPokeR",
+    "HoloChin",
+    "Bulb",
+    "Bolt",
+    "Barcode",
+    "Gears",
+    "UpdateArrows",
+    "Magnifier",
+    "SignalBars",
+    "PointHand",
+    "FaceBrackets",
+    "Sun",
+    "RainCloud",
+    "AlarmClock",
+    "Calendar",
+    "Clock",
+    "Pencil",
+    "Warning",
+    "Curtains",
+    "BigBattery",
+    "Cracked",
+    "SceneFood",
+    "SceneDrink",
+    "SceneBath",
+    "SceneGame",
+    "SceneStudy",
+    "SceneRain",
+    "SceneThug",
+    "SceneRich",
+    "SceneRoyal",
+    "SceneFire",
+    "SceneThunder",
+    "SceneSoul",
+    "SceneLove",
+    "SceneCry",
+    "SceneParty",
+    "SceneVR",
+    "SceneMusic",
+    "MoodBall",
+    "MoodYoYo",
+    "MoodStars",
+    "MoodShock",
+    "MoodSad",
+    "MoodCurious",
+    "MoodMissile",
+    "MoodFume",
+    "MoodGlitch",
+    "MoodThink",
+    "MoodHappy",
+    "MoodLove",
+    "MoodGlad",
+    "MoodCool",
+    "MoodShy",
+    "MoodEmbarrassed",
+    "MoodShowOff",
+    "MoodListen",
+    "MoodArrogant"
+  ],
+  "bg": [
+    "None",
+    "Grid",
+    "BokehHearts",
+    "ChartUp",
+    "ChartDown",
+    "RedAlert",
+    "GoldGlow",
+    "BurstRays",
+    "ShatterRed",
+    "DeepBlue",
+    "Spotlight"
+  ],
+  "fg": [
+    "None",
+    "Water",
+    "Explosion",
+    "Cracks",
+    "LowerThird",
+    "Confetti",
+    "ArrowUp",
+    "ArrowDown",
+    "RedFlash",
+    "MoneyRain",
+    "Smoke",
+    "BulletHoles"
+  ],
+  "eyeActs": [
+    "Auto",
+    "Squint",
+    "Wide",
+    "Pop",
+    "Twinkle",
+    "Closed",
+    "SlowBlink"
+  ],
+  "seqs": [
+    {
+      "name": "None",
+      "durationMs": 17
+    },
+    {
+      "name": "Normal",
+      "durationMs": 5667
+    },
+    {
+      "name": "Happy",
+      "durationMs": 5667
+    },
+    {
+      "name": "Angry",
+      "durationMs": 9000
+    },
+    {
+      "name": "Sleepy",
+      "durationMs": 8000
+    },
+    {
+      "name": "Curious",
+      "durationMs": 5667
+    },
+    {
+      "name": "Eating",
+      "durationMs": 5667
+    },
+    {
+      "name": "Drinking",
+      "durationMs": 5667
+    },
+    {
+      "name": "Wink",
+      "durationMs": 5667
+    },
+    {
+      "name": "Dead",
+      "durationMs": 5667
+    },
+    {
+      "name": "Laughing",
+      "durationMs": 5667
+    },
+    {
+      "name": "Music",
+      "durationMs": 5667
+    },
+    {
+      "name": "VRMode",
+      "durationMs": 5667
+    },
+    {
+      "name": "Diving",
+      "durationMs": 5667
+    },
+    {
+      "name": "Evil",
+      "durationMs": 5667
+    },
+    {
+      "name": "Focused",
+      "durationMs": 5667
+    },
+    {
+      "name": "Excited",
+      "durationMs": 5667
+    },
+    {
+      "name": "Shy",
+      "durationMs": 5667
+    },
+    {
+      "name": "Shock",
+      "durationMs": 5667
+    },
+    {
+      "name": "Disgusted",
+      "durationMs": 5667
+    },
+    {
+      "name": "CameraMode",
+      "durationMs": 5667
+    },
+    {
+      "name": "Love",
+      "durationMs": 5667
+    },
+    {
+      "name": "Crying",
+      "durationMs": 9333
+    },
+    {
+      "name": "Sad",
+      "durationMs": 5667
+    },
+    {
+      "name": "Thinking",
+      "durationMs": 5667
+    },
+    {
+      "name": "Listening",
+      "durationMs": 5667
+    },
+    {
+      "name": "Confused",
+      "durationMs": 5667
+    },
+    {
+      "name": "Pout",
+      "durationMs": 5667
+    },
+    {
+      "name": "Dizzy",
+      "durationMs": 5667
+    },
+    {
+      "name": "Bored",
+      "durationMs": 5667
+    },
+    {
+      "name": "Scared",
+      "durationMs": 5667
+    },
+    {
+      "name": "Proud",
+      "durationMs": 5667
+    },
+    {
+      "name": "LowBattery",
+      "durationMs": 5667
+    },
+    {
+      "name": "AngryMissile",
+      "durationMs": 8667
+    },
+    {
+      "name": "CryFlood",
+      "durationMs": 10333
+    },
+    {
+      "name": "Interview",
+      "durationMs": 7667
+    },
+    {
+      "name": "MindBlown",
+      "durationMs": 5667
+    },
+    {
+      "name": "DealWithIt",
+      "durationMs": 5667
+    },
+    {
+      "name": "MoneyRain",
+      "durationMs": 5667
+    },
+    {
+      "name": "MarketUp",
+      "durationMs": 5667
+    },
+    {
+      "name": "MarketCrash",
+      "durationMs": 5667
+    },
+    {
+      "name": "PortBlown",
+      "durationMs": 8667
+    },
+    {
+      "name": "StopLoss",
+      "durationMs": 5667
+    },
+    {
+      "name": "Smug",
+      "durationMs": 5667
+    },
+    {
+      "name": "Party",
+      "durationMs": 5667
+    },
+    {
+      "name": "Idea",
+      "durationMs": 5667
+    },
+    {
+      "name": "Disappointed",
+      "durationMs": 5667
+    },
+    {
+      "name": "Pained",
+      "durationMs": 5667
+    },
+    {
+      "name": "Scanning",
+      "durationMs": 5667
+    },
+    {
+      "name": "Processing",
+      "durationMs": 5667
+    },
+    {
+      "name": "Charging",
+      "durationMs": 5667
+    },
+    {
+      "name": "SoftwareUpdate",
+      "durationMs": 5667
+    },
+    {
+      "name": "BatteryEmpty",
+      "durationMs": 5667
+    },
+    {
+      "name": "SignalSearch",
+      "durationMs": 5667
+    },
+    {
+      "name": "Searching",
+      "durationMs": 5667
+    },
+    {
+      "name": "GestureInput",
+      "durationMs": 5667
+    },
+    {
+      "name": "FaceRecognized",
+      "durationMs": 5667
+    },
+    {
+      "name": "WeatherSunny",
+      "durationMs": 5667
+    },
+    {
+      "name": "WeatherRainy",
+      "durationMs": 5667
+    },
+    {
+      "name": "Alarm",
+      "durationMs": 5667
+    },
+    {
+      "name": "Calendar",
+      "durationMs": 5667
+    },
+    {
+      "name": "StandbyClock",
+      "durationMs": 5667
+    },
+    {
+      "name": "DrawingMode",
+      "durationMs": 5667
+    },
+    {
+      "name": "InvalidCommand",
+      "durationMs": 5667
+    },
+    {
+      "name": "SystemSecured",
+      "durationMs": 5667
+    },
+    {
+      "name": "SceneEating",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneDrinking",
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneBath",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneGaming",
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneStudy",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneRain",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneThug",
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneRich",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneRoyal",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneFire",
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneThunder",
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneSoulOut",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneSuperLove",
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneCry",
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneCelebrate",
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneVR",
+      "durationMs": 9000
+    },
+    {
+      "name": "SceneMusic",
+      "durationMs": 8500
+    },
+    {
+      "name": "MoodIdleBall",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodYoYo",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodStars",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShocked",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodSad",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodCurious",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodAngryMissile",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodFuming",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodGlitch",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodThinking",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodHappy",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodInLove",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodGlad",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodAwesome",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShy",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodEmbarrassed",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShowOff",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodListening",
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodArrogant",
+      "durationMs": 7000
+    }
+  ],
+  "states": [
+    {
+      "name": "Off",
+      "durationMs": 17,
+      "pinsFace": false
+    },
+    {
+      "name": "Idle",
+      "durationMs": 8000,
+      "pinsFace": false
+    },
+    {
+      "name": "Ready",
+      "durationMs": 4000,
+      "pinsFace": false
+    },
+    {
+      "name": "Listening",
+      "durationMs": 3333,
+      "pinsFace": true
+    },
+    {
+      "name": "Thinking",
+      "durationMs": 5000,
+      "pinsFace": true
+    },
+    {
+      "name": "Speaking",
+      "durationMs": 2000,
+      "pinsFace": false
+    },
+    {
+      "name": "Detected",
+      "durationMs": 4333,
+      "pinsFace": true
+    },
+    {
+      "name": "Scanning",
+      "durationMs": 4000,
+      "pinsFace": true
+    },
+    {
+      "name": "Standby",
+      "durationMs": 10000,
+      "pinsFace": false
+    },
+    {
+      "name": "WaitCmd",
+      "durationMs": 6000,
+      "pinsFace": true
+    },
+    {
+      "name": "Working",
+      "durationMs": 5000,
+      "pinsFace": true
+    },
+    {
+      "name": "TiltL",
+      "durationMs": 3333,
+      "pinsFace": true
+    },
+    {
+      "name": "TiltR",
+      "durationMs": 3333,
+      "pinsFace": true
+    },
+    {
+      "name": "Dizzy",
+      "durationMs": 4000,
+      "pinsFace": true
+    },
+    {
+      "name": "PlayBounce",
+      "durationMs": 7000,
+      "pinsFace": false
+    },
+    {
+      "name": "PlayChase",
+      "durationMs": 5000,
+      "pinsFace": false
+    },
+    {
+      "name": "PlaySpin",
+      "durationMs": 5000,
+      "pinsFace": false
+    },
+    {
+      "name": "PlayPeek",
+      "durationMs": 5000,
+      "pinsFace": false
+    },
+    {
+      "name": "PlayWiggle",
+      "durationMs": 4000,
+      "pinsFace": false
+    },
+    {
+      "name": "Asleep",
+      "durationMs": 8000,
+      "pinsFace": true
+    }
+  ],
+  "reacts": [
+    {
+      "name": "None",
+      "durationMs": 17
+    },
+    {
+      "name": "HeadPat",
+      "durationMs": 4000
+    },
+    {
+      "name": "PokeL",
+      "durationMs": 3000
+    },
+    {
+      "name": "PokeR",
+      "durationMs": 3000
+    },
+    {
+      "name": "PokeAnnoyed",
+      "durationMs": 3333
+    },
+    {
+      "name": "PokeAngry",
+      "durationMs": 4667
+    },
+    {
+      "name": "ChinScratch",
+      "durationMs": 4333
+    },
+    {
+      "name": "Startled",
+      "durationMs": 3500
+    },
+    {
+      "name": "ShakeAngry",
+      "durationMs": 5500
+    }
+  ],
+  "selfPlay": [
+    14,
+    15,
+    16,
+    17,
+    18
+  ],
+  "presets": [
+    {
+      "name": "Normal",
+      "seq": 1,
+      "face": 0,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Happy",
+      "seq": 2,
+      "face": 1,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Angry",
+      "seq": 3,
+      "face": 2,
+      "prop": 15,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 9000
+    },
+    {
+      "name": "Sleepy",
+      "seq": 4,
+      "face": 3,
+      "prop": 1,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "Curious",
+      "seq": 5,
+      "face": 4,
+      "prop": 2,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Eating",
+      "seq": 6,
+      "face": 0,
+      "prop": 3,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Drinking",
+      "seq": 7,
+      "face": 0,
+      "prop": 4,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Wink",
+      "seq": 8,
+      "face": 5,
+      "prop": 5,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Dead",
+      "seq": 9,
+      "face": 6,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Laughing",
+      "seq": 10,
+      "face": 7,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Music",
+      "seq": 11,
+      "face": 30,
+      "prop": 6,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "VRMode",
+      "seq": 12,
+      "face": 25,
+      "prop": 7,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Diving",
+      "seq": 13,
+      "face": 0,
+      "prop": 8,
+      "bg": 9,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Evil",
+      "seq": 14,
+      "face": 8,
+      "prop": 9,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Focused",
+      "seq": 15,
+      "face": 9,
+      "prop": 0,
+      "bg": 1,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Excited",
+      "seq": 16,
+      "face": 10,
+      "prop": 10,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Shy",
+      "seq": 17,
+      "face": 11,
+      "prop": 11,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Shock",
+      "seq": 18,
+      "face": 12,
+      "prop": 12,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Disgusted",
+      "seq": 19,
+      "face": 13,
+      "prop": 13,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "CameraMode",
+      "seq": 20,
+      "face": 3,
+      "prop": 14,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Love",
+      "seq": 21,
+      "face": 14,
+      "prop": 16,
+      "bg": 2,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Crying",
+      "seq": 22,
+      "face": 15,
+      "prop": 17,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 9333
+    },
+    {
+      "name": "Sad",
+      "seq": 23,
+      "face": 16,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Thinking",
+      "seq": 24,
+      "face": 17,
+      "prop": 18,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Listening",
+      "seq": 25,
+      "face": 18,
+      "prop": 19,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Confused",
+      "seq": 26,
+      "face": 19,
+      "prop": 20,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Pout",
+      "seq": 27,
+      "face": 20,
+      "prop": 21,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Dizzy",
+      "seq": 28,
+      "face": 21,
+      "prop": 22,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Bored",
+      "seq": 29,
+      "face": 22,
+      "prop": 23,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Scared",
+      "seq": 30,
+      "face": 23,
+      "prop": 24,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Proud",
+      "seq": 31,
+      "face": 1,
+      "prop": 25,
+      "bg": 10,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "LowBattery",
+      "seq": 32,
+      "face": 24,
+      "prop": 26,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "AngryMissile",
+      "seq": 33,
+      "face": 31,
+      "prop": 29,
+      "bg": 5,
+      "fg": 2,
+      "durationMs": 8667
+    },
+    {
+      "name": "CryFlood",
+      "seq": 34,
+      "face": 15,
+      "prop": 17,
+      "bg": 9,
+      "fg": 1,
+      "durationMs": 10333
+    },
+    {
+      "name": "Interview",
+      "seq": 35,
+      "face": 10,
+      "prop": 27,
+      "bg": 10,
+      "fg": 4,
+      "durationMs": 7667
+    },
+    {
+      "name": "MindBlown",
+      "seq": 36,
+      "face": 21,
+      "prop": 0,
+      "bg": 7,
+      "fg": 2,
+      "durationMs": 5667
+    },
+    {
+      "name": "DealWithIt",
+      "seq": 37,
+      "face": 25,
+      "prop": 28,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "MoneyRain",
+      "seq": 38,
+      "face": 26,
+      "prop": 0,
+      "bg": 6,
+      "fg": 9,
+      "durationMs": 5667
+    },
+    {
+      "name": "MarketUp",
+      "seq": 39,
+      "face": 10,
+      "prop": 0,
+      "bg": 3,
+      "fg": 6,
+      "durationMs": 5667
+    },
+    {
+      "name": "MarketCrash",
+      "seq": 40,
+      "face": 12,
+      "prop": 0,
+      "bg": 4,
+      "fg": 7,
+      "durationMs": 5667
+    },
+    {
+      "name": "PortBlown",
+      "seq": 41,
+      "face": 6,
+      "prop": 0,
+      "bg": 8,
+      "fg": 3,
+      "durationMs": 8667
+    },
+    {
+      "name": "StopLoss",
+      "seq": 42,
+      "face": 29,
+      "prop": 30,
+      "bg": 4,
+      "fg": 8,
+      "durationMs": 5667
+    },
+    {
+      "name": "Smug",
+      "seq": 43,
+      "face": 28,
+      "prop": 0,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Party",
+      "seq": 44,
+      "face": 7,
+      "prop": 0,
+      "bg": 2,
+      "fg": 5,
+      "durationMs": 5667
+    },
+    {
+      "name": "Idea",
+      "seq": 45,
+      "face": 32,
+      "prop": 37,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Disappointed",
+      "seq": 46,
+      "face": 16,
+      "prop": 55,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Pained",
+      "seq": 47,
+      "face": 7,
+      "prop": 23,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Scanning",
+      "seq": 48,
+      "face": 25,
+      "prop": 39,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Processing",
+      "seq": 49,
+      "face": 25,
+      "prop": 40,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Charging",
+      "seq": 50,
+      "face": 3,
+      "prop": 38,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "SoftwareUpdate",
+      "seq": 51,
+      "face": 25,
+      "prop": 41,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "BatteryEmpty",
+      "seq": 52,
+      "face": 25,
+      "prop": 54,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "SignalSearch",
+      "seq": 53,
+      "face": 25,
+      "prop": 43,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Searching",
+      "seq": 54,
+      "face": 25,
+      "prop": 42,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "GestureInput",
+      "seq": 55,
+      "face": 32,
+      "prop": 44,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "FaceRecognized",
+      "seq": 56,
+      "face": 33,
+      "prop": 45,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "WeatherSunny",
+      "seq": 57,
+      "face": 25,
+      "prop": 46,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "WeatherRainy",
+      "seq": 58,
+      "face": 25,
+      "prop": 47,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Alarm",
+      "seq": 59,
+      "face": 0,
+      "prop": 48,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "Calendar",
+      "seq": 60,
+      "face": 0,
+      "prop": 49,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "StandbyClock",
+      "seq": 61,
+      "face": 25,
+      "prop": 50,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "DrawingMode",
+      "seq": 62,
+      "face": 22,
+      "prop": 51,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "InvalidCommand",
+      "seq": 63,
+      "face": 6,
+      "prop": 52,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "SystemSecured",
+      "seq": 64,
+      "face": 25,
+      "prop": 53,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 5667
+    },
+    {
+      "name": "SceneEating",
+      "seq": 65,
+      "face": 1,
+      "prop": 56,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneDrinking",
+      "seq": 66,
+      "face": 30,
+      "prop": 57,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneBath",
+      "seq": 67,
+      "face": 1,
+      "prop": 58,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneGaming",
+      "seq": 68,
+      "face": 34,
+      "prop": 59,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneStudy",
+      "seq": 69,
+      "face": 9,
+      "prop": 60,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneRain",
+      "seq": 70,
+      "face": 1,
+      "prop": 61,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneThug",
+      "seq": 71,
+      "face": 28,
+      "prop": 62,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneRich",
+      "seq": 72,
+      "face": 26,
+      "prop": 63,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneRoyal",
+      "seq": 73,
+      "face": 28,
+      "prop": 64,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneFire",
+      "seq": 74,
+      "face": 21,
+      "prop": 65,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneThunder",
+      "seq": 75,
+      "face": 21,
+      "prop": 66,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7500
+    },
+    {
+      "name": "SceneSoulOut",
+      "seq": 76,
+      "face": 21,
+      "prop": 67,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneSuperLove",
+      "seq": 77,
+      "face": 14,
+      "prop": 68,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8000
+    },
+    {
+      "name": "SceneCry",
+      "seq": 78,
+      "face": 16,
+      "prop": 69,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneCelebrate",
+      "seq": 79,
+      "face": 1,
+      "prop": 70,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8500
+    },
+    {
+      "name": "SceneVR",
+      "seq": 80,
+      "face": 25,
+      "prop": 71,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 9000
+    },
+    {
+      "name": "SceneMusic",
+      "seq": 81,
+      "face": 1,
+      "prop": 72,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 8500
+    },
+    {
+      "name": "MoodIdleBall",
+      "seq": 82,
+      "face": 3,
+      "prop": 1,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodYoYo",
+      "seq": 83,
+      "face": 1,
+      "prop": 74,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodStars",
+      "seq": 84,
+      "face": 22,
+      "prop": 75,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShocked",
+      "seq": 85,
+      "face": 6,
+      "prop": 76,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodSad",
+      "seq": 86,
+      "face": 35,
+      "prop": 77,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodCurious",
+      "seq": 87,
+      "face": 34,
+      "prop": 78,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodAngryMissile",
+      "seq": 88,
+      "face": 8,
+      "prop": 79,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodFuming",
+      "seq": 89,
+      "face": 31,
+      "prop": 80,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodGlitch",
+      "seq": 90,
+      "face": 31,
+      "prop": 81,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodThinking",
+      "seq": 91,
+      "face": 0,
+      "prop": 82,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodHappy",
+      "seq": 92,
+      "face": 38,
+      "prop": 83,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodInLove",
+      "seq": 93,
+      "face": 14,
+      "prop": 84,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodGlad",
+      "seq": 94,
+      "face": 39,
+      "prop": 85,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodAwesome",
+      "seq": 95,
+      "face": 28,
+      "prop": 86,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShy",
+      "seq": 96,
+      "face": 40,
+      "prop": 87,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodEmbarrassed",
+      "seq": 97,
+      "face": 41,
+      "prop": 88,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodShowOff",
+      "seq": 98,
+      "face": 28,
+      "prop": 89,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodListening",
+      "seq": 99,
+      "face": 1,
+      "prop": 90,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    },
+    {
+      "name": "MoodArrogant",
+      "seq": 100,
+      "face": 3,
+      "prop": 91,
+      "bg": 0,
+      "fg": 0,
+      "durationMs": 7000
+    }
+  ]
+}

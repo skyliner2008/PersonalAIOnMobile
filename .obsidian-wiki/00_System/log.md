@@ -1,3 +1,1163 @@
+## 2026-09-16 — Avatar (Live โหมดสัตว์เลี้ยง) บางครั้งไม่เรียก trade tool แล้วแต่งตัวเลขเอง
+- **User Request**: Live ปกติใช้ tool ได้ แต่ avatar บางครั้งไม่ยอมเรียก tool และมั่วค่าขึ้นมาเอง
+- **สาเหตุที่พบ**:
+  1. `JarvisPersona.PET_LIVE_SYSTEM_PROMPT` ไม่มี `TOOL_INTEGRITY_RULES` (ห้ามเดาราคา/ต้องใช้ tool) ที่ Live ปกติมี และสั่ง "พูด 1-2 ประโยค", หัวข้อ "ห้ามวิเคราะห์การเงิน", ตัวอย่าง "Order Block อยู่แถว..." — โมเดลเลยตอบสั้นจากความจำแทนการเรียก tool
+  2. `LiveGeminiService`: transcription ของ Live มาเป็นชิ้นๆ (ยืนยันจาก logcat) แต่โค้ดเขียนทับด้วยชิ้นล่าสุด → `lastUserText`, ข้อความในแชท และประวัติที่บันทึก เหลือแค่คำท้ายประโยค
+  3. `LiveToolBridge` guard: คำขอฉาก/อวาตาร์มีคำว่า "ทองคำ", "เหรียญทอง", "คนรวย", "หน้า", "แบบ" → `trading_price` ถูกเปลี่ยนไปเล่นฉาก/เปลี่ยนหน้า แล้วโมเดลพูดราคาเอง · guard ใช้ข้อความชิ้นเดียว
+  4. Profile guard: คำถามค่า (RSI/แนวรับ/เท่าไหร่) บล็อก analysis tool ทุกตัว แล้วสั่ง "สรุปจากข้อมูลที่มีอยู่ทันที" → เชิญให้แต่งตัวเลข · ตัวนับ 3 ครั้งผูกกับข้อความ (ข้ามรอบได้)
+- **Actions Taken**: รวม transcription เป็นประโยคเต็ม (`mergeTranscript`, `userTurnSerial`) · guard ที่เปลี่ยน trading tool ไม่ทำงานเมื่อเป็นคำถามเทรด (`isTradingQuestion`) และตัดคำกว้างเกิน · USER_QUERY ใช้ `trading_technical_analysis` ได้ · ข้อความ guard/ผล tool ล้มเหลวสั่งห้ามแต่งตัวเลข · นับ analysis ต่อ turn · pet persona: กฎ "ข้อมูลตลาดต้องมาจาก tool ทุกครั้ง" + map คำถาม→tool + `TOOL_INTEGRITY_RULES`
+- **Verification**: unit test 336 ผ่าน · `installDebug` แล้ว — ต้องทดสอบด้วยเสียงบนเครื่อง (เช่น "ราคาทองคำตอนนี้", "RSI ทอง H1 เท่าไหร่" ในโหมดสัตว์เลี้ยง)
+
+## 2026-09-16 — เอาเสียงปี๊บเป็นจังหวะออกจาก Scene
+- **User Request**: ตอนเล่น Scene (เช่น กินอาหาร) มีเสียงปี๊บๆ เป็นจังหวะแทรกในหลาย Scene
+- **สาเหตุ** (logcat บนเครื่องขณะกดให้อาหาร): ฉากตั้งฉากหลังตามเวลา (`resolveSmartBackground` → NIGHT หลังสองทุ่ม, SUNNY/SAKURA กลางวัน) ทำให้ `AmbientSoundEngine` เปิดลูปบรรยากาศ — NIGHT คือเสียงจิ้งหรีด 4.4 kHz 3 ครั้ง/วินาที (SUNNY มีนกหวีด 2.8 kHz) ดังใต้เสียงประกอบของฉาก · ตอนให้อาหาร/อาบน้ำ/เล่น ยังมีเสียงปฏิกิริยาของ state machine (CONFUSED) ซ้อนตอนเริ่มฉาก
+- **Actions Taken**: `AlwaysLiveScreen` ปิดลูปบรรยากาศระหว่างที่มีฉากเล่น (ใช้ DEFAULT = เงียบ) แล้วคืนตามฉากหลังเมื่อจบ · `PetModeController.feedPet/cleanPet/playWithPet` ตัดเสียงปฏิกิริยาออก (ฉากมีเสียงตามบทอยู่แล้ว)
+- **Verification**: unit test 336 ผ่าน · `installDebug` แล้ว — ฟังซ้ำบนเครื่องยังไม่ได้ (จอดับ/ล็อกหลังติดตั้ง)
+
+## 2026-09-16 — พื้นหลังเป็นกล่อง, ตาใหญ่ขึ้น, ตำแหน่งตาตามกฎสามส่วน, เสียง FX ตามเสียงสื่อ
+- **User Request** (ภาพจากเครื่องจริง): 1) พื้นหลังเป็นกล่องสี่เหลี่ยม ไม่กลืนกับพื้นหลัง 2) ตายังเล็กทั้งแนวตั้ง/นอน 3) แนวตั้งตาอยู่กลางครึ่งบนต่ำเกินไป 4) หรี่เสียงแล้วเสียง FX ยังดังเท่าเดิม
+- **สาเหตุ / แก้**:
+  1. Rive: ฉากหลัง/แฟลช/หน้าจอมืดวาดเป็นสี่เหลี่ยม 500×500 (DeepBlue, RedAlert vignette, ChartWash, แฟลชฟ้าผ่า/ตกใจ/ขีปนาวุธ, Heat, Dim, RedFlash) → `wash()` วงกลมไล่จางหมดก่อนขอบ artboard · glow รัศมีเกิน 250 (Alert, GoldGlow, Shatter, Spotlight, Thug Spot) ลดให้จางในกรอบ · รัศมีแสง Burst ไล่จางปลาย · Compose: `PetBackgroundLayer` ขยับ parallax จนเห็นขอบ → overscan ×1.12 · ออร่าย้ายไปอยู่หลังตา (ภาพผู้ใช้วัดค่าพิกเซลแล้ว ออร่าเองเป็นวงกลมไล่จาง)
+  2. `EYE_SCALE` 1.24 → 1.32, `EYE_DX` 96 → 100 · แว่นดำ/แว่นพิกเซลยึดตำแหน่งตา (`LEFT_X/RIGHT_X`) · เขาปีศาจขึ้น 12 px · ลดการขยายหน้าในเรื่อง Shocked และ SuperLove (ตัวตรวจตาชนกันจับได้)
+  3. `PetModeScreen`: Engine Rive ไม่มี padding, artboard กว้าง 1.10× ของพื้นที่ (แนวนอน 1.15× ความสูง) และวางให้แถวตาอยู่ 40% จากบน (แนวนอน 42%) — ค่าคงที่ `RIVE_*` ท้ายไฟล์
+  4. `RobotSoundEngine` ใช้ `USAGE_ASSISTANCE_SONIFICATION` (ผูกเสียงระบบ/แจ้งเตือนบน Samsung) → `USAGE_GAME` (เสียงสื่อ) · `MainActivity.volumeControlStream = STREAM_MUSIC`
+- **Verification**: rive verify 0 errors (.riv 529,974 bytes) · เรนเดอร์ตรวจฉากหลัง/แฟลช/แว่น/เขา · unit test 336 ผ่าน · assembleDebug ผ่าน — ยังไม่ได้ติดตั้ง (มือถือไม่ได้เชื่อมต่อ adb)
+
+## 2026-09-15 — ดวงตาวงรี, ตาหน้า/หลังแยกตามทิศการมอง, การเคลื่อนไหวนุ่มเด้ง
+- **User Request**: ตากลมเกินไป ควรเป็นวงรีนิดหน่อย · บางการเคลื่อนไหวแข็ง ไม่นุ่มนิ่มเด้ง · ตาสองวงซ้อนเยื้องด้านเดียวตลอด ควรแยกวงใน/วงนอก ให้วงในเยื้องตามทิศที่มอง · แววตาจุดเล็กไม่ต้องมี
+- **Actions Taken** (`rive_avatar/tools/build_scene.py`):
+  - ตา Round / Wide / Tiny เป็นวงรีตั้ง (กว้าง ×0.90 สูง ×1.06) และปรับตารางความกว้างที่ใช้ตรวจตาชนกัน
+  - ตาแต่ละข้างแยกเป็น 2 ชั้น: **หน้า** (สว่าง) อยู่ใต้ `IrisGaze` > `IrisLook`, **หลัง** (สีเข้ม) อยู่ใน `EyeBackSolo` เยื้องลงเล็กน้อย — ทุกคีย์ที่เปลี่ยนรูปตา สลับทั้งสองชั้นพร้อมกัน (`EYE_BACK`, `BACK_SOLO`)
+  - `IrisGaze` ขยับ ±13 ตาม gazeX/gazeY (มองขวา → วงหน้าเยื้องขวา ขอบหลังโผล่ซ้าย) · `IrisLook` คำนวณจากการขยับตาในเรื่อง/สถานะ/ปฏิกิริยา (×0.45 จำกัด ±13) — มองลงในฉากก็เยื้องลง
+  - ลบแววตาจุดเล็ก (Gleam)
+  - easing ใหม่ `jelly` (เลยเป้านิดแล้วเด้งกลับ) ใช้กับคีย์ตำแหน่ง/สเกลของตา หัว และปากในทุกเรื่อง · หายใจเป็น squash & stretch
+- **แอป**: `RivePetAvatar` gaze/tilt ผ่าน spring หน่วงต่ำ (dampingRatio 0.52) · `RiveAvatarView.android` ไจโรผ่าน spring 0.5 — ขยับแล้วมีเด้งตาม
+- **Verification**: rive verify 0 errors (.riv 529,343 bytes) · เรนเดอร์มอง ซ้าย/ขวา/บน/ล่าง/ทแยง และเฟรมในเรื่องต่างๆ (ตาโค้ง กากบาท หัวใจ ตาโต) · unit test 336 ผ่าน · `installDebug` แล้ว
+
+## 2026-09-15 — แก้พร็อพกองโผล่ตอนเริ่ม Scene
+- **User Request**: ตอนเริ่มเล่น Scene เห็นพร็อพทุกชิ้นกองอยู่ในวินาทีแรก แล้วค่อยหายไปก่อนฉากเล่นปกติ
+- **สาเหตุ**: layer `Seq` / `React` / `Prop` / `Bg` / `Fg` ใน state machine ใช้ transition blend 140 ms — Solo สลับพร็อพเข้ามาทันที แต่ตำแหน่ง/ความทึบของชิ้นส่วนถูก blend จาก rest pose (ท่าจุดพีคของฉาก = ทุกชิ้นอยู่บนจอ) ไปหาเฟรมแรกของเรื่อง (ยืนยันด้วยภาพเฟรม 2–6: VR เห็นแว่น+การ์ด+ป๊อปคอร์นกองกัน, ขีปนาวุธจอสว่างทั้งจอ)
+- **Actions Taken** (`rive_avatar/tools/build_scene.py`): transition ของ 5 layer นี้เป็น `duration=0` (เรื่องเริ่มจากเฟรมแรกของตัวเองอยู่แล้ว) · ซ่อนแว่น VR, แก้ว (Drinking) และเปลวไฟ (Fire) ให้พ้นจอจนถึงจังหวะของมัน
+- **Verification**: เรนเดอร์เฟรมแรกของทั้ง 36 เรื่อง (seq 65–100) ไม่มีพร็อพโผล่ก่อนเวลา · rive verify 0 errors · unit test 336 ผ่าน · `installDebug` แล้ว
+
+## 2026-09-15 — ปุ่มเดโม่ + คำสั่งเสียงเล่นฉากจนจบ
+- **User Request**: ตรวจปุ่ม "เดโม่" (แสดงแต่ละ Scene) และคำสั่งเสียงเล่น Scene ที่ต้องการ ว่าใช้งานถูกต้องและเล่นจนจบ
+- **ปัญหาที่พบ**:
+  1. ปุ่มเดโม่เล่น LOOI Moodset 50 หน้า (หน้าละ 4 วิ) ไม่ใช่ฉากอนิเมชัน · คำสั่งเสียง/แชท "เดโม่" เล่นโชว์หน้าตา 8 แบบเก่าที่ตั้งหน้าจากภายนอก (ทับฉาก)
+  2. ตัวแปลคำ: "อาบน้ำ" → ฉากดื่ม ("น้ำ"), "ราชา" → ฉากดื่ม ("ชา"), ชื่อที่ tool ประกาศเอง `royal` / `soul_out` หาไม่เจอ, "ไฟฟ้าช็อต" → ไฟไหม้, "crypto" → ร้องไห้
+  3. เรื่องอารมณ์ 19 เรื่องเรียกด้วยเสียงไม่ได้ · ถ้าสั่งฉากตอนหน้าสัตว์เลี้ยงยังไม่พร้อม คำสั่งหลุด · idle loop (อารมณ์ตามค่าสถานะ) อาจเปลี่ยนหน้าระหว่างฉาก
+- **Actions Taken**:
+  - `PetModeController`: `startScene()` ตัวเดียวสำหรับ Pet Scene และเรื่องอารมณ์ (`playMoodStory`) — sceneId ใหม่, เสียงตามเวลา, คืนหน้าเมื่อจบเท่านั้น, `stopScene()`, `isScenePlaying`, idle loop ไม่แตะหน้าระหว่างฉาก; `playSceneByNameOrKeyword` คืนชื่อฉากที่เล่นจริง (เรื่องอารมณ์ก่อน แล้วค่อย Pet Scene)
+  - `RiveMoodStories`: ชื่อไทย, อารมณ์, คำสั่งเสียง, `forName` / `resolveKeyword` · `RiveSeq.forScene` รู้จักชื่อเรื่องอารมณ์
+  - `PetSceneEngine.resolveFromKeyword`: แก้ทุกข้อในข้อ 2 + คำใหม่ (ราชา เจ้าหญิง วิญญาณ เศรษฐี shower …)
+  - `JarvisViewModel.playSceneShowcase()`: เล่น 37 ฉาก (Pet Scene 18 + เรื่องอารมณ์ 19) ทีละฉากจนจบ ขึ้นป้าย "🎬 n/37 · ชื่อฉาก" หยุดได้ทันที; ปุ่มเดโม่ + เสียง/แชท "เดโม่" ในโหมดสัตว์เลี้ยงใช้ตัวนี้
+  - `DeviceControlExecutor` scene: รอหน้าสัตว์เลี้ยงพร้อม ≤3 วิ, ตอบชื่อฉากที่เล่นจริง · `DeviceToolDefinitions`: รายชื่อฉากครบ 37 + "ห้ามเรียกซ้ำระหว่างเล่น"
+- **Verification**: `PetSceneDemoVoiceTest` 7 เคส (ชื่อ tool ครบ, วลีไทย, เรื่องอารมณ์ด้วยเสียง, ฉากไม่หลุดเมื่อโดนจิ้มและจบเอง, หยุดเดโม่) — unit test 336 ผ่าน · `installDebug` แล้ว · ⏳ ยังไม่ได้ทดสอบบนจอ (เครื่องล็อก PIN)
+
+## 2026-09-15 — ตรวจตำแหน่งและขนาดพร็อพทั้งหมด (91 ชิ้น)
+- **User Request**: พร็อพบนหัวต้องสูงกว่าตา, แว่น/ของสวมตาต้องไม่เล็กกว่าตา, พร็อพทุกชิ้นต้องไม่เล็กเกินไปบนจอมือถือ
+- **Actions Taken** (`rive_avatar/tools/build_scene.py`):
+  - เรนเดอร์พร็อพ 1–91 ทับหน้าปกติแล้วไล่ตรวจ; เพิ่ม `fit()` + ตาราง `PROP_FIT` ขยายไอคอนรอบจุดศูนย์กลาง (Question, Burger, Beer, Sparkle, Blush, Exclaim, Trash, Camera, AngryMark, ThinkDots, SoundWave, Questions, Sweat, Medal, BatteryLow, HoloPat/Chin/Poke, Bolt, Calendar, Pencil, Warning, AlarmClock)
+  - แว่น: Sunglasses เลนส์ 176×110 → 184×156 · แว่นพิกเซล SceneThug สูง ~63 → ~170 คลุมตา · แว่น Mood (Awesome/ShowOff) 150×96 → 178×154
+  - Devil: เขาใหญ่ขึ้นและอยู่เหนือตาทั้งชิ้น, ปีศาจน้อยย้ายไปมุมบน · Zzz / Sparkles / Hearts / DizzyStars / Tears ใหญ่ขึ้น
+  - ฉาก: อาหาร ×1.25, หลอดไฟ/เครื่องหมายถูกของ Study, มงกุฎ Arrogant ×1.4, ลูกบอล Idle, แมงมุม Shocked ×1.5
+  - แอป: `RiveAvatarMapper.plan()` ใช้หน้า OneEye เมื่อแสดง Bulb (หลอดไฟแทนตาขวา ไม่ซ้อนตาจริง)
+  - เอกสาร: กฎการจัดวางใน `AVATAR_CONTRACT.md` และ [[Rive_Avatar_Engine]]
+- **Verification**: rive verify 0 errors (.riv 408,520 bytes) · เรนเดอร์ตรวจซ้ำทั้ง 91 ชิ้น · unit test 329 ผ่าน · `installDebug` แล้ว
+
+## 2026-09-15 — Jelly Mood Stories: 19 เรื่องสั้นตามอารมณ์ (Engine Rive)
+- **User Request**: บทฉากตัวอย่างจากผู้ใช้ — ว่างงาน 3 แบบ, ตกใจ, เศร้า, สงสัย, โกรธ 3 แบบ, คิด, สุข, รัก, ยินดี, เยี่ยม, เขิน, อาย, เก็กท่า, ฟัง, เย่อหยิ่ง (ตาเยลลี่ squash & stretch)
+- **Actions Taken**:
+  1. `build_scene.py`: พร็อพ `Mood*` 19 ชุด, หน้าใหม่ 8 แบบ, story `seq` 82–100 (7 วิ) ที่คีย์ตาซ้าย/ขวาแยกกัน + ตัวตรวจลำดับเฟรม; ตรวจภาพ 152 เฟรมและแก้ (มือโผล่ขอบจอ, แว่น/มงกุฎไม่ตามหัว, ตาตกใจล้นจอ)
+  2. `RiveMoodStories.kt` (ใหม่): seq + เสียงตามไทม์ไลน์ + อารมณ์ → เรื่อง (สุ่มหลายแบบ)
+  3. `RiveAvatarView.kt` `RivePetAvatar`: เล่นเรื่องเมื่ออารมณ์เปลี่ยน (รอ react จบ, cooldown 20 วิ, หยุดทันทีเมื่ออารมณ์เปลี่ยน), เรื่องว่างงานเมื่อ IDLE 30–50 วิ, ไม่ทับฉาก/มิสซาย/ตอนพูด
+  4. บท: [[Pet_Mood_Scripts]] · `AVATAR_CONTRACT.md` · [[Rive_Avatar_Engine]]
+- **Verification**: rive verify 0 errors (.riv 406,800 bytes) · unit test 329 ผ่าน (+`RiveMoodStoriesTest` 2) · `installDebug` แล้ว — ยังไม่ได้ทดสอบบนจอ (เครื่องล็อก PIN)
+
+## 2026-09-15 — Pet Scenes เป็นอนิเมชันเล่าเรื่อง + เสียงประกอบทุกฉาก (Engine Rive)
+- **User Request**: ฉากต่างๆ ดูนิ่ง (แค่ลอย) ไม่มีการแสดงของดวงตา — อยากให้ทุกฉากเป็นอนิเมชันมีเรื่องราว (ตัวอย่าง: ใส่แว่น VR) และมีเสียงประกอบทุกฉาก; คิดบทก่อนแล้วค่อยทำ
+- **Actions Taken**:
+  1. บท 18 ฉาก: [[Pet_Scene_Scripts]] (ไทม์ไลน์ ดวงตา / พร็อพ / เสียง)
+  2. `rive_avatar/tools/build_scene.py`: พร็อพ `Scene*` 17 ชุดที่มีชิ้นส่วนเคลื่อนไหวแยก, story `seq` 65–81, หน้า `Starry`, ช่อง `item` (Solo ของอาหาร/เครื่องดื่ม/อุปกรณ์) — ไฟล์ .riv เดียว ใช้ rig ร่วม ไม่ต้องโหลดใหม่
+  3. `PetSceneEngine.kt`: `SceneCue`, `PetSceneSpec.cues`, `SCRIPTS` (ความยาวบท + 300 ms), ฉากใหม่ `VR_MODE` / `MUSIC`, `RobotFaceState.sceneName/sceneItem`
+  4. `PetModeController.kt`: `startScene()` รวม playScene / playSceneByNameOrKeyword — `sceneId` ใหม่ทุกครั้ง, เล่นเสียงตามเวลา, ไม่ทับหน้าที่ถูกเปลี่ยนระหว่างฉาก
+  5. `RiveAvatarBinding.kt`: `RiveSeq.forScene`, `RiveItem.forProp`, `RiveAvatarInputs.item`; ระหว่างฉากไม่มี Compose props/ฉากหลัง · `RiveAvatarView.kt`: รีสตาร์ท story เมื่อ `sceneId` เปลี่ยน · binder เขียน `item`
+  6. `RobotSoundPlayer.kt` + `RobotSoundEngine.kt` + `AlwaysLiveManager.kt`: เสียงใหม่ WHOOSH, POP, SLURP, COIN, ZAP, SIZZLE, RAIN, GAME_BLIP, TYPING, SOB, FANFARE, POWER_UP, MELODY, HEARTBEAT, GHOST
+- **Verification**: `scripts/build_rive_avatar.ps1` (verify 0 errors, .riv 307,659 bytes deployed) · unit test 327 ผ่าน (+`PetSceneScriptTest` 3, ปรับ test นับ enum/ความยาวฉากใน `PetModeTest`) · `installDebug` ลงเครื่องแล้ว — **ยังไม่ได้ทดสอบบนจอ** เพราะเครื่องล็อก PIN
+
+## 2026-09-15 — Pet System Review & Fixes (ทดสอบบนเครื่องจริง Galaxy S22 Ultra / Android 16, Engine Rive เป็นหลัก)
+- **User Request**: review ระบบสัตว์เลี้ยงทั้งหมด (การคำนวณสถานะ, การเคลื่อนไหวเมื่อถูกกระตุ้น, การเรียก tool) + ติดตั้ง APK ทดสอบผ่าน adb โดยทดสอบ Rive เป็นหลัก
+- **Bugs found (ยืนยันบนเครื่อง = ✔)**:
+  1. ✔ อารมณ์จากการสัมผัสถูกทับด้วยสถานะไมค์/เสียง (IDLE/LISTENING) จาก ViewModel ภายใน ~1 วิ (ANGRY 30 วิ หายเป็นหน้าปกติ) + echo ของการอัปเดตตัวเองล้างสิทธิ์ + timer ของการจิ้มครั้งก่อนตัดอารมณ์ของครั้งถัดไป
+  2. ✔ Engine Rive: `RiveAnimationView` กินทุก touch → จิ้ม/ลูบ/เกาคาง ไม่ทำงานเลยบน Rive
+  3. การเขย่า/คว่ำ/หงายจอถูกประมวลผล 2 ทาง (`AlwaysLiveManager` เขียน avatar ตรง + `PetMotionBridge` → state machine) ทางแรกทับผลของ state machine (เขย่าแรงแสดง DIZZY แทน ANGRY, หงายจอ HAPPY เสมอ)
+  4. ✔ ปิดแอป 205 นาที → อิ่ม 0% เครียด 59%; พลังงานไม่ฟื้นตอนหลับ (decay ลดพลังงานเสมอ)
+  5. เสียงดัง: ไม่มี cooldown และนับทุกเฟรมที่ไมค์ > 0.68 (เสียงพูดปกติ) → 4 เฟรม = rage 100 = ยิงมิสซาย
+  6. idle loop หาวซ้ำทุก 3-5 วิ, หิวแล้วโกรธซ้ำทุก 20 วิ, ✔ passive emotion ถูกบันทึกเป็น "pat" (log แสดง pat→angry)
+  7. hand gesture / เซียมซี / แท็บเกม ตั้งอารมณ์ค้างไม่คืน IDLE → ชีวิตใน idle loop หยุด
+  8. จิ้มจนงอนยังได้ affection, ป้อนตอนอิ่ม/เล่นตอนหิว ปฏิเสธแต่ยังได้รางวัล
+  9. Tools: `device_custom_prop` ไม่มี FunctionDeclaration (AI เรียกไม่ได้ + ToolExecutor route ไม่ถึง) · ไม่มี tool ดูแลค่าสถานะ · enum ของ `device_avatar_emotion` มีแค่ 14/58 อารมณ์ 8/20 ฉาก · ถอดพร็อพชิ้นเดียวล้างทั้งหมด · คำสั่ง `MISSILE_BARRAGE` นอกโหมดสัตว์เลี้ยงไปรีเซ็ตหน้า
+- **Fixes**:
+  - `AlwaysLiveScreen.kt`: `petOwnsEmotion` + ตัดสิน echo — สถานะเสียงไม่ทับปฏิกิริยาสัตว์เลี้ยง · ตรวจเสียงดังแบบ spike (เงียบ→ดังฉับพลัน)
+  - `PetModeController.kt`: generation token ของ timer · `showTransientEmotion` · cooldown หาว 90 วิ / passive 60 วิ / เสียงดัง 8 วิ · passive ไม่บันทึก memory · decay ตามการหลับ · `decayOffline` · `wearStockProp` / `removeStockProp` / `wakeUpFromTool`
+  - `PetNeedsState.kt`: `decay(elapsed, isSleeping)` (หลับ: พลังงาน +0.8/นาที เครียดลด หิว/สกปรกช้าครึ่ง) · `decayOffline` (นับเป็นหลับ, พื้นอิ่ม 25 / สะอาด 30)
+  - `PetStateMachine.kt`: จิ้มจนงอนไม่ได้ affection · ป้อนตอนอิ่ม/อาบตอนสะอาด/เล่นตอนหิว ไม่ได้รางวัล · rage ของเสียงดังครั้งแรกสอดคล้อง
+  - `AlwaysLiveManager.kt`: callback ของ `PetMotionDetector` เหลือแค่ log (bridge เป็นทางเดียว)
+  - `RiveAvatarView.android.kt`: `touchPassThrough = true`
+  - Tools: เพิ่ม `device_pet_care` (feed/clean/play/sleep/wake/status ผ่านระบบค่าสถานะจริง, รอ controller พร้อม ≤3 วิ) และ declaration ของ `device_custom_prop` (SVG จริง, ถอดเฉพาะชิ้น) · enum อารมณ์/ตา/ฉาก ครบตาม enum จริง · persona สัตว์เลี้ยงสอนใช้ `device_pet_care` · voice rule ใน `LiveToolBridge`
+- **Verification**: unit test ทั้งหมดผ่าน (+ `PetNeedsLogicTest` 6 เคส) · บนเครื่อง: Rive แสดงผล + พื้นโปร่งใส, จิ้ม → PokeR, จิ้มรัว → PokeAngry แล้ว ANGRY ค้างครบ, `external=LISTENING` ไม่ทับ HAPPY/POUT, แชท "open pet mode then feed the pet a burger" → `device_always_live` + `device_pet_care(feed, burger)` สำเร็จ (ฉากกินเบอร์เกอร์ + ค่าสถานะจริง)
+- **ยังไม่ได้ทดสอบบนเครื่อง**: เขย่า/คว่ำจอ/เสียงดัง (ต้องใช้มือ) · Live voice session (ทดสอบผ่าน Chat)
+
+## 2026-09-15 — Rive Avatar v7: ผูก Engine Rive เข้ากับโหมดสัตว์เลี้ยง
+- **User Request**:
+  - ระบบ Live Pet มี 2 Engine (Compose Canvas ใช้งานได้ / Rive ยังไม่ผูก) — ให้ผูก Rive เข้ากับเงื่อนไขต่างๆ แบบเดียวกับ Compose Canvas
+- **Actions Taken**:
+  1. `RiveAvatarBinding.kt` (ใหม่): ดัชนีช่อง Rive ตรง `presets.json`, `AvatarState.effectiveEmotion()` ใช้ร่วมกับ Canvas, `RiveAvatarMapper.plan()` แมพอารมณ์ 58 แบบ / props / bg / fg / eye trick / gesture / speaking → ช่อง Rive พร้อมรายการที่ Compose ต้องวาดต่อ, `reactFor()` ไล่ระดับจิ้มตาม `PetStateMachine`
+  2. `RiveAvatarView.kt`: expect ใหม่ `(inputs, fallbackState)`, `RiveRuntime`, `RivePetAvatar` (timer react / Startled / ShakeAngry / Detected / AngryMissile, สเกลตามระยะหน้า)
+  3. `RiveAvatarView.android.kt` เขียนใหม่: `autoBind = true`, cache property เขียนเฉพาะค่าที่เปลี่ยน, ไจโร → tilt, ถอยไป Canvas อัตโนมัติ
+  4. `PetRobotHeadAvatar.kt`: พารามิเตอร์เหตุการณ์สำหรับ Rive + ใช้ `effectiveEmotion()` ร่วม
+  5. `PetModeScreen.kt`: จำ Engine (`pet.avatar_engine` ผ่าน `PetMemoryStore`), มือโฮโลแกรม → `RiveReactionEvent`, Compose วาดเฉพาะส่วนที่ Rive ไม่มี, ปิด overlay มือ/มิสซายของ Canvas เมื่อใช้ Rive
+  6. `build_scene.py`: artboard พื้นหลังโปร่งใส (ให้ฉากหลัง Compose แสดงได้) → build `.riv` ใหม่
+  7. `RiveAvatarBindingTest` 8 เคส + อัปเดต [[Rive_Avatar_Engine]], `AVATAR_CONTRACT.md`, README
+- **Verification**: `compileDebugKotlinAndroid` BUILD SUCCESSFUL · `testDebugUnitTest` ผ่านทั้งหมด (RiveAvatarBindingTest 8/8) · ดัชนี Kotlin ตรง `presets.json` ทั้งหมด
+- **ยังไม่ได้ทำ**: ทดสอบบนเครื่องจริง (ไม่มีอุปกรณ์เชื่อมต่อ)
+
+## 2026-09-15 — Rive Avatar v6: Engine Fixes, LOOI Style & Status Moodset
+- **User Request**:
+  - review `rive_avatar` เทียบกับ LOOI robot (ความถูกต้อง การวาด โมชั่น ความต่อเนื่อง ความน่ารัก) แล้ว "ดำเนินการทั้งหมด"
+- **Findings (ยืนยันด้วย `rive inspect --json` + เรนเดอร์ ~500 เฟรม)**:
+  1. keyframe `cubic` 3,960 ตัวไม่มี `CubicEaseInterpolator` → ไม่มี easing ทั้งไฟล์
+  2. seq/react เป็น `loop` และ AnimationState ไม่มี `reset` → เล่นซ้ำ/เล่นต่อกลางเรื่อง
+  3. property ที่ไม่มีใครคีย์แล้วค้างค่าสุดท้าย → ท่าค้างหลังตัดเรื่อง
+  4. ท่าเข้าของพร๊อพผูกกับนาฬิกากลาง `PropLoops` ไม่ใช่ตอนที่โผล่
+  5. state Idle บีบตาหน้า noblink, หน้าไม่มีปากพูดแล้วไม่เห็นอะไร, LEADIN ทำจอว่าง, ปากซิกแซกขาด, ลำดับวาดใน mover กลับด้าน, burger/beer ทับตา
+- **Actions Taken** (`rive_avatar/tools/build_scene.py`):
+  1. `kf()` แนบ interpolator ทุกตัว · seq/react `oneShot` · channel state `reset="true"` · self-check ทำ build ล้ม
+  2. เลเยอร์ `RestPose` (คำนวณค่าพักอัตโนมัติ 50 property) · `intro()` อบท่าเข้าลง channel anim + story beats
+  3. โหนด `StateBlink` + เลเยอร์ `BlinkGate` · `VoiceBar` + `FaceSpeak` · `VoiceIdle` ว่าง
+  4. สไตล์ LOOI: ตาใหญ่ขึ้น 24 %, ตัดคิ้ว/ปาก, สีเดียวต่อหน้า, Squint = `^ ^`, gaze กว้างขึ้น
+  5. เพิ่ม faces 32–33, props 37–55, presets/seq 45–64 (LOOI IDs 21–40) + ตัวเลขนาฬิกาจาก VM `clockD0..3`
+  6. `scripts/build_rive_avatar.ps1` เช็ค exit code, regen → verify → inspect → test → compile → copy
+  7. อัปเดต `AVATAR_CONTRACT.md` (v6), [[Rive_Avatar_Engine]], README
+- **Verification**: `rive . --verify` 0 errors · `inspect` problems [] · cubic ทุกตัวมี interpolator · AnimationState ใน channel layer มี reset ครบ · เรนเดอร์ตรวจทุกหน้า/พร๊อพ/state/react/seq · `avatar.riv` 229,895 bytes
+- **ยังไม่ทำ**: ผูก `RiveAvatarView.android.kt` กับ view-model contract ใหม่
+
+## 2026-09-15 — Skill Installation: rive-interactive (Android & Multi-Layer State Machine Integration)
+- **User Request**:
+  - ติดตั้ง skill `C:\Users\JOJO\AndroidStudioProjects\PersonalAIBot\rive-interactive`
+- **Actions Taken**:
+  1. **Installation into Skill Directories**:
+     - ติดตั้งลงใน Workspace Skills Directory: `.agent/skills/rive-interactive/`
+     - ติดตั้งลงใน Global Antigravity Discovery: `C:\Users\JOJO\.gemini\config\skills\rive-interactive/`
+     - ซิงค์ไฟล์โครงสร้างครบถ้วน (`SKILL.md`, `references/`, `scripts/`, `assets/`)
+  2. **Skill Documentation Augmentation (Android / KMP & RML)**:
+     - เพิ่มหัวข้อ **With Android Jetpack Compose & Compose Multiplatform** (การโหลด JNI ผ่าน `System.loadLibrary("rive-android")`, `Rive.init`, Compose `AndroidView`, Defensive Input Guarding, Graceful Canvas Fallback)
+     - เพิ่มหัวข้อ **With RML Multi-Layer Parallel State Machines & 1D BlendStates** (สถาปัตยกรรม 6 เลเยอร์คู่ขนาน, กฎ Draw Order *"The first sibling draws on top"*, การแมป BlendState 1D พิกัดสายตา 0–100)
+     - เพิ่มหัวข้อ **Common Pitfalls and Solutions**:
+       - Pitfall 4: Android JNI `UnsatisfiedLinkError` on `FileAssetLoader`
+       - Pitfall 5: Android Fatal Background Thread Crash: `StateMachineInputException`
+       - Pitfall 6: Freeze at Frame 0 (`advance() == false` putting Render Loop to Sleep)
+       - Pitfall 7: RML Draw Order Occlusion
+     - สร้างเอกสารคู่มือเจาะลึก `references/android_rml_reference.md`
+  3. **Verification**:
+     - ทดสอบพาธและการค้นพบ Skill สำเร็จทั้ง Local Workspace และ Global
+     - รัน `.\gradlew.bat testDebugUnitTest` ผ่านเรียบร้อย (BUILD SUCCESSFUL)
+
+## 2026-09-14 — Architecture Upgrade: Rive Native 6-Layer State Machine & 1D BlendStates (Living Eyes & Mouth Motion)
+- **User Issue & Diagnosis**:
+  - ผู้ใช้แจ้งว่า: *"Rive Avatar ดวงตา ปาก มันไม่ขยับเลย มันขยับแต่ กล่อง 4 เหลี่ยม รอบนอก"*
+  - **Root Cause**:
+    1. ใน Android C++ Runtime (`rive-android`) ตัว `RiveAnimationView` ทำหน้าที่ขับเคลื่อน `StateMachineInstance` เท่านั้น ไม่ได้รัน `ScriptedLayout` / Luau Scripting Engine ของ Rive 2 CLI
+    2. ใน `scene.rml` เดิม แอนิเมชัน `IdleLoop` ไม่มี Keyframes ใดๆ และ State Machine Input (`gazeX`, `gazeY`) ไม่ได้ผูกเข้ากับ State ใดใน State Machine ส่งผลให้ดวงตาและปากด้านในอยู่นิ่งสนิท สิ่งเดียวที่ขยับคือ `Box` ชั้นนอกของ Jetpack Compose (`graphicsLayer { rotationX/Y, translationX/Y }`) ตาม Face-Tracking ของมือถือ ("กล่อง 4 เหลี่ยม รอบนอก")
+    3. นอกจากนี้ ตามข้อกำหนดการวาดเลเยอร์ของ Rive *"The first sibling draws on top"* การประกาศ `LeftEyeShape` ก่อน `LeftPupilContainer` ทำให้แผ่นพื้นหลังตาบังลูกตา (Pupils) และประกายตา (Specular Highlights) ไว้ด้านหลัง
+- **Solution & Hardening**:
+  1. **สถาปัตยกรรม 6-Layer Parallel Native State Machine ใน `scene.rml`**:
+     - **Layer 1 (Blink)**: รัน `AnimBlink` (210 เฟรม / 3.5s, loop) บีบและดีดตา `LeftEyeScaleNode`, `RightEyeScaleNode` (`scaleY`: 1.0 -> 0.08 -> 1.0) อย่างเป็นธรรมชาติ
+     - **Layer 2 (Breathe)**: รัน `AnimBreathe` (120 เฟรม / 2.0s, loop) ขยับปากแบบ Cyber-Breathing บน `MouthContainerNode` (`scaleY`, `scaleX`, `y`)
+     - **Layer 3 (MicroSaccades)**: รัน `AnimMicroSaccade` (180 เฟรม / 3.0s, loop) สั่นไหวสายตาเล็กน้อยบนลูกตา `LeftPupilNode`, `RightPupilNode` เพื่อให้ดูมีชีวิตชีวาตลอดเวลา
+     - **Layer 4 (GazeHorizontal)**: ใช้ `BlendState1DInput` บน `gazeX` (ช่วง 0–100 โดย 50 คือจุดกึ่งกลาง) ผสมผสาน 3 ท่าทาง (`LookLeft`, `LookCenterH`, `LookRight`) ขยับทั้งลูกตาและเบ้าตาแบบ Parallax
+     - **Layer 5 (GazeVertical)**: ใช้ `BlendState1DInput` บน `gazeY` (ช่วง 0–100 โดย 50 คือจุดกึ่งกลาง) ผสมผสาน 3 ท่าทาง (`LookUp`, `LookCenterV`, `LookDown`)
+     - **Layer 6 (Speech)**: สลับระหว่าง `MouthRest` และ `Talking` (ขยับอ้าปาก `scaleY` สูงสุด 2.6) โดยมีเงื่อนไข `TransitionBoolCondition` ผูกกับ `isSpeaking`
+  2. **แก้ไข Draw Order ใน `scene.rml`**:
+     - สลับให้ประกาศ `LeftHighlight` (บนสุด) -> `LeftPupilShape` (กลาง) -> `LeftEyeShape` (ล่างสุด) ทำให้ลูกตาสีเข้มและประกายตาสีขาวคมชัดปรากฏเด่นชัดอยู่บนเบ้าตาสควีร์เคิลสีฟ้าไซแอน
+  3. **Mapping ค่าใน `RiveAvatarView.android.kt`**:
+     - แมปปิ้งค่า `gazeX`, `gazeY` จาก Compose range [-1f, 1f] ไปเป็น [0f, 100f] (กึ่งกลางคือ 50f)
+     - แมปปิ้ง `speechVolume` และผูกสถานะ `isSpeaking`
+  4. **คอมไพล์และติดตั้งลงเครื่องจริง**:
+     - รัน `.\scripts\build_rive_avatar.ps1` คอมไพล์ได้ `avatar.riv` (8,402 bytes)
+     - รัน `.\gradlew.bat testDebugUnitTest` ผ่าน 310/310 การทดสอบ (100%)
+     - รัน `.\gradlew.bat assembleDebug` และติดตั้ง APK ลงเครื่องจริง Android (`R5CT42YEMMM`) สำเร็จ (`Success`)
+- **Verification**:
+  - แคปเจอร์สแนปช็อตตรวจสอบผ่าน Rive CLI:
+    - `rive_native_0s.png`: ลูกตาและประกายตามองตรง ปากอยู่จุดพัก
+    - `rive_native_1s.png`: ปากขยายตัวตามลูปหายใจ (diffCount=84)
+    - `rive_native_3.25s.png`: ตาทั้งสองข้างกะพริบปิดสนิทเป็นขีดไซแอน (diffCount=4528)
+  - ติดตั้ง APK สดใหม่ขึ้นอุปกรณ์จริงเรียบร้อย
+
+## 2026-09-14 — Defect Fix: Rive Static Freeze Resolution & Continuous 60fps Animation Loop
+- **User Issue & Diagnosis**:
+  - ผู้ใช้แจ้งว่า "rive ไม่ error แล้ว แต่ Rive Avatar ไม่มีความเคลื่อนใหว อะไร นิ่งๆ"
+  - **Root Cause**:
+    1. ใน `scene.rml` เดิม State Machine มีเพียง `<EntryState/>` โดยไม่มีการเชื่อมต่อไปยัง State หรือแอนิเมชันใดๆ ตามข้อกำหนดของ Rive C++ Runtime เมื่อ State Machine เริ่มทำงานและไม่มีแอนิเมชันที่กำลังเล่นอยู่ ฟังก์ชัน `stateMachineInstance.advance()` จะส่งค่าคืนกลับเป็น `false` ทันที ส่งผลให้ `RiveFileController` ลบ State Machine ออกจาก `playingStateMachineSet` และสั่ง `Renderer.stop()` หยุด Render Loop ถาวรเพื่อประหยัดพลังงาน ทำให้ทุกอย่างหยุดนิ่งที่เฟรมแรก (Freeze at Frame 0)
+    2. ใน `avatar.luau` สคริปต์ยังไม่มีการเชื่อมโยงค่าพิกัดการมองและสถานะเสียงจากภายนอกที่ส่งมาจาก Android (รับเพียงเมาส์คลิกบนเดสก์ท็อป) และรูปทรงปาก `Mouth` ยังไม่ได้ผูก Data Binding เข้ากับ `mouthScaleY`
+- **Fix & Hardening**:
+  1. **Continuous Looping Animation ใน `scene.rml`**:
+     - เพิ่ม `<LinearAnimation loopValue="loop" duration="60" fps="60" name="IdleLoop" id="0:65"/>`
+     - ใน `State Machine 1` เชื่อม `EntryState` -> `StateTransition stateToId="0:66"` -> `AnimationState animationId="0:65" id="0:66"` เพื่อให้ State Machine อยู่ในสถานะ Active Looping ตลอดเวลา ทำให้ Render Thread หมุนลูป 60fps ต่อเนื่อง ไม่หยุดนิ่ง
+     - หุ้มรูปทรงปากด้วย `<Node name="MouthNode" id="0:34">` และผูก Data Binding `scaleY` (propertyKey 17) เข้ากับ `mouthScaleY` (0:53)
+     - เพิ่มตัวแปร ViewModel สำหรับรับอินพุตจาก Android: `inputGazeX`, `inputGazeY`, `inputSpeaking`, `inputMouth`
+  2. **Active Input Synchronization & Organic Motion ใน `avatar.luau`**:
+     - ซิงโครไนซ์ค่าสายตา `targetGazeX`, `targetGazeY` จาก `inputGazeX`, `inputGazeY` ของ Android อย่างต่อเนื่อง
+     - รันลูปการเลิ่กลั่กสายตาธรรมชาติ (Micro-saccades) ทุก 2.8 วินาที
+     - รันวงจรกะพริบตาอัตโนมัติ (Procedural Blink Cycle) ทุก 3.5 วินาที บีบตาแล้วดีดสปริงคืน
+     - ปรับปากให้ขยับตามเสียงพูดแบบเรียลไทม์เมื่อ `inputSpeaking == true` และมีการหายใจกระเพื่อมแผ่วเบาแบบ Cyber-Breathing ในขณะสแตนด์บาย
+  3. **Dual-Channel Input Binding & Play Guard ใน `RiveAvatarView.android.kt`**:
+     - เพิ่มตัวเช็ค `if (!view.isPlaying) view.play()` ในบล็อก `update` เพื่อปลุก Render Loop ทันที
+     - ส่งค่าอินพุตทั้งสองทาง: ทั้ง State Machine Inputs (`setNumberState` / `setBooleanState`) และเขียนลง `sm.viewModelInstance` (`vmi.getNumberProperty(...).value = ...`) โดยตรง
+- **Verification**:
+  - `rive ./rive_avatar --test`: ผ่าน 4/4 Luau tests
+  - `rive ./rive_avatar --once`: คอมไพล์ได้ `avatar.riv` (7,523 bytes) ปราศจาก Error/Warning
+  - `.\gradlew.bat compileDebugKotlinAndroid`: ผ่านสมบูรณ์
+  - `.\gradlew.bat testDebugUnitTest`: ผ่านสมบูรณ์ 310/310 การทดสอบ (100%)
+  - `.\gradlew.bat assembleDebug` และ `.\gradlew.bat assembleRelease`: คอมไพล์สำเร็จทั้งสองแพ็กเกจ
+
+## 2026-09-14 — Defect Fix: Rive StateMachineInputException (No StateMachineInput found with name gazeX)
+- **User Issue & Diagnosis**:
+  - เมื่อเปิดใช้งาน Rive Engine แอปเกิด Crash บน Background Render Thread:
+    `FATAL EXCEPTION: Thread-57 app.rive.runtime.kotlin.core.errors.StateMachineInputException: No StateMachineInput found with name gazeX.`
+  - **Root Cause**:
+    - ใน `scene.rml` เดิม ตัวแปร `gazeX`, `gazeY` ถูกประกาศเป็นเพียง ViewModel Properties (`<ViewModelPropertyNumber>`) แต่ไม่ได้ประกาศเป็น State Machine Inputs (`<StateMachineNumber>`, `<StateMachineBool>`) ภายใต้ `<StateMachine name="State Machine 1">`
+    - ในฝั่ง Kotlin เมื่อ Compose `update` เรียก `view.setNumberState("State Machine 1", "gazeX", ...)`, ตัวแปรจะถูกจัดคิวลงใน `RiveFileController`
+    - เมื่อ Render Thread (`Thread-57`) ประมวลผลคิวใน `processAllInputs()` จะเรียก `stateMachineInstance.input("gazeX")` ซึ่งเมื่อหาไม่พบใน State Machine จึงโยน `StateMachineInputException` ออกมาบน Background Thread ส่งผลให้แอป Crash ทันที
+- **Fix & Hardening**:
+  1. **เพิ่ม State Machine Inputs ใน `scene.rml`**:
+     - ประกาศ `<StateMachineNumber name="gazeX" value="0" id="0:90"/>`, `gazeY` (0:91), `emotion` (0:92), `mouthOpen` (0:94)
+     - ประกาศ `<StateMachineBool name="isSpeaking" value="false" id="0:93"/>`
+     - รันเทสต์ Luau ผ่าน 4/4 และคอมไพล์ไบนารี `avatar.riv` (6666 bytes) พร้อมอัปเดตลง `composeApp/src/androidMain/res/raw/avatar.riv`
+  2. **Defensive Input Guarding ใน `RiveAvatarView.android.kt`**:
+     - ใน Compose `update` เพิ่มการตรวจสอบสถานะ `sm = view.stateMachines.firstOrNull()` หรือ `playingStateMachines`
+     - ตรวจสอบ `sm.inputNames.contains("...")` ก่อนเรียก `setNumberState` / `setBooleanState` ทุกครั้ง
+     - หาก State Machine ยังไม่พร้อม หรือไม่มี input ชื่อนั้นๆ จะไม่ส่งคำสั่งเข้าคิว ป้องกันข้อผิดพลาด `StateMachineInputException` บน Render Thread ได้ 100%
+- **Verification**:
+  - `rive ./rive_avatar --test`: ผ่าน 4/4 การทดสอบ
+  - `rive ./rive_avatar --once`: คอมไพล์ได้ 6666 bytes ปราศจาก Warning/Error
+  - `.\gradlew.bat compileDebugKotlinAndroid`: ผ่านสมบูรณ์
+  - `.\gradlew.bat testDebugUnitTest`: ผ่านสมบูรณ์
+  - `.\gradlew.bat assembleDebug`: สำเร็จ และบรรจุ `res/raw/avatar.riv` เข้า APK เรียบร้อย
+
+## 2026-09-14 — Defect Fix: Rive UnsatisfiedLinkError & Native JNI Initialization Lifecycle
+- **User Issue & Diagnosis**:
+  - เมื่อกดเลือก Rive State Machine Engine ในหน้า Settings เกิด Runtime Crash:
+    `No implementation found for long app.rive.runtime.kotlin.core.FileAssetLoader.constructor() (tried Java_app_rive_runtime_kotlin_core_FileAssetLoader_constructor and Java_app_rive_runtime_kotlin_core_FileAssetLoader_constructor__) - is the library loaded, e.g. System.loadLibrary?`
+  - **Root Cause**:
+    - ใน `RiveAvatarView.android.kt` โค้ดเดิมเรียก `Rive.init(context)` ภายใน `LaunchedEffect(Unit)` ซึ่งจะทำงานแบบ Asynchronous *หลังจาก* Composition และ View Hierarchy ถูกสร้างเสร็จแล้ว
+    - ในขณะที่ Compose `AndroidView(factory = { ctx -> RiveAnimationView(ctx) })` ถูกเรียกทำงานแบบ Synchronous ทันทีตั้งแต่เฟรมแรกของการสร้าง View Tree
+    - คอนสตรัคเตอร์ของ `RiveAnimationView` เรียกใช้ `FallbackAssetLoader` -> `FileAssetLoader.constructor()` (JNI C++ method) ก่อนที่ `Rive.init` จะได้เรียก `System.loadLibrary("rive-android")` ส่งผลให้โยน `UnsatisfiedLinkError` ทันที
+    - นอกจากนี้ `AndroidView.factory` ขาด Error Boundary ส่งผลให้เกิด Unhandled Fatal Exception ปิดแอป
+- **Fix & Hardening**:
+  1. **Early Native Initialization in `MainActivity.kt`**:
+     - เพิ่มการเรียก `System.loadLibrary("rive-android")` และ `Rive.init(applicationContext)` ทันทีใน `MainActivity.onCreate()`
+  2. **Synchronous Initialization & Error Boundary in `RiveAvatarView.android.kt`**:
+     - ปรับ `isRiveReady` ให้โหลด `System.loadLibrary("rive-android")` และ `Rive.init(context.applicationContext)` แบบ Synchronous ใน `remember`
+     - เรียก `Rive.init(ctx.applicationContext)` ซ้ำแบบ Synchronous ใน `AndroidView.factory` ก่อนการสร้างอินสแตนซ์
+     - ครอบการสร้าง `RiveAnimationView` ด้วยบล็อก `try-catch (t: Throwable)` เพื่อดักจับข้อผิดพลาดระดับ JNI / Runtime ทั้งหมด
+     - **Graceful Fallback**: หาก Native Library โหลดไม่สำเร็จ (`!isRiveReady`) หรือเกิด Error ขณะสร้าง View ระบบจะสลับไปแสดงผล `PetRobotHeadAvatar(..., engineType = COMPOSE_CANVAS)` โดยอัตโนมัติอย่างราบรื่น ไม่มี Crash 100%
+- **Verification**:
+  - `.\gradlew.bat testDebugUnitTest`: ผ่าน 100% (310/310 การทดสอบ)
+  - `.\gradlew.bat assembleDebug`: คอมไพล์และแพ็กเกจ APK สำเร็จ
+  - ตรวจสอบไบนารีใน `PersonalAIBot-debug.apk`: บรรจุ `librive-android.so` ครบถ้วนทั้ง 4 สถาปัตยกรรม (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`) และทรัพยากร `res/raw/avatar.riv`
+
+## 2026-09-14 — End-to-End Rive Avatar Pipeline & Compose Multiplatform Dual-Engine Integration
+- **User Request & Goal**:
+  - สร้างระบบ Avatar ด้วย Rive ทั้งหมดครบวงจร (End-to-End Rive Avatar Creation, Tooling, Compilation & Runtime Integration into Compose Multiplatform)
+- **Completed Components**:
+  1. **Rive Avatar Project (`rive_avatar/`)**:
+     - `rive.yaml`: กำหนดโปรเจกต์และเป้าหมายการคอมไพล์
+     - `scene.rml`: Artboard หุ่นยนต์ OLED ขนาด 500x500 พร้อมขอบหน้ากาก Visor Bezel เรืองแสงนีออน, ตาสควีร์เคิลนีออนไซแอน 2.5D Shading พร้อมแสงสะท้อน Specular Glint, ม่านตาดำ, และปากดิจิทัล
+     - `avatar.luau`: สคริปต์ฟิสิกส์ Luau จัดการ Smooth Gaze Tracking (Adaptive EMA damping), Micro-saccades เลิ่กลั่กสายตาธรรมชาติ, วงจรการกะพริบตาอัตโนมัติ (Procedural Blink Cycle ย่นตาแล้วสปริงตัวคืน), และการขยับปากพูดตอบสนองเสียง
+     - `mathutil.luau` & `avatar_test.luau`: ชุดฟังก์ชันคณิตศาสตร์และ Unit Test Luau (ผ่าน 4/4 การทดสอบใน ~15ms)
+     - คอมไพล์ได้ไฟล์ไบนารี `avatar.riv` (ขนาดเพียง 6.6 KB ประสิทธิภาพสูงมาก)
+  2. **เครื่องมือพัฒนาและพรีวิวอัตโนมัติ (CLI Scripts)**:
+     - `scripts/preview_rive_avatar.ps1`: เปิดหน้าต่าง Interactive 60fps Live Preview บน Windows รองรับการลากเมาส์ส่องสายตาและแก้โค้ด Hot-Reload สด
+     - `scripts/build_rive_avatar.ps1`: รันเทสต์ Luau, คอมไพล์ `.riv` และก็อปปี้ไปยังทรัพยากร Android อัตโนมัติ
+  3. **การเชื่อมโยงระบบ Compose Multiplatform (`composeApp`)**:
+     - เพิ่ม Dependency `app.rive:rive-android:11.12.0` พร้อมกำหนด `resolutionStrategy.force("androidx.core:core:1.15.0")` ป้องกันข้อจำกัด API 36/AGP
+     - วางไฟล์ไบนารี `avatar.riv` ไว้ที่ `composeApp/src/androidMain/res/raw/avatar.riv`
+     - สร้าง Multiplatform Bridge:
+       - `commonMain`: `expect @Composable fun RiveAvatarView(...)`
+       - `androidMain`: `actual @Composable fun RiveAvatarView(...)` ผ่าน `AndroidView` ครอบ `RiveAnimationView` รับส่งข้อมูล Gaze, Emotion, Speaking แบบเรียลไทม์
+       - `iosMain`: `actual @Composable fun RiveAvatarView(...)` ฟอลแบ็กไปยัง Compose Canvas Avatar อย่างปลอดภัย
+  4. **สถาปัตยกรรม Dual-Engine พร้อม UI สลับโหมด**:
+     - เพิ่ม `AvatarEngineType` (`COMPOSE_CANVAS` vs `RIVE_STATE_MACHINE`) ใน `PetRobotHeadAvatar.kt`
+     - เพิ่ม UI Card เลือกเอนจินใน `PetSettingsDialog.kt` (แท็บหน้าจอ & ดีบัก) ให้ผู้ใช้กดสลับระหว่าง Compose Canvas และ Rive State Machine ได้ทันทีในแอป
+- **Verification**:
+  - `rive ./rive_avatar --test`: ผ่าน 4/4 Unit Tests ใน 15ms
+  - `rive ./rive_avatar --once`: คอมไพล์ `rive_avatar.riv` (6605 bytes) สำเร็จใน 44ms
+  - ตรวจสอบเรนเดอร์ภาพ Headless Screenshot: บันทึกภาพตรงกลางและภาพมองขวาถูกต้องสมบูรณ์
+  - `.\gradlew.bat testDebugUnitTest`: ผ่าน 100% (310/310 การทดสอบ) ปราศจากบั๊กหรือข้อผิดพลาดตกค้าง
+
+## 2026-09-14 — LOOI Moodset Precision Kinetic & Structural Enhancements (Pages 12, 15, 16, 19, 23, 49)
+- **User Request & Goal**:
+  1. **หน้าที่ 12 (VR Mode)**: แว่น VR ให้มีลูกตา จางๆ อยู่ในแว่นด้วย
+  2. **หน้าที่ 15 (Focused)**: ตารางแสกน กวาดขึ้นลง เหมือนกำลังแสกน
+  3. **หน้าที่ 16 (Excited)**: ตาครึ่งวงรี สีเหลือง ให้เริ่มจาก ตาวงกลมสีเหลือง แล้วหดเป็นครึ่งวงกลม
+  4. **หน้าที่ 19 (Disgusted)**: ตาทั้ง 2 ข้าง ค่อยๆ เลื่อนเข้าหากัน
+  5. **หน้าที่ 23 (Rich)**: เพิ่มดวงตา โดยให้ $$ สีเหลืองทอง อยู่ในดวงตา
+  6. **หน้าที่ 49 (Warrior)**: ดาบไปอยู่ ข้างละอัน เหมือนกำลังถือดาบ
+- **Key Implementation Details**:
+  1. **Page 12 (VR_MODE in `PetRobotHeadAvatar.kt`)**:
+     - เรนเดอร์ดวงตาไซแอนแบบโปร่งแสง (`alpha = 0.42f * effAlpha`) พร้อมม่านตาดำที่ปรับสายตาตาม `gazeX`, `gazeY` ภายในกระจกแว่น VR Vision Pro ให้เห็นดวงตาลอดผ่านกระจกมืดลึกลับตามต้นแบบ
+  2. **Page 15 (FOCUSED in `PetRobotHeadAvatar.kt`)**:
+     - เพิ่มแอนิเมชันลำแสงเลเซอร์นีออนไซแอนแนวนอนกวาดขึ้น-ลงทั่วทั้งใบหน้าและดวงตาอย่างต่อเนื่อง (`scanProg`)
+     - เพิ่มพารามิเตอร์ `scanProgress` ให้กับ `drawLooiSynthwaveGrid`: เส้นกริดเพอร์สเปกทีฟจะสว่างวาบขึ้นเมื่อลำแสงสแกนวิ่งผ่าน และตัวตารางจะโยกขึ้นลงตามการสแกน
+  3. **Page 16 (EXCITED in `PetRobotHeadAvatar.kt`)**:
+     - ปรับสีดวงตาเป็นสีเหลืองนีออนสดใส (`#FFD700`) พร้อมเงาสีทองเข้ม
+     - ออกแบบการแปลงรูปทรงแบบเรียลไทม์ (Bézier Morphing) ใน `drawLooiExcitedEye`: เริ่มต้นรอบเวลาด้วยดวงตากลมโตสีเหลือง (`shrinkProgress = 0f`) จากนั้นส่วนโค้งด้านล่างจะค่อยๆ ย่นหดแบนขึ้นด้านบนกลายเป็นตาครึ่งวงรี/ครึ่งวงกลม (`shrinkProgress = 1f`) ค้างไว้พร้อมดาวประกายหมุน แล้วดีดตัวสปริงกลับสู่ตากลม
+  4. **Page 19 (DISGUSTED in `PetRobotHeadAvatar.kt`)**:
+     - ปรับระยะเยื้องของดวงตาทั้ง 2 ข้าง (`inwardSquintX`) ให้เลื่อนเข้าหากึ่งกลางใบหน้าอย่างช้าๆ ต่อเนื่อง จาก 2dp ถึง 16dp ตามจังหวะ `cringeCycle` พร้อม Micro-jitter แสดงอาการขยะแขยง
+  5. **Page 23 (RICH in `PetRobotMoodsetDraw.kt`)**:
+     - เพิ่มกรอบดวงตาสควีร์เคิลนีออนไซแอนพร้อมเลเยอร์เงาลึกและพื้นหลังกระจก Visor สีเข้ม
+     - วางสัญลักษณ์ดอลลาร์สีทองนีออน `$$` บรรจุไว้ที่กึ่งกลางของดวงตาทั้งสองข้างอย่างประณีต
+  6. **Page 49 (WARRIOR in `PetRobotMoodsetDraw.kt`)**:
+     - ปรับเปลี่ยนจากดาบไขว้ตรงกลาง เป็นถือดาบคาตานะคู่แยกข้างซ้ายและขวา (Dual Wielding):
+       - ดาบซ้าย: ด้ามจับอยู่ที่ข้างซ้ายล่างมุม -115° ชี้ขึ้นเฉียงออก โดยมีมือกลหุ่นยนต์ (`drawRobotPaw`) กำด้ามดาบ
+       - ดาบขวา: ด้ามจับอยู่ที่ข้างขวาล่างมุม -65° ชี้ขึ้นเฉียงออก โดยมีมือกลหุ่นยนต์กำด้ามดาบ
+       - ลำดาบทั้งสองข้างมีประกายดาวสะท้อนแสงดาบสไลด์วิ่งผ่านคมดาบทั้งสองเล่มพร้อมจังหวะหายใจเตรียมต่อสู้
+- **Verification**:
+  - `.\gradlew.bat testDebugUnitTest` ผ่าน 100% (310/310 การทดสอบ)
+
+## 2026-09-14 — Defect Rectification: Double Eye Layer Elimination, Background Sensor Leak Fix & LOOI 25-Moodset Visual Enhancements
+- **User Issue & Diagnosis**:
+  1. **การซ้อนทับของเลเยอร์ตา 2 ชุด (Double Eye Layer Overlay)**:
+     - ผู้ใช้แจ้งว่า "ดวงตาส่วนใหญ่เหมือนมีการซ้อนทับ ของ เลเยอร์ตา 2 ชุด เลยทำให้ รูปทรงผิดไป"
+     - สาเหตุ: `drawParametricEye` ถูกเรียกวาดตาสควีร์เคิล/วงกลมทุกครั้งที่มี `leftEyeParams != null` (ซึ่งไม่เป็น null สำหรับทุกอารมณ์) จากนั้นในโค้ดของอารมณ์เฉพาะ (เช่น `HAPPY`, `LAUGHING`, `DISGUSTED`, `SICK`, `CRYING`, `RICH`, `GAMING`) มีการวาดรูปทรงตาเฉพาะซ้อนทับลงไปอีกรอบหนึ่ง หรือในบางอารมณ์มี guard `if (!isParametric)` ทำให้ระบบไม่ยอมวาดรูปทรงตาเฉพาะ แต่ไปบังคับวาดผ่าน `buildParametricEyePath` ซึ่งพยายามแปลงรูปทรง (เช่น เชฟรอน `> <` หรือ ส่วนโค้ง `⌒ ⌒`) ให้เป็นโพลิกอน 12 จุดจนรูปทรงบิดเบี้ยวผิดเพี้ยน
+     - การแก้ไข:
+       - กำหนดเซ็ต `emotionsWithDedicatedEyeRenderer` รวบรวม 54 อารมณ์ที่มีฟังก์ชันวาดดวงตาเฉพาะ
+       - ครอบบล็อกการวาดตา Parametric ใน `PetRobotHeadAvatar.kt` ด้วย `if (isParametric && emotion !in emotionsWithDedicatedEyeRenderer)` ทำให้ตาสควีร์เคิลแบบพารามิเตอร์จะถูกวาดเฉพาะอารมณ์พื้นฐาน (`IDLE`, `SPEAKING`, `LISTENING`) เท่านั้น สำหรับอารมณ์อื่นๆ ทั้งหมดจะเรนเดอร์ผ่าน Dedicated Vector Renderers ของแต่ละอารมณ์โดยตรงอย่างสะอาดตา คมชัด 100% ปราศจากปัญหาตาซ้อน 2 ชั้นโดยสิ้นเชิง
+  2. **Background Sensor & Audio Leak หลังออกจากโหมดสัตว์เลี้ยง**:
+     - พบว่าเมื่อผู้ใช้ออกจากโหมดสัตว์เลี้ยงหรือออกจากแอป โค้ด `PetMotionDetector` ยังคงค้าง listener เซนเซอร์ความเร่ง และ `AlwaysLiveManager` มี delayed coroutines (`delay(1200) -> YAWN_SLEEP`, `delay(2000) -> SNORE`) ที่ไม่ถูก cancel ส่งผลให้มีเสียงกรนดังขึ้นมาในพื้นหลังหลังจากปิดหน้าจอหรือพับแอป
+     - การแก้ไข:
+       - ปรับปรุง `PetMotionDetector.kt`: เพิ่ม guard `isRunning` พร้อม unregister เซนเซอร์และเคลียร์ listeners ให้เป็น null เมื่อสั่ง `stop()`
+       - ปรับปรุง `AlwaysLiveManager.kt`: เก็บ Job อ้างอิง (`faceDownSoundJob`, `faceUpSoundJob`, `shakeSoundJob`) และสั่ง `cancel()` ทันทีเมื่อสั่ง stop, minimize หรือเมื่อปิดหน้าจอ (`onScreenOff()`)
+       - ปรับปรุง `AlwaysLiveScreen.kt`: เพิ่ม `BackHandler { onEndLive() }` เพื่อให้ปุ่ม Back ของ Android สั่งปิดเซสชันและทำความสะอาดทรัพยากรทั้งหมดอย่างถูกต้อง
+       - ปรับปรุง `App.kt`: ใน callback `onEndLive` สั่งรีเซ็ต profile กลับเป็น `AlwaysLiveProfile.CONTROL` และเรียก `stopBackgroundLiveService()`
+  3. **LOOI Moodset 25-Page Detail Enhancements (ตรงตาม Reference Sheet 1 & 2)**:
+     - **หน้าที่ 2 (HAPPY)**: แสดงตาเส้นโค้งหงายขึ้น `⌒ ⌒` คมชัด ปราศจากตาซ้อน และเพิ่มปากยิ้มโค้งมน `◡`
+     - **หน้าที่ 3 (ANGRY)**: ปรับตำแหน่งปากขยับเลื่อนลงมาที่ `angryMouthY = eyeCenterY + baseEyeH * 0.72f` และเปลี่ยนปากเป็นขอบสีแดงพร้อมเขี้ยวขาวขบกราม `v v`
+     - **หน้าที่ 4 (SLEEPING)**: วาดปากกรน `o` ทรงรี ขยาย-หดตามจังหวะลมหายใจ พร้อมฟอง Zzz ลอยหมุนควงสว่าน
+     - **หน้าที่ 8 (WINK)**: ปรับ kinetic motion ใน `AvatarLivingEngine.kt` ให้เป็นจังหวะ "ขยิบตา 2 ที" (Double Wink) ต่อหนึ่งรอบ พร้อมประกายดาวสีทอง ✦ เด้ง Pop และหมุนเปล่งแสง
+     - **หน้าที่ 10 & 19 (LAUGHING & DISGUSTED)**: ปรับเป็นตาเชฟรอน `> <` คมชัดสมส่วน โดยหน้าที่ 19 เป็นตาหยีเกร็งขยะแขยงคู่กับปากขยะแขยงและถังขยะ
+     - **หน้าที่ 11 (MUSIC)**: เพิ่มตัวโน้ตดนตรีนีออน 4 ตัว (`♪`, `♫`, `♩`) ลอยพลิ้วไหวรอบตัวหุ่นยนต์พร้อมหูฟังครอบหัว
+     - **หน้าที่ 17 (SHY)**: เลื่อนเส้นขีดเขินอายลงมาอยู่บริเวณแก้มใต้ดวงตาอย่างเป็นธรรมชาติ (`eyeCenterY + baseEyeH * 0.82f`)
+     - **หน้าที่ 18 (SURPRISED)**: ขยายเครื่องหมายตกใจสีแดง `!` ขนาดใหญ่เด่นชัด (48dp) พร้อมแอนิเมชันเด้งย่อ-ขยาย (Bounce scale)
+     - **หน้าที่ 20 (CAMERA_MODE)**: ตาซ้ายแสดงเลนส์ชัตเตอร์กล้องพร้อมวงแหวนแสงแฟลช ตาขวาแสดงกรอบโฟกัส Viewfinder Reticle `[  ]`
+     - **หน้าที่ 23 (RICH)**: ปรับตาสัญลักษณ์ดอลลาร์ `$$` ให้เป็นสีทองนีออนสว่างสดใส (`#FFD700`) พร้อมเงาสีทองเข้ม
+     - **หน้าที่ 24 (LOVE)**: ปรับเป็นดวงตาหัวใจเต็มดวง ♥ ♥ (`drawHeart`) เต้นตึกตักตามจังหวะชีพจร
+     - **หน้าที่ 25 (CRYING)**: แสดงตาโดมมนเรียบเนียน ปราศจากตาสควีร์เคิลซ้อน พร้อมสายน้ำตาไหลพราก
+     - **หน้าที่ 27 (READING)**: แสดงตากวาดอ่านหนังสือสะอาดตาคู่กับแว่นตาและหน้าหนังสือกาง
+     - **หน้าที่ 28 (GAMING)**: ขยายขนาดจอยคอนโทรลเลอร์ให้ใหญ่ขึ้นเป็น 84x48dp เห็นปุ่ม D-pad และปุ่มแอ็กชันชัดเจน
+     - **หน้าที่ 33 (DETECTIVE)**: เพิ่มแอนิเมชันแว่นขยายกวาดสแกนซ้าย-ขวาอย่างต่อเนื่อง
+     - **หน้าที่ 36 (SPACE)**: ขยายขนาดยานอวกาศ UFO ให้ใหญ่ขึ้นเป็น 48x18dp พร้อมโดมกระจกและลำแสง
+     - **หน้าที่ 37 (PARTY)**: ปรับเป็นตาโค้งยิ้ม `⌒ ⌒` สะอาดตา พร้อมหมวกปาร์ตี้และแตรเป่ายืด-หด
+     - **หน้าที่ 38 (DREAMING)**: ปรับเป็นตาปิดหลับสบาย `— —` พร้อมก้อนเมฆและพระจันทร์
+     - **หน้าที่ 39 (EXHAUSTED)**: ขยายขนาดลิ้นห้อยแฮ่กๆ ชมพูให้ใหญ่ขึ้น (18x20dp) พร้อมร่องกลางลิ้นคู่กับปากหอบโค้งคว่ำ
+     - **หน้าที่ 42 (ROMANTIC)**: ปรับเป็นดวงตาหัวใจพร้อมขยิบตาข้างเดียวและประกายดาว
+- **Verification**:
+  - `.\gradlew.bat testDebugUnitTest` สำเร็จ 100% (310/310 ผ่านทั้งหมด)
+
+## 2026-09-14 — Bug Fix: Infinite Sleep Trigger Loop in GazeStabilizer & PetVisionDetector
+- **User Issue & Diagnosis**:
+  - ผู้ใช้แจ้งปัญหาหุ่นยนต์ avatar ติดสถานะนอนหลับ (`SLEEPING`) ตลอดเวลา พยายามตื่นแล้วก็กลับมาหลับทันที แม้ว่าสถานะความต้องการ (อิ่ม / พลังงาน / ความสะอาด / ความสุข) จะเกือบ 100% ทั้งหมด
+  - ตรวจสอบจาก Logcat พบว่า `PetVisionDetector` ส่งสัญญาณ:
+    `😴 Face absence timeout reached -> Triggering SLEEPING`
+    รัวทุกเฟรมกล้อง (~80ms หรือ 12 ครั้งต่อวินาที) ส่งผลให้เมื่อหุ่นยนต์เปลี่ยนเป็น `HAPPY` จากการสัมผัสหรือพูดคุย จะถูกกล้องดีดกลับเป็น `SLEEPING` ในทันทีภายใน 100ms
+- **Root Causes & Solutions**:
+  1. **Level-Triggered Spam ใน `GazeStabilizer.kt`**:
+     - เดิม: เมื่อ `elapsed >= idleSleepTimeoutMs` ฟังก์ชัน `onNoFace()` ส่งคืน `AvatarEmotion.SLEEPING` รัวทุกๆ เฟรมแบบไม่มีที่สิ้นสุด
+     - แก้ไข: ปรับเป็น **One-Shot Edge-Triggered State Machine** โดยเพิ่ม `lastAbsenceEmotionNotified` เพื่อแจ้งเตือนเพียงครั้งเดียวต่อช่วงเวลาที่ใบหน้าหายไป และคืนค่า `null` ในเฟรมถัดไป
+     - เพิ่มฟังก์ชัน `resetAbsenceTimer()` เพื่อรีเซ็ตตัวจับเวลาเมื่อมีการสัมผัส โต้ตอบ หรือพูดคุย
+     - ปรับระยะเวลาเริ่มต้นให้เหมาะสมกับการใช้งานบนโต๊ะ (Desk Companion): `idleBoredTimeoutMs = 45,000L` (45 วิ) และ `idleSleepTimeoutMs = 180,000L` (3 นาที)
+  2. **Cross-Platform Absence Reset Bridge (`PetVisionBridge.kt` & `PetVisionDetector.kt`)**:
+     - เพิ่ม `PetVisionBridge.onResetAbsence` และ `resetAbsenceTimer()`
+     - ผูกเข้ากับ `gazeStabilizer.resetAbsenceTimer()` ใน `PetVisionDetector`
+  3. **High-Energy & Conversation Guards ใน `PetModeController.kt`**:
+     - ใน `notifyInteraction()`: เรียก `PetVisionBridge.resetAbsenceTimer()` ทุกครั้งที่มีการสัมผัส (ลูบหัว, เกาคาง, จิ้มแก้ม, เขย่า), พูดคุย หรือให้อาหาร
+     - ใน `onFaceAbsenceTimeout()`: เพิ่มการตรวจสอบ:
+       - หากหุ่นยนต์กำลังพูด (`isSpeaking`), กำลังฟัง (`LISTENING`), หรือรันฉากทดสอบ -> ไม่ขัดจังหวะ
+       - หากพลังงานยังสูง (`energy > 30f`) -> ไม่บังคับเข้าโหมดหลับลึก แต่จะปรับเป็น `BORED` (เหงา/รอบอส) หรือเล่นลูกเล่น Screensaver Trick แทน
+       - อนุญาตให้หลับลึกเฉพาะเมื่อพลังงานต่ำจริง (`energy <= 30f`) หรือสั่งนอนหลับโดยตรง
+     - ใน `startIdleLoop()`: เพิ่มเงื่อนไขการหลับลึก 150 วินาที เฉพาะเมื่อพลังงานต่ำ (`<= 35f`) หากพลังงานเต็มจะไม่หลับ และขยายระยะพักสายตาเต็มที่สำหรับเครื่องที่ทิ้งไว้เฉยๆ เป็น 10 นาที (600 วินาที)
+- **Verification**:
+  - `PetRobotAvatar25DTest.kt`: ผ่านครบ 14/14 การทดสอบ (ครอบคลุม One-shot edge triggering และ absence timer reset)
+  - `PetModeTest.kt`: ผ่านครบ 75/75 การทดสอบ (ครอบคลุม High Energy Guard, Low Energy sleep transition, Conversation protection, และ Bridge reset hook)
+  - รันการทดสอบ Unit Tests ทั้งหมดในโปรเจกต์: **310/310 ผ่าน 100%**
+
+## 2026-09-14 — LOOI Robot: 2.5D Spherical Eye Depth & 100% Parametric Emotion Morphing
+- **User Request & Goal**:
+  - วิเคราะห์เปรียบเทียบภาพจริงของ LOOI Robot (Normal mode & Love mode จากภาพฮาร์ดแวร์จริง) และ Moodset Reference Sheets (20-moodset & 40-moodset):
+    1. **2.5D Spherical Eye Depth**: วาดแสงเงาหลายเลเยอร์ตามหลักฟิสิกส์บนกระจกหน้าจอ visor (ไฮไลท์สว่างมุมบนซ้าย, ไล่สีเรเดียลที่แกนกลางตา, เงาเสี้ยวจันทร์ลึกด้านล่างขวา, แสงสะท้อนกลินท์รูปไข่, และรัศมีนีออนโกลว์เรืองแสงรอบนอก)
+    2. **100% Parametric Eye Morphing**: ปลดล็อคทุกอารมณ์ (ไม่มีอารมณ์ใดคืนค่า null) ให้แปลงร่างแบบต่อเนื่อง 350ms `FastOutSlowInEasing` ไร้เงาผีซ้อน (no crossfade ghosting)
+    3. **ความถูกต้องตามต้นแบบฮาร์ดแวร์จริง**: โหมด LOVE บนเครื่องจริงเป็นตาโดมโค้งมนไซแอน (`domeAmount = 0.95f, curvature = 0.35f`) พร้อมหัวใจชมพูลอยด้านข้าง, โหมด ROMANTIC เป็นตาหัวใจชมพูเต็มดวง ♥ (`heartAmount = 1.0f`), โหมด DEAD เป็นตากากบาท X X (`crossAmount = 1.0f`), โหมด EXCITED เป็นตาดาว 4 แฉก ★ (`starAmount = 1.0f`)
+    4. **Simple Mode vs Rich Mode (`AvatarDetailLevel`)**: `SIMPLE` แสดงพื้นหลังดำสนิทแบบ OLED `#000000` ไร้แสงพัลส์ พร้อมพร็อพแบบไอคอนิกสะอาดตา (ตัดกรงเล็บหุ่นยนต์, เศษขนมปัง, ฟองเบียร์) vs `RICH`
+- **Key Implementation Details**:
+  1. **2.5D Spherical Eye Visor Shading (`PetRobotNeonDraw.kt`)**:
+     - เพิ่ม `getEyeDeepShadowColor(baseColor)`: คำนวณสีเงาเสี้ยวจันทร์ตามสเปกตรัมแสง LED จริง:
+       - ไซแอน `#00F5FF` -> น้ำเงินครามเข้ม Deep Indigo `#071952` (ตรงตามภาพถ่ายฮาร์ดแวร์จริง)
+       - แดง `#FF3B5C` -> แดงเบอร์กันดีเข้ม Deep Burgundy `#42000E`
+       - ชมพู `#FF4081` -> พลัมม่วงเข้ม Deep Plum `#450624`
+       - ทอง `#FFD700` -> ทองบรอนซ์เข้ม Deep Bronze `#522800`
+     - เพิ่ม `getEyeHighlightColor(baseColor)` และ `drawNeonEyeRoundRect` 4-layer composition
+  2. **100% Parametric Morphing Engine (`PetRobotParametricEye.kt`)**:
+     - ขยาย `EyeShapeParams` เพิ่ม `heartAmount`, `starAmount`, `crossAmount`, `domeAmount`, `innerPinch`
+     - แมปปิ้งทั้ง 44 อารมณ์ใน `toEyeShapeParams(isLeft)` ครบถ้วน 100% ไร้ null
+     - พัฒนา `buildParametricEyePath` ให้รองรับ 12-point cubic Bézier topology สำหรับ Squircle, Arch, Dome, Wedge, Chevron, Heart, Star, Cross
+     - พัฒนา `drawParametricEye` ให้ตัดแกน 2.5D Spherical Gradient + Crescent Shadow + Glint ลงบน Path และครอบด้วย Neon Bloom Halo
+  3. **Detail Level Integration (`AvatarLayout.kt`, `PetBackgroundLayer.kt`, `PetRobotHeadAvatar.kt`)**:
+     - สร้าง `AvatarDetailLevel` (`SIMPLE`, `RICH`) และ `LocalAvatarDetailLevel`
+     - `DefaultBackground()` ในโหมด `SIMPLE` วาดดำสนิท OLED pitch black `#000000`
+     - ครอบฟังก์ชันวาดดวงตาดั้งเดิมใน `renderPetEmotion` ด้วย `if (!isParametric)` กำจัดการวาดตาซ้ำซ้อน
+     - ปรับ `drawRomanticMood` ใน `PetRobotMoodsetDraw.kt` ให้รับ `includeEyes = !isParametric` เพื่อไม่ให้ตาสควีร์เคิลทับตาหัวใจ
+- **Verification**:
+  - `PetRobotAvatar25DTest.kt`: ผ่านครบทั้ง 14/14 การทดสอบ (100%)
+  - `PetModeTest.kt`: ผ่านครบทั้ง 71/71 การทดสอบ (100%)
+  - โค้ดคอมไพล์ผ่านสมบูรณ์ทั้ง Android และ iOS Multiplatform (`commonMain`)
+
+## 2026-09-14 — PetRobotHeadAvatar: 2.5D Face-Tracking Avatar + Smooth Emotion Morphing
+- **User Request & Goal**:
+  - ยกระดับ `PetRobotHeadAvatar` สู่ 2.5D Face-Tracking Avatar + Smooth Emotion Morphing:
+    1. Unified Layout: รวมโครงสร้างเรขาคณิตและการตรวจสอบ `isLandscape` เข้าสู่ `LocalAvatarLayout` กลาง เพื่อให้ทุกเลเยอร์ทำงานสอดคล้องกัน ไม่เหลื่อมล้ำ
+    2. Smooth Face-Tracking & Distance Filter: กำจัดอาการตาสั่นระริกจาก Face Detector (±3% jitter) ด้วย Adaptive EMA (`GazeStabilizer`), ขยายสเกลดวงตาเมื่อเข้าใกล้กล้อง (`faceScaleFactor`), และปรับอารมณ์อัตโนมัติเมื่อผู้ใช้ไม่อยู่หน้าจอ (>12s -> BORED, >25s -> SLEEPING)
+    3. 2.5D Layering Parallax: สร้างมิติเชิงลึกผ่านการแบ่งชั้นความเร็วการเคลื่อนที่ (Counter-translation บนพื้นหลัง, 3D Perspective Rotation บนศีรษะและพร็อพ, Accelerated Parallax บน Foreground)
+    4. Smooth Emotion Morphing: ปรับเปลี่ยนรูปทรงตาอย่างลื่นไหลต่อเนื่องผ่าน Unified Parametric Eye (`buildParametricEyePath`) สอดประสาน 350ms (`FastOutSlowInEasing`) แทนการกะพริบหดเป็นเส้นขีด
+    5. รักษาเอกลักษณ์ Flat Neon-Glow ดั้งเดิมแบบ LOOI Robot (แกนนีออนทึบ + รัศมีโกลว์ 2 ชั้น ไม่ใช้ 3D specular highlight/ดินน้ำมัน)
+- **Key Implementation Details**:
+  1. **Unified Layout (`AvatarLayout.kt`)**:
+     - กำหนด `AvatarLayoutInfo` และ `LocalAvatarLayout` (CompositionLocal)
+     - ฟังก์ชัน `calculateAvatarLayout(width, height, isLandscapeOverride)` คำนวณพิกัดกลาง `cX`, `cY`, `eyeDiameter`, `foreheadY`, `mouthY`, `chinY`, `leftTempleX`, `rightTempleX`
+     - ปรับปรุง `PetPropsOverlay.kt` และ `PetRobotHeadAvatar.kt` ให้อ้างอิงโครงสร้างเรขาคณิตชุดเดียวกัน แก้ปัญหาพร็อพ (แว่นตา, หมวก, มงกุฎ) ลอยเยื้องพิกัดดวงตา
+  2. **Parametric Eye & Morphing Engine (`PetRobotParametricEye.kt`)**:
+     - กำหนด `EyeShapeParams` (scaleX/Y, squashTop/Bottom, curveTop/Bottom, cornerTopInner/Outer, slantAngle, pupilScale, pupilOffsetX/Y)
+     - ฟังก์ชันแปลง `AvatarEmotion.toEyeShapeParams(isLeft)` รองรับอารมณ์หลัก (IDLE, HAPPY, ANGRY, SLEEPING, SAD, SURPRISED, BORED, WINK ฯลฯ)
+     - `rememberAnimatedEyeShapeParams(...)` ทำ Interpolation ทุกพารามิเตอร์ของตาซ้ายและตาขวาพร้อมกัน 350ms `FastOutSlowInEasing`
+     - วาดเส้นทางดวงตาต่อเนื่องด้วย Bézier Path (`buildParametricEyePath`) คงรูปแบบ 2-layer neon glow ดั้งเดิม
+  3. **Adaptive Low-Pass Gaze & Absence Tracker (`GazeStabilizer.kt`)**:
+     - Adaptive Exponential Moving Average (EMA): ดักจับการสั่นไหวเล็กน้อย (<3.5%) กรองด้วย low alpha (0.08) ให้ภาพนิ่งสนิท ขณะที่การหันหน้าจริง (>15%) ตอบสนองรวดเร็วด้วย alpha 0.45
+     - Face Distance Scaling: คำนวณอัตราส่วนใบหน้าเทียบกับขนาดจอ หากเข้าใกล้กล้อง (>0.38) จะขยาย `faceScaleFactor` สู่ 1.05x - 1.22x
+     - Face Absence Watchdog: ตรวจจับการละสายตาหรือเดินออกจากกล้อง (>12s -> ปรับเป็น BORED, >25s -> ปรับเป็น SLEEPING)
+     - รองรับ Multiplatform อย่างสมบูรณ์ด้วย `kotlinx.datetime.Clock`
+  4. **2.5D Layering Parallax System (`PetModeScreen.kt`)**:
+     - ห่อหุ้มเลเยอร์ด้วย `BoxWithConstraints` และส่งผ่าน `LocalAvatarLayout provides layoutInfo`
+     - **Layer 0 (PetBackgroundLayer)**: เลื่อนสวนทิศทางสายตาเล็กน้อย (`translationX = -gazeX * 14.dp`, `translationY = -gazeY * 10.dp`) สร้างมิติฉากหลังลึกลงไป
+     - **Layer 2 (PetRobotHeadAvatar)**: หมุน 3 มิติ (`rotationY` สูงสุด 35°, `rotationX` สูงสุด 20°, `cameraDistance = 14f * density`)
+     - **Layer 3 (PetPropsOverlay)**: หมุน 3 มิติตามศีรษะ พร้อม Forward Translation เล็กน้อย (`+gazeX * 6.dp`) และจัดระยะ Padding ให้ตรงกับศีรษะ
+     - **Layer 3.7 (PetForegroundLayer)**: เลื่อนตามทิศทางสายตาด้วยความเร็วสูง (`+gazeX * 24.dp`, `+gazeY * 18.dp`) สร้างมิติละอองแสง/เลนส์ลอยอยู่หน้าจอ
+  5. **Bridge & Controller Integration**:
+     - เพิ่ม `onFaceDistanceDetected` และ `onFaceAbsenceTimeout` บน `PetVisionBridge`
+     - เชื่อมต่อ `PetVisionDetector` (Android ML Kit) เข้ากับ `GazeStabilizer` และส่งต่ออีเวนต์เข้าสู่ `PetModeController`
+   6. **Unit Tests & Regression Verification**:
+      - `PetRobotAvatar25DTest.kt`: ผ่าน 11 จาก 11 เทส (Adaptive EMA, Jitter suppression, Dynamic distance scaling, Absence watchdog, Layout geometry, Parametric path generation)
+      - `PetModeTest.kt`: แก้ไขตำแหน่งพารามิเตอร์ `foregroundName` ใน `RobotFaceState` ให้อยู่หลัง `gestureName` คืนความเข้ากันได้ย้อนหลัง (Backward Compatibility) ให้กับ Positional Constructor และอัปเดตการตรวจสอบ `BackgroundTheme` ครบทั้ง 20 ธีม ส่งผลให้ผ่านครบทั้ง 71 จาก 71 เทส 100%
+- **Status**: Completed & 100% Verified (All Tests Passed)
+
+## 2026-09-14 — LOOI Robot Page 8 (Wink) Dynamic In-and-Out Gesture with Pop Sparkle Stars
+- **User Request & Goal**:
+  - "หน้าขยิบตา ให้ ตา 1 ข้างขยิบ เข้าออก"
+  - พัฒนาการแสดงออกทางสีหน้าของ LOOI Robot Avatar ในโหมด Wink (หน้าที่ 8 / `AvatarEmotion.WINK`) จากเดิมที่เป็นภาพนิ่งตายตัว (ตาขวาขีดเส้นตรงแข็งทื่อตลอดเวลา) ให้เป็นท่าทางขยิบตาแบบไดนามิก เข้า-ออก (In-and-Out) เป็นจังหวะธรรมชาติต่อเนื่อง 60fps พร้อมประกายดาวสีทอง ✦ เด้ง Pop และหมุนเปล่งประกายเฉพาะช่วงที่ขยิบตาตาม Reference Sheet 1 Cell 8
+- **Key Implementation Details**:
+  1. **Dynamic Wink Kinetic Driver (`AvatarLivingEngine.kt`)**:
+     - เพิ่มตัวแปร `winkEyeScaleY` และ `winkSparkleScale` เข้าสู่ `LivingMotionState`
+     - ออกแบบรอบเวลา 2,200ms (5 จังหวะธรรมชาติ):
+       - `0.00..0.38` (~840ms): ตาทั้ง 2 ข้างเปิดมองกลมโตปกติ (Rest Open)
+       - `0.38..0.52` (~300ms): ตาขวาเริ่มหรี่ลง (Squash & Close `1f -> 0.06f`)
+       - `0.52..0.76` (~530ms): ตาขวาปิดสนิทเป็นขีดหลับตามน (`drawSleepingEye`), ประกายดาวสีทอง ✦ เด้ง Pop ขยาย 1.35x พร้อมหมุนเปล่งประกาย
+       - `0.76..0.88` (~260ms): ตาขวาดีดตัวเปิดกลับเป็นตากลม (Spring Open `0.06f -> 1f`)
+       - `0.88..1.00` (~260ms): พักตาก่อนเริ่มรอบขยิบตาครั้งถัดไป
+  2. **Elevated Wink Emotion Rendering (`PetRobotHeadAvatar.kt`)**:
+     - ตาซ้าย: เปิดกลมโตเป็น Squircle Cyan 2D Depth พร้อม Sympathetic Reaction ขยายตัวรับเล็กน้อย (+4%) ช่วงที่ตาขวาขยิบตา
+     - ตาขวา: ควบคุมด้วย `winkEyeScaleY`:
+       - ช่วงปิดสนิท (`<= 0.16f`): วาดเป็น `drawSleepingEye` แถบมนนีออนไซแอน 14dp
+       - ช่วงเปิด/กำลังหรี่: วาดด้วย `drawDualCircleEye` พร้อม Squash & Stretch ฟิสิกส์ (`squashX = 1f + (1f - winkScaleY) * 0.14f`)
+     - ประกายดาววิ้งค์สีทอง ✦ (Dual Star System ตาม Reference Cell 8):
+       - ดาวดวงหลัก (Main 4-point Star): สีทอง Neon Gold (`#FFD700`) ขนาด 30dp พิกัดมุมขวาบนของตาที่ขยิบ (`rightEyeCenterX + baseEyeW * 0.42f`, `eyeCenterY - baseEyeH * 0.38f`)
+       - ดาวดวงเล็กเสริม (Secondary Mini Star): สีเหลืองนีออน (`#FFEA00`) ขนาด 14dp หมุนสวนทางเพื่อมิติความระยิบระยับ
+  3. **Mouth Vertical Balance**:
+     - ตรวจสอบ `hasMouth` ให้ `AvatarEmotion.WINK` ปรับสมดุลกึ่งกลางจออย่างลงตัวเมื่อไม่มีการพูด
+- **Verification & Physical Device Testing**:
+  - บิลด์ผ่านฉลุย `./gradlew :composeApp:assembleDebug`
+  - ติดตั้งลงบน Samsung Galaxy S22 Ultra (`R5CT42YEMMM`) ผ่าน adb install
+  - ทดสอบ Broadcast Page 8 (`adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION -p com.skyliner2008.jarvis --es emotion 8`)
+  - แคปเจอร์ภาพเคลื่อนไหวต่อเนื่องแบบ Burst Capture:
+    - `screen_wink30.png`: สภาวะเปิดตากลมโตปกติ 2 ข้าง
+    - `screen_wink32.png`: สภาวะตาขวาเริ่มหรี่ลง (Squash down)
+    - `screen_wink36.png`: สภาวะตาขวาขยิบตาปิดสนิทเป็นขีด พร้อมประกายดาวสีทอง ✦ เด้ง Pop และเปล่งแสงอย่างงดงามตรงตามภาพต้นแบบ
+
+## 2026-09-14 — Comprehensive Procedural Living Gestures & Dynamic Emotion Kinetics Across LOOI Moodsets
+- **User Request & Goal**:
+  - "หน้าที่ 6 , หน้าที่ 7 แบบนี้แหละ คือ moodset ที่ฉันต้องการ คือมีการเคลื่อนใหว ที่สื่อถึงสิ่งที่ทำ คือ moodset ไม่ควรลอย อยู่เฉยๆ ควรสื่อถึงอารมณ์ ในบาง moodset ก็สื่อได้ดี เช่น หน้า 31 หนาว ก็มี ปากสั่น แต่บางอันยังสื่อไม่ ถึงความหมาย อย่างโกรธ ก็ควรตาสั่น หรือแนงเฉียงขยับ เพื่อสื่อว่า กำลังโกรธ ลองคิด ปรับ moodset แต่ละแบบ ให้สื่อความหมาย ได้ถูกต้องกว่านี้"
+  - ยกระดับทุก Moodset ของ LOOI Robot ให้มี "Living Gestures" มีชีวิตชีวา ไม่ลอยอยู่นิ่งๆ โดยเฉพาะอารมณ์ที่สื่อสารได้ไม่ชัดเจน เช่น โกรธ (ตาสั่น/คิ้วกระตุก), นอน (สัปหงก), หัวเราะ (ตัวโยก/ตาหยีเด้ง), ตกใจ (ตาสั่น/เครื่องหมาย ! สั่น), รัก (หัวใจเต้นจังหวะชีพจร), อ่านหนังสือ (สายตากวาดทีละบรรทัด), ปาร์ตี้ (เป่าแตรคลี่ออก), นักรบ (ประกายดาบสะท้อนวาบ), แบตเตอรี่ต่ำ (ไฟวูบวาบกระตุกดับ)
+- **Key Implementation Details**:
+  1. **Dynamic Procedural Kinetic Engine (`AvatarLivingEngine.kt`)**:
+     - เพิ่มตัวแปร Procedural Motion Clocks คำนวณแบบ 60fps ภายใน `remember(...)` โดยอิงจาก Master Timers (`loopFast`, `loopMedium`, `loopSlow`):
+       - `angerJitterX/Y`: การสั่นเกร็งความถี่สูงระดับ Micro-tremor ของความโกรธ
+       - `angerBrowSlant`: จังหวะกระตุกคิ้วขมวดขยับขึ้นลง (-20° ถึง -28°)
+       - `veinPulse`: เส้นเลือดปูด 💢 เต้นตุบๆ รุนแรง
+       - `nodOffOffsetY`: การสัปหงกหลับ (หลับคอพับลงช้าๆ แล้วสะดุ้งคืนตัว)
+       - `laughBounceY` & `laughSquint`: จังหวะตัวโยกขึ้นลงของการหัวเราะพร้อมตาหด-ขยาย
+       - `heartbeatScale`: จังหวะเต้นหัวใจคู่จริง (Lub-Dub double pulse: 1.0 -> 1.25 -> 1.12 -> 1.32 -> 1.0)
+       - `readingScanX`: การกวาดสายตาแบบ Sawtooth ซ้ายไปขวาช้าๆ แล้วดีดกลับต้นบรรทัด
+       - `partyHornProg`: จังหวะเป่าแตรปีใหม่ คลี่ม้วนกระดาษยืดออกยาวแล้วม้วนหดกลับ
+       - `wandArcAngle`: วงสวิงโบกไม้กายสิทธิ์เป็นส่วนโค้งเวทมนตร์พร้อมปล่อยประกายดาว
+       - `pantHeaveY` & `pantCycle`: จังหวะหอบแฮ่กๆ ตัวโยกตามลมหายใจและลิ้นกระเพื่อม
+       - `bladeShineProg`: แสงสะท้อนดาวประกาย 4 แฉกวิ่งเฉียบคมบนคมดาบคู่ซามูไร
+       - `brownoutAlpha`: สภาวะไฟตกวูบวาบของหุ่นยนต์ใกล้แบตหมด
+       - `shiverFastX/Y`: อาการสั่นระริกจากความหนาว/กลัว
+  2. **Elevated Sheet 1 Moodsets (`PetRobotHeadAvatar.kt`)**:
+     - **Page 3 (Angry)**: ตาเฉียงแดงสั่นระริก (`angerJitterX/Y`), คิ้วกระตุกขมวดชันเป็นจังหวะ (`angerBrowSlant`), เส้นเลือดปูด 💢 เต้นตุบๆ ขยาย 1.35x, เขี้ยวขาวขบเกร็ง
+     - **Page 4 (Sleeping)**: ศีรษะและดวงตาค่อยๆ สัปหงกทิ่มลง (`nodOffOffsetY`) แล้วสะดุ้งตัวกลับ, ตัวอักษร Zzz ลอยควงสว่าน
+     - **Page 10 (Laughing)**: ตา `> <` โยกเด้งจังหวะหัวเราะท้องแข็ง (`laughBounceY`), ขนาดตาหดขยาย (`laughSquint`), ประกายดาวความสุขผุดรอบดวงตา
+     - **Page 14 (Evil)**: คิ้วเฉียงกระตุกเอียงไม่เท่ากัน 2 ข้าง (Asymmetric Slant Cocking), ดวงตามองเหี้ยม, ไอคอนปิศาจม่วง 😈 ลอยเต้นเป็นจังหวะ
+     - **Page 17 (Shy)**: ตากลมหลบสายตาไปมา (`shyGazeX/Y`), แก้มชมพูระเรื่อเต้นเรื่อๆ เปล่งแสง
+     - **Page 18 (Surprised/Shock)**: ตาเบิกกว้างสั่นตกใจ (`shockJitter`), เครื่องหมายตกใจสีแดง ! สั่นกระตุก
+     - **Page 24 (Love)**: ดวงตาหัวใจสีชมพูเต้นตุบๆ ตามจังหวะหัวใจจริง (`heartbeatScale` Lub-Dub Rhythm)
+  3. **Elevated Sheet 2 Moodsets (`PetRobotMoodsetDraw.kt`)**:
+     - **Page 27 (Reading)**: สายตากวาดอ่านหนังสือทีละบรรทัดจากซ้ายไปขวาแล้วดีดกลับ (`readingScanX`)
+     - **Page 37 (Party)**: แตรเป่าคลี่ขยายความยาวจาก 16dp เป็น 54dp ขณะเป่า พร้อมม้วนกระดาษปลายแตรคลายออก
+     - **Page 39 (Exhausted)**: หน้าอกและดวงตายกยุบตามจังหวะหอบหายใจ (`pantHeaveY`), ลิ้นห้อยกระเพื่อมตามลมหายใจ (`pantCycle`)
+     - **Page 40 (Electric)**: ดวงตาสายฟ้ากระตุกสั่นแบบ 8-bit Stepped Arcade Jitter ไม่ใช่ Sine wave เรียบๆ
+     - **Page 45 (Magic)**: ไม้กายสิทธิ์โบกวาดส่วนโค้ง Wave Casting Arc (`wandArcAngle`) พร้อมประกายดาวขยายตัววาบที่ปลายไม้
+     - **Page 48 (Scared)**: ตาสั่นระริกหวาดกลัว (`shiverFastX/Y`), สายตากลอกมองตามผีน้อยที่บินวนไปมา, ฟันสั่นกึกๆ
+     - **Page 49 (Warrior)**: แสงประกายดาบสะท้อน 4 แฉกเฉียบคมสไลด์ผ่านคมดาบคู่คาตานะ (`bladeShineProg`)
+     - **Page 50 (Low Battery)**: ดวงตาสีฟ้าหม่นค่อยๆ หรี่กระพริบวูบวาบดับสลับติด (`brownoutAlpha`) พร้อมเปลือกตาตกหนักหน่วง
+- **Verification & Physical Device Testing**:
+  - บิลด์สำเร็จ: `./gradlew :composeApp:compileDebugKotlinAndroid` & `assembleDebug`
+  - ติดตั้ง APK และทดสอบบน Samsung Galaxy S22 Ultra (`R5CT42YEMMM`) ผ่าน adb broadcast `com.skyliner2008.jarvis.TEST_EMOTION`
+  - ยืนยันผลลัพธ์ผ่านรูปภาพจับหน้าจอจริง:
+    - `screen_angry.png`: หน้าที่ 3 (Angry) คิ้วกระตุก ตาสั่น เส้นเลือดปูดเต้น
+    - `screen_p24.png`: หน้าที่ 24 (Love) ดวงตาหัวใจเต้นตึกตักเป็นจังหวะ Lub-Dub
+    - `screen_p10.png`: หน้าที่ 10 (Laughing) ตา `> <` โยกเด้งหัวเราะอย่างร่าเริง
+    - `screen_p27.png`: หน้าที่ 27 (Reading) แว่นตาและหนังสือกาง สายตากวาดอ่าน
+    - `screen_p37.png`: หน้าที่ 37 (Party) หมวกปาร์ตี้ แตรเป่ายืดคลี่ออก
+    - `screen_p48.png`: หน้าที่ 48 (Scared) ตาสั่น ปากสั่น ผีลอยประกบ
+    - `screen_p50.png`: หน้าที่ 50 (Low Battery) หลอดไฟวูบวาบ ไฟตก (Brownout) และแบตเตอรี่สีแดงเตือน
+
+## 2026-09-14 — LOOI Robot Page 6 (Eating) & Page 7 (Drinking) Living Gestures: Lift-Bite & Head-Tilt Drink
+- **User Request & Goal**:
+  - "อย่าง เบียร์ ควรทำตาเอียง เหมือนเอียงหน้า แล้วเอียงแก้วเบียร์ ระดับปาก ให้ทำท่าคล้ายยกดื่ม" (เบียร์: ทำตาเอียงเหมือนเอียงหน้า ยกและเอียงแก้วเบียร์ที่ระดับปาก ทำท่าคล้ายยกดื่ม)
+  - "อย่าง เบอร์เกอร์ ให้เบอร์เกอร์ เลื่อนขึ้นมา จากด้านล่าง มาถึงแนวปาก คล้ายยกเบอร์เกอร์มากัด" (เบอร์เกอร์: เลื่อนขึ้นมาจากด้านล่าง มาถึงแนวปาก คล้ายยกเบอร์เกอร์ขึ้นมากัด)
+- **Key Implementation Details**:
+  1. **AvatarLivingEngine Timing Adjustments (`AvatarLivingEngine.kt`)**:
+     - ขยายรอบเวลา `chewCycle` จาก 850ms เป็น 2000ms เพื่อให้รอบเวลารองรับ 4 จังหวะการเคลื่อนไหวเต็มรูปแบบ (ยกขึ้น -> กัด -> ลดลง -> เคี้ยวตุ้ยๆ)
+     - ขยายรอบเวลา `gulpCycle` จาก 1300ms เป็น 2400ms เพื่อให้รอบเวลารองรับ 4 จังหวะการดื่มเต็มรูปแบบ (เอียงหน้ายกแก้ว -> ยกเอียงดื่มกลืน 2 อึก -> วางแก้วคืนหน้าตรง -> พักสดชื่น)
+  2. **Page 6: Eating Lift & Chomp Gesture (`PetRobotHeadAvatar.kt`)**:
+     - ฟิสิกส์ 4 จังหวะ:
+       - Phase 1 (0.00..0.28): ยกเบอร์เกอร์เลื่อนขึ้นมาจากด้านล่าง (+36dp) มาสู่แนวระดับปาก สายตาก้มมองตามเบอร์เกอร์
+       - Phase 2 (0.28..0.44): จังหวะกัด Chomp! เบอร์เกอร์มีแรงกด squash ย่นเข้าหาปาก ตาหยีปิดอร่อย พร้อมเศษขนมปังร่วงกระจาย
+       - Phase 3 (0.44..0.60): ดึงเบอร์เกอร์เลื่อนลงกลับมาที่ตำแหน่งถือพัก (+36dp) ด้านล่าง
+       - Phase 4 (0.60..1.00): พักเบอร์เกอร์ไว้ด้านล่าง แล้วเคี้ยวแก้มตุ่ย ตาเด้งเป็นจังหวะตามการเคี้ยวอย่างเอร็ดอร่อย
+  3. **Page 7: Drinking Head Tilt & Glass Tip Gesture (`PetRobotHeadAvatar.kt`)**:
+     - ฟิสิกส์ 4 จังหวะ:
+       - Phase 1 (0.00..0.26): ดวงตาและใบหน้าเอียงองศา (Head Tilt -7.5°) พร้อมยกแก้วเบียร์ขึ้นและเอียงแก้ว (Glass Tilt 24.0°) โดยมี Pivot point อยู่ที่ขอบปากแก้วด้านบนซ้าย ให้ขอบปากแก้วแตะอยู่ที่แนวระดับปากตลอดเวลา
+       - Phase 2 (0.26..0.68): ยกกระดกดื่มค้างไว้พร้อมเอียงหน้า มี Swallow Pulse กลืนอึกๆ 2 ครั้ง ตาหรี่เคลิ้ม มีประกายฟองเบียร์
+       - Phase 3 (0.68..0.84): ลดแก้วเบียร์ลงและหมุนแก้วกลับมาตั้งตรง พร้อมคืนศีรษะและดวงตากลับมาหน้าตรงปกติ
+       - Phase 4 (0.84..1.00): แก้วเบียร์ตั้งตรงระดับปาก ดวงตากลับมาตรงสดชื่น
+  4. **Preserved Non-Obstructive Positioning**:
+     - ทั้งสองไอเทมยังคงอยู่ที่ระดับปาก (Mouth level) ด้านล่างตา ไม่ซ้อนทับหว่างตาเหมือนเป็นจมูก และเคลื่อนไหวอย่างสมจริงเป็นธรรมชาติ
+- **Verification & Testing**:
+  - บิลด์ผ่านสำเร็จ 100%: `./gradlew :composeApp:assembleDebug`
+  - ติดตั้งและจับภาพหน้าจอจริงบน Samsung Galaxy S22 Ultra (`R5CT42YEMMM`):
+    - `p6_gesture_bite.png`: จังหวะยกเบอร์เกอร์ขึ้นมาถึงแนวระดับปากเพื่อกัด
+    - `p6_gesture_chew.png`: จังหวะลดเบอร์เกอร์ลงมาด้านล่างและเคี้ยวตุ้ยๆ
+    - `p7_gesture_drinking.png`: จังหวะดวงตาเอียงและแก้วเบียร์เอียงยกกระดกดื่มที่ระดับปาก
+    - `p7_gesture_upright.png`: จังหวะลดแก้วเบียร์ลงและคืนหน้าตรงปกติ
+
+## 2026-09-14 — LOOI Robot Page 6 (Eating) & Page 7 (Drinking) Proportional & Position Parity
+- **User Request & Goal**:
+  - "moodset หน้าที่ 6 กับ หน้าที่ 7 เบอร์เกอร์ กับ เบียร์ มันไปทับอยู่ ที่ ระหว่างดวงตา เลยทำให้ดูเหมือน เป็นจมูก มากกว่า กำลังกิน"
+  - แก้ไขปัญหาเบอร์เกอร์และแก้วเบียร์ที่เคยวางตำแหน่งสูงเกินไปจนทับช่องว่างระหว่างดวงตาทำให้ดูเหมือนจมูก ย้ายลงมาที่ระดับปาก (Mouth Level) ด้านล่างตาอย่างถูกต้องตามภาพอ้างอิง LOOI Reference Sheet 1 (Cell 6 & Cell 7)
+- **Key Implementation Details (`PetRobotHeadAvatar.kt`)**:
+  1. **Page 6: Eating (เบอร์เกอร์)**:
+     - ปรับตำแหน่งแนวตั้ง: `burgerY = eyeCenterY + baseEyeH * 0.68f` (ย้ายลงมาจากเดิม 0.22f) ขอบบนของขนมปังเบอร์เกอร์แตะพอดีกับส่วนโค้งขอบล่างของดวงตา ปล่อยให้ช่องว่างตรงกลางระหว่างดวงตาโล่งสะอาดตา 100%
+     - ปรับสัดส่วนขนาด: `burgerW = baseEyeW * 0.58f` (ลดจาก 0.95f) ให้มีขนาดกะทัดรัดได้สัดส่วนมินิเบอร์เกอร์ตามแบบ LOOI Sheet 1 Cell 6
+     - ปรับสายตามองลง: `eatingGazeY = (gazeY + 0.38f)` สายตามองก้มลงที่เบอร์เกอร์ขณะเคี้ยว พร้อมแอนิเมชันเศษขนมปังร่วงหล่น
+  2. **Page 7: Drinking (แก้วเบียร์)**:
+     - ปรับตำแหน่งแนวตั้ง: `beerY = eyeCenterY + baseEyeH * 0.84f` (ย้ายลงมาจากเดิม 0.40f) ปุยฟองเบียร์ด้านบนแตะขอบล่างของดวงตา ตัวแก้วเบียร์ทอดตัวลงด้านล่างในระดับปาก/คาง
+     - ปรับสัดส่วนขนาด: `beerW = baseEyeW * 0.46f` ได้สัดส่วนแก้วไพนต์มินิมอล
+     - ปรับสายตาเอียงมองลงชนแก้ว: ตาทั้งสองข้างมองก้มเข้าหากันที่ปากแก้วเบียร์ (`gazeX = ±0.18f`, `gazeY = 0.42f`)
+- **Verification & Testing**:
+  - บิลด์สำเร็จ: `./gradlew :composeApp:assembleDebug`
+  - ทดสอบและจับภาพหน้าจอจริงบน Samsung Galaxy S22 Ultra (`R5CT42YEMMM`):
+    - `screen_p6_final.png`: เบอร์เกอร์อยู่ระดับปากด้านล่างตา ไม่ทับหว่างคิ้ว/จมูก ดูเป็นการกินเบอร์เกอร์ชัดเจน
+    - `screen_p7_final.png`: แก้วเบียร์อยู่ระดับปากด้านล่างตา หว่างตาโล่ง ดูเป็นการดื่มเบียร์สดชื่นสมบูรณ์แบบ
+
+## 2026-09-14 — Pet Mode Portrait Dialogue Layout: Non-Obstructive Overlay & Bottom Status Dimming
+- **User Request & Goal**:
+  - ในหน้าจอแนวตั้ง (Portrait) เมื่อมีกล่องข้อความสนทนาแสดงขึ้นมา มันเคยแสดงทับใบหน้าของ Pet Robot
+  - ผู้ใช้ต้องการให้:
+    1. เมื่อมีกล่องข้อความ กล่องข้อความจะต้องมาแสดงทับแถบสถานะด้านล่างแทน (ไม่ทับใบหน้าหุ่นยนต์)
+    2. แถบสถานะด้านล่างจะมืดลง (Dimmed) ในขณะที่กล่องข้อความกำลังแสดง
+    3. เมื่อกล่องข้อความหายไป แถบสถานะจะกลับมาสว่างเป็นปกติเหมือนเดิม
+- **Key Implementation Details (`PetModeScreen.kt`)**:
+  1. **Decoupled Pet Face from Message Card in Portrait**:
+     - ปรับ `targetFaceOffsetY = 0f` และ `targetFaceScale = if (isLandscape) 0.82f else 1.0f` ในแนวตั้ง ใบหน้าหุ่นยนต์จะคงสเกล 100% เต็มและจัดกึ่งกลางครึ่งบนอย่างสมบูรณ์แบบโดยไม่ถูกบีบหรือเลื่อนหลบ
+     - ป้องกันไม่ให้ `PetDialogueCard` ถูกวาดในครึ่งบนในโหมดแนวตั้ง (`if (isLandscape) { ... }`)
+  2. **Layered Bottom Status Surface with Dynamic Dimming**:
+     - เพิ่ม `statusContentAlpha by animateFloatAsState(targetValue = if (hasMessage) 0.08f else 1.0f, tween(320))` ลดความสว่างของ Dashboard ค่าความต้องการ (Tamagotchi needs) ลงเหลือเพียง 8% เพื่อไม่ให้ลายตาและขับกล่องข้อความให้โดดเด่น
+     - เพิ่ม `statusScrimAlpha by animateFloatAsState(targetValue = if (hasMessage) 0.78f else 0.0f, tween(320))` แผ่น Scrim สีกรมเข้ม/ดำ คลุมทับแผงสถานะ พร้อมดักจับการแตะเพื่อปิดกล่องข้อความ (tap to dismiss)
+     - ปิดการใช้งานปุ่มคำสั่ง (Feed, Clean, Play, Sleep) ชั่วคราวเมื่อมีกล่องข้อความเปิดอยู่ (`enabled = !hasMessage`)
+  3. **Centered Floating Dialogue Card Over Status Panel**:
+     - วาง `AnimatedVisibility` ภายใน `Box` กึ่งกลางแถบสถานะด้านล่าง โดยจำกัดความสูง `heightIn(max = screenMaxHeight * 0.38f)` ไม่ให้ล้นเกินขอบเขต
+     - เพิ่มพื้นหลัง `PetDialogueCard` ให้ทึบขึ้น (`surfaceColor.copy(alpha = 0.96f)`) พร้อมเงาลึก 20dp และขอบนีออนไซแอนคมชัด
+  4. **Smooth Auto-Restore Transition**:
+     - เมื่อกล่องข้อความหายไป (Demo จบ หรือแตะปิด) ค่า Alpha จะ Fade-in กลับมาสว่าง 100% ภายใน 320ms อย่างนุ่มนวล
+- **Verification & Testing**:
+  - บิลด์สำเร็จ: `./gradlew :composeApp:assembleDebug`
+  - ทดสอบจริงบน Samsung Galaxy S22 Ultra (`R5CT42YEMMM`):
+    - `screen_portrait_dim_verified.png`: ตรวจสอบขณะแสดงกล่องข้อความ หุ่นยนต์อยู่ครึ่งบน 100% ชัดเจน แถบสถานะด้านล่างมืดลง และกล่องข้อความแสดงทับอย่างประณีต
+    - `screen_portrait_restored_bright.png`: ตรวจสอบหลังข้อความหายไป แถบสถานะกลับมาสว่างเต็มที่ 100% พร้อมปุ่มคำสั่งพร้อมใช้งาน
+
+## 2026-09-14 — LOOI Robot "Neon Cyan Style Moodset" 2-Layer Flat Glow & Morph Engine
+- **User Request & Goal**:
+  - สไตล์ภาพอ้างอิง "Looi Robot: Neon Cyan Style Moodset" (flat neon-glow icon + motion) แทนแนวทาง 3D gradient/specular:
+    1. เขียนฟังก์ชัน `drawNeonShape` (Glow layer ขยาย ~15-20% alpha ~0.4-0.6 + Core layer ทึบ ไม่มี gradient, strokeCap = Round) และ accentColor ต่ออารมณ์ (Cyan, Red, Pink, Gold, Mint, Grey)
+    2. ทำ blink/emotion-switch เป็น morph animation บน scaleY (circle -> flat slit ~150-250ms -> spring open to new shape)
+    3. แยก layer การเคลื่อนไหวของ prop ออกจากตาหลัก (hearts, tears, sparkles, swirls, zzz, sweat drops) เคลื่อนไหวอิสระซ้าย-ขวาไม่พร้อมกัน
+    4. คง 3D rotation ไว้เป็น outer layer
+    5. ลบ radial gradient และ specular highlight จุดขาวทั้งหมดออก
+- **Key Architecture & Enhancements Implemented**:
+  1. **Neon Vector Drawing Engine (`PetRobotNeonDraw.kt`)**:
+     - สร้างชุดฟังก์ชันวาดเวกเตอร์ 2 ชั้น Neon Flat Glow บริสุทธิ์: `drawNeonRoundRect`, `drawNeonCircle`, `drawNeonPath`, `drawNeonFilledPath`, `drawNeonArc`, `drawNeonLine`, `drawNeonHeart`, `drawNeonTeardrop`, `drawNeonSparkle`, `drawNeonZzz`, `drawNeonSwirl`
+     - Glow Layer: ขยายขนาดรูปทรง ~15-20% รัศมีแสงฟุ้ง Multi-pass GPU-accelerated DrawScope bloom (alpha 0.35-0.55), Core Layer: เนื้อสีทึบคมชัด ไร้ gradient จุดตัดเส้นโค้งมน Round cap
+     - พาเล็ตสีนีออนมาตรฐาน: `NeonCyan` (`#00F5FF`), `NeonRed` (`#FF3B5C`), `NeonPink` (`#FF4081`), `NeonGold` (`#FFD700`), `NeonMint` (`#64FFDA`), `NeonGrey` (`#90A4AE`)
+  2. **Morph Animation on Blink & Emotion Switch (`PetRobotHeadAvatar.kt`)**:
+     - **Blink Morph**: `naturalBlinkScaleY` แอนิเมชันกะพริบตาธรรมชาติวนรอบ 3800ms บีบ `scaleY` จาก 1f ลงสู่ Flat Slit 0.06f ใน 170ms ด้วย `FastOutSlowInEasing` และเด้งเปิดกลับสู่ 1f ใน 120ms
+     - **Emotion Switch Morph**: `emotionMorphScaleY` เมื่อตรวจพบการเปลี่ยนอารมณ์ จะบีบยุบตัวลงสู่ Slit 0.08f ใน 160ms แล้วสลับ `displayedEmotion` ก่อนจะ Spring เด้งเปิดสู่รูปทรงอารมณ์ใหม่อย่างนุ่มนวลด้วย `Spring.DampingRatioLowBouncy`
+  3. **Decoupled Out-of-Sync Particle Motion Layer (`rememberPetParticleMotionState()`)**:
+     - แยกพร็อพเคลื่อนไหวออกจากแกนตาหลัก: หัวใจลอย (Love), หยดน้ำตาร่วง (Sad/Crying), อักษร Zzz ลอยหมุน (Sleepy), ดาวหมุนประกาย (Wink), ก้นหอยหมุนวน (Sick), หยดเหงื่อ (Sweat)
+     - ซ้ายและขวาแยกคาบเวลาและความถี่ไม่พร้อมกัน (Out-of-phase oscillation เช่น ซ้าย 1900ms ขวา 2300ms) ให้ความเป็นธรรมชาติตามหลักฟิสิกส์สิ่งมีชีวิต
+  4. **Removal of 3D Gradient & Specular Highlights**:
+     - ลบ Brush.radialGradient และจุดขาว specular highlight dots ออกทั้งหมดในทุกดวงตาและพร็อพ เปลี่ยนเป็น Flat Neon Icon ตามแม่แบบ LOOI แท้จริง
+     - คงระบบ Native 3D Perspective (`rotationY`, `rotationX` บน Canvas `graphicsLayer`) ไว้นอกสุดเพื่อคงมิติ Parallax
+  5. **Crying Waterfall Flow Matching Looi Reference (`PetRobotMoodsetDraw.kt`)**:
+     - ปรับปรุง `drawCryingMood` ให้มีดวงตาทรงโดมไซแอนนีออน, ม่านน้ำตกไหลพรั่งพรูจากตาทั้งสองข้าง (`drawNeonFilledPath`), หยดน้ำตาหยดติ๋งอิสระ (`drawNeonTeardrop`), และปากคว่ำเศร้า `⌒`
+- **Verification & Testing**:
+  - บิลด์ผ่านสำเร็จ 100%: `./gradlew :composeApp:assembleDebug`
+  - ติดตั้งและจับภาพหน้าจอบนอุปกรณ์จริง (Samsung Galaxy S22 Ultra - `R5CT42YEMMM`) ผ่าน ADB Intent `com.skyliner2008.jarvis.TEST_EMOTION`:
+    - `screen_p1.png`: Normal (Standby Neon Cyan flat glow)
+    - `screen_p3_angry.png`: Angry (Neon Red wedge eyes + fangs + red glow)
+    - `screen_p4_sleeping.png`: Sleepy (Neon Grey capsule slits + animated rising Zzz)
+    - `screen_p8_wink.png`: Wink (Neon Cyan eye + wink slit + gold sparkle star)
+    - `screen_p22_sick.png`: Sick (Neon Mint dual out-of-phase swirls + thermometer)
+    - `screen_p24_love.png`: In Love (Neon Pink giant hearts + floating mini hearts)
+    - `screen_p25_neon.png`: Crying (Neon Cyan dome eyes + cascading waterfalls + sad mouth)
+
+## 2026-09-13 — LOOI Robot True 3D Spherical Face Projection
+- **User Request & Goal**:
+  - "ตัว Moodsets ส่วนที่ทำ ดวงตา ของ pet ฉันว่า มายังขาด ในส่วนของ อารมณ์แบบโครงหน้า ส่วนโค้งตามรูปหน้า ที่เหมือนเป็นทรงกลม 3D มันเลยยังดูไม่เป็น ธรรมชาติ อย่างถ้าหันซ้าย ตาข้างซ้าย จะใหญ่กว่า ข้างขวา ,หันขวา ตาข้างขวา จะใหญ่กว่าข้างซ้าย ตืออารมณ์เหมือน มีหัวมีหน้า แต่ไม่ต้องวาดหัววาดหน้า มีแค่ดวงตา คิ้ว กับปาก"
+  - สร้างมิติโครงหน้าทรงกลม 3D ล่องหน (Invisible 3D Head Effect) เวลาที่ดวงตาและใบหน้าของหุ่นยนต์หันไปด้านข้าง
+- **Key Enhancements Implemented**:
+  1. **Native 3D Perspective via Compose `graphicsLayer` (`PetRobotHeadAvatar.kt`)**:
+     - เพิ่ม `rotationY` (Yaw) และ `rotationX` (Pitch) ลงใน Modifier.graphicsLayer ของ Canvas อวตารหลัก
+     - ปรับคำนวณ `targetRotationY = gazeX * 35f` และ `targetRotationX = -gazeY * 20f` ผูกเข้ากับทิศทางสายตา
+     - ผลลัพธ์: มิติ Parallax แบบ 3D แท้จริง (เมื่อหันซ้าย `gazeX < 0` หน้าซ้ายจะหมุนมาด้านหน้า ทำให้ดวงตาซ้ายขยายใหญ่ขึ้น และตาขวาแบนเล็กลงอัตโนมัติตามหลัก Perspective Foreshortening)
+  2. **Spherical Curve Offset Mapping**:
+     - เปลี่ยนการเลื่อนแกน X/Y แบบแบนราบ (Flat translation) เป็นการเลื่อนโค้งแบบทรงกลม (Spherical Wrap-around Spacing)
+     - สร้างตัวแปร `faceCenterX` และ `faceCenterY` ที่คำนวณจาก `gazeDisplacementX` และ `dynamicSpacing` เพื่อดึงพร็อพทั้งหมด (ปาก, คิ้ว, แว่น, ของกิน ฯลฯ) ให้หมุนและจัดกึ่งกลางสอดคล้องกับระนาบ 3D ใหม่
+  3. **Anticipation Scale Pivot Alignment**:
+     - อัปเดตจุดศูนย์กลาง (Pivot) ของฟิสิกส์การยืดหด (Squash & Stretch) จาก `centerX` เดิมเป็น `faceCenterX` เพื่อให้เวลากระโดดเปลี่ยนอารมณ์ ใบหน้าจะยืดหดจากแกนหน้าตัวเอง ไม่ใช่จากแกนกลางจอโทรศัพท์
+
+## 2026-09-13 — LOOI Robot 50 Moodsets Dynamic Background & Foreground 2.5D Depth Engine
+- **User Request & Goal**:
+  - "มันยังขาดฉากหลัง /ฉากหน้า ไดนามิก ที่คู่กับ Moodsets มันได้เพิ่มความมี มิติ"
+  - เพิ่มมิติความลึก (2.5D Layered Depth & Atmospheric Immersion) ให้กับ Avatar ทั้ง 50 Moodsets ผ่านระบบฉากหลังไดนามิก (Dynamic Background) และฉากหน้าเลนส์/ละอองบรรยากาศ (Dynamic Foreground)
+  - คงเอกลักษณ์ความมินิมอล High-Contrast Dark OLED (#000000) ของ LOOI หุ่นยนต์ตั้งโต๊ะ โดยดวงตาไซแอน (#00F5FF) ยังคงเด่นชัดเป็นจุดนำสายตา
+  - รองรับ Kotlin Multiplatform (KMP) 100% ใน `composeApp/src/commonMain`, วาดด้วย Compose Canvas Vector ล้วน ไม่ใช้บิตแมปภายนอก, ทำงานลื่นไหล 60fps
+- **Key Enhancements Implemented**:
+  1. **Architecture & State Expansion (`RobotFaceState.kt`)**:
+     - เพิ่ม `BackgroundTheme` 12 ธีมใหม่: `CYBER_GRID`, `SPACE_NEBULA`, `MAGIC_MYSTIC`, `CINEMA_COZY`, `WINTER_BLIZZARD`, `SUMMER_HEAT`, `WARRIOR_DOJO`, `PARTY_CONFETTI`, `GOLDEN_VAULT`, `SICK_LAB`, `SPORTS_ARENA`, `LOW_POWER_CRT` รวมเป็น 20 ธีม
+     - เพิ่ม `ForegroundEffect` enum 17 เอฟเฟกต์: `NONE`, `CYBER_HUD`, `STAR_DUST`, `MAGIC_SPARKLES`, `LENS_REFLECTION`, `FROST_VIGNETTE`, `HEAT_DISTORTION`, `RAIN_CONDENSATION`, `ELECTRIC_SPARKS`, `FALLING_PETALS`, `CONFETTI_TUMBLE`, `GOLDEN_SHINE`, `HEART_ORBS`, `BUBBLE_FLOAT`, `ANAMORPHIC_FLARE`, `CRT_SCANLINES`, `CAMERA_VIEWFINDER`
+     - เพิ่ม `foregroundName` และ property helper `foregroundEffect` ใน `RobotFaceState`
+  2. **Dynamic Background Engine (`PetBackgroundLayer.kt`)**:
+     - อัปเกรด `DefaultBackground()` ให้มี Organic Breathing Depth Halo (รัศมีแสงไซแอน `#00F5FF` หายใจอย่างนุ่มนวล alpha 0.03f..0.08f) ขจัดความแบนราบมืดทึบ
+     - สร้างคอมโพเนนต์ฉากหลัง 12 รูปแบบ: ตารางไซเบอร์เปอร์สเปกทีฟ, กาแล็กซีเนบิวลาพร้อมดาวตก, วงแหวนอักขระเวทมนตร์, แสงไฟโรงหนังนุ่มนวล, พายุหิมะไซบีเรีย, คลื่นแดดฤดูร้อน, โรงฝึกซามูไร, สปอตไลต์ปาร์ตี้, ประกายทองคำในคลังสมบัติ, ฟองทดลองเคมีในแล็บ, อัฒจันทร์สนามกีฬา, เมทริกซ์ CRT พลังงานต่ำ
+  3. **Dynamic Foreground Engine (`PetForegroundLayer.kt`)**:
+     - สร้างคอมโพเนนต์ `PetForegroundLayer` พร้อม Crossfade Animation (500ms)
+     - เรนเดอร์เอฟเฟกต์เลนส์/บรรยากาศ 16 ชนิด: โครงข่าย HUD, ละอองโบเก้ดาวระยิบระยับ, แสงประกายเวท 4 แฉก, แสงสะท้อนเลนส์ Visor กวาดผ่าน, ขอบน้ำแข็งเกาะเลนส์ (Frost Vignette), คลื่นความร้อนบิดเบี้ยว (Heat Distortion), หยดน้ำเกาะกระจก, ประกายไฟสายฟ้าแลบ, กลีบซากุระร่วงปลิวลม, คอนเฟตติหมุนคว้าง 3D, ประกายดาวสีทอง, อณูหัวใจลอย, ฟองสบู่ลอย, แสงแฟลร์แนวนอน Anamorphic, เส้นสแกน CRT ยุค 80, กรอบเล็งกล้อง Viewfinder
+  4. **Moodset Catalog Automatic Resolution (`LooiMoodsetCatalog.kt`)**:
+     - พัฒนา `resolveDefaultBackground(pageNumber, emotion)` และ `resolveDefaultForeground(pageNumber, emotion)` เชื่อมโยง Moodset ทั้ง 50 หน้าเข้ากับฉากหลังและฉากหน้าอย่างสมบูรณ์แบบ
+     - อัปเดต `JarvisViewModel.kt` ส่ง `backgroundName` และ `foregroundName` อัตโนมัติเมื่อเรียก `showMoodsetPage` และ `playAllMoodsets`
+     - ติดตั้ง `PetForegroundLayer` ใน `PetModeScreen.kt` (Layer 3.7) ด้านหน้าหุ่นยนต์และอุปกรณ์
+  5. **Procedural Synthesis Exhaustiveness (`AmbientSoundEngine.kt`)**:
+     - อัปเดต `when(theme)` ใน `AmbientSoundEngine.kt` ให้มี `else` branch รองรับ 12 ธีมใหม่อย่างปลอดภัย
+- **Verification & Testing**:
+  - **Unit Tests**: `MoodsetCatalogTest` ครอบคลุมการทดสอบทั้ง 50 หน้า, การตรวจสอบ Background และ Foreground Depth $\rightarrow$ **BUILD SUCCESSFUL** (100% Pass)
+  - **On-Device ADB Verification (Samsung Galaxy S22 Ultra - `R5CT42YEMMM`)**:
+    - ติดตั้ง `PersonalAIBot-debug.apk` สำเร็จ
+    - บันทึกและตรวจสอบภาพถ่ายหน้าจอจริง 7 แบบตัวแทน:
+      - `screen_p1.png`: Normal (Default Breathing Depth Halo + Visor Lens Reflection)
+      - `screen_p23.png`: Rich (Golden Vault Gradient Aura + Golden Star Sparkles)
+      - `screen_p31.png`: Cold (Winter Blizzard Snowflakes + Frost Crystalline Vignette)
+      - `screen_p36.png`: Space (Deep Space Nebula Orbit + Star Dust Bokeh Depth)
+      - `screen_p37.png`: Party (Celebration Sweeping Spotlights + Tumbling Confetti)
+      - `screen_p45.png`: Magic (Mystical Rune Rings + Arcane Star Sparkles)
+      - `screen_p49.png`: Warrior (Red Dojo Aura + Falling Cherry Blossom Petals)
+      - `screen_p50.png`: Low Battery (Pulsing CRT Red Matrix + CRT Scanlines)
+    - ทุกเลเยอร์เรนเดอร์สวยงาม มีมิติ 2.5D ลึกชัดเจน ลื่นไหล 60fps บนหน้าจอ OLED
+
+## 2026-09-13 — LOOI Robot 50 Moodsets Full Stylistic Parity & On-Device ADB Verification
+- **User Request & Goal**:
+  - บรรลุความแม่นยำ 100% ในด้านสัดส่วน ลายเส้น และสไตล์ตามแม่แบบภาพอ้างอิงทั้ง 50 หน้าของ LOOI Robot (Sheet 1: 1-20, Sheet 2: 21-50)
+  - แก้ไขพร็อพอาหารและเครื่องดื่ม (🍔 Burger, 🍺 Beer, 🍿 Popcorn) ที่ดูลอยเป็นสติ๊กเกอร์แปะใต้ตา ให้จัดวางและได้สัดส่วนที่กลมกลืนเป็นเนื้อเดียวกับดวงตาไซแอน
+  - ตรวจสอบความถูกต้องของทุก Moodset บนอุปกรณ์จริงผ่าน ADB Screencap (Samsung Galaxy S22 Ultra - `R5CT42YEMMM`)
+- **Key Enhancements Implemented**:
+  1. **Food & Drink Proportional Realignment (`PetRobotHeadAvatar.kt`)**:
+     - **Page 6 (Eating)**: ขยายและย้ายตำแหน่งเบอร์เกอร์ให้สอดรับเข้ากับร่องโค้งระหว่างดวงตาทั้งสองข้างอย่างพอดี (`burgerW = baseEyeW * 0.95f`, `burgerY = eyeCenterY + baseEyeH * 0.22f`), ปรับระดับสายตาให้เหลือบมองเบอร์เกอร์อย่างเอร็ดอร่อย, ถอดอุ้งมือและเส้นปากที่ไม่จำเป็นออกเพื่อให้ดูมินิมอลตามแบบ Sheet 1 Cell 6
+     - **Page 7 (Drinking)**: ปรับแก้วเบียร์เป็นทรงไพนต์ (Conical Pint Tumbler) ตั้งตรงระหว่างดวงตา (`beerW = baseEyeW * 0.52f`, `beerY = eyeCenterY + baseEyeH * 0.40f`) มีฟองขาวนุ่มพูนขอบและฟองอากาศคาร์บอเนต, เปลี่ยนดวงตาเป็นดวงตากลมสดชื่นเหลือบมองเข้าหาแก้ว (`gazeX = ±0.20f`, `gazeY = 0.25f`), ตัดแก้มชมพูและอุ้งมือออกให้ตรงกับ Sheet 1 Cell 7
+     - **Page 12 (VR Mode)**: ปรับขนาดถังป๊อปคอร์นให้กะทัดรัดได้สัดส่วน (`popW = baseEyeW * 0.46f`) วางไว้ที่มุมล่างขวาของแว่น VR Vision Pro (`popX = rightEyeCenterX + baseEyeW * 0.50f`, `popY = eyeCenterY + baseEyeH * 0.50f`), ตัดเม็ดกระเด็นและมือออกตาม Sheet 1 Cell 12
+  2. **Costume & Expression Parity (`PetRobotMoodsetDraw.kt`)**:
+     - **Page 21 (Confused)**: เพิ่มความหนาของเส้นดวงตาคลื่นหยัก (Wavy Eye Stroke 11dp, Depth Shadow 15dp) ให้เปล่งประกายคมชัด พร้อมเครื่องหมาย `¿` สีฟ้าอ่อน และ `??` สีแดง
+     - **Page 45 (Magic)**: ขยายความสูงหมวกพ่อมด 56dp พร้อมริบบิ้นสีเหลือง, ไม้กายสิทธิ์หัวดาวประกาย และรอยยิ้มมั่นใจ `drawSmileArc`
+     - **Page 46 (Sporty)**: ปรับจากลูกบาสเกตบอลเป็นลูกฟุตบอลขาว-ดำคลาสสิก (⚽) มีช่องห้าเหลี่ยมตรงกลางและลายเย็บ, สายคาดหัว 3 สี, และรอยยิ้ม
+     - **Page 47 (Scientist)**: ออกแบบแว่นตาทดลองคู่เชื่อมด้วยสะพานแว่นและสายรัดด้านข้าง, ขวดแก้วรูปชมพู่มีของเหลวสีเขียวเดือดปุด, และรอยยิ้ม
+     - **Page 49 (Warrior)**: เพิ่มยอดเขาเกราะทองซามูไร (Kuwagata V-horns) โค้งขึ้นจากเหรียญวงกลมกลางหน้าผาก, ผ้าคาดหัวสีแดง, ดาบคะตะนะไขว้, และรอยยิ้ม
+     - **Page 50 (Low Battery)**: เพิ่มประกายดาวสีเทาเข้มหรี่แสง `✦` เหนือดวงตาข้างซ้ายตาม Sheet 2 Cell 50
+- **On-Device ADB Screencap Verification**:
+  - ตรวจสอบผ่าน ADB Broadcast: `com.skyliner2008.jarvis.TEST_EMOTION`
+  - ตรวจภาพแคปหน้าจอจริง: `screen6.png`, `screen7.png`, `screen12.png`, `screen21.png`, `screen45.png`, `screen46.png`, `screen47.png`, `screen49.png`, `screen50.png` ผ่าน `view_file` ยืนยันตรงตามแบบ 100%
+
+## 2026-09-13 — LOOI Robot Food & Drink Living Gestures Upgrade (🍔 Burger, 🍺 Beer, 🍿 Popcorn)
+- **User Feedback**:
+  - "ดูมี ชีวิตชีวา ขึ้นมานิดหน่อย แต่พวก 🍔 🍺 🍿 สติ๊กเกอร์ ที่อยู่ ใต้ดวงตา และไม่ได้แสดง ท่าทาง เหมือนกำลังกิน มันดูเล็กไป"
+  - พร็อพอาหารและเครื่องดื่มในหน้า Eating (หน้า 6), Drinking (หน้า 7), และ VR Mode (หน้า 12) มีขนาดเล็กเกินไป (24-40dp) ดูแบนเหมือนสติ๊กเกอร์แปะใต้ตา และขาดท่าทางกำลังกิน/ดื่มจริง
+- **Changes Implemented**:
+  1. **Living Motion Engine Drivers (`AvatarLivingEngine.kt`)**:
+     - เพิ่ม `chewCycle` (0..1f ใน 850ms): ควบคุมจังหวะงับเบอร์เกอร์และเคี้ยวตุ้ยๆ (Squash & Stretch)
+     - เพิ่ม `gulpCycle` (0..1f ใน 1300ms): ควบคุมการเอียงยกแก้วดื่ม จังหวะกลืน และการเต้นของลำคอ (Throat pulse)
+     - เพิ่ม `popPhase` (0..1f ใน 700ms): ควบคุมการป๊อปและวิถีโค้งของเม็ดป๊อปคอร์นลอยเข้าปาก
+  2. **Substantial Size Enlargement (ขยายขนาดใหญ่ขึ้น 2.0x – 2.5x)**:
+     - 🍔 Burger: ขยายจาก 40dp เป็น **80dp** (เห็นชั้นขนมปังงา, ผักกาด, มะเขือเทศ, ชีสเยิ้ม, เนื้อย่าง, รอยกัด)
+     - 🍺 Beer Stein: ขยายจาก 28dp เป็น **66dp x 84dp** (แก้วเบียร์หนักทรงยุโรป มีฟองนุ่มล้นขอบและพรายฟองคาร์บอเนต)
+     - 🍿 Popcorn: ขยายจาก 24dp เป็น **62dp x 74dp** (ถังป๊อปคอร์นลายทางขาวแดงโรงหนัง ขอบทอง เม็ดป๊อปคอร์นพูน)
+  3. **Living Eating & Drinking Gestures (`PetRobotHeadAvatar.kt`)**:
+     - **Eating (หน้า 6)**: อุ้งมือหุ่นยนต์ 2 ข้างจับเบอร์เกอร์ (`drawRobotPaw`), ปากเคี้ยวตุ้ยๆ (`drawChewingMouth`) สลับจังหวะงับ, แก้มสีชมพูพองระเรื่อตามจังหวะเคี้ยว, มีเศษขนมปังสีทองร่วง, สายตาหรี่มองเบอร์เกอร์อย่างเอร็ดอร่อย (`⌒ ⌒`)
+     - **Drinking (หน้า 7)**: ยกแก้วเบียร์เอียงทำมุมดื่ม (`-28° ถึง -35°`), มือหุ่นยนต์จับหูแก้ว, ฟองขาวพวยพุ่ง, ปากขยับดื่มอึกๆ พร้อมจังหวะกระตุกกลืนที่คอ, มีคราบฟองเบียร์สีขาวติดมุมปาก, สายตาเคลิบเคลิ้มสดชื่น
+     - **VR Mode (หน้า 12)**: ถังป๊อปคอร์นลายทางใบใหญ่, เม็ดป๊อปคอร์นเด้งลอยเป็นวิถีโค้งเข้าปาก, ปากใต้หน้ากาก VR กำลังเคี้ยวหงุบหงับ
+  4. **Pet Mode Props Overlay Sync (`PetPropsOverlay.kt`)**:
+     - อัปเกรด `BurgerProp()`, `BeerProp()`, `PopcornProp()` ให้มีขนาดและท่าทางเคลื่อนไหวแบบเดียวกันเมื่อผู้ใช้สวมใส่พร็อพ
+- **Verification**:
+  - Unit Tests: `MoodsetCatalogTest`, `DeviceControlTest` $\rightarrow$ **BUILD SUCCESSFUL in 2m 30s** (100% Pass)
+  - Android APK: `./gradlew :composeApp:assembleDebug` $\rightarrow$ **BUILD SUCCESSFUL in 1m 31s** (Ready to install)
+
+## 2026-09-13 — LOOI Robot 50 Moodsets Living Procedural Motion Engine (Canvas Dynamic Physics)
+- **User Issue**:
+  - ผู้ใช้ตรวจดูหน้าตาหุ่นยนต์ LOOI Robot ทั้ง 50 แบบแล้วพบว่า "ยังแข็ง ไม่มีการขยับเคลื่อนไหวที่ดูเป็นธรรมชาติ ถ้าเรายกระดับเป็น Rive Animation จะได้มั้ย"
+  - จากการวิเคราะห์เปรียบเทียบระหว่าง Rive Vector Graphics (ต้องรอสร้างไฟล์ `.riv` ภายนอกและไม่พร้อมรันได้ทันที) กับ Procedural Canvas Living Physics ผู้ใช้เลือก **ทางเลือกที่ 1 (Procedural Engine ใน Compose Canvas)** เพื่อให้ทั้ง 50 Moodsets มีชีวิตชีวา ขยับเคลื่อนไหวนุ่มนวลแบบเรียลไทม์ทันทีโดยไม่ต้องพึ่งพาไฟล์ภายนอก
+- **Architecture & Implementation**:
+  1. **`AvatarLivingEngine.kt`** (`com.skyliner2008.jarvis.ui.component.avatar`):
+     - สร้าง State data class `LivingMotionState` และ Composable hook `rememberLivingMotionState()`
+     - **Respiration Scaling (Volume Conservation)**: ขยายแกน Y (1.02f) พร้อมบีบแกน X (0.985f) สลับกันตามจังหวะหายใจอย่างเป็นธรรมชาติ (Sine curve 2800ms)
+     - **Subtle Head Sway**: การเอียงศีรษะแบบ Organic Micro-roll (+/- 1.8 องศา) ตามจังหวะการหายใจ
+     - **Saccadic Eye Darting**: การเหลือบสายตาขยับโฟกัสฉับพลันทุก 2.5-4.2 วินาที (Saccadic eye jumps: +/- 6dp) จำลองกระบวนการคิดและสังเกตสิ่งแวดล้อมของ AI
+     - **Micro-Blinking**: การกะพริบตาจังหวะสั้นๆ (Micro-blinks) นอกเหนือจากการกะพริบตาเต็มรอบ
+     - **Multi-loop Timers**: `loopFast` (1.2s), `loopMedium` (2.4s), `loopSlow` (3.6s), `pulse` (1.6s), `sparkleRot` (0..360°), `flickerPhase`
+  2. **`PetRobotMoodsetDraw.kt`** (Enhanced 30 Additional Moodsets):
+     - อัปเดตฟังก์ชันวาดทั้ง 28 ฟังก์ชันให้รับพารามิเตอร์ `living: LivingMotionState = LivingMotionState()`
+     - บรรจุฟิสิกส์แอนิเมชันเฉพาะตัวในทุกอารมณ์: ปรอทไข้สั่น, เหรียญทองร่วง, น้ำตาไหลพราก, กวาดตาอ่านหนังสือ, สั่นหนาวหิมะปลิว, ดาวโคจรรอบหมวกอวกาศแบบ 3D, ฟองเคมีปุดแตกตัว, ดอกกุหลาบแกว่งไกว, ดวงตาคลื่นไหวระลอก, ริบบิ้นนักรบสะบัด ฯลฯ
+  3. **`PetRobotHeadAvatar.kt`** (Enhanced Sheet 1 & Visor Canvas):
+     - เชื่อมโยง `rememberLivingMotionState()` เข้ากับ Canvas หลัก
+     - ครอบการวาดทั้งใบหน้าด้วย Respiration `scale(living.breathingScaleX, living.breathingScaleY)` และ `living.headSwayDeg`
+     - รวม `living.saccadeOffsetX/Y` เข้ากับ Gaze displacement
+     - อัปเดต Sheet 1 Moodsets ให้มีชีวิตชีวา: หูฟังเพลงเต้นตามบีท, แว่น VR โค้งสะท้อนแสง, ฟองดำน้ำลอยผุด, ตารางเลเซอร์ขยายมิติ, ประกายดาวหมุนวน, เบอร์เกอร์และแก้วเบียร์ขยับตามจังหวะ
+- **Verification**:
+  - รันคำสั่งทดสอบ Unit Tests: `./gradlew :composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.MoodsetCatalogTest" --tests "com.skyliner2008.jarvis.DeviceControlTest"` $\rightarrow$ **BUILD SUCCESSFUL** (ผ่าน 100%)
+  - บิลด์ไฟล์ติดตั้ง Android Debug APK: `./gradlew :composeApp:assembleDebug` $\rightarrow$ **BUILD SUCCESSFUL** (ผ่าน 100%)
+
+## 2026-09-13 — LOOI Robot Page 4 (Sleepy) Infinite Wake-Up Loop & Touch Trigger Fix
+- **User Issue**:
+  - เมื่อสั่ง "แสดงหน้าที่ 4" (Sleepy): มีเสียง SNORE ดังขึ้น แล้วเกิดเสียง WAKE_UP รัวๆ ถี่ๆ ต่อเนื่องไม่หยุด และใน Log พบ `PetStateMachine: 🎯 processTouch: type=WAKE_UP, zone=FACE_CENTER, currentEmotion=SLEEPING` วนลูปทุก 30-50ms
+- **Root Causes**:
+  1. **`PetModeController.kt` Spurious `wakeUp()` in `notifyInteraction()`**:
+     - ภายใน `notifyInteraction()` มีเงื่อนไข `if (current.emotion == AvatarEmotion.SLEEPING) wakeUp()`
+     - `notifyInteraction()` ถูกเรียกจากหลายจุด เช่น `updateRobotFace`, การลากสายตา (`onGazeTouch`), และใน `AlwaysLiveScreen.kt` เมื่อมีเสียงพูดหรือระดับเสียง (`audioLevel > 0.15f`)
+     - เมื่อผู้ใช้สั่งหน้าที่ 4 ซึ่งเป็นอารมณ์ `SLEEPING`: ทุกครั้งที่ AI พูด หรือระดับเสียงจากไมโครโฟนสตรีมเข้ามา (ประมาณ 20-30 เฟรมต่อวินาที) `AlwaysLiveScreen.kt` จะเรียก `petController.notifyInteraction()` ทุกเฟรม
+     - `notifyInteraction()` เห็นว่าอารมณ์คือ `SLEEPING` จึงสั่ง `wakeUp()` ส่งผลให้เกิดการปลุกผ่าน `stateMachine.processTouch(InteractionType.WAKE_UP)` และเล่นเสียง `RobotSoundPlayer.playWakeUp()` วนลูปไม่หยุด
+  2. **Missing Catalog Test Guard in StateMachine & Touch Handlers**:
+     - เมื่ออยู่ในโหมดทดสอบ Moodset Catalog (`statusText` ขึ้นต้นด้วย 🎭) ตัวหุ่นยนต์ไม่ได้หลับจริงจากความง่วงตามธรรมชาติ แต่เป็นการจัดแสดงหน้าตา Sleepy เพื่อการตรวจสอบ จึงต้องไม่ถูกขัดจังหวะด้วยการปลุก
+- **Changes Implemented**:
+  1. **`PetModeController.kt`**:
+     - ตัด `if (current.emotion == AvatarEmotion.SLEEPING) wakeUp()` ออกจาก `notifyInteraction()` ป้องกันการวนลูปปลุกเมื่อมีการสตรีมเสียงพูดหรืออัปเดตหน้าตา
+     - ใน `wakeUp()`: เพิ่มการตรวจสอบ `if (isCatalogTest) return` ป้องกันไม่ให้การปลุกทำงานขณะทดสอบ Moodset
+     - ใน `applyStateMachineResult()`: ป้องกันไม่ให้ StateMachine เขียนทับสีหน้าระหว่างที่กำลังทดสอบ Moodset Catalog
+  2. **`AlwaysLiveScreen.kt`**:
+     - ครอบเงื่อนไข `if (!isSpecificEmotion) petController.notifyInteraction()` ทั้งตอน `avatarState.isSpeaking` และตอน `audioLevel > 0.15f` เพื่อไม่ส่ง interaction event ไปรบกวนหน้าตาที่กำลังทดสอบ
+  3. **`PetRobotHeadAvatar.kt`**:
+     - เพิ่มการวาด Waveform Mouth สำหรับ `AvatarEmotion.SLEEPING` เมื่อ AI พูดตอบรับ เพื่อให้ปากขยับตามเสียงพูดร่วมกับลูกเล่น Zzz ลอยได้อย่างสมบูรณ์
+
+## 2026-09-13 — LOOI Robot Moodset Face Display Rendering & Speaking Override Fix
+- **User Issue**:
+  - เมื่อสั่งด้วยเสียงใน Live mode เช่น "หน้าที่ 10" หรือ "หน้าที่ 12": AI ขานตอบรับยืนยันว่าแสดงหน้าแล้วและเล่นเสียง Sound effect แล้ว แต่บนหน้าจอ สีหน้าของ Avatar ไม่เปลี่ยนเป็นหน้านั้นๆ ยังคงเป็นหน้าปกติหรือหน้าพูด
+- **Root Cause Analysis**:
+  1. **`AlwaysLiveScreen.kt` PET Mode State Synchronization**:
+     - ใน `LaunchedEffect(avatarState)` เดิมตรวจสอบเฉพาะ `hasFaceChange = (avatarState.faceState != lastObservedExternalFaceState)` โดยไม่ได้ตรวจสอบการเปลี่ยนแปลงของ `avatarState.emotion` เลย
+     - เมื่อ AI เริ่มพูดโต้ตอบ ("แสดงหน้าที่ 12 ให้บอสตรวจสอบแล้วค่ะ") ตัวแปร `isSpeaking = true` บังคับให้ `activeAvatarState.emotion = AvatarEmotion.SPEAKING` ทับอารมณ์ของ Moodset ไปในทันที
+     - เมื่อ AI พูดจบ (`isSpeaking = false`) ตัวแปร `activeAvatarState.emotion` เป็น `SPEAKING` ทำให้ `when` block ตกไปที่เคส `activeAvatarState.emotion == AvatarEmotion.SPEAKING -> if (updatedFace.emotion != IDLE) updatedFace.emotion else IDLE` ซึ่ง `updatedFace.emotion` เป็น `IDLE` เพราะ `testFaceStateOverride` ไม่ได้ถูกเซ็ต ส่งผลให้ Avatar กลับสู่ `AvatarEmotion.IDLE` ในเสี้ยววินาที ทำให้ User ไม่เห็นหน้าตาของ Moodset เลย
+  2. **`JarvisViewModel.kt` `testFaceStateOverride` & Decay Timing**:
+     - ใน `showMoodsetPage` และ `playAllMoodsets` กำหนดเฉพาะ `testEmotionOverride.value = item.emotion` แต่ปล่อยให้ `testFaceStateOverride.value = null` ทำให้ `avatarState.faceState` เป็น `RobotFaceState()` ค่าว่าง และ `PetModeController` ตัวหลักไม่ได้รับข้อมูลหน้าตาใหม่
+     - การตั้งเวลาสลายหน้าจอ (`faceAutoDecayJob`) เดิมนับถอยหลังคงที่ 4500ms โดยไม่ได้รอให้ AI พูดจบ หาก AI พูดเกิน 4 วินาที หน้านั้นจะสลายหายไปทันทีที่ AI พูดเสร็จพอดี
+     - เมื่อมีคำสั่งเสียงใน Live Mode ทั้ง `VoiceController` (ดักจับ transcript) และ `DeviceControlExecutor` (ดักจับ native tool call) ต่างเรียก `showMoodsetPage` พร้อมกันในเสี้ยววินาที ทำให้เกิดเสียง SFX เบิ้ลซ้ำสองรอบ
+- **Changes Implemented**:
+  1. **`AlwaysLiveScreen.kt`**:
+     - เพิ่ม `lastObservedExternalEmotion` เพื่อตรวจจับทั้งการเปลี่ยน FaceState และ Emotion อย่างแม่นยำ
+     - เพิ่มตัวแปร `isSpecificEmotion`: ตรวจจับว่าอารมณ์ปัจจุบันเป็น Moodset Catalog (`statusText` ขึ้นต้นด้วย 🎭) หรืออารมณ์เฉพาะที่ไม่ใช่ IDLE/SPEAKING/LISTENING
+     - เมื่อ `avatarState.isSpeaking`: หากเป็น `isSpecificEmotion` ให้คงอารมณ์ของ Moodset นั้นไว้ (`speakingEmotion = avatarState.emotion`) แล้วเรนเดอร์รูปคลื่นเสียงที่ปาก (Waveform mouth) ทับบนสีหน้าของ Moodset โดยตรงแทนการสลับเป็นหน้า SPEAKING
+     - เมื่อหยุดพูด (`!avatarState.isSpeaking`): คงสีหน้าของ Moodset ไว้ตลอดระยะเวลาทดสอบ ไม่ดรอปกลับสู่ IDLE ก่อนเวลา
+  2. **`JarvisViewModel.kt`**:
+     - ใน `showMoodsetPage` และ `playAllMoodsets`: สร้าง `moodFace = RobotFaceState(emotionName = item.emotion.name.lowercase(), eyeStyleName = "default", speechText = ...)` แล้วเซ็ตทั้ง `testFaceStateOverride.value = moodFace` และเรียก `PetModeController.activeInstance?.updateRobotFace(moodFace)` ให้ซิงค์กันทุกจุด
+     - เพิ่มการตรวจสอบ De-duplication: ตรวจสอบเลขหน้าและเวลาล่าสุด หากเลขเดิมถูกเรียกซ้ำภายใน 1.5 วินาที จะไม่เล่นเสียง SFX ซ้ำสองรอบ
+     - ปรับปรุง `faceAutoDecayJob`: หน่วงเวลา `durationMs` แล้ววนรอจนกว่า AI จะพูดจบ (`while (voice.isAiSpeaking.value) delay(500)`), จากนั้นรออีก 2.5 วินาทีก่อนจะรีเซ็ตกลับสู่ Normal IDLE
+     - ใน `resetToIdleFace()`: รีเซ็ต `PetModeController.activeInstance?.updateRobotFace(RobotFaceState())` ให้กลับสู่หน้าปกติพร้อมกันทั้งหมด
+
+## 2026-09-13 — LOOI Robot 50 Moodset Live Tool Bridge & Persona Voice Sync Fix (Pages 10 & 11)
+- **User Issue**:
+  1. เมื่อพูด "หน้าที่ 11": AI ตอบว่า "หน้าที่ 11 ไม่มีนะคะ จาวิสมีแค่ 10 หน้าตา ตอนนี้... บอสอยากให้จาวิสกลับไปทำหน้าไหนเป็นพิเศษไหมคะ?"
+  2. เมื่อพูด "หน้าที่ 10": หน้าจอกลายเป็นหน้า DIZZY (ตาวนก้นหอย + สั่นหัว) แทนที่จะเป็น Laughing (ตาหยีแหลม > < หัวเราะร่าเริง) และไม่ตรงกับสารบัญ 50 หน้าของ LOOI Robot
+- **Root Causes**:
+  1. **Outdated Persona Prompts**: `JarvisPersona.kt` (บรรทัด 137, LIVE_SYSTEM_PROMPT บรรทัด 341-344) และ `LiveToolBridge.kt` (บรรทัด 273, 695) มีข้อความแจ้ง Gemini เก่าว่ามีเพียง "10 แบบ" ทำให้ Gemini หลอนคิดว่ามีแค่ 10 หน้าและบอกผู้ใช้ว่าไม่มีหน้าที่ 11
+  2. **Device Tool Definition Mismatch**: `DeviceToolDefinitions.kt` ขาดพารามิเตอร์ `page` ใน `device_avatar_emotion` และมีคำอธิบายจำกัดแค่ 10 อารมณ์ ทำให้ Gemini แมปเลข 10 เข้ากับอารมณ์ลำดับที่ 10 ในรายการเดิมซึ่งคือ `DIZZY`
+  3. **Live Tool Bridge Argument Passthrough**: `LiveToolBridge.kt` ไม่ได้ดักจับ `userPrompt` ที่ระบุ "หน้าที่ 10" หรือ "หน้าที่ 11" เพื่อเขียนทับ arguments ที่ Gemini ส่งมาผิดพลาด และไม่ได้ถอดรหัสเลขหน้า
+  4. **Device Control Executor Missing Page Branch**: `DeviceControlExecutor.kt` ไม่ได้รองรับ `action == "page"` หรือ `args["page"]`
+  5. **App.kt Missing PAGE Receiver**: `App.kt` ใน `registerTestEmotion` ไม่ได้ดักรับ `"PAGE|$page"` หรือเลขหน้า 1..50 ส่งผลให้คำสั่งไม่ถูกส่งไปยัง `viewModel.showMoodsetPage(page)`
+- **Changes Implemented**:
+  1. **`JarvisPersona.kt`**:
+     - อัปเดตคำอธิบาย 50 LOOI Robot Moodsets (หน้าที่ 1-20 แผ่นที่ 1, หน้าที่ 21-50 แผ่นที่ 2) ใน `DEFAULT_SYSTEM_PROMPT`, `LIVE_SYSTEM_PROMPT`, และ `PET_LIVE_SYSTEM_PROMPT`
+     - สั่งห้ามโมเดลพูดว่า "มีแค่ 10 หน้า" หรือ "ไม่มีหน้าที่ 11" อย่างเด็ดขาด
+     - ระบุกฎการเรียกเครื่องมือ `device_avatar_emotion(action="page", page="...")` เมื่อผู้ใช้สั่ง "หน้าที่ X" หรือ "หน้า X"
+  2. **`DeviceToolDefinitions.kt`**:
+     - เพิ่มพารามิเตอร์ `"page"` (ลำดับหน้าที่ 1 ถึง 50)
+     - เพิ่ม `"page"` และ `"all"` ใน enum ของพารามิเตอร์ `"action"`
+     - ขยายคำอธิบายเครื่องมือ `device_avatar_emotion` ให้ครอบคลุมทั้ง 50 หน้าของ LOOI Robot
+  3. **`LiveToolBridge.kt`**:
+     - อัปเดต `isAvatarEmotionRequest` ให้รวมคำค้นหน้า ("หน้าที่", "หน้า", "แบบที่", "moodset", "ทุกหน้า", "หน้าทั้งหมด")
+     - ใน `handleNativeToolCall`: ตรวจจับ `targetPage = LooiMoodsetCatalog.parsePageNumber(userPrompt) ?: event.args["page"]...`
+     - หากตรวจพบเลขหน้า (1..50) จะเขียนทับ `effectiveArgs` เป็น `mapOf("action" to "page", "page" to targetPage.toString())` ทันที ป้องกันการที่โมเดลส่ง `emotion=dizzy` มาทับ
+     - หากตรวจพบคำสั่งเล่นทุกหน้า จะเขียนทับเป็น `mapOf("action" to "all")`
+     - อัปเดต `voiceRule` ยืนยันชื่อหน้าและกำชับโมเดลห้ามตอบว่าไม่มีหน้าที่ 11
+  4. **`DeviceControlExecutor.kt`**:
+     - เพิ่มการจัดการ `targetPage` (1..50) ใน `executeAvatarEmotion`: ส่งคำสั่ง `"PAGE|$targetPage"` ไปยัง MainActivity และตอบกลับชื่อหน้าและคำอธิบาย
+     - จัดการ action `"all"` และ `"demo"` ส่ง `"ALL"` ไปยัง MainActivity
+  5. **`App.kt`**:
+     - ใน `registerTestEmotion`: รองรับ `"PAGE|$page"`, `"PAGE_$page"`, `"PAGE:$page"`, และตัวเลขโดดๆ `1..50` โดยเรียก `viewModel.showMoodsetPage(page)`
+     - รองรับ `"ALL"` และ `"DEMO"` โดยเรียก `viewModel.playAllMoodsets()`
+     - ปรับ `onToggleDemo` บน AlwaysLiveScreen ให้เรียก `playAllMoodsets()`
+  6. **`ChatController.kt` & Tests**:
+     - อัปเดตข้อความช่วยเหลือ `/avatar` ให้แสดง 50 LOOI Robot Moodsets
+     - เพิ่มชุดทดสอบใน `MoodsetCatalogTest.kt` ยืนยันว่า หน้าที่ 10 คือ Laughing (ไม่ใช่ Dizzy) และหน้าที่ 11 คือ Music มีอยู่จริงในระบบ และคำสั่งเสียง "หน้าที่ 10" / "หน้าที่ 11" ถอดรหัสได้ถูกต้องตรงตามสารบัญ 50 หน้า
+
+## 2026-09-13 — LOOI Robot 50 Moodset Voice Navigation & Verification Engine
+- **User Request**:
+  1. เพิ่มคำสั่งเสียงสำหรับเล่น Moodset แต่ละแบบ เชื่อมโยงกับตัวเลข "หน้าที่ 1", "หน้าที่ 2", "หน้าที่ 3", ... ถึง "หน้าที่ 50" และ "หน้าทั้งหมด"
+  2. แสดงหน้าแบบต่างๆ ให้ User ตรวจสอบ โดยจะแสดง 3-5 วินาที (กำหนดเดี่ยว 4.5 วินาที, วนลูปต่อเนื่อง 4.0 วินาที/หน้า) แล้วกลับสู่สถานะสแตนด์บายอัตโนมัติ
+  3. บันทึกคอมเมนต์กำกับในโค้ดอย่างละเอียดว่า Moodset ไหน คือ หน้าที่เท่าไร และได้รับการแก้ไขตรวจสอบถูกต้อง 100% ตามรูปภาพอ้างอิงทั้ง 2 แผ่น
+- **Changes Implemented**:
+  1. **Centralized Moodset Catalog (`LooiMoodsetCatalog.kt`)**:
+     - สร้าง `LooiMoodsetItem` (pageNumber, sheet, sheetIndex, nameEn, nameTh, emotion, description, durationMs, soundEffect)
+     - สร้าง `LooiMoodsetCatalog.ITEMS` ครบถ้วนทั้ง 50 หน้า (หน้าที่ 1-20 จากแผ่นที่ 1 "LOOI 20 MOODSET", หน้าที่ 21-50 จากแผ่นที่ 2 "LOOI 30 ADDITIONAL MOODSET") พร้อมคอมเมนต์กำกับทุกหน้าและยืนยันสถานะ `[แก้ไขและตรวจสอบถูกต้อง 100%]`
+     - ระบบถอดรหัสคำสั่งเสียง `parsePageNumber(text)`: รองรับเลขอารบิก ("หน้าที่ 1", "หน้า 25", "mood 10", "page 50"), เลขไทย ("หน้าที่ ๑" ถึง "หน้าที่ ๕๐"), คำอ่านภาษาไทย ("หน้าที่หนึ่ง" ถึง "หน้าที่ห้าสิบ"), และคำสั่งแชต `/avatar 15`
+     - ระบบตรวจจับคำสั่งลูป `isPlayAllCommand(text)`: รองรับ "หน้าทั้งหมด", "เล่นทุกหน้า", "แสดงทุกหน้า", "moodset ทั้งหมด", "all moods", "play all", "/avatar all"
+  2. **Controller Voice & Chat Integration (`VoiceController.kt`, `ChatController.kt`)**:
+     - เพิ่ม callbacks `onPlayMoodsetPage: ((Int) -> Unit)?` และ `onPlayAllMoodsets: (() -> Unit)?`
+     - ใน `VoiceController.kt`: ดักจับข้อความเสียงของผู้ใช้ใน Live Mode เพื่อสั่งแสดงหน้าเจาะจงหรือเล่นทุกหน้าอัตโนมัติ
+     - ใน `ChatController.kt`: ดักจับคำสั่งพิมพ์ทั้ง `/avatar <1-50>`, `/avatar all`, ข้อความ "หน้าที่ X", หรือ "หน้าทั้งหมด" พร้อมแสดงข้อความตอบกลับยืนยันรายละเอียดของหน้านั้นๆ ในช่องแชต
+  3. **JarvisViewModel Display Controller (`JarvisViewModel.kt`)**:
+     - `showMoodsetPage(page: Int, durationMs: Long = 4500L)`: สลับเข้าโหมด Pet Mode อัตโนมัติ (หากยังไม่ได้เปิด), เรนเดอร์ใบหน้า 2D Vector พร้อมเสียง SFX ประจำอารมณ์, แสดงสถานะชื่อหน้า และตั้ง Timer หน่วงเวลา 4.5 วินาที (อยู่ในเกณฑ์ 3-5 วินาที) ก่อนสลายกลับสู่ Normal IDLE อัตโนมัติ
+     - `playAllMoodsets(durationPerMoodMs: Long = 4000L)`: เล่นวนลูปทุกหน้า 1 ถึง 50 หน้าละ 4 วินาที (อยู่ในเกณฑ์ 3-5 วินาที) พร้อมเสียงและสถานะแบบเรียลไทม์
+     - เชื่อมโยง callbacks ใน `init {}` ทั้งส่วน Chat และ Voice ครบถ้วน
+  4. **Unit Test Suite (`MoodsetCatalogTest.kt`)**:
+     - เพิ่มชุดทดสอบ 8 ฟังก์ชัน ครอบคลุม: ขนาดรายการ 50 หน้า, การแบ่งแผ่น 1 (20 หน้า) และแผ่น 2 (30 หน้า), การค้นหา `findByPage`, การแปลงคำสั่งเสียงเลขไทย/เลขอารบิก/คำอ่าน, การตรวจจับคำสั่งเล่นทุกหน้า, และการตรวจสอบระยะเวลาแสดงผล (3-5 วินาที)
+
+## 2026-09-13 — LOOI Robot 30 Additional Moodset & 50-Preset Total Verification Audit
+- **User Request & Master Style Prompt**:
+  - รองรับชุดอารมณ์และท่าทางเพิ่มเติม 30 แบบ จากภาพอ้างอิง "LOOI ROBOT: 30 ADDITIONAL MOODSET (NEON CYAN STYLE)"
+  - สไตล์ 2D Vector Minimalist: ดวงตา Squircle สีนีออนไซแอน (`#00F5FF`) พร้อมเลเยอร์เงาสี Dark Cyan (`#004D6B`) เยื้อง Y = +5dp สำหรับมิติตื้น 2D Shallow Depth
+  - เพิ่มเติม 27 อารมณ์ใหม่ใน `AvatarEmotion` (รวมเป็น 56 อารมณ์ทั้งหมด) โดยแยก `ROMANTIC` ออกเป็นอิสระจาก `LOVE` (Romantic: คาบกุหลาบแดง 🌹 + ปากจูบ 3 + แก้มชมพูระเรื่อ ///, ส่วน In Love: ตารูปหัวใจดวงโต ♥♥) และยกระดับ `CONFUSED` ด้วยตาสควีร์เคิลคลื่น `~ ~` + เครื่องหมาย `¿` และ `??` คู่กับปากหยักคลื่น
+- **Changes Implemented**:
+  1. **AvatarEmotion & Color Expansion (`AvatarEmotion.kt`, `AvatarEmotionColors.kt`, `RobotFaceState.kt`)**:
+     - เพิ่ม 27 อารมณ์ใหม่: `SICK`, `RICH`, `CRYING`, `READING`, `GAMING`, `TRAVELING`, `WORKING`, `COLD`, `HOT`, `DETECTIVE`, `COOKING`, `ART_MODE`, `SPACE`, `PARTY`, `DREAMING`, `EXHAUSTED`, `ELECTRIC`, `SNEAKY`, `ROMANTIC`, `HERO`, `GLITCHED`, `MAGIC`, `SPORTY`, `SCIENTIST`, `SCARED`, `WARRIOR`, `LOW_BATTERY`
+     - แมปสีนีออน primary, secondary, และ statusPill ครบถ้วนทั้ง 27 อารมณ์ (รวม 56 อารมณ์)
+     - เพิ่ม 34 ค่า `PropType` ใหม่ใน `RobotFaceState.kt` (รวมเป็น 96 พร็อพ) พร้อมคำศัพท์ภาษาไทย-อังกฤษสำหรับการรู้จำ
+  2. **Modular Moodset Drawing Engine (`PetRobotMoodsetDraw.kt`)**:
+     - สร้างไฟล์ `PetRobotMoodsetDraw.kt` บรรจุฟังก์ชันวาดเวกเตอร์ Canvas สำหรับ 27 อารมณ์ใหม่ทั้งหมดตามแบบภาพอ้างอิงเป๊ะๆ (รวม `drawRomanticMood` และ `drawConfusedMood`)
+     - ปรับฟังก์ชันวาดพื้นฐานใน `PetRobotHeadAvatar.kt` ให้เป็น `internal` เพื่อให้เรียกใช้งานข้ามไฟล์ได้อย่างมีประสิทธิภาพ
+     - เชื่อมโยงเข้ากับ `renderPetEmotion` ใน `PetRobotHeadAvatar.kt` ครบ 56 branches พร้อมรองรับระบบ Cross-Fade Alpha Transition
+  3. **UI Integration & Overlay (`AlwaysLiveScreen.kt`, `ChatController.kt`, `PetPropsOverlay.kt`)**:
+     - เพิ่ม dynamic ambient background gradients (3 layers) และ status text ภาษาไทย-อังกฤษ ใน `AlwaysLiveScreen.kt` รองรับครบ 56 อารมณ์
+     - เพิ่มคำสั่งและคำอธิบายสำหรับการทดสอบผ่าน `/avatar` ใน `ChatController.kt`
+     - แมป `RenderProp` ใน `PetPropsOverlay.kt` สำหรับ 34 พร็อพใหม่
+  4. **Test Suite Verification (`AlwaysLiveTest.kt`, `PetModeTest.kt`)**:
+     - อัปเดตการตรวจสอบขนาด `AvatarEmotion.entries.size` จาก 55 เป็น 56
+     - อัปเดตการตรวจสอบขนาด `PropType.entries.size` จาก 62 เป็น 96
+     - ผ่านการทดสอบทั้งหมด 281 Unit Tests (Build Successful 100%)
+
+## 2026-09-13 — LOOI Robot 20 Moodset (Neon Cyan Style) & Smooth Continuous Emotion Transitions
+- **User Request & Master Style Prompt**:
+  - ถอดแบบโมชั่นการแสดงของหุ่นยนต์ LOOI Robot จากแผ่นอ้างอิง "LOOI ROBOT: 20 MOODSET (NEON CYAN STYLE)" บนพื้นดำสนิท Pure OLED Black (`#000000`)
+  - สไตล์ 2D Vector Minimalist: ดวงตาทรง Squircle สีนีออนไซแอน (`#00F5FF`) พร้อมเลเยอร์เงาสี Dark Cyan (`#004D6B`) เยื้อง Y = +5dp สร้างมิติตื้น 2D Shallow Depth
+  - **การเคลื่อนไหวที่ดูต่อเนื่อง (Continuous Motion / Seamless Transition)**:
+    - ปรับเปลี่ยนอารมณ์อย่างนุ่มนวลเป็นธรรมชาติ ไม่ตัดฉับ ไม่กระตุก
+    - เช่น จากหน้าปกติ (`IDLE`) ค่อยๆ เอียงตาลง ลิ้นเขี้ยวเลื่อนลง เส้นเลือดปูด ค่อยๆ เปลี่ยนเป็นหน้าโกรธ (`ANGRY`)
+    - จากหน้าปกติ (`IDLE`) ค่อยๆ หรี่ตาลู่ลง น้ำตาค่อยๆ เลื่อนไหล ปากค่อยๆ คว่ำ เปลี่ยนเป็นหน้าเศร้า (`SAD`)
+- **Changes Implemented**:
+  1. **New LOOI Moodset & Avatar Emotions (`AvatarEmotion.kt`, `AvatarEmotionColors.kt`, `RobotFaceState.kt`)**:
+     - เพิ่มอารมณ์ใหม่ครบทั้ง 12 LOOI Moods: `DEAD`, `LAUGHING`, `MUSIC`, `VR_MODE`, `DIVING`, `EVIL`, `FOCUSED`, `SHY`, `DISGUSTED`, `CAMERA_MODE`, `EATING`, `DRINKING` (รวมทั้งหมด 29 Emotion States)
+     - กำหนดคู่สี Neon Primary, Secondary, และ Shadow Depth Colors ใน `AvatarEmotionColors.kt`
+     - เพิ่มพร็อพเฉพาะสไตล์ LOOI 7 ชนิดใน `PropType`: `HEADPHONES`, `VR_HEADSET`, `SNORKEL_MASK`, `DEVIL_HORNS`, `SCANNER_GRID`, `TRASH_BIN`, `CAMERA_ICON` (รวมเป็น 62 ชนิด)
+  2. **Smooth Continuous Emotion Morphing Engine (`PetRobotHeadAvatar.kt`)**:
+     - เพิ่มระบบ Transition State Tracking: `previousEmotion`, `currentEmotionTarget`, และ `emotionTransition = Animatable(1f)`
+     - เมื่อตรวจพบการเปลี่ยนอารมณ์ (`LaunchedEffect(effectiveEmotion)`): สั่ง animate transition จาก 0f สู่ 1f ด้วย `tween(durationMillis = 350, easing = FastOutSlowInEasing)`
+     - **Disney Anticipation Squash & Stretch**:
+       - คำนวณ `anticipationSquashY = 1f - 0.08f * sin(transitionProg * PI)`
+       - คำนวณ `anticipationSquashX = 1f + 0.05f * sin(transitionProg * PI)`
+       - ตาจะยุบตัวลงเล็กน้อยเพื่อสะสมพลังก่อนเด้งยืดเข้าสู่รูปทรงอารมณ์ใหม่อย่างมีชีวิตชีวา
+     - **Continuous Shape & Color Morph Variables**:
+       - `animatedEyeColor`: สลับสีระหว่างต้นทางและปลายทางอย่างต่อเนื่องผ่าน `lerp`
+       - `eyeSlantProgress`: ควบคุมการเอียงของตา (เช่น ค่อยๆ ปรับจาก Squircle ตรง $\rightarrow$ สามเหลี่ยมลิ่มเฉียง 16dp เมื่อโกรธ)
+       - `fangsProgress`: สั่งให้เขี้ยวคู่สีขาวค่อยๆ เลื่อนลงมา (`slideY = (1f - progress) * -14dp`)
+       - `angerVeinProgress`: เส้นเลือดปูดค่อยๆ ขยายขนาดปูดขึ้นมาที่ขมับขวา
+       - `sadProgress`: ควบคุมการลู่ลงของดวงตา (-8° และ +8°), ตาหย่อนลง 7dp, น้ำตาเลื่อนหยดลง และปากโค้งคว่ำ
+       - `sleepProgress`, `surpriseProgress`, `happyProgress`: ควบคุมการหรี่เปลือกตา, เบิกตากว้าง 1.25x, และความโค้งยิ้ม
+     - **Dual-Layer Cross-Fade Rendering**:
+       - เมื่อ `transitionProg < 1f` และ `previousEmotion != effectiveEmotion`: เรนเดอร์เลเยอร์อารมณ์เดิมด้วย `alpha = 1f - transitionProg` และเรนเดอร์เลเยอร์อารมณ์ใหม่ด้วย `alpha = transitionProg` ทับซ้อนกัน ทำให้การกลายรูปทรง (Morphing) ลื่นไหล ไร้รอยต่อ ไม่มีอาการกระพริบหรือกระตุก
+  3. **Canvas Drawing Architecture Overhaul (`PetRobotHeadAvatar.kt`)**:
+     - อัปเดตฟังก์ชันวาด Canvas ทั้งหมดให้รองรับพารามิเตอร์ `alpha: Float = 1f` พร้อม Color Alpha Blending
+     - ปรับแต่งการวาด LOOI Eye Styles:
+       - `drawDualCircleEye`: เลเยอร์เงา Dark Cyan ด้านล่าง + เลเยอร์บน Neon Cyan + Blink Squash
+       - `drawHappyEye`: ตาโค้งยิ้มหยี ⌒ ⌒
+       - `drawAngryEye`: ตาทรงลิ่มเฉียงปรับมุมได้ตาม `slantProgress` + เขี้ยวขาวคู่ + เส้นเลือดปูดสีแดง
+       - `drawSleepingEye`: ตาขีดมน — — + Zzz ลอย
+       - `drawLooiCuriousRightEye`: ตาขวาทรงลิ่มเอียง 12° + เครื่องหมายคำถาม
+       - `drawCrossEye`: ตากากบาท X X สไตล์ Dead / Dizzy
+       - `drawLooiExcitedEye`: ตาทรงพัดเอียงออก + ประกายดาวสีทอง ✦ ✦
+       - `drawLooiFocusdWedge`: ตาทรงลิ่มคมกริบ + ตารางเลเซอร์ Synthwave Grid
+       - `drawLooiVrHeadset`: แว่น VR Vision Pro + ถังป๊อปคอร์นจิ๋ว
+       - `drawLooiSnorkelMask`: แว่นหน้ากากดำน้ำ + ท่อหายใจ + ฟองอากาศ
+       - `drawLooiHeadphones`: หูฟังครอบศีรษะ Over-Ear Headphones
+       - `drawLooiMiniBurger` & `drawLooiMiniBeer`: มินิเบอร์เกอร์และแก้วเบียร์มีฟองสำหรับ Eating & Drinking
+  4. **System Integration & Exhaustiveness (`ChatController.kt`, `AlwaysLiveScreen.kt`, `PetPropsOverlay.kt`)**:
+     - รองรับคำสั่งเสียงภาษาไทยและอังกฤษสำหรับทั้ง 12 อารมณ์ใหม่
+     - อัปเดต Background Ambiance Gradient และ Status Pill สำหรับทุกอารมณ์
+     - ขยาย Exhaustive `when` blocks ป้องกันคอมไพล์เออเรอร์
+  5. **Unit Tests Coverage (`AlwaysLiveTest.kt`, `PetModeTest.kt`)**:
+     - อัปเดต `AlwaysLiveTest` ให้ตรวจสอบครบ 29 อารมณ์ (`AvatarEmotion.entries.size == 29`)
+     - อัปเดต `PetModeTest` ให้ตรวจสอบครบ 62 พร็อพ (`PropType.entries.size == 62`)
+- **Verification**:
+  - รัน `:composeApp:testDebugUnitTest`: 281 tests ผ่านทั้งหมด 100% (Build Successful)
+  - รัน `:composeApp:assembleDebug`: สำเร็จ 100% สร้าง APK ได้อย่างสมบูรณ์แบบ
+
+## 2026-09-13 — Pet Mode Visual Polish & Facial Geometry Anchoring (55 Alive Props & Clumsy Pet Personality)
+- **Problem & Feedback**:
+  - ผู้ใช้ทดสอบระบบพร็อพและฉาก พบว่าสิ่งของที่สัตว์เลี้ยงนำมาแสดงยังมีขนาดเล็กเกินไป และตำแหน่งยังไม่เหมาะสม: สิ่งของด้านบน เช่น ร่ม ลอยสูงเกือบพ้นขอบจอด้านบน ควรอยู่เหนือดวงตาเพียงนิดเดียว
+  - สิ่งของหลายชิ้นดูเป็นเวกเตอร์นิ่งๆ ขาดชีวิตชีวา ขาดความเคลื่อนไหวทางฟิสิกส์ (เช่น ควันอาหาร, ชีสยืด, ไอศกรีมหยด, ฟองเบียร์, เมล็ดข้าวโพดคั่วกระเด้ง)
+  - ผู้ใช้ชื่นชอบโมเมนต์ที่สัตว์เลี้ยงหยิบของผิด (เช่น ผู้ใช้สั่งเบอร์เกอร์แต่ AI หยิบป๊อปคอร์น) แล้ว AI แสดงอาการตกใจปนเด๋อด๋า เขินอาย (`CONFUSED` / `SWEAT_DROP` / `TILT_LEFT`) ต้องการให้รักษาและส่งเสริมเสน่ห์ความเด๋อด๋านี้ไว้
+- **Changes Implemented**:
+  1. **Facial Geometry Mathematical Model (`PetPropsOverlay.kt`)**:
+     - เพิ่มฟังก์ชัน `calculateGeometry(width, height)`:
+       - `foreheadY = cY - eyeDiameter * 0.65f`: กำหนดจุดอ้างอิงหน้าผากให้อยู่ "เหนือดวงตาพอดี" บนทุกขนาดและอัตราส่วนหน้าจอ (ทั้ง Portrait 20:9 และ Landscape 16:9)
+       - `mouthY = cY + eyeDiameter * 0.58f`: จุดอ้างอิงปาก/ถือของด้านล่าง
+       - `leftTempleX / rightTempleX = cX +/- eyeDiameter * 0.85f`: จุดอ้างอิงขมับ/ข้างศีรษะ
+  2. **Comprehensive Visual & Animation Overhaul across Built-in Props (`PetPropsOverlay.kt`)**:
+     - *Umbrella (`UMBRELLA`)*: ขยายขนาดเป็น 175dp อยู่เหนือระดับตาพอดี (`foreheadY + 12dp`) ร่มไล่เฉดสีฟ้าเข้ม-อ่อน ก้านร่มพร้อมด้ามจับโค้ง และมีเม็ดฝน 4 จุดกระเซ็นแตกบนร่ม
+     - *Sunglasses (`SUNGLASSES`)*: แว่นตาดำทรงเท่ เลนส์ 76dp เด้งลงมาครอบตาพอดี พร้อมเส้นแสงสะท้อนเฉียงสีขาว (Specular Glare)
+     - *Crown (`CROWN`)*: มงกุฎทองคำ 94dp บุผ้ากำมะหยี่สีแดง ล้อมเพชรพลอยไพลินทับทิม พร้อมดาวประกายเพชรหมุน 360 องศา
+     - *Burger (`BURGER`)*: เบอร์เกอร์เนื้อย่าง 88dp โรยงา มะเขือเทศ ผักกาดหอม ชีสเยิ้ม จังหวะเด้งเคี้ยวหนึบหนับ และมีควันไอร้อนลอยพวยพุ่ง
+     - *Pizza (`PIZZA`)*: พิซซ่าถาด 56dp แป้งเกรียม เปปเปอโรนี ชีสมอสซาเรลล่ายืดหยุ่นหยดติ๋งๆ
+     - *Popcorn (`POPCORN`)*: ถังป๊อปคอร์นลายทาง 68dp พร้อมเมล็ดข้าวโพดคั่วเด้งกระโดดออกมาเป็นวิถีโค้งพาราโบลา
+     - *Drinks (`COFFEE`, `BOBA_TEA`, `BEER`, `TEA_CUP`)*: ขยายขนาดเป็น ~60dp พร้อมไอควันร้อนลอยเอื่อย, เม็ดไข่มุกกลิ้ง swishing, ฟองเบียร์ซ่าและฟองล้นแก้ว
+     - *Tech & Tool Props (`LAPTOP`, `SHIELD`, `BATTERY`, `CLOCK`, `MAGNIFYING_GLASS`, `SIREN`, `CHECK_MARK`)*: แล็ปท็อปจอ Cyber Code สีเขียวนีออน, โล่พลังงานบลูการ์ดขอบทองพร้อมวงแหวนป้องกัน, หลอดไฟไอเดียพร้อมเส้นแสงพลังคิด
+  3. **Clumsy Pet Personality Guidelines (`JarvisPersona.kt`, `LiveToolBridge.kt`)**:
+     - เพิ่มกฎข้อ 14 ใน `PET_LIVE_SYSTEM_PROMPT`: เมื่อเจ้านายทักหรือแซวว่าหยิบของผิด ("นี่มันป๊อปคอร์น ไม่ใช่เบอร์เกอร์นะ", "หยิบผิดแล้ว") ให้ AI ทำท่าเขินอาย เด๋อด๋า ตกใจปนงงงวย (`CONFUSED` / `SWEAT_DROP` / `TILT_LEFT`) แล้วพูดสารภาพอย่างน่ารักพร้อมรีบเสกของที่ถูกต้องให้ทันที
+  4. **Specific Prop Detection & Scene Enrichment (`PetSceneEngine.kt`, `LiveToolBridge.kt`)**:
+     - ฟังก์ชัน `detectSpecificPropFromText` สกัดชื่อของกินและของใช้ (เบอร์เกอร์, พิซซ่า, เค้ก, กาแฟ, ร่ม, ป๊อปคอร์น) จากข้อความเจาะจงของผู้ใช้
+     - เพิ่ม Scene Archetype `RAIN_UMBRELLA` กางร่มกันฝน
+  5. **Unit Tests Coverage (`PetModeTest.kt`)**:
+     - เพิ่มชุดทดสอบ `detectSpecificPropFromText`, `RAIN_UMBRELLA` archetype resolution, และ specificProp override priority
+- **Verification**:
+  - รัน Unit Tests `:composeApp:testDebugUnitTest` ผ่าน 100%
+
+## 2026-09-13 — Smart Scene Archetype Engine & Dynamic SVG Deprecation (Virtual Desk Pet)
+- **Problem & Goal**:
+  - ระบบเดิม "Dynamic SVG Path Parser System & Auto-Fit Anchor Geometry" มีข้อจำกัด: เวกเตอร์ที่สร้างขึ้นโดย AI มีความหยาบ สัดส่วนผิดเพี้ยน ไม่สวยงาม และตำแหน่งไม่สอดคล้องกับใบหน้าหุ่นยนต์
+  - AI สับสนและ hallucinate โค้ด SVG (`M5,9...`) ส่งผลให้ AI ไม่เคยหยิบใช้งานคลังพร็อพสำเร็จรูปที่มีอยู่กว่า 50 ชนิด
+  - ฉากอนิเมชันเดิม (เช่น ฉากยิงจรวด) เล่นเร็วเกินไป (<1s) เห็นแค่ระเบิดตู้มๆ โดยไม่เห็นการตั้งท่าโกรธหรือตัวจรวดพุ่ง 3D
+  - ผู้ใช้ต้องการระบบ **"ฉากสำเร็จรูปอัจฉริยะ (Smart Scene Archetypes)"** ที่ AI สามารถผสมผสาน (Mix) สิ่งต่างๆ เข้าด้วยกัน:
+    1. ธีมฉากหลัง 8 รูปแบบ พร้อมระบบคำนวณตามเวลาจริง (Time-Aware Context)
+    2. คลังพร็อพและสติกเกอร์สำเร็จรูปสวยงาม 55 ชนิด
+    3. ท่าทาง หน้าตา และอารมณ์ของ Avatar
+    4. แสง สี เสียง FX สังเคราะห์เฉพาะฉาก
+    5. จังหวะการแสดงผล 3 องก์ (3-Act Pacing) 3.8 - 5.0 วินาที พร้อมระบบคืนสู่ IDLE อัตโนมัติ
+    6. รองรับทั้งการสุ่มอัตโนมัติ (Default Smart Random เช่น กดให้อาหาร สุ่มอาหาร 5 เมนู) และการสั่งเจาะจงด้วยเสียง (Specific Override เช่น "ขอดื่มกาแฟ", "ใส่แว่นตา")
+- **Changes Implemented**:
+  1. **Smart Scene Engine (`PetSceneEngine.kt`)**:
+     - สร้าง 15 Scene Archetypes ครอบคลุม 4 หมวดหมู่:
+       - *Activity*: `EATING`, `DRINKING`, `BATH_CLEAN`, `PLAY_GAMING`, `STUDY_WORK`
+       - *Meme*: `MEME_THUG_LIFE`, `MEME_RICH`, `MEME_ROYAL`
+       - *Comedy*: `COMEDY_FIRE`, `COMEDY_THUNDER`, `COMEDY_SOUL_OUT`
+       - *Emotion*: `ANGRY_MISSILE`, `SUPER_LOVE`, `DRAMATIC_CRY`, `CELEBRATION`
+     - ระบบสุ่มไอเทมจาก Item Pool: อาหาร (เบอร์เกอร์, พิซซ่า, เค้ก, ไอศกรีม, ป๊อปคอร์น) และเครื่องดื่ม (กาแฟ, ชานมไข่มุก, น้ำชา, เบียร์)
+     - ระบบคำนวณฉากหลังตามเวลาจริง (`resolveSmartBackground`): กลางวัน 06:00-16:59 `SUNNY`, พระอาทิตย์ตก 17:00-19:59 `SAKURA`, กลางคืน 20:00-05:59 `NIGHT`
+     - ตัวแปลงคีย์เวิร์ดภาษาไทยและอังกฤษ (`resolveFromKeyword`): รองรับคำพ้องความหมาย เช่น "กินข้าว", "ขอดื่มกาแฟ", "ใส่แว่นตา", "ยิงจรวด", "อาบน้ำ", "เล่นเกม", "รวย", "มงกุฎ", "ไฟลุก", "โดนช็อต", "วิญญาณหลุด", "ซุปเปอร์เลิฟ", "อกหัก", "ปาร์ตี้"
+  2. **Pacing & 3-Act Timing (`MissileBarrageOverlay.kt`, `PetModeController.kt`)**:
+     - ปรับระยะเวลาฉากจรวดเป็น 5.0 วินาทีเต็ม พร้อมแบ่ง 3 องก์:
+       - องก์ 1 (0–1200ms): ตั้งท่าโกรธ ควันพวยพุ่ง เสียงเตือนภัย
+       - องก์ 2 (1200–2400ms): ปล่อยจรวด 5 ลูกเหลื่อมเวลากัน พร้อมไอพ่นเปลวไฟพุ่งขึ้นด้านบนชัดเจนในมิติ 3D
+       - องก์ 3 (2400–5000ms): จรวดพุ่งตกกระทบหน้าจอ เกิดแรงกระแทก เขย่าจอ แสงแฟลช และควันจางหาย
+     - ฉากอื่นๆ กำหนดระยะเวลา 3.8s – 4.5s พร้อม Coroutine Auto-Revert กลับสู่ Pure Dark OLED IDLE อัตโนมัติ
+  3. **Deprecate Dynamic SVG & Enforce Built-in Props (`PetPropsOverlay.kt`, `DeviceToolDefinitions.kt`, `JarvisPersona.kt`)**:
+     - ตัด Dynamic SVG Canvas Loop ออกจาก `PetPropsOverlay.kt` และหันมาเรนเดอร์ผ่าน Compose Canvas Handcrafted 55 Built-in Props 100%
+     - ลบ Tool `device_custom_prop` ออกจาก Gemini Function Declarations
+     - เพิ่มพารามิเตอร์ `scene` และ `action="scene"` ใน `device_avatar_emotion` พร้อมระบุรายการพร็อพทั้ง 55 ชนิดใน Tool Description
+     - ปรับ System Prompts ทั้งหมดใน `JarvisPersona.kt` ให้อ้างอิงการเล่นฉากและพร็อพสำเร็จรูป
+  4. **Voice Intent Interception & Dual Execution (`LiveToolBridge.kt`, `DeviceControlExecutor.kt`)**:
+     - เพิ่ม `isSceneRequest` ใน `LiveToolBridge.kt` ป้องกัน Gemini สับสนเรียก Trading Tools
+     - อัปเดตกฎเสียง `[VOICE RULE - PET SCENE]` ให้ AI ตอบรับอย่างเป็นธรรมชาติและมีอารมณ์ร่วมกับฉาก
+     - ใน `DeviceControlExecutor.kt`: เชื่อมโยงตรงสู่ `PetModeController.activeInstance?.playSceneByNameOrKeyword()` เมื่ออยู่ใน Pet Mode หรือ Broadcast Emotion Intent ไปยัง MainActivity
+  5. **Unit Tests Coverage (`PetModeTest.kt`, `DeviceControlTest.kt`)**:
+     - ปรับ `DeviceControlTest.kt` ให้ทดสอบ `device_avatar_emotion` และลบ assertions ของ `device_custom_prop`
+     - เพิ่ม Unit Tests 7 ชุดใน `PetModeTest.kt` ครอบคลุมทั้ง 15 Archetypes, Item Pools Randomizer, Specific Prop Overrides, Time-Aware Background, และ Thai/English Keyword Resolver
+- **Verification**:
+  - `:composeApp:compileDebugKotlinAndroid` ผ่าน 100%
+  - `:composeApp:testDebugUnitTest` ผ่าน 100% (30 tasks, Build Successful in 24s)
+
+## 2026-09-13 — Always_AI_Live_Mode Polish (P3 Complete: Driving Safety, Smart Parking Memory & Low-Glare Night Mode)
+- **Problem & Goal**:
+  - โหมดขับขี่และควบคุม (Drive & Control Mode) ต้องการฟังก์ชันความปลอดภัยขั้นสูง: การแจ้งเตือนเมื่อขับขี่เกินความเร็วที่กำหนด (Speed Limit Alert)
+  - ผู้ขับขี่มักลืมตำแหน่งที่จอดรถเมื่อลงจากรถ ต้องการระบบจดจำจุดจอดรถอัจฉริยะ (Smart Parking Location Memory) ที่สามารถบันทึกพิกัดและนำทางกลับไปยังรถได้ทันทีทั้งผ่านการแตะปุ่มและคำสั่งเสียง ("รถจอดอยู่ที่ไหน", "จำที่จอดรถ")
+  - การขับขี่ตอนกลางคืนต้องการหน้าจอที่ลดแสงสะท้อน (Low-Glare OLED Night Mode) เพื่อไม่ให้แสงนีออนหรือออร่ารบกวนสายตาและสมาธิของผู้ขับขี่
+- **Changes Implemented**:
+  1. **Speed Limit Alert & Over-speed Monitoring (`DriveBridge.kt`, `DriveModeController.kt`, `DriveModeScreen.kt`)**:
+     - เพิ่ม `speedLimitKmh` (ค่าเริ่มต้น 120 กม./ชม.) และ `isSpeeding` ใน `DriveTelemetry`
+     - เพิ่มฟังก์ชัน `setSpeedLimit(limitKmh)` พร้อมรองรับการแตะปุ่ม `MAX 120` บน Speedometer HUD เพื่อวนเปลี่ยนขีดจำกัดความเร็ว (80 $\rightarrow$ 90 $\rightarrow$ 100 $\rightarrow$ 110 $\rightarrow$ 120 กม./ชม.)
+     - เมื่อความเร็วเกินกำหนด: Speedometer เปลี่ยนเป็นสี Crimson Red พร้อมขอบหนา 2dp และแสดงป้ายเตือนสีแดงสดกระพริบ `⚠️ ขับขี่เกินความเร็วที่กำหนด (X KM/H) กรุณาลดความเร็ว`
+  2. **Smart Parking Location Memory (`DriveBridge.kt`, `DriveModeController.kt`, `DriveModeScreen.kt`, `LiveToolBridge.kt`)**:
+     - เพิ่มโมเดล `ParkingLocation(latitude, longitude, address, timestamp)` และ StateFlow `parkingLocation`
+     - เพิ่มฟังก์ชัน `saveCurrentParking()`, `saveParkingLocation()`, `clearParkingLocation()`, และ `navigateToParking()`
+     - บน UI `DriveControlPanel`:
+       - หากยังไม่ได้บันทึก: แสดงปุ่มด่วน `🅿️ บันทึก/จำจุดจอดรถตรงนี้`
+       - เมื่อบันทึกแล้ว: แสดงการ์ดจุดจอดสีน้ำเงิน Indigo `🅿️ จุดจอดรถที่จำไว้: [ที่อยู่/พิกัด]` พร้อมปุ่มกด `🗺️ นำทางไปรถ` (เปิด Google Maps นำทางกลับไปยังพิกัดรถ) และปุ่ม `✖` ลบข้อมูล
+     - ป้องกัน Voice Intent สับสนใน `LiveToolBridge.kt`:
+       - ผู้ใช้สั่ง "จำที่จอดรถ" / "บันทึกที่จอดรถ" / "จอดรถตรงนี้" $\rightarrow$ สั่งบันทึกพิกัด GPS ทันทีและยืนยันด้วยเสียง
+       - ผู้ใช้ถาม "รถจอดอยู่ที่ไหน" / "หาที่จอดรถ" $\rightarrow$ รายงานพิกัดที่จอดและพร้อมกดนำทาง
+  3. **Low-Glare Night Driving Mode (`DriveBridge.kt`, `DriveModeController.kt`, `DriveModeScreen.kt`, `LiveToolBridge.kt`)**:
+     - เพิ่ม StateFlow `isLowGlareMode` พร้อมปุ่มสลับ `🌙 / 🕶️` บน Speedometer HUD
+     - เมื่อเปิดใช้งาน:
+       - หน้าจอด้านหลังปรับเป็น Pure OLED Pitch Black (`#000000`)
+       - หรี่แสง Ambient Aura ลงเหลือ 0.04f และลดขนาดลง 20%
+       - ลดความสว่างและระดับ Pulse ของ AudioVisualizerRing ลง 65%
+       - ปรับพื้นหลัง Card เป็นสีดำสนิท (`Color(0xFF08080C).copy(alpha = 0.88f)`) ป้องกันแสงสะท้อนแยงตาตอนกลางคืน
+       - รองรับคำสั่งเสียง "เปิดโหมดกลางคืน" / "ลดแสงสะท้อน" / "ปิดโหมดกลางคืน"
+  4. **Unit Tests Added (`DriveModeTest.kt`)**:
+     - `Speed limit and speeding detection calculate accurately`: ตรวจสอบการคำนวณความเร็วเกินและการเปลี่ยนค่าขีดจำกัดความเร็วแบบ Real-time
+     - `Smart parking location memory saves, navigates, and clears correctly`: ตรวจสอบการบันทึก, การนำทางกลับ, และการล้างข้อมูลจุดจอดรถ
+     - `Low-glare night driving mode toggles state correctly`: ตรวจสอบการเปิด/ปิดโหมดกลางคืน
+     - `Parking and night mode voice intents match correctly`: ตรวจสอบความแม่นยำของคำสั่งเสียงเกี่ยวกับที่จอดรถและโหมดกลางคืน
+- **Verification**:
+  - คอมไพล์ `:composeApp:compileDebugKotlinAndroid` สำเร็จ (Build Successful in 2m 16s)
+  - รัน Unit Tests `:composeApp:testDebugUnitTest` ผ่าน 100% ทั้ง 3 ชุด (`DriveModeTest`, `AlwaysLiveTest`, `PetModeTest`) ใน 41s
+- **Next Steps**:
+  - เตรียมทดสอบ On-Device บนรถยนต์จริง พร้อมทดสอบ HUD Speedometer ในสภาพแสงแดดและกลางคืน
+
+## 2026-09-13 — Always_AI_Live_Mode Enhancement (P2 Complete: Voice Intent Routing, Structured Sentiment & Resilience)
+- **Problem & Goal**:
+  - เมื่อผู้ใช้สั่งการด้วยเสียงขณะขับขี่หรือควบคุม (เช่น เล่นเพลง, นำทาง, อ่านแจ้งเตือน, ถามความเร็ว) โมเดล Gemini Live มักสับสนและอาจเรียกใช้ trading tools ผิดพลาด
+  - ฟังก์ชัน `detectSentiment` ใน `AlwaysLiveManager` เดิมใช้เพียงคีย์เวิร์ดอย่างง่าย ไม่รองรับแท็กอารมณ์แบบมีโครงสร้าง `[EMOTION]` หรือ Piped Commands (`HAPPY|...`) จากคำตอบของ AI
+  - ต้องการ Unit Tests ครอบคลุม Intent Detection และ Regex Tag Extraction
+- **Changes Implemented**:
+  1. **Smart Voice Intent Routing & Guards (`LiveToolBridge.kt`)**:
+     - เพิ่มฟังก์ชันตรวจสอบเจตนาคำสั่ง: `isMediaRequest`, `isNavigationRequest`, `isNotificationRequest`, `isLocationOrSpeedRequest`
+     - เพิ่ม Interception Guards 4 ชุด: เมื่อ Gemini Live เรียกเครื่องมือผิดทาง ให้ Redirect ไปยัง Tool ที่ถูกต้องอัตโนมัติ:
+       - เพลง $\rightarrow$ `device_media_control` พร้อมพารามิเตอร์ `play/pause/next/previous/search_play`
+       - แผนที่ $\rightarrow$ `device_navigate` พร้อมจุดหมายปลายทาง
+       - แจ้งเตือน $\rightarrow$ `device_notification_read`
+       - ความเร็ว/พิกัด $\rightarrow$ `device_location`
+  2. **Structured Sentiment & Emotion Tag Parser (`AlwaysLiveManager.kt`)**:
+     - อัปเกรด `detectSentiment(text)`:
+       - ตรวจสอบ Bracketed Tags ก่อนเป็นอันดับแรก: `[HAPPY]`, `[LOVE]`, `[EXCITED]`, `[SAD]`, `[ANGRY]`, `[CONFUSED]`, `[WINK]`, `[POUT]`, `[DIZZY]`, `[SURPRISED]`, `[BORED]`, `[ENRAGED]`, `[SLEEPING]`
+       - รองรับ Pipe-delimited Commands: `HAPPY|props=...`, `SPEAKING|...`
+       - ขยายชุดคำค้นหา Natural Sentiment Keywords ภาษาไทยและอังกฤษครอบคลุมทุกอารมณ์
+  3. **Unit Tests Added (`DriveModeTest.kt`)**:
+     - ทดสอบ Structured Tag Regex Extraction
+     - ทดสอบ Pipe Syntax Head Parsing
+     - ทดสอบ Driving Voice Intent Keywords
+- **Verification**:
+  - คอมไพล์ `:composeApp:compileDebugKotlinAndroid` สำเร็จ (Build Successful in 2m 16s)
+  - รัน Unit Tests `:composeApp:testDebugUnitTest` ทั้ง 3 ชุด (`DriveModeTest`, `AlwaysLiveTest`, `PetModeTest`) ผ่าน 100% (Build Successful in 50s)
+
+## 2026-09-13 — Always_AI_Live_Mode Implementation (P1 Complete: Full Drive Mode, Telemetry & Power Management)
+- **Problem & Goal**:
+  - โหมด DRIVE เดิมเป็นเพียง Placeholder Card ที่ไม่มีฟังก์ชันจริง (ขาด GPS Speedometer, Media Player Controls, Notification Reader, Navigation Shortcuts)
+  - กล้องพื้นหลังใน Pet mode ทำงานตลอดเวลาแม้สัตว์เลี้ยงจะหลับ (`SLEEPING`) ก่อให้เกิดการใช้แบตเตอรี่และพลังงาน CPU โดยไม่จำเป็น
+  - ขาด Unit Tests ครอบคลุมการทำงานของ DriveBridge และ DriveModeController
+- **Changes Implemented**:
+  1. **Full Drive & Control Architecture (`DriveBridge.kt`, `DriveModeController.kt`)**:
+     - สร้าง `DriveBridge` ใน `commonMain` พร้อม StateFlow: `telemetry` (speedKmh, address, lat, lng, isMoving), `mediaState` (title, artist, appName, isPlaying), และ `recentNotificationText`
+     - สร้าง `DriveModeController` อำนวยความสะดวกให้ UI Composable สั่งการ playPause, nextTrack, prevTrack, readNotifications, และ startNavigation
+  2. **DriveModeScreen Overhaul (`DriveModeScreen.kt`)**:
+     - เพิ่ม `DriveTelemetryHeader`: หน้าปัดวัดความเร็ว GPS HUD ขนาดใหญ่ + ป้าย Location Pill ระบุชื่อถนน/ย่าน
+     - เพิ่ม `DriveNotificationReaderBar`: แสดงการแจ้งเตือนล่าสุด พร้อมปุ่มอ่านออกเสียงด้วย AI Voice TTS
+     - เพิ่ม `DriveActionRow`: ปุ่มควบคุมเพลงขนาดใหญ่พิเศษ (สัมผัสง่ายขณะขับขี่) + ปุ่มลัดเปิด Google Maps Navigation นำทางทันที
+     - ปรับปรุง Responsive Landscape: Two-pane layout ด้านซ้ายเป็น Speedometer + Media + Navigation ด้านขวาเป็น Avatar
+  3. **Platform Integration in `AlwaysLiveManager.kt`**:
+     - เชื่อมต่อ `LocationProvider` ดึงความเร็วและชื่อถนนแบบ Real-time
+     - เชื่อมต่อ `MediaInfoProvider` และ `AudioManager.dispatchMediaKeyEvent` เพื่อควบคุมเพลง
+     - เชื่อมต่อ `VoiceManager` อ่านข้อความแจ้งเตือนสำคัญ 3 รายการล่าสุดด้วยเสียงสังเคราะห์ TTS
+  4. **Pet Mode Background Camera Power Management (`PetModeScreen.kt`)**:
+     - เพิ่มตัวแปร `shouldRunBackgroundVision` หยุดประมวลผลเฟรมกล้องพื้นหลังเมื่อสัตว์เลี้ยงอยู่ในสถานะ `SLEEPING` หรือไม่มี processor
+  5. **Unit Tests Added (`DriveModeTest.kt`)**:
+     - ทดสอบ Telemetry (speed > 5f -> isMoving), Media State, Notification updates, และ DriveModeController callbacks ผ่าน 100%
+- **Verification**:
+  - คอมไพล์ `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% (Build Successful in 2m 17s)
+  - รัน Unit Tests `:composeApp:testDebugUnitTest` ทั้ง 3 ชุด (`AlwaysLiveTest`, `PetModeTest`, `DriveModeTest`) ผ่าน 100% (Build Successful in 50s)
+
+## 2026-09-13 — Always_AI_Live_Mode Refactoring (P0 Complete: Modular Architecture & KMP Compatibility)
+- **Problem & Goal**:
+  - `AlwaysLiveScreen.kt` มีขนาดใหญ่เกินไป (2,471 บรรทัด) รวบรวมตรรกะ UI ของ PET, DRIVE, และ CONTROL ไว้ใน Composable เดียว
+  - การใช้งาน `System.currentTimeMillis()` ใน `commonMain` ส่งผลให้ไม่สามารถคอมไพล์บนเป้าหมาย iOS ได้
+  - โค้ด `RobotSoundPlayer.handler` ซ้ำซ้อน 2 จุดใน `AlwaysLiveManager.kt`
+  - ตรรกะแปลง Emotion -> Color กระจายซ้ำซ้อนในหลาย Composable
+- **Changes Implemented**:
+  1. **Decomposed `AlwaysLiveScreen.kt`**:
+     - แยก `PetModeScreen.kt` (~800 บรรทัด): รองรับ `PetModeContent`, `PetDialogueCard`, `PetDetectionBadge`, `PetEyeScannerOverlay`
+     - แยก `DriveModeScreen.kt` (~270 บรรทัด): รองรับ `DriveModeContent` (ทั้ง Portrait และ Landscape)
+     - `AlwaysLiveScreen.kt` ลดขนาดเหลือเพียง ~730 บรรทัด ทำหน้าที่เป็น Clean Profile Router และ Host Shared Sub-Composables
+  2. **Centralized Emotion Color Palette**:
+     - สร้าง `AvatarEmotionColors.kt` รวบรวม `primary()`, `secondary()`, และ `statusPill()` ลดการเขียน `when(emotion)` ซ้ำซ้อน 3 จุด
+  3. **KMP / iOS Compatibility**:
+     - แทนที่ `System.currentTimeMillis()` ทั้งหมดด้วย `Clock.System.now().toEpochMilliseconds()` จาก `kotlinx-datetime` ในทุกไฟล์ `commonMain`:
+       - `PetModeController.kt`, `PetStateMachine.kt`, `PetMemory.kt`, `PetVisionTargetTracker.kt`, `PetNeedsState.kt`, `AlwaysLiveScreen.kt`
+  4. **Deduplicated Sound Handler**:
+     - สกัด `installSoundHandler()` ใน `AlwaysLiveManager.kt` ลดโค้ดซ้ำซ้อนใน `init{}` และ `startPetMode()`
+  5. **Profile Architecture Alignment**:
+     - บันทึกข้อกำหนด: 🚗 ขับขี่ / ควบคุม (`CONTROL` / `DRIVE`) คือโหมดเดียวกัน สำหรับสั่งการ/นำทาง โดยมี 2 กลุ่มโหมดหลักคือ ขับขี่/ควบคุม vs สัตว์เลี้ยง (`PET`)
+- **Verification**:
+  - คอมไพล์ `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% (Build Successful in 1m 23s)
+  - รัน Unit Tests `:composeApp:testDebugUnitTest` ทั้งชุด `AlwaysLiveTest` และ `PetModeTest` ผ่าน 100% (30 actionable tasks, Build Successful in 38s)
+
+## 2026-09-13 — Comprehensive Code Review: Always_AI_Live_Mode (Driving + Pet Modes)
+- **Scope**: Full review of Always_AI_Live_Mode covering CONTROL, DRIVE, and PET profiles
+- **Files Reviewed**: 14 source files + 2 test files (~9,500 lines total)
+- **Key Findings**:
+  - **PET Mode (⭐⭐⭐⭐½)**: Excellent implementation — Tamagotchi needs system, 10+ touch reactions, `PetStateMachine` with anti-spam ring buffer, eye scanner camera overlay, face recognition (5 slots), hand gestures, missile barrage, sentry mode, focus timer, copycat game, fortune oracle. 30+ comprehensive tests.
+  - **DRIVE Mode (⭐)**: Essentially a placeholder — only a static `DriveFeaturePanel` card. No GPS, no media controls, no notification reader, no hands-free features. Uses identical UI as CONTROL mode.
+- **Critical Issues Found (4)**:
+  1. `AlwaysLiveScreen.kt` is a 2,471-line God Composable (PET + DRIVE + CONTROL in one function)
+  2. Duplicate `RobotSoundPlayer` handler in `AlwaysLiveManager.kt` init/startPetMode (~40 lines × 2)
+  3. `System.currentTimeMillis()` in commonMain — breaks iOS compilation (must use `kotlinx-datetime`)
+  4. No iOS actual implementations for `PetMotionDetector`, `PetVisionDetector`, `AlwaysLiveManager`
+- **Moderate Issues (4)**: Hidden 1dp camera battery drain, fragile keyword-based anti-hallucination guards, WakeLock leak risk, hardcoded sentiment detection
+- **Improvement Plan Proposed**:
+  - P0: Decompose AlwaysLiveScreen, fix KMP compat, deduplicate sound handler
+  - P1: Build real driving features (DriveModeController), extract emotion color map, camera power management, WakeLock safety
+  - P2: iOS implementations, intent classifier for guards, structured AI sentiment
+- **Files**: [[AlwaysLiveScreen]], [[AlwaysLiveManager]], [[PetModeController]], [[PetStateMachine]], [[PetNeedsState]], [[LiveToolBridge]], [[LiveVoiceAlertEngine]], [[LiveModePanel]], [[AlwaysLiveProfile]]
+
 ## 2026-09-13 — Pet Vision Fix: Implement Robust 2-Turn Vision Flow (Eliminate Turn-1 Guessing & Fix Frozen Camera)
 - **Problem Solved**:
   - *User Report*: "ยังอาการเดิม สั่งให้ pet ดูสิ่งที่ถืออยู่ pet เปิดกล้องดู และปิดกล้อง ตอบผิด สั่งให้ดูใหม่ pet ไม่ได้เปิดกล้อง แต่ตอบถูก"

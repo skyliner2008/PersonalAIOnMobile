@@ -32,7 +32,24 @@ enum class RobotSound {
     /** เสียงกระดิ่ง/ลูกบอลของเล่น (Bell Toy chime) เมื่อชวนเล่น 🎾 */
     BELL_TOY,
     /** เสียงเปิดตาแสกนเรดาร์ไซไฟไฮเทค (Futuristic cyber radar scanner sweep) 👁️ */
-    SCAN_RADAR
+    SCAN_RADAR,
+
+    // ─── Scene storytelling cues (Pet_Scene_Scripts.md) ───
+    /** ของเคลื่อนเข้าฉาก */ WHOOSH,
+    /** ของถึงที่ / สวมเข้าที่ */ POP,
+    /** ซดเครื่องดื่ม */ SLURP,
+    /** เหรียญทอง */ COIN,
+    /** ไฟฟ้าช็อต */ ZAP,
+    /** ไฟลุกฉ่า */ SIZZLE,
+    /** ฝนตก / สายน้ำ */ RAIN,
+    /** เสียงเกม 8-bit */ GAME_BLIP,
+    /** พิมพ์ / พลิกหน้า */ TYPING,
+    /** สะอื้น */ SOB,
+    /** แตรชัยชนะ */ FANFARE,
+    /** บูตเครื่อง / แสงส่อง */ POWER_UP,
+    /** ทำนองสั้นๆ */ MELODY,
+    /** หัวใจเต้น */ HEARTBEAT,
+    /** วิญญาณลอย */ GHOST
 }
 
 /**

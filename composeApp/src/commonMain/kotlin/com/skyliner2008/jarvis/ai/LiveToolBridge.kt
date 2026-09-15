@@ -4,6 +4,7 @@ import com.skyliner2008.jarvis.data.ConversationTurn
 import com.skyliner2008.jarvis.data.GeminiService
 import com.skyliner2008.jarvis.data.LiveGeminiService
 import com.skyliner2008.jarvis.data.LiveToolCallEvent
+import com.skyliner2008.jarvis.drive.DriveBridge
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.logError
 import com.skyliner2008.jarvis.tools.ToolCall
@@ -81,7 +82,8 @@ class LiveToolBridge(
         if (!allowedTradingTimeframe(args)) return false
         return when (profile) {
             "SMC" -> toolName == "trading_smc_analysis"
-            "USER_QUERY" -> false
+            // "RSI / แนวรับ / เท่าไหร่" needs real indicator values: one technical analysis, no deep suite
+            "USER_QUERY" -> toolName == "trading_technical_analysis"
             else -> toolName == "trading_deep_analysis_suite"
         }
     }
@@ -93,15 +95,42 @@ class LiveToolBridge(
         return alertTerms.any { p.contains(it) } && tradeTerms.any { p.contains(it) }
     }
 
+    /** คำขอเรื่องตลาด/เทรดจริง — guard ที่เปลี่ยน trading tool เป็นอย่างอื่นต้องไม่ทำงาน */
+    private fun isTradingQuestion(prompt: String): Boolean =
+        TradingIntentUtility.isTradingPrompt(prompt) || TradingIntentUtility.isMt5Prompt(prompt) ||
+            TradingIntentUtility.isSmcPrompt(prompt) ||
+            listOf("ราคา", "หุ้น", "ตลาด", "กราฟ", "เทรด", "xau", "btc", "บิทคอยน์", "ดัชนี", "set50", "nasdaq", "ดาวโจนส์")
+                .any { prompt.lowercase().contains(it) }
+
     private fun isAvatarEmotionRequest(prompt: String): Boolean {
         val p = prompt.lowercase()
+        // ("หน้า" / "แบบ" / "mood" alone matched ordinary sentences like "แบบไหนดี" or "หน้าจอ")
         val avatarTerms = listOf(
+            "หน้าที่", "แบบที่", "moodset",
             "เดโม", "เดโม่", "demo",
             "แสดงอารมณ์", "โชว์อารมณ์", "ทดสอบอารมณ์", "อารมณ์ทั้งหมด",
             "ซะแดงเดโมอารมณ์", "แสดงเดโม่อารมณ์", "ซะแดงอารมณ์",
-            "ทำหน้า", "สีหน้า", "avatar", "อวาตาร์", "ขยิบตา", "ยิ้มหน่อย", "หน้าตา"
+            "ทำหน้า", "สีหน้า", "avatar", "อวาตาร์", "ขยิบตา", "ยิ้มหน่อย", "หน้าตา",
+            "ทุกหน้า", "ทุกแบบ", "หน้าทั้งหมด", "all pages", "all moods", "play all", "show all"
         )
-        return avatarTerms.any { p.contains(it) }
+        return avatarTerms.any { p.contains(it) } ||
+                com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(prompt) != null ||
+                com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(prompt)
+    }
+
+    private fun isSceneRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val sceneTerms = listOf(
+            "ฉาก", "กินข้าว", "ให้อาหาร", "กินพิซซ่า", "กินเบอร์เกอร์", "กินเค้ก", "กินไอติม", "กินป๊อปคอร์น", "หิวข้าว",
+            "ดื่มน้ำ", "ขอดื่ม", "กินกาแฟ", "ดื่มกาแฟ", "กินชา", "ดื่มชา", "กินโค้ก", "กินชานม", "หิวน้ำ",
+            "อาบน้ำ", "ถูสบู่", "แปรงฟัน", "สระผม",
+            "เล่นเกม", "จอยเกม", "ทำงาน", "อ่านหนังสือ",
+            // (no "ทองคำ" / "เหรียญทอง" / "คนรวย": those are gold-price questions far more often than scenes)
+            "ใส่แว่น", "แว่นตา", "thug life", "แว่นดำ", "มงกุฎ", "ราชา", "เจ้าหญิง",
+            "ไฟลุก", "วิ่งหนีไฟ", "ไฟไหม้", "โดนช็อต", "ฟ้าผ่า", "ไฟดูด", "วิญญาณหลุด", "เหนื่อยมาก", "หมดแรง", "ตายแป๊บ",
+            "ยิงจรวด", "มิสไซล์", "ถล่มจอ", "ซุปเปอร์เลิฟ", "คลั่งรัก", "หัวใจเต็มจอ", "อกหัก", "ร้องไห้หนักมาก", "ปาร์ตี้", "ฉลอง"
+        )
+        return sceneTerms.any { p.contains(it) }
     }
 
     private fun isAlwaysLiveRequest(prompt: String): Boolean {
@@ -115,19 +144,76 @@ class LiveToolBridge(
         return terms.any { p.contains(it) }
     }
 
+    private fun isMediaRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "เปิดเพลง", "เล่นเพลง", "หยุดเพลง", "ข้ามเพลง", "เพลงถัดไป", "เพลงก่อนหน้า",
+            "เพลงอะไร", "พักเพลง", "สลับเพลง", "play music", "stop music", "next song", "previous song"
+        )
+        return terms.any { p.contains(it) }
+    }
+
+    private fun isNavigationRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "นำทางไป", "นำทาง", "เปิดแผนที่ไป", "เปิด google maps ไป", "พาไปที่", "ไปที่",
+            "navigate to", "directions to"
+        )
+        return terms.any { p.contains(it) }
+    }
+
+    private fun isNotificationRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "อ่านแจ้งเตือน", "อ่านข้อความ", "มีแจ้งเตือนอะไร", "เช็คแจ้งเตือน", "มีไลน์เข้าไหม",
+            "read notifications", "read notification", "check notifications"
+        )
+        return terms.any { p.contains(it) }
+    }
+
+    private fun isLocationOrSpeedRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "ขับเร็วเท่าไหร่", "ความเร็วเท่าไหร่", "วิ่งเร็วเท่าไหร่", "ตอนนี้อยู่ที่ไหน",
+            "พิกัดปัจจุบัน", "เช็คตำแหน่ง", "ตำแหน่งปัจจุบัน", "current speed", "where am i"
+        )
+        return terms.any { p.contains(it) }
+    }
+
+    private fun isParkingRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "จอดรถอยู่ที่ไหน", "จอดรถไว้ตรงไหน", "รถจอดอยู่ที่ไหน", "รถจอดที่ไหน",
+            "หาที่จอดรถ", "รถอยู่ไหน", "จำที่จอดรถ", "บันทึกที่จอดรถ", "บันทึกจุดจอด",
+            "จอดรถตรงนี้", "where did i park", "where is my car", "save parking", "remember parking"
+        )
+        return terms.any { p.contains(it) }
+    }
+
+    private fun isNightModeRequest(prompt: String): Boolean {
+        val p = prompt.lowercase()
+        val terms = listOf(
+            "เปิดโหมดกลางคืน", "ปิดโหมดกลางคืน", "โหมดกลางคืน", "ลดแสงสะท้อน", "หรี่แสง",
+            "night mode", "low glare"
+        )
+        return terms.any { p.contains(it) }
+    }
+
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
         logDebug("LiveBridge", "▶ Path A: ${event.name} callId=${event.callId} (${event.args})")
 
         // Enforce the profile selected from the user's actual request before executing tools.
         // This prevents the Live model from expanding one analysis request into Deep+SMC+TA+D1 chains.
         val userPrompt = liveService.lastUserText
-        if (userPrompt != tradingProfilePromptKey) {
-            tradingProfilePromptKey = userPrompt
+        val turnKey = "turn-${liveService.userTurnSerial}"
+        if (turnKey != tradingProfilePromptKey) {
+            tradingProfilePromptKey = turnKey
             tradingProfileCallCount = 0
         }
 
         // Always Live Guard: If Gemini mistakenly calls trading tools when user meant Always Live / Control / Drive mode
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && isAlwaysLiveRequest(userPrompt)) {
+        val tradingQuestion = isTradingQuestion(userPrompt)
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && !tradingQuestion && isAlwaysLiveRequest(userPrompt)) {
             val p = userPrompt.lowercase()
             val pWithoutOpen = p.replace("เปิด", "")
             val action = if (pWithoutOpen.contains("ปิด") || pWithoutOpen.contains("ออก") || pWithoutOpen.contains("off") || pWithoutOpen.contains("stop")) "off" else "on"
@@ -159,30 +245,34 @@ class LiveToolBridge(
             return
         }
 
-        // Avatar Emotion Guard: If Gemini mistakenly calls Fear & Greed or Sentiment when user meant Avatar face
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment") && isAvatarEmotionRequest(userPrompt)) {
+        // Avatar Emotion & Smart Scene Guard: If Gemini mistakenly calls Fear & Greed or Sentiment when user meant Avatar face or Scene
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && !tradingQuestion && (isAvatarEmotionRequest(userPrompt) || isSceneRequest(userPrompt))) {
             val p = userPrompt.lowercase()
-            val action = when {
-                p.contains("รีเซ็ต") || p.contains("ปกติ") || p.contains("reset") -> "reset"
-                p.contains("เดโม") || p.contains("demo") || p.contains("แสดงอารมณ์") || p.contains("โชว์อารมณ์") || p.contains("อารมณ์ทั้งหมด") || p.contains("ทดสอบอารมณ์") -> "demo"
-                else -> "set"
-            }
-            val emotion = if (action == "set") {
+            val isScene = isSceneRequest(userPrompt)
+            val args = if (isScene) {
+                mapOf("action" to "scene", "scene" to userPrompt)
+            } else {
+                val targetPage = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(userPrompt)
+                val isPlayAll = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(userPrompt)
                 when {
-                    p.contains("ดีใจ") || p.contains("happy") || p.contains("ยิ้ม") -> "happy"
-                    p.contains("ตื่นเต้น") || p.contains("excited") -> "excited"
-                    p.contains("รัก") || p.contains("love") || p.contains("หัวใจ") -> "love"
-                    p.contains("โกรธ") || p.contains("angry") || p.contains("โมโห") -> "angry"
-                    p.contains("เศร้า") || p.contains("sad") || p.contains("เสียใจ") || p.contains("ร้องไห้") -> "sad"
-                    p.contains("หลับ") || p.contains("sleeping") || p.contains("ง่วง") || p.contains("นอน") -> "sleeping"
-                    p.contains("คิด") || p.contains("thinking") || p.contains("สงสัย") -> "thinking"
-                    else -> "happy"
+                    targetPage != null -> mapOf("action" to "page", "page" to targetPage.toString())
+                    isPlayAll -> mapOf("action" to "all")
+                    p.contains("รีเซ็ต") || p.contains("ปกติ") || p.contains("reset") -> mapOf("action" to "reset")
+                    p.contains("เดโม") || p.contains("demo") || p.contains("แสดงอารมณ์") || p.contains("โชว์อารมณ์") || p.contains("อารมณ์ทั้งหมด") || p.contains("ทดสอบอารมณ์") -> mapOf("action" to "all")
+                    else -> {
+                        val emotion = when {
+                            p.contains("ดีใจ") || p.contains("happy") || p.contains("ยิ้ม") -> "happy"
+                            p.contains("ตื่นเต้น") || p.contains("excited") -> "excited"
+                            p.contains("รัก") || p.contains("love") || p.contains("หัวใจ") -> "love"
+                            p.contains("โกรธ") || p.contains("angry") || p.contains("โมโห") -> "angry"
+                            p.contains("เศร้า") || p.contains("sad") || p.contains("เสียใจ") || p.contains("ร้องไห้") -> "sad"
+                            p.contains("หลับ") || p.contains("sleeping") || p.contains("ง่วง") || p.contains("นอน") -> "sleeping"
+                            p.contains("คิด") || p.contains("thinking") || p.contains("สงสัย") -> "thinking"
+                            else -> "happy"
+                        }
+                        mapOf("action" to "set", "emotion" to emotion)
+                    }
                 }
-            } else null
-
-            val args = buildMap<String, String> {
-                put("action", action)
-                if (emotion != null) put("emotion", emotion)
             }
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_avatar_emotion($args)")
             val redirectCall = ToolCall(name = "device_avatar_emotion", args = args)
@@ -192,10 +282,173 @@ class LiveToolBridge(
                 logError("LiveBridge", "Redirected avatar emotion execution failed", e)
                 com.skyliner2008.jarvis.tools.ToolResult("device_avatar_emotion", "Error: ${e.message}", true)
             }
+            val voiceRule = if (isScene) {
+                "\n\n[VOICE RULE - PET SCENE] เริ่มเล่นฉากอนิเมชันและเอฟเฟกต์บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใสและมีอารมณ์ร่วมตามฉากที่เล่น เช่น กินอาหาร ดื่มน้ำ ยิงจรวด หรือใส่แว่นตา (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามใช้ markdown"
+            } else {
+                val page = args["page"]?.toIntOrNull()
+                val isAll = args["action"] in listOf("all", "demo")
+                if (page != null) {
+                    val item = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.findByPage(page)
+                    "\n\n[VOICE RULE - MOODSET PAGE] แสดง Moodset หน้าที่ $page: ${item?.nameEn} (${item?.nameTh}) บนหน้าจอ 3-5 วินาทีเรียบร้อยแล้วค่ะ (ระบบมีสารบัญครบทั้ง 50 หน้า แผ่นที่ 1: หน้า 1-20, แผ่นที่ 2: หน้า 21-50) — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'แสดงหน้าที่ $page ${item?.nameTh} ให้บอสตรวจสอบแล้วค่ะ' ห้ามบอกว่าไม่มีหน้าที่ 11 หรือมีแค่ 10 หน้าเด็ดขาด ห้ามใช้ markdown"
+                } else if (isAll) {
+                    "\n\n[VOICE RULE - MOODSET ALL] เริ่มเล่นแสดง Moodset ครบทั้งหมด 50 หน้าวนตรวจบนหน้าจอสลับทุก 4 วินาทีเรียบร้อยแล้วค่ะ — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'เริ่มแสดง Moodset ทุกหน้าครบทั้ง 50 หน้าให้บอสตรวจสอบแล้วนะคะ' ห้ามบอกว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                } else {
+                    "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว (ระบบมี Moodset ทั้งหมด 50 หน้า) — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ ห้ามตอบว่าไม่มีหน้าตา ห้ามพูดว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                }
+            }
             liveService.sendNativeToolResponse(
                 callId   = event.callId,
                 toolName = event.name,
-                result   = result.result + "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ (เช่น 'เริ่มแสดงเดโม่อารมณ์ทั้ง 10 แบบให้ดูแล้วนะคะ!' หรือ 'ทำหน้าดีใจแล้วค่ะบอส!') ห้ามตอบว่าไม่มีหน้าตา ห้ามใช้ markdown"
+                result   = result.result + voiceRule
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Media Control Guard: If Gemini mistakenly calls trading/other tools when user wants music control
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && !tradingQuestion && isMediaRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val action = when {
+                p.contains("หยุด") || p.contains("pause") || p.contains("พัก") -> "pause"
+                p.contains("ข้าม") || p.contains("ถัดไป") || p.contains("next") -> "next"
+                p.contains("ก่อนหน้า") || p.contains("ย้อน") || p.contains("previous") -> "previous"
+                p.contains("เพลงอะไร") || p.contains("ชื่อเพลง") || p.contains("now playing") -> "now_playing"
+                else -> "play"
+            }
+            val query = if (action == "play") {
+                p.replace("เปิดเพลง", "").replace("เล่นเพลง", "").replace("play", "").trim()
+            } else ""
+            val args = buildMap {
+                if (query.isNotBlank()) {
+                    put("action", "search_play")
+                    put("query", query)
+                } else {
+                    put("action", action)
+                }
+            }
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_media_control($args)")
+            val redirectCall = ToolCall(name = "device_media_control", args = args)
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected media control execution failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_media_control", "Error: ${e.message}", true)
+            }
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = result.result + "\n\n[VOICE RULE - MEDIA] ควบคุมการเล่นเพลงเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างกระชับ เช่น 'กำลังเล่นเพลงให้แล้วนะคะ' หรือ 'หยุดเล่นเพลงแล้วค่ะ' ห้ามอธิบายยาว ห้ามใช้ markdown"
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Navigation Guard: If Gemini mistakenly calls trading tools when user asks for navigation
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isNavigationRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val destination = p.replace("นำทางไป", "")
+                .replace("เปิดแผนที่ไป", "")
+                .replace("เปิด google maps ไป", "")
+                .replace("พาไปที่", "")
+                .replace("ไปที่", "")
+                .replace("navigate to", "")
+                .replace("directions to", "")
+                .trim()
+            val args = mapOf("destination" to destination, "action" to "navigate", "mode" to "drive")
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_navigate($args)")
+            val redirectCall = ToolCall(name = "device_navigate", args = args)
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected navigate execution failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_navigate", "Error: ${e.message}", true)
+            }
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = result.result + "\n\n[VOICE RULE - NAVIGATION] เปิดระบบนำทางไปยัง $destination เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยค เช่น 'เปิดระบบนำทางไป $destination ให้แล้วค่ะ เดินทางปลอดภัยนะคะ' ห้ามอธิบายยาว ห้ามใช้ markdown"
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Notification Read Guard: If Gemini mistakenly calls trading tools when user asks for notifications
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isNotificationRequest(userPrompt)) {
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_notification_read")
+            val redirectCall = ToolCall(name = "device_notification_read", args = mapOf("count" to "3"))
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected notification read failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_notification_read", "Error: ${e.message}", true)
+            }
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = result.result + "\n\n[VOICE RULE - NOTIFICATIONS] อ่านการแจ้งเตือนล่าสุดเรียบร้อยแล้ว — สรุปหรือแจ้งเตือนสั้นๆ ให้ผู้ใช้ทราบอย่างกระชับและเป็นธรรมชาติ"
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Location & Speed Guard: If Gemini mistakenly calls trading tools when user asks for speed / current location
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isLocationOrSpeedRequest(userPrompt)) {
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_location")
+            val redirectCall = ToolCall(name = "device_location", args = mapOf("action" to "get_current"))
+            val result = try {
+                ToolExecutor.execute(redirectCall, memoryContext)
+            } catch (e: Exception) {
+                logError("LiveBridge", "Redirected location failed", e)
+                com.skyliner2008.jarvis.tools.ToolResult("device_location", "Error: ${e.message}", true)
+            }
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = result.result + "\n\n[VOICE RULE - LOCATION] ได้ข้อมูลพิกัด/ตำแหน่งเรียบร้อยแล้ว — ตอบความเร็วหรือตำแหน่งปัจจุบันให้ผู้ใช้ทราบอย่างกระชับและชัดเจน"
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Parking Location Guard: If Gemini mistakenly calls trading tools when user asks about parking
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isParkingRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val isSave = listOf("จำ", "บันทึก", "ตรงนี้", "save", "remember").any { p.contains(it) }
+            val responseText = if (isSave) {
+                DriveBridge.saveCurrentParking()
+                val saved = DriveBridge.parkingLocation.value
+                val addr = saved?.address ?: "พิกัดปัจจุบัน"
+                "บันทึกพิกัดจุดจอดรถเรียบร้อยแล้วค่ะ ที่ $addr เมื่อต้องการกลับมาที่รถ ให้ถามว่า 'รถจอดอยู่ที่ไหน' ได้ตลอดนะคะ\n\n[VOICE RULE - PARKING] บันทึกจุดจอดรถเรียบร้อยแล้ว — ตอบยืนยันสั้นๆ 1 ประโยคอย่างเป็นธรรมชาติ"
+            } else {
+                val parking = DriveBridge.parkingLocation.value
+                if (parking != null) {
+                    val addr = parking.address ?: "พิกัดที่บันทึกไว้ (${parking.latitude}, ${parking.longitude})"
+                    "รถของคุณจอดอยู่ที่ $addr ค่ะ สามารถกดปุ่มนำทางกลับไปที่รถบนหน้าจอได้ทันที\n\n[VOICE RULE - PARKING] บอกตำแหน่งจุดจอดรถให้ผู้ใช้ทราบสั้นๆ 1-2 ประโยคอย่างชัดเจนและเป็นมิตร"
+                } else {
+                    "ยังไม่มีข้อมูลจุดจอดรถที่บันทึกไว้ค่ะ สามารถพูดว่า 'จำที่จอดรถ' เพื่อบันทึกพิกัดปัจจุบันได้นะคะ\n\n[VOICE RULE - PARKING] แจ้งว่ายังไม่ได้บันทึกจุดจอดรถ และแนะนำให้บันทึกสั้นๆ 1 ประโยค"
+                }
+            }
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Handled Parking Intent: $responseText")
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = responseText
+            )
+            _activeToolName.value = null
+            return
+        }
+
+        // Night / Low-Glare Driving Mode Guard
+        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && !tradingQuestion && isNightModeRequest(userPrompt)) {
+            val p = userPrompt.lowercase()
+            val isTurnOff = listOf("ปิด", "ยกเลิก", "off", "disable").any { p.contains(it) }
+            DriveBridge.setLowGlareMode(!isTurnOff)
+            val msg = if (isTurnOff) "ปิดโหมดกลางคืนและปรับความสว่างปกติแล้วค่ะ" else "เปิดโหมดลดแสงสะท้อนสำหรับการขับขี่ตอนกลางคืนเรียบร้อยแล้วค่ะ"
+            logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Handled Low Glare Mode: $msg")
+            liveService.sendNativeToolResponse(
+                callId = event.callId,
+                toolName = event.name,
+                result = "$msg\n\n[VOICE RULE - NIGHT_MODE] ยืนยันการปรับโหมดลดแสงสะท้อนสำหรับการขับขี่สั้นๆ 1 ประโยค"
             )
             _activeToolName.value = null
             return
@@ -271,17 +524,17 @@ class LiveToolBridge(
             if (!profileToolAllowed(userPrompt, event.name, event.args)) {
                 val reason = when {
                     !allowedTradingTimeframe(event.args) -> "AI Profile จำกัด timeframe เริ่มต้นไว้ที่ M15, H1, H4; โปรดไม่เรียก D1/1D เว้นแต่ผู้ใช้ระบุเอง"
-                    profile == "USER_QUERY" -> "คำถามนี้เป็น User Query profile ไม่ใช่ full analysis; ให้ตอบจากค่าที่ผู้ใช้ระบุเท่านั้น"
+                    profile == "USER_QUERY" -> "คำถามนี้ถามค่าเฉพาะ ไม่ใช่ full analysis; ใช้ trading_technical_analysis หรือ trading_price แทน"
                     profile == "SMC" -> "ผู้ใช้เลือก SMC Profile แล้ว ไม่ต้องเรียก Technical/Deep Analysis ซ้ำ"
                     else -> "AI Profile ใช้ trading_deep_analysis_suite เป็น consolidated analysis path เท่านั้น"
                 }
-                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: $reason แล้วสรุปคำตอบจากข้อมูลที่มีอยู่ทันที")
+                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: $reason — tool นี้ไม่ได้ดึงข้อมูลให้ ห้ามแต่งราคาหรือตัวเลขเอง ถ้ายังไม่มีข้อมูลจาก tool ใน turn นี้ให้เรียก tool ที่ระบุ หรือบอกผู้ใช้ตรงๆ ว่ายังไม่มีข้อมูล")
                 logDebug("LiveBridge", "🛡️ Profile guard blocked ${event.name} for profile=$profile")
                 return
             }
             tradingProfileCallCount++
             if (tradingProfileCallCount > 3) {
-                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: ได้ข้อมูลครบ 3 TF (M15/H1/H4) แล้ว ไม่ต้องเรียก analysis tool เพิ่ม โปรดสังเคราะห์ผลและตอบผู้ใช้ทันที")
+                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: ได้ข้อมูลครบ 3 TF (M15/H1/H4) ใน turn นี้แล้ว ไม่ต้องเรียก analysis tool เพิ่ม โปรดสังเคราะห์จากผล tool ที่ได้รับแล้วเท่านั้น ห้ามเพิ่มตัวเลขที่ไม่มีในผล tool")
                 logDebug("LiveBridge", "🛡️ Profile guard capped analysis chain at 3 calls")
                 return
             }
@@ -299,7 +552,36 @@ class LiveToolBridge(
             return
         }
 
-        val toolCall = ToolCall(name = event.name, args = event.args)
+        val effectiveArgs = if (event.name == "device_avatar_emotion") {
+            val targetPage = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(userPrompt)
+                ?: event.args["page"]?.toIntOrNull()
+                ?: event.args["page_number"]?.toIntOrNull()
+                ?: if (event.args["action"] in listOf("page", "หน้า", "หน้าที่")) event.args["emotion"]?.toIntOrNull() else null
+                ?: event.args["emotion"]?.toIntOrNull()?.takeIf { it in 1..50 }
+
+            val isPlayAll = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(userPrompt) ||
+                    event.args["action"] in listOf("all", "play_all", "demo_all", "all_pages", "หน้าทั้งหมด")
+
+            if (targetPage != null) {
+                logDebug("LiveBridge", "📖 Detected Moodset Page $targetPage from userPrompt='$userPrompt' or args=${event.args} -> overriding args")
+                mapOf("action" to "page", "page" to targetPage.toString())
+            } else if (isPlayAll) {
+                logDebug("LiveBridge", "🎭 Detected Play All Moodsets from userPrompt='$userPrompt' or args=${event.args} -> overriding args")
+                mapOf("action" to "all")
+            } else {
+                val detectedProp = com.skyliner2008.jarvis.pet.PetSceneEngine.detectSpecificPropFromText(userPrompt)
+                if (detectedProp != null && event.args["props"].isNullOrBlank()) {
+                    logDebug("LiveBridge", "🍔 Detected specific prop '${detectedProp.name}' from userPrompt='$userPrompt' -> enriching tool args")
+                    event.args + ("props" to detectedProp.name.lowercase())
+                } else {
+                    event.args
+                }
+            }
+        } else {
+            event.args
+        }
+
+        val toolCall = ToolCall(name = event.name, args = effectiveArgs)
         val rawResult = try {
             ToolExecutor.execute(toolCall, memoryContext)
         } catch (e: Exception) {
@@ -312,6 +594,7 @@ class LiveToolBridge(
         val isInternalUiTool = event.name in setOf(
             "device_avatar_emotion",
             "device_custom_prop",
+            "device_pet_care",
             "device_always_live",
             "vision_activate"
         )
@@ -431,6 +714,11 @@ class LiveToolBridge(
         // ยกเว้น system_self_review: โหมดเล่ายาว (narration) ผู้ใช้ต้องการฟังรีวิวเต็ม ไม่จำกัดประโยค
         // ยกเว้น long-task ack (backtest/optimize/evolve): แค่รับคำสั่ง งานจริงรันเบื้องหลัง — ตอบสั้นๆ พอ
         val isLongTaskAck = event.name in setOf("trading_backtest", "trading_backtest_optimize", "trading_backtest_evolve")
+        val dataFailureRule = if (ToolRegistry.isTradingTool(event.name) &&
+            (rawResult.isError || finalResultText.startsWith("Error") || finalResultText.startsWith("❌"))
+        ) {
+            "\n\n[DATA ERROR] ดึงข้อมูลตลาดไม่สำเร็จ — บอกผู้ใช้ตรงๆ ว่าดึงข้อมูลไม่ได้และสาเหตุสั้นๆ ห้ามเดาหรือแต่งราคา/ตัวเลขใดๆ เด็ดขาด"
+        } else ""
         val profileFinalization = if (
             isTradingAnalysisTool(event.name) && tradingProfileCallCount >= 3
         ) {
@@ -446,7 +734,20 @@ class LiveToolBridge(
                 }
             }
             event.name == "device_avatar_emotion" -> {
-                "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ (เช่น 'เริ่มแสดงเดโม่อารมณ์ทั้ง 10 แบบให้ดูแล้วนะคะ!' หรือ 'ทำหน้าดีใจแล้วค่ะบอส!') ห้ามตอบว่าไม่มีหน้าตา ห้ามใช้ markdown"
+                val action = effectiveArgs["action"]?.lowercase() ?: event.args["action"]?.lowercase() ?: ""
+                val scene = effectiveArgs["scene"] ?: event.args["scene"] ?: ""
+                val page = effectiveArgs["page"]?.toIntOrNull() ?: event.args["page"]?.toIntOrNull()
+                val isAll = action in listOf("all", "demo", "play_all")
+                if (action == "scene" || action == "ฉาก" || scene.isNotBlank()) {
+                    "\n\n[VOICE RULE - PET SCENE] เริ่มเล่นฉากอนิเมชันและเอฟเฟกต์บนหน้าจอเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใสและมีอารมณ์ร่วมตามฉากที่เล่น เช่น กินอาหาร ดื่มน้ำ ยิงจรวด หรือใส่แว่นตา (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามใช้ markdown"
+                } else if (page != null) {
+                    val item = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.findByPage(page)
+                    "\n\n[VOICE RULE - MOODSET PAGE] แสดง Moodset หน้าที่ $page: ${item?.nameEn} (${item?.nameTh}) บนหน้าจอ 3-5 วินาทีเรียบร้อยแล้วค่ะ (ระบบมีสารบัญครบทั้ง 50 หน้า แผ่นที่ 1: หน้า 1-20, แผ่นที่ 2: หน้า 21-50) — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'แสดงหน้าที่ $page ${item?.nameTh} ให้บอสตรวจสอบแล้วค่ะ' ห้ามบอกว่าไม่มีหน้าที่ 11 หรือมีแค่ 10 หน้าเด็ดขาด ห้ามใช้ markdown"
+                } else if (isAll) {
+                    "\n\n[VOICE RULE - MOODSET ALL] เริ่มเล่นแสดง Moodset ครบทั้งหมด 50 หน้าวนตรวจบนหน้าจอสลับทุก 4 วินาทีเรียบร้อยแล้วค่ะ — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'เริ่มแสดง Moodset ทุกหน้าครบทั้ง 50 หน้าให้บอสตรวจสอบแล้วนะคะ' ห้ามบอกว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                } else {
+                    "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว (ระบบมี Moodset ทั้งหมด 50 หน้า) — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ ห้ามตอบว่าไม่มีหน้าตา ห้ามพูดว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                }
             }
             event.name == "device_custom_prop" -> {
                 val action = event.args["action"]?.lowercase() ?: "add"
@@ -456,6 +757,9 @@ class LiveToolBridge(
                 } else {
                     "\n\n[VOICE RULE - CUSTOM PROP] เสกและสวมใส่อุปกรณ์เสริมเวกเตอร์ SVG เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างภูมิใจ ขี้เล่น น่ารัก เช่น 'เสก $name มาใส่ให้แล้วฮับ! น่ารักไหมฮับเจ้านาย' ห้ามอ่านโค้ด SVG ห้ามใช้ markdown"
                 }
+            }
+            event.name == "device_pet_care" -> {
+                "\n\n[VOICE RULE - PET CARE] ผลลัพธ์ข้างบนคือค่าสถานะจริงของน้องหลังดูแล — ตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักตามตัวเลขจริง (เช่น อิ่มแล้ว ยังง่วง สะอาดแล้ว) ห้ามอ่านตัวเลขทุกค่าเรียงกัน ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ ห้ามใช้ markdown"
             }
             event.name == "device_notification_read" -> {
                 "\n\n[VOICE RULE - NOTIFICATION READ] สรุปข้อความแจ้งเตือนที่ตรวจพบให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ ระบุแอป ผู้ส่ง และเนื้อหาสำคัญ ห้ามอ่าน timestamp หรือ ID ยาวๆ"
@@ -493,7 +797,7 @@ class LiveToolBridge(
         liveService.sendNativeToolResponse(
             callId   = event.callId,
             toolName = event.name,
-            result   = finalResultText + profileFinalization + voiceRule
+            result   = finalResultText + profileFinalization + dataFailureRule + voiceRule
         )
         logDebug("LiveBridge", "✅ Path A done: ${event.name} → ${finalResultText.take(80)}")
     }

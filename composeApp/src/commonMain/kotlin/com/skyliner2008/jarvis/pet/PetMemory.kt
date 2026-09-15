@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.pet
 
+import kotlinx.datetime.Clock
 import com.skyliner2008.jarvis.db.JarvisDatabaseHolder
 import com.skyliner2008.jarvis.logDebug
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +35,7 @@ data class InteractionEntry(
 @Serializable
 data class PetMemory(
     // ─── Session Stats (รีเซ็ตทุกเซสชัน) ───────────────────────────────
-    val sessionStartTime: Long = System.currentTimeMillis(),
+    val sessionStartTime: Long = Clock.System.now().toEpochMilliseconds(),
     val sessionInteractions: Int = 0,
     val sessionPokes: Int = 0,
     val sessionPets: Int = 0,
@@ -51,7 +52,7 @@ data class PetMemory(
     val totalPokes: Long = 0L,
     val totalSleepMinutes: Long = 0L,
     val daysAlive: Int = 1,
-    val birthdayTimestamp: Long = System.currentTimeMillis(),
+    val birthdayTimestamp: Long = Clock.System.now().toEpochMilliseconds(),
 
     // ─── Emotional Memory (จำอารมณ์ที่ผ่านมา) ──────────────────────────
     val lastMoodBeforeSleep: String = "idle",
@@ -74,7 +75,7 @@ data class PetMemory(
 ) {
     /** อายุ Pet เป็นวัน */
     val ageInDays: Int
-        get() = ((System.currentTimeMillis() - birthdayTimestamp) / 86_400_000L).toInt().coerceAtLeast(1)
+        get() = ((Clock.System.now().toEpochMilliseconds() - birthdayTimestamp) / 86_400_000L).toInt().coerceAtLeast(1)
 
     /** สรุปสถิติสั้นๆ สำหรับ UI */
     val lifetimeSummary: String
@@ -103,7 +104,7 @@ object PetMemoryStore {
             if (!stored.isNullOrBlank()) {
                 val loaded = json.decodeFromString<PetMemory>(stored)
                 val newSession = loaded.copy(
-                    sessionStartTime = System.currentTimeMillis(),
+                    sessionStartTime = Clock.System.now().toEpochMilliseconds(),
                     sessionInteractions = 0,
                     sessionPokes = 0,
                     sessionPets = 0,
@@ -124,7 +125,7 @@ object PetMemoryStore {
      * บันทึก PetMemory ลง SQLite
      */
     fun save(memory: PetMemory = _memoryFlow.value) {
-        val updated = memory.copy(lastSaveTimestamp = System.currentTimeMillis())
+        val updated = memory.copy(lastSaveTimestamp = Clock.System.now().toEpochMilliseconds())
         _memoryFlow.value = updated
         try {
             val db = JarvisDatabaseHolder.database ?: return
@@ -147,7 +148,7 @@ object PetMemoryStore {
         val entry = InteractionEntry(
             type = type.name.lowercase(),
             zone = zone.name.lowercase(),
-            timestamp = System.currentTimeMillis(),
+            timestamp = Clock.System.now().toEpochMilliseconds(),
             resultingEmotion = resultingEmotion
         )
 
@@ -193,6 +194,25 @@ object PetMemoryStore {
      */
     fun saveNeedsState(needs: PetNeedsState) {
         _memoryFlow.value = _memoryFlow.value.copy(savedNeedsState = needs)
+    }
+
+    private const val ENGINE_KEY = "pet.avatar_engine"
+
+    /** Engine ที่ผู้ใช้เลือกไว้ล่าสุด (ชื่อ enum AvatarEngineType) หรือ null ถ้ายังไม่เคยเลือก */
+    fun loadAvatarEngine(): String? = try {
+        JarvisDatabaseHolder.database?.jarvisDatabaseQueries?.getSetting(ENGINE_KEY)?.executeAsOneOrNull()
+    } catch (e: Exception) {
+        logDebug(TAG, "⚠️ Failed to load avatar engine: ${e.message}")
+        null
+    }
+
+    /** จำ Engine ที่เลือกข้ามการเปิดแอป */
+    fun saveAvatarEngine(name: String) {
+        try {
+            JarvisDatabaseHolder.database?.jarvisDatabaseQueries?.insertSetting(ENGINE_KEY, name)
+        } catch (e: Exception) {
+            logDebug(TAG, "⚠️ Failed to save avatar engine: ${e.message}")
+        }
     }
 
     /**

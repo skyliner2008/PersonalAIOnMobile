@@ -55,6 +55,8 @@ class VoiceController(
     var onStartDemo: (() -> Unit)? = null
     var onStopDemo: (() -> Unit)? = null
     var onTestEmotion: ((com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion?, String?) -> Unit)? = null
+    var onPlayMoodsetPage: ((Int) -> Unit)? = null
+    var onPlayAllMoodsets: (() -> Unit)? = null
 
     private var liveSessionJob: kotlinx.coroutines.Job? = null
 
@@ -236,7 +238,10 @@ class VoiceController(
                             // Fast-path local trigger for Avatar emotion/demo when user speaks
                             if (update.role == "user") {
                                 val lower = update.text.lowercase().trim()
-                                val isDemo = lower.contains("ทดสอบเดโม") || lower.contains("เดโม") ||
+                                val isPlayAll = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(lower)
+                                val pageNumber = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(lower)
+
+                                val isDemo = isPlayAll || lower.contains("ทดสอบเดโม") || lower.contains("เดโม") ||
                                     lower.contains("demo") || lower.contains("ทดสอบระบบ") ||
                                     lower.contains("ทดสอบหุ่นยนต์") || lower.contains("โชว์หุ่นยนต์") ||
                                     lower.contains("แสดงเดโม") || lower.contains("แสดงอารมณ์ทั้งหมด") ||
@@ -244,8 +249,13 @@ class VoiceController(
                                     lower.contains("avatar demo")
                                 val isReset = lower.contains("หยุดเดโม") || lower.contains("หยุดทดสอบ") ||
                                     lower.contains("รีเซ็ต") || lower.contains("avatar reset") ||
-                                    lower.contains("กลับสู่โหมดปกติ") || lower.contains("โหมดปกติ")
-                                if (isDemo) {
+                                    lower.contains("กลับสู่โหมดปกติ") || lower.contains("โหมดปกติ") ||
+                                    lower == "หยุด" || lower.startsWith("หยุด")
+                                if (isPlayAll) {
+                                    onPlayAllMoodsets?.invoke() ?: onStartDemo?.invoke()
+                                } else if (pageNumber != null) {
+                                    onPlayMoodsetPage?.invoke(pageNumber)
+                                } else if (isDemo) {
                                     onStartDemo?.invoke()
                                 } else if (isReset) {
                                     onStopDemo?.invoke() ?: onTestEmotion?.invoke(null, null)

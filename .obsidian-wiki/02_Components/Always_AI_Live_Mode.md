@@ -14,7 +14,7 @@ sources:
   - composeApp/src/androidMain/kotlin/com/example/personalaibot/service/AlwaysLiveManager.kt
   - composeApp/src/androidMain/kotlin/com/example/personalaibot/service/HotwordDetector.kt
 created: 2026-09-06
-updated: 2026-09-12
+updated: 2026-09-13
 ---
 
 # Always AI Live Mode (2026-09-06)
@@ -73,22 +73,71 @@ stateDiagram-v2
 
 ---
 
-## 2. JARVIS Robot Avatar & 10 Emotion States
+## 2. LOOI Robot Avatar & 29 Emotion States (`PetRobotHeadAvatar.kt`)
 
-The robot avatar features responsive micro-animations (breathing, blinking, head bounce, visor pulse, antenna beacon, floating heart/sparkle particles, and "Zzz" sleep indicators):
+The pet avatar implements a **2D Vector Minimalist Neon Cyan Style** on solid OLED black (`#000000`) matching the official LOOI robot moodset sheet. It utilizes pure Canvas rendering with shallow 2D depth: a bottom shadow layer (`#004D6B`) offset Y = +5dp underneath bright neon cyan eyes (`#00F5FF`) with soft edge glows.
 
-| Emotion State | Visual Cue | Visor / Glow Color | Facial Expression |
+### 2.1 Continuous Motion & Seamless Emotion Transition Engine
+- **Disney Anticipation Squash & Stretch**: 350ms curve (`1f - 0.08f * sin(p * π)`) where eyes squish before morphing into new shapes.
+- **Progressive Shape Morphing**:
+  - `eyeSlantProgress`: Smooth angle transition from 0° (flat squircle) to steep slanted wedge (angry).
+  - `fangsProgress`: White fangs slide down dynamically (`slideY = (1f - p) * -14dp`).
+  - `angerVeinProgress`: Red anger vein (💢) expands outward on temple.
+  - `sadProgress`: Drooping eyes (-8° / +8°), tear slide, and frown arc expansion.
+- **Dual-Layer Cross-Fade**: Blends outgoing shape `alpha = 1 - p` with incoming shape `alpha = p` when geometry diverges completely.
+
+### 2.2 Complete 29 Emotion Matrix
+
+| Emotion State | Visual Cue | Primary Color | Facial Expression & Props |
 | :--- | :--- | :--- | :--- |
-| `IDLE` | Subtle breathing & eye blink | Cyan (`0xFF00E5FF`) | Neutral wide round eyes |
-| `LISTENING` | Fast antenna beacon & expanding ripples | Deep Cyan (`0xFF00B0FF`) | Focused attentive eyes |
-| `THINKING` | Rotating gears / orbital rings | Purple (`0xFF7C4DFF`) | Shifting pupils |
-| `SPEAKING` | Animated audio waveform mouth | Amber (`0xFFFFB300`) | Dynamic mouth waves |
-| `HAPPY` | Subtle bounce & sparkle particles | Neon Cyan / Mint (`0xFF00E676`) | Inverted arc smiling eyes (⌒ ⌒) |
-| `EXCITED` | Fast bounce & energy ring | Bright Gold (`0xFFFFD700`) | Star-shaped pupils |
-| `SAD` | Lowered head & droopy eyes | Cool Steel Blue (`0xFF607D8B`) | Inverted mouth curve |
-| `ANGRY` | Alert beacon & rapid pulse | Crimson Red (`0xFFFF1744`) | Slanted aggressive visor |
-| `LOVE` | Floating heart particles | Hot Pink (`0xFFFF4081`) | Heart-shaped eyes (♥ ♥) |
-| `SLEEPING` | Dim glow & floating "Zzz" particles | Dark Lavender (`0xFF3F51B5`) | Closed horizontal lines (- -) |
+| `IDLE` | Subtle breathing & blink | Neon Cyan (`0xFF00F5FF`) | Dual squircle eyes, shallow depth, clean black |
+| `HAPPY` | Bouncing smiling arc | Neon Cyan (`0xFF00F5FF`) | Inverted arc smiling eyes (⌒ ⌒) |
+| `ANGRY` | Slanted wedge eyes + fangs | Crimson Red (`0xFFFF3B5C`) | Inward slanted wedge, white fangs (v v), anger vein (💢) |
+| `SLEEPING` | Dim glow & floating Zzz | Neon Cyan (`0xFF00F5FF`) | Rounded horizontal slits (— —), floating Zzz letters |
+| `CONFUSED` | Curious asymmetrical gaze | Neon Cyan (`0xFF00F5FF`) | Left slit (—), right tilted wedge (12°), question mark (?) |
+| `WINK` | Playful wink with star | Neon Cyan (`0xFF00F5FF`) | Left squircle, right sleeping slit, golden sparkle star (✦) |
+| `DEAD` | Cyber reboot / KO | Neon Cyan (`0xFF00F5FF`) | Dual bold cross eyes (X X) with shadow layer |
+| `LAUGHING` | Joyful laughter | Neon Cyan (`0xFF00F5FF`) | Minimalist inward closed laughing eyes (> <) |
+| `MUSIC` | Listening to tunes | Neon Cyan (`0xFF00F5FF`) | Dual squircle eyes + over-ear gold & dark headphones 🎧 |
+| `VR_MODE` | Spatial computing & movies | Neon Cyan (`0xFF00F5FF`) | Apple Vision Pro curved headset + striped popcorn bucket 🍿 |
+| `DIVING` | Underwater exploration | Neon Cyan (`0xFF00F5FF`) | Snorkel mask + amber breathing tube + air bubbles 🤿 |
+| `EVIL` | Mischievous villain | Crimson Red (`0xFFFF3B5C`) | Slanted red eyes + white fangs + purple devil icon 😈 |
+| `FOCUSED` | Laser target scanning | Neon Cyan (`0xFF00F5FF`) | Sharp inward wedge eyes + synthwave perspective grid |
+| `EXCITED` | High energy anticipation | Neon Cyan (`0xFF00F5FF`) | Outward fan eyes + dual golden sparkle stars (✦ ✦) |
+| `SHY` | Cute embarrassment | Neon Cyan (`0xFF00F5FF`) | Squircle eyes + triple slanted pink blush lines (/// ///) |
+| `SURPRISED` | Sudden shock / alert | Electric Cyan (`0xFF00F5FF`)| 1.25x wide-open eyes + bright red exclamation mark (!) |
+| `DISGUSTED` | Grossed out / smells bad | Neon Cyan (`0xFF00F5FF`) | Closed laughing eyes (> <) + open trash bin + trash icon 🗑️ |
+| `CAMERA_MODE`| Photography / capture | Neon Cyan (`0xFF00F5FF`) | Dual sleeping slits (— —) + orange DSLR camera 📷 |
+| `EATING` | Snack time | Neon Cyan (`0xFF00F5FF`) | Squircle eyes + layered sesame seed mini burger 🍔 |
+| `DRINKING` | Cheers / refreshment | Neon Cyan (`0xFF00F5FF`) | Squircle eyes + golden frothy cold beer mug 🍺 |
+| `SAD` | Melancholy sorrow | Soft Sky Blue (`0xFF80D8FF`) | Drooping slanted eyes, sliding tear drop, curved frown |
+| `LOVE` | Deep affection | Hot Pink (`0xFFFF4081`) | Floating glowing hearts (♥ ♥) + warm smile |
+| `THINKING` | AI reasoning / cogitation | Neon Cyan (`0xFF00F5FF`) | Shifting pupils + stylized hand touching chin |
+| `POUT` | Playful sulk | Hot Pink (`0xFFFF4081`) | Radial blush cheeks + pucker 'O' mouth |
+| `DIZZY` | Nausea / shaken | Neon Cyan (`0xFF00F5FF`) | Dual cross eyes + wavy path mouth |
+| `BORED` | Low energy waiting | Slate Gray (`0xFF90A4AE`) | Half-lidded drooping eyes + flat sigh line |
+| `ENRAGED` | Maximum fury / fight-back | Burning Red (`0xFFFF1744`) | Deep V angular eyes + yellow slit pupils + zigzag teeth + steam puffs |
+| `LISTENING` | Voice stream active | Neon Cyan (`0xFF00F5FF`) | Attentive wide eyes, ready to receive |
+| `SPEAKING` | Voice playback active | Amber Gold (`0xFFFFB300`) | 5-bar dynamic audio waveform mouth equalizer |
+
+### 2.3 LOOI Robot 50 Moodset Catalog & Voice Verification Navigation (`LooiMoodsetCatalog.kt`)
+
+To allow users to rapidly verify and interact with all 50 robot moodsets from both reference sheets, `LooiMoodsetCatalog` provides a centralized index linking voice commands to exact page numbers and emotions:
+
+- **Sheet 1 (Pages 1-20) — LOOI 20 MOODSET**:
+  1. `Normal` (IDLE), 2. `Happy` (HAPPY), 3. `Angry` (ANGRY), 4. `Sleepy` (SLEEPING), 5. `Curious` (CONFUSED), 6. `Wink` (WINK), 7. `Dead` (DEAD), 8. `Laughing` (LAUGHING), 9. `Music` (MUSIC), 10. `VR Mode` (VR_MODE), 11. `Diving` (DIVING), 12. `Evil` (EVIL), 13. `Focused` (FOCUSED), 14. `Excited` (EXCITED), 15. `Shy` (SHY), 16. `Surprised` (SURPRISED), 17. `Disgusted` (DISGUSTED), 18. `Camera Mode` (CAMERA_MODE), 19. `Eating` (EATING), 20. `Drinking` (DRINKING).
+- **Sheet 2 (Pages 21-50) — LOOI 30 ADDITIONAL MOODSET**:
+  21. `Confused` (CONFUSED), 22. `Sick` (SICK), 23. `Rich` (RICH), 24. `Crying` (CRYING), 25. `Reading` (READING), 26. `Gaming` (GAMING), 27. `Traveling` (TRAVELING), 28. `Working` (WORKING), 29. `Cold` (COLD), 30. `Hot` (HOT), 31. `Detective` (DETECTIVE), 32. `Cooking` (COOKING), 33. `Art Mode` (ART_MODE), 34. `Space` (SPACE), 35. `Party` (PARTY), 36. `Dreaming` (DREAMING), 37. `Exhausted` (EXHAUSTED), 38. `Electric` (ELECTRIC), 39. `Sneaky` (SNEAKY), 40. `In Love` (LOVE), 41. `Romantic` (ROMANTIC), 42. `Hero` (HERO), 43. `Glitched` (GLITCHED), 44. `Magic` (MAGIC), 45. `Sporty` (SPORTY), 46. `Scientist` (SCIENTIST), 47. `Scared` (SCARED), 48. `Warrior` (WARRIOR), 49. `Low Battery` (LOW_BATTERY), 50. `Thinking` (THINKING).
+
+#### Voice Commands & Verification Pacing
+- **Individual Page Command**: Users say `"หน้าที่ 1"` through `"หน้าที่ 50"` (also supports Thai numerals `"หน้าที่ ๑".."หน้าที่ ๕๐"`, spoken words `"หน้าที่หนึ่ง".."หน้าที่ห้าสิบ"`, or `/avatar 1..50`).
+  - Automatically switches to Pet Mode.
+  - Plays the characteristic sound effect (`RobotSoundPlayer`).
+  - Displays the moodset for **4.5 seconds** (within the 3-5 second constraint) with clear status text, then automatically reverts to normal standby.
+- **Continuous All-Moodset Inspection**: Users say `"หน้าทั้งหมด"`, `"เล่นทุกหน้า"`, `"แสดง moodset ทั้งหมด"`, or `"all moods"` (or `/avatar all`).
+  - Cycles through all 50 moodsets sequentially.
+  - Displays each page for **4.0 seconds** (within the 3-5 second constraint) with live status and sound effects.
+  - Returns to normal idle after completing the full loop.
 
 ---
 
@@ -275,5 +324,156 @@ The robot avatar features responsive micro-animations (breathing, blinking, head
   - เพิ่มปุ่ม Pinned Exit (`X`) บนมุมขวาบนในโหมดแนวตั้ง ให้สามารถออกจาก Pet Mode ได้ทุกสถานการณ์
   - ปรับปุ่มโหมดควบคุม (รูปรถ) ให้มีขนาดกะทัดรัด ไอคอนเดี่ยวสมส่วนเท่ากับปุ่มเครื่องมืออื่นๆ
   - แถบเมนูด้านบนจัดวางแบบ Responsive ไม่ตกหล่นหรือซ้อนทับกัน
+
+---
+
+## 8. Modular Architecture, Dedicated Drive Mode & KMP Compatibility (2026-09-13)
+
+### 8.1 God Object Decomposition
+- **`AlwaysLiveScreen.kt` Refactor**:
+  - เดิมเป็น God Composable ขนาด 2,471 บรรทัดที่รวม UI ของทั้ง 3 โหมดไว้ในที่เดียว
+  - แยกออกเป็น 3 โมดูลย่อยที่รับผิดชอบหน้าที่เฉพาะ:
+    1. **`PetModeScreen.kt`** (~800 บรรทัด): โหมดสัตว์เลี้ยงโต๊ะทำงาน (`PetModeContent`, `PetDialogueCard`, `PetDetectionBadge`, `PetEyeScannerOverlay`, `PetNeedsDashboardContent`)
+    2. **`DriveModeScreen.kt`** (~570 บรรทัด): โหมดขับขี่และควบคุมอัจฉริยะ (`DriveModeContent`, `DriveTelemetryHeader`, `DriveNotificationReaderBar`, `DriveActionRow`, Two-pane landscape)
+    3. **`AvatarEmotionColors.kt`** (~80 บรรทัด): ฟังก์ชันรวมศูนย์สำหรับแปลง `AvatarEmotion` เป็นสี Aura/Primary, Secondary, และ StatusPill
+  - `AlwaysLiveScreen.kt` ลดขนาดเหลือ ~730 บรรทัด ทำหน้าที่เป็น Clean Profile Router และ Host Sub-Composables
+- **Profile Architecture Consolidation**:
+  - ยืนยันโครงสร้างโปรไฟล์ตามข้อกำหนดผู้ใช้:
+    - 🚗 **ขับขี่ / ควบคุม (`DRIVE` / `CONTROL`)**: โหมดผู้ช่วยอัจฉริยะสำหรับการขับขี่ สั่งการรถ นำทาง และควบคุมสื่อ
+    - 🐾 **สัตว์เลี้ยง (`PET`)**: หุ่นยนต์จำลองสัตว์เลี้ยงตั้งโต๊ะ (Desk Pet)
+
+### 8.2 Full Drive & Control Mode Architecture (`DriveBridge.kt`, `DriveModeController.kt`)
+- **`DriveBridge` (commonMain)**:
+  - สะพานเชื่อมโยงข้อมูลแบบ StateFlow สำหรับ Compose Multiplatform:
+    - `telemetry`: StateFlow<DriveTelemetry> (ความเร็ว GPS `speedKmh`, ที่อยู่/ถนน `address`, ละติจูด/ลองจิจูด, สถานะ `isMoving`)
+    - `mediaState`: StateFlow<MediaPlaybackState> (ชื่อเพลง, ศิลปิน, แอปผู้เล่น, สถานะกำลังเล่น)
+    - `recentNotificationText`: StateFlow<String?> (ข้อความแจ้งเตือนล่าสุด)
+  - รองรับ Callback สั่งการ: `onPlayPause`, `onNextTrack`, `onPrevTrack`, `onReadNotifications`, `onStartNavigation`
+- **`DriveModeController` (commonMain)**:
+  - ควบคุมการกระทำต่างๆ จาก Composable UI สู่แพลตฟอร์มอย่างเป็นระเบียบ
+- **Android Platform Integration (`AlwaysLiveManager.kt`)**:
+  - `LocationProvider`: ติดตามความเร็วรถแบบ Real-time และแปลงพิกัดเป็นชื่อถนนอัตโนมัติ (Geocoding)
+  - `MediaInfoProvider` + `AudioManager.dispatchMediaKeyEvent`: เล่น/หยุด/เปลี่ยนเพลงรองรับ Spotify, YouTube Music ฯลฯ
+  - `NotificationBridge` + `VoiceManager`: อ่านข้อความแจ้งเตือนสำคัญ 3 รายการล่าสุดด้วยเสียงสังเคราะห์ TTS แบบ Hands-free
+  - `Intent(ACTION_VIEW, "google.navigation:q=...")`: ทางลัดเปิด Google Maps ระบบนำทางทันทีเพียงคลิกเดียว
+
+### 8.3 Battery & CPU Power Management
+- **Conditional Background Camera Vision (`shouldRunBackgroundVision`)**:
+  - ใน `PetModeScreen.kt` เพิ่มเงื่อนไขหยุดการประมวลผลกล้องพื้นหลังเมื่อสัตว์เลี้ยงหลับ (`SLEEPING`) หรือเมื่อไม่มี processor รับภาพ ช่วยประหยัดแบตเตอรี่และลดภาระ CPU อย่างมีนัยสำคัญ
+
+### 8.4 KMP & iOS Compatibility
+- กำจัดการใช้งาน `System.currentTimeMillis()` ใน `commonMain` ทั้งหมด โดยเปลี่ยนเป็น `kotlinx.datetime.Clock.System.now().toEpochMilliseconds()` ในทุกไฟล์:
+  - `PetModeController.kt`, `PetStateMachine.kt`, `PetMemory.kt`, `PetVisionTargetTracker.kt`, `PetNeedsState.kt`, `AlwaysLiveScreen.kt`, `DriveBridge.kt`
+- ป้องกันข้อผิดพลาดในการคอมไพล์บนเป้าหมาย iOS ตามมาตรฐาน Kotlin Multiplatform
+
+### 8.5 Voice Intent Routing & Structured Sentiment (Phase 2)
+- **Voice Intent Guards (`LiveToolBridge.kt`)**:
+  - `isMediaRequest`: ดักจับคำสั่งเพลง Redirect สู่ `device_media_control`
+  - `isNavigationRequest`: ดักจับคำสั่งนำทาง Redirect สู่ `device_navigate`
+  - `isNotificationRequest`: ดักจับคำสั่งแจ้งเตือน Redirect สู่ `device_notification_read`
+  - `isLocationOrSpeedRequest`: ดักจับคำถามความเร็ว/พิกัด Redirect สู่ `device_location`
+- **Structured Sentiment Parser (`AlwaysLiveManager.kt`)**:
+  - รองรับแท็กอารมณ์ `[EMOTION]` จาก AI เช่น `[HAPPY]`, `[LOVE]`, `[SAD]`, `[EXCITED]`, `[SURPRISED]`, `[BORED]`
+  - รองรับ Piped Command syntax `HAPPY|props=...`, `SPEAKING|...`
+  - ขยายคลังคำ Sentiment ภาษาไทยและอังกฤษครอบคลุมทุก 17 อารมณ์ของ Avatar
+
+### 8.6 Driving Safety, Smart Parking Memory & Low-Glare Night Mode (Phase 3)
+- **Speed Limit Alert & Over-speed Monitoring (`DriveBridge.kt`, `DriveModeScreen.kt`)**:
+  - เพิ่ม `speedLimitKmh: Float = 120f` และ `isSpeeding: Boolean` ใน `DriveTelemetry`
+  - ป้าย `MAX 120` บน Speedometer HUD สามารถแตะเพื่อวนเปลี่ยนขีดจำกัดความเร็วได้ทันที (80 $\rightarrow$ 90 $\rightarrow$ 100 $\rightarrow$ 110 $\rightarrow$ 120 กม./ชม.)
+  - เมื่อความเร็วรถเกินขีดจำกัดที่ตั้งไว้:
+    - Speedometer ตัวเลขและกรอบเปลี่ยนเป็นสี Crimson Red สว่างสดใส
+    - แสดงป้ายแจ้งเตือนเรืองแสงสีแดง `⚠️ ขับขี่เกินความเร็วที่กำหนด (X KM/H) กรุณาลดความเร็ว` เตือนผู้ขับขี่ให้ลดความเร็วเพื่อความปลอดภัย
+- **Smart Parking Location Memory (`DriveBridge.kt`, `DriveModeController.kt`, `DriveModeScreen.kt`, `LiveToolBridge.kt`)**:
+  - เพิ่มโมเดล `ParkingLocation(latitude, longitude, address, timestamp)` และ StateFlow `parkingLocation`
+  - ปุ่มด่วน `🅿️ บันทึก/จำจุดจอดรถตรงนี้` ในแผงควบคุมสื่อ: เพียงกดครั้งเดียวจะบันทึกพิกัด GPS และชื่อถนนปัจจุบันเป็นจุดจอด
+  - เมื่อบันทึกแล้ว: แสดงการ์ดจุดจอดสีน้ำเงิน Indigo พร้อมปุ่ม `🗺️ นำทางไปรถ` (เปิด Google Maps นำทางกลับไปยังพิกัดรถทันที) และปุ่มกากบาท `✖` ลบข้อมูล
+  - เสียงสั่งการอัจฉริยะ (Voice Intent Routing):
+    - สั่ง *"จำที่จอดรถ"*, *"บันทึกที่จอดรถ"*, *"จอดรถตรงนี้"* $\rightarrow$ ระบบบันทึกพิกัดอัตโนมัติและตอบรับยืนยัน
+    - ถาม *"รถจอดอยู่ที่ไหน"*, *"หาที่จอดรถ"*, *"where did I park"* $\rightarrow$ รายงานพิกัดจุดจอดให้ทราบทันที
+- **Low-Glare Night Driving Mode (`DriveBridge.kt`, `DriveModeScreen.kt`)**:
+  - ปุ่มสลับโหมดกลางคืน `🌙 / 🕶️` บนแถบ Speedometer HUD หรือสั่งด้วยเสียง *"เปิดโหมดกลางคืน"*, *"ลดแสงสะท้อน"*
+  - ปรับการแสดงผลเพื่อไม่ให้รบกวนสายตาของผู้ขับขี่ในความมืด:
+    - พื้นหลังด้านหลังปรับเป็น Pure OLED Pitch Black (`#000000`)
+    - หรี่แสง Ambient Aura ลงเหลือเพียง 0.04f และลดขนาดลง 20%
+    - ลดความสว่างและ Pulse ของ AudioVisualizerRing ลง 65%
+    - ปรับพื้นหลัง Card เป็นสีดำสนิทลึก (`Color(0xFF08080C).copy(alpha = 0.88f)`)
+- **Unit Tests Coverage**:
+  - `DriveModeTest.kt` ครอบคลุมการคำนวณความเร็วเกิน, การบันทึก-ล้างจุดจอดรถ, การเปิด-ปิดโหมดกลางคืน, และ Voice Intent Detection ผ่าน 100%
+
+### 8.7 Smart Scene Archetype Engine & Handcrafted Built-in Props (Phase 4 / 2026-09-13)
+- **Deprecating Crude Dynamic SVG Path Parser**:
+  - ยกเลิกระบบ Dynamic SVG Path Parser เดิมที่สร้างเวกเตอร์ไม่สวยงาม สัดส่วนบิดเบี้ยว และตำแหน่งไม่ตรงจุด
+  - ย้ายการแสดงผลทั้งหมดมาสู่คลังพร็อพสำเร็จรูปคุณภาพสูง 55 ชนิดที่วาดด้วย Compose Canvas โดยตรง (`PetPropsOverlay.kt`)
+  - ลบ Tool `device_custom_prop` ออกจาก Gemini Tool Declarations และเพิ่มพารามิเตอร์ `scene` ใน `device_avatar_emotion`
+- **15 Smart Scene Archetypes across 4 Categories (`PetSceneEngine.kt`)**:
+  - **กิจกรรม (Activity)**: `EATING`, `DRINKING`, `BATH_CLEAN`, `PLAY_GAMING`, `STUDY_WORK`
+  - **มีมไวรัล (Viral Meme)**: `MEME_THUG_LIFE` (แว่นดำสุดเท่ Deal With It), `MEME_RICH` (เศรษฐีคริปโตเหรียญทองลอย), `MEME_ROYAL` (มงกุฎทองราชา/เจ้าหญิง)
+  - **ตลกขบขัน (Comedy)**: `COMEDY_FIRE` (ไฟไหม้ตูดวิ่งพล่าน), `COMEDY_THUNDER` (โดนฟ้าผ่าตัวสั่นตาลาย), `COMEDY_SOUL_OUT` (วิญญาณหลุดกะโหลกลอย)
+  - **อารมณ์ขั้นสุด (Dramatic Emotion)**: `ANGRY_MISSILE` (โกรธจัดยิงจรวด 5 ลูกถล่มจอ), `SUPER_LOVE` (ปิ๊งรักหัวใจพุ่งเป็นชุด), `DRAMATIC_CRY` (อกหักน้ำตานอง), `CELEBRATION` (ปาร์ตี้พลุเฉลิมฉลอง)
+- **Dual Invocation Strategy (Smart Random vs. Specific Override)**:
+  - **Default Smart Random**: เมื่อแตะปุ่ม เช่น ให้อาหาร 🍖 (`feedPet()`) หรือสั่ง *"กินข้าว"* ระบบจะสุ่มอาหาร 1 ใน 5 เมนู (เบอร์เกอร์, พิซซ่า, เค้ก, ไอศกรีม, ป๊อปคอร์น) พร้อมจัดฉากหลังตามเวลาจริง
+  - **Specific Override**: เมื่อสั่งเจาะจงด้วยเสียง เช่น *"ขอดื่มกาแฟหน่อย"* $\rightarrow$ AI เรียกฉาก `DRINKING` พร้อมระบุไอเทมเป็น `COFFEE` ทันที, *"ใส่แว่นตาหน่อย"* $\rightarrow$ AI เรียกฉาก `MEME_THUG_LIFE` พร้อมแว่นตาดำ `SUNGLASSES`
+- **Time-Aware Environmental Context (`resolveSmartBackground`)**:
+  - 06:00 - 16:59: แดดจ้ากลางวัน (`SUNNY`)
+  - 17:00 - 19:59: พระอาทิตย์ตกดินกลีบซากุระปลิว (`SAKURA`)
+  - 20:00 - 05:59: ท้องฟ้ายามดึกดาวกะพริบ (`NIGHT`)
+- **Pacing & 3-Act Animation Timing (3.8s – 5.0s)**:
+  - แก้ไขปัญหาฉากเล่นเร็วเกินไปจนผู้ใช้มองไม่ทัน โดยออกแบบโครงสร้าง 3 องก์:
+    - องก์ 1 (Build-up): แสดงอารมณ์ ควันพวยพุ่ง เสียงเตือนภัย
+    - องก์ 2 (Action): วัตถุลอย/จรวดพุ่งในมิติ 3D สวยงามชัดเจน
+    - องก์ 3 (Impact & Settle): ระเบิด แสงแฟลช และ Coroutine Timer ปรับคืนสู่ Pure Dark OLED IDLE อย่างนุ่มนวล
+
+### 8.8 Facial Geometry Spatial Anchoring & Living Physics Props (Phase 4 Polish / 2026-09-13)
+- **Facial Geometry Spatial Anchoring (`PetFaceGeometry`)**:
+  - แก้ปัญหาไอเทมหลุดขอบจอด้านบน หรือลอยสูงเกือบพ้นจอ (`UMBRELLA` เดิมลอยติดขอบจอบน):
+    - `foreheadY = cY - eyeDiameter * 0.65f`: กำหนดให้ไอเทมบนศีรษะ (ร่ม, มงกุฎ, เหงื่อตก, เครื่องหมายคำถาม) วางอยู่ **เหนือดวงตาขึ้นไปเพียงนิดเดียว** อย่างเป็นธรรมชาติ ไม่ว่าหน้าจอจะเป็น Portrait 20:9 หรือ Landscape 16:9
+    - `mouthY = cY + eyeDiameter * 0.58f`: กำหนดตำแหน่งอาหาร เครื่องดื่ม และอุปกรณ์ถือ (เบอร์เกอร์, พิซซ่า, แก้วกาแฟ, โน้ตบุ๊ก) ให้อยู่ระดับปาก/สองมือล่าง
+    - `leftTempleX / rightTempleX = cX +/- eyeDiameter * 0.85f`: กำหนดตำแหน่งขมับซ้าย-ขวาสำหรับแว่นตาและหยดเหงื่อ
+- **Vivid Living Physics & Animation Overhaul (`PetPropsOverlay.kt`)**:
+  - เปลี่ยนจากเวกเตอร์นิ่งๆ ไร้ชีวิตชีวา ให้มีระบบฟิสิกส์แอนิเมชันสมจริง:
+    - `UmbrellaProp`: สเกลกว้าง 175dp แคนูปีโค้งไล่เฉดสี + เม็ดฝนตกกระทบ 4 เม็ดพร้อมระลอกคลื่น Splash
+    - `BurgerProp`: ขนมปังโรยงา 88dp, ผักกาดหอม, เชดด้าชีสเยิ้มหยด, เนื้อเบอร์เกอร์ย่าง, ควันไอความร้อนลอยพวยพุ่ง และจังหวะเคี้ยวเด้งดึ๋ง
+    - `PizzaProp`: แป้งพิซซ่าขอบกรอบ 56dp, เปปเปอโรนี, มอสซาเรลล่าชีสยืดเยิ้มหยดย้อยตามแรงโน้มถ่วง
+    - `PopcornProp`: ถังป๊อปคอร์นลายทาง 68dp โคลงเคลงสั่นดุ๊กดิ๊ก พร้อมเม็ดข้าวโพดคั่วกระโดดเด้งลอย Parabolic Trajectory
+    - `CoffeeProp` / `TeaCupProp` / `BeerProp` / `BobaTeaProp`: ควันไอร้อนลอยเอื่อย, ฟองเบียร์ล้นฟู่นุ่ม, ไข่มุกบะหมี่/ชานมส่ายกวัดแกว่ง
+    - `CrownProp`: มงกุฎกษัตริย์ 94dp ประดับทับทิม-ไพลิน พร้อมประกายเพชรวิบวับหมุน 360 องศา
+    - `LaptopProp` & `GamingControllerProp`: เทอร์มินัลแล็ปท็อปสตรีมโค้ดไซเบอร์สีเขียว Matrix และจอยเกมไฟ LED แถบสีฟ้าหายใจ
+- **16th Smart Archetype: `RAIN_UMBRELLA`**:
+  - เพิ่มฉากกางร่มกันฝนในวันที่ฝนตกหรือเมื่อผู้ใช้ขอร่ม (`PropType.UMBRELLA` + `PropType.RAIN_DROPS`, พื้นหลัง `RAINY`)
+- **Codified Clumsy Pet Personality (Rule 14 in `JarvisPersona.kt`)**:
+  - เมื่อผู้ใช้ทักหรือแซวเรื่องหยิบของผิด (เช่น *"นี่มันป๊อปคอร์น ไม่ใช่เบอร์เกอร์นะ"*, *"หยิบผิดแล้ว"*):
+    - สัตว์เลี้ยงจะทำท่าตกใจ งงงวย อายเขิน (`CONFUSED` / `SWEAT_DROP` / `TILT_LEFT`)
+    - ตอบรับอย่างน่ารักและยอมรับความโก๊ะ ("แงง นึกว่าบอสอยากกินอันนี้ซะอีก... เผลอหยิบผิดถังเฉยเลย แหะๆ")
+    - สลับเปลี่ยนไอเทมเป็นชิ้นที่ถูกต้องทันที สร้างเสน่ห์ความผูกพันสไตล์ทามาก็อตจิ
+- **Unit Test Coverage (`PetModeTest.kt`)**:
+  - ทดสอบ `detectSpecificPropFromText` แยกแยะอาหาร/เครื่องดื่มจากคำพูด
+  - ทดสอบการสลับฉาก `RAIN_UMBRELLA`
+  - ทดสอบลำดับความสำคัญของ Specific Prop Override ผ่านฉลุย 100%
+
+### 8.9 LOOI Robot: 20 Moodset (Neon Cyan Style) & Continuous Motion Morphing (2026-09-13)
+- **สไตล์ 2D Vector Minimalist**:
+  - พื้นหลัง Pure OLED Black (`#000000`) ไร้ 3D หนักเครื่อง
+  - ตาสควีร์เคิลนีออนไซแอน (`#00F5FF`) ซ้อนเลเยอร์เงา Dark Cyan (`#004D6B`) เยื้อง Y = +5dp ให้มิติ 2D Shallow Depth
+- **12 อารมณ์แรกของ LOOI Moodset**:
+  - `DEAD` (ตา X X), `LAUGHING` (ตา > <), `MUSIC` (หูฟังครอบหัว), `VR_MODE` (แว่น VR + ป๊อปคอร์น), `DIVING` (หน้ากากดำน้ำ + ท่อหายใจ), `EVIL` (ตาแดงเขี้ยว + ปิศาจม่วง), `FOCUSED` (ตาลิ่ม + กริดเลเซอร์), `SHY` (แก้มชมพู ///), `DISGUSTED` (ตาหยี + ถังขยะ), `CAMERA_MODE` (ตาขีด + ไอคอนกล้องส้ม), `EATING` (เบอร์เกอร์คั่นกลาง), `DRINKING` (แก้วเบียร์คั่นกลาง)
+- **Continuous Motion Morphing Engine**:
+  - *Disney Anticipation Squash & Stretch* (350ms curve) ยุบตัวก่อนเด้ง
+  - *Progressive Parameter Morphing* (`eyeSlantProgress`, `fangsProgress`, `angerVeinProgress`, `sadProgress`)
+  - *Dual-Layer Cross-Fade Rendering* ซ้อนทับการเปลี่ยนรูปตาอย่างไร้รอยต่อ
+
+### 8.10 LOOI Robot: 30 Additional Moodset & 50-Preset Total Verification (2026-09-13)
+- **ขยายสู่ 56 Avatar Emotions & 96 Interactive Props**:
+  - เพิ่ม 27 อารมณ์ใหม่ครอบคลุมชีต 30 Additional Moodset:
+    - แถวที่ 1: `CONFUSED` (ตาสควีร์เคิลคลื่น `~ ~`, ปากคลื่น, `¿` และ `??`), `SICK` (ปรอทวัดไข้แก้ว), `RICH` (ตา $$ + ถุงเงิน + เหรียญทองร่วง), `LOVE` (In Love: ตาหัวใจชมพูโต ♥♥), `CRYING` (น้ำตาไหลพราก)
+    - แถวที่ 2: `THINKING` (ฟองความคิด 💭), `READING` (แว่นเหลี่ยม + หนังสือเปิด), `GAMING` (หูฟังเกมมิ่ง + จอยเกม), `TRAVELING` (หมวกบัคเก็ต + พาสปอร์ต + ลูกโลก), `WORKING` (แว่นกลม + แล็ปท็อป + กาแฟ)
+    - แถวที่ 3: `COLD` (ตาสั่น + น้ำแข็งย้อย + เกล็ดหิมะ), `HOT` (เหงื่อไหล + คลื่นความร้อน + พระอาทิตย์), `DETECTIVE` (หมวก Fedora + แว่นขยาย), `COOKING` (หมวกเชฟ + กระทะ + ตะหลิว), `ART_MODE` (หมวกเบเรต์ + จานสี)
+    - แถวที่ 4: `SPACE` (หมวกนักบินอวกาศ + ดาวโคจร), `PARTY` (หมวกปาร์ตี้ + แตร + คอนเฟตติ), `DREAMING` (เมฆฝัน + Zzz), `EXHAUSTED` (ตาหนักลู่ + ลิ้นห้อย + เหงื่อหยด), `ELECTRIC` (ตาสายฟ้า ⚡ + ประกายไฟ)
+    - แถวที่ 5: `SNEAKY` (หน้ากากโจร + ตาเหลือบข้าง), `ROMANTIC` (แก้มชมพูระเรื่อ ///, ปากจูบ '3', คาบดอกกุหลาบแดง 🌹), `HERO` (หน้ากากซูเปอร์ฮีโร่มีปีก + ตาเปล่งประกาย), `GLITCHED` (Scanlines + RGB Shift), `MAGIC` (หมวกพ่อมดม่วง + ไม้กายสิทธิ์ดาว)
+    - แถวที่ 6: `SPORTY` (ผ้าคาดศีรษะสามสี + ลูกบาส), `SCIENTIST` (แว่นแล็บ + ขวดบีกเกอร์เคมีฟู่), `SCARED` (ตากลมจิ๋วสั่นสะท้าน + ผีหลอน), `WARRIOR` (ผ้าคาดหัวแดงตราทอง + ดาบคู่), `LOW_BATTERY` (ตาหรี่ริบหรี่ + แบตเตอรี่แดงกะพริบ)
+- **การแยกแยะ In Love กับ Romantic อย่างชัดเจน**:
+  - *In Love* (Cell 4): ตารูปหัวใจดวงโตสีชมพูนีออน (`♥♥`) แมปกับ `AvatarEmotion.LOVE`
+  - *Romantic* (Cell 22): ดวงตาสควีร์เคิลหวาน + ขีดแก้มชมพูระเรื่อ `///` + ปากจูบ `3` + คาบดอกกุหลาบแดง `🌹` ไว้ที่ปาก แมปกับ `AvatarEmotion.ROMANTIC`
+- **โครงสร้างแยกไฟล์ `PetRobotMoodsetDraw.kt`**: รวม 27 ฟังก์ชันวาด Canvas สำหรับชุดอารมณ์เสริม แยกเป็นโมดูลาร์สะอาดตา ไม่ทำให้ไฟล์หลักบวม และผ่านการทดสอบ Unit Tests ทั้ง 281 รายการ 100%
 
 

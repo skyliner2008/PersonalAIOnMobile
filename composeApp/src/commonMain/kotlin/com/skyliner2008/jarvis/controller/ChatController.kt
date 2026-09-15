@@ -63,6 +63,8 @@ class ChatController(
     var onTestEmotion: ((com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion?, String?) -> Unit)? = null
     var onStartDemo: (() -> Unit)? = null
     var onStopDemo: (() -> Unit)? = null
+    var onPlayMoodsetPage: ((Int) -> Unit)? = null
+    var onPlayAllMoodsets: (() -> Unit)? = null
 
     fun sendMessage(
         text: String,
@@ -77,6 +79,8 @@ class ChatController(
             cleanText.startsWith("/demo", ignoreCase = true) ||
             cleanText.startsWith("/test", ignoreCase = true) ||
             cleanText.startsWith("ทำหน้า", ignoreCase = true) ||
+            com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(cleanText) ||
+            com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(cleanText) != null ||
             cleanText.equals("ทดสอบเดโม", ignoreCase = true) ||
             cleanText.equals("เดโม", ignoreCase = true) ||
             cleanText.equals("demo", ignoreCase = true) ||
@@ -238,7 +242,10 @@ class ChatController(
         val parts = cmd.split(Regex("\\s+"))
         val target = if (parts.size > 1) parts[1].lowercase() else ""
 
-        val isDemo = target in listOf("demo", "all", "start") ||
+        val isPlayAll = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(cmd)
+        val pageNumber = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(cmd)
+
+        val isDemo = isPlayAll || target in listOf("demo", "all", "start") ||
             lower == "demo" || lower == "/demo" || lower == "เดโม" || lower == "ทดสอบเดโม" ||
             lower.contains("ทดสอบเดโม") || lower.contains("แสดงเดโม") ||
             lower.contains("ทดสอบระบบ") || lower.contains("ทดสอบหุ่นยนต์") ||
@@ -248,16 +255,19 @@ class ChatController(
             lower.contains("แสดงเดโม่อารมณ์") || lower.contains("แสดงอารมณ์")
         val isReset = target in listOf("reset", "auto", "stop", "off") ||
             lower.contains("หยุดเดโม") || lower.contains("หยุดทดสอบ") ||
-            lower.contains("รีเซ็ต") || lower.contains("โหมดปกติ") || lower.contains("กลับสู่ปกติ")
+            lower.contains("รีเซ็ต") || lower.contains("โหมดปกติ") || lower.contains("กลับสู่ปกติ") ||
+            lower == "หยุด" || lower.startsWith("หยุด")
 
         val matchedEmotion = when {
-            isDemo || isReset -> null
+            isPlayAll || pageNumber != null || isDemo || isReset -> null
             target in listOf("happy", "smile") || lower.contains("ดีใจ") || lower.contains("ยิ้ม") || lower.contains("มีความสุข") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.HAPPY
             target in listOf("excited", "star") || lower.contains("ตื่นเต้น") || lower.contains("ดาว") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EXCITED
             target in listOf("love", "heart") || lower.contains("รัก") || lower.contains("หัวใจ") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LOVE
+            target in listOf("romantic", "rose") || lower.contains("โรแมนติก") || lower.contains("กุหลาบ") ->
+                com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ROMANTIC
             target in listOf("enraged", "fight", "rage") || lower.contains("โกรธจัด") || lower.contains("สู้กลับ") || lower.contains("ยิงจรวด") ->
                 com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ENRAGED
             target in listOf("angry", "mad") || lower.contains("โกรธ") || lower.contains("โมโห") ->
@@ -280,6 +290,31 @@ class ChatController(
         _messages.value = _messages.value + Message("user", cmd)
 
         when {
+            isPlayAll -> {
+                _messages.value = _messages.value + Message(
+                    "model",
+                    "▶️ **เริ่มโหมดทดสอบ LOOI Moodset ทั้งหมด 50 หน้า!**\n" +
+                    "กำลังสลับแสดงทุกอารมณ์เปรียบเทียบกับภาพอ้างอิงทีละหน้า (แสดงหน้าละ 4 วินาที ครบ 50 หน้า)\n" +
+                    "(พิมพ์ `หยุด` หรือ `หยุดเดโม` เพื่อหยุดได้ทุกเมื่อค่ะ)",
+                    isStatic = true
+                )
+                onPlayAllMoodsets?.invoke() ?: onStartDemo?.invoke()
+            }
+            pageNumber != null -> {
+                val moodItem = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.findByPage(pageNumber)
+                if (moodItem != null) {
+                    _messages.value = _messages.value + Message(
+                        "model",
+                        "🎭 **แสดง Moodset หน้าที่ ${moodItem.pageNumber}/50: ${moodItem.nameEn} (${moodItem.nameTh})**\n" +
+                        "• ภาพอ้างอิง: แผ่นที่ ${moodItem.sheet} (ช่องที่ ${moodItem.sheetIndex})\n" +
+                        "• อารมณ์ (Emotion): `${moodItem.emotion.name}`\n" +
+                        "• รายละเอียด: ${moodItem.description}\n" +
+                        "• แสดงผล: ${moodItem.durationMs / 1000} วินาทีสำหรับตรวจสอบ",
+                        isStatic = true
+                    )
+                    onPlayMoodsetPage?.invoke(pageNumber)
+                }
+            }
             isDemo -> {
                 _messages.value = _messages.value + Message(
                     "model",
@@ -332,6 +367,87 @@ class ChatController(
                         "SURPRISED (ตกใจ)" to "ตาเบิกกว้างสุดขีด (O_O) + ปากอ้า 'O' + แสง Electric White-Cyan"
                     com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.BORED ->
                         "BORED (เบื่อ/ง่วง)" to "ตาลู่ครึ่งปิด (─.─) + ปากเส้นตรงเฉยเมย + แสง Cool Slate Gray"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DEAD ->
+                        "DEAD (สลบ/หมดแรง)" to "ตาลายกากบาทคู่ (X X) + แสง Cyber Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LAUGHING ->
+                        "LAUGHING (หัวเราะร่าเริง)" to "ตาหยีแหลมสามเหลี่ยม (> <) + ปากยิ้มกว้าง + แสง Neon Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.MUSIC ->
+                        "MUSIC (ฟังเพลง)" to "ตากลม Squircle + หูฟังครอบศีรษะสีเหลืองดำ + แสง Neon Cyan"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.VR_MODE ->
+                        "VR_MODE (แว่น VR/ดูหนัง)" to "แว่นตามิติ Vision Pro + ถังป๊อปคอร์นสีแดงขาว"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DIVING ->
+                        "DIVING (ดำน้ำ)" to "หน้ากากดำน้ำ Snorkel Mask + ท่อหายใจฟองอากาศ"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EVIL ->
+                        "EVIL (ตัวร้าย/แสบซน)" to "ตาเฉียงแดงเพลิง + เขี้ยวขาวคู่ + มินิไอคอนปิศาจสีม่วง 😈"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.FOCUSED ->
+                        "FOCUSED (โฟกัส/สแกน)" to "ตาทรงลิ่มเฉียงคมกริบ + เส้นเลเซอร์ตาราง Synthwave Grid"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SHY ->
+                        "SHY (เขินอาย)" to "ตากลม Squircle + แก้มชมพูระเรื่อขีดสามเส้น /// ///"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DISGUSTED ->
+                        "DISGUSTED (รังเกียจ/เหม็น)" to "ตาหยี (> <) + ถังขยะเปิดฝา + ไอคอนถังขยะสีฟ้า"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.CAMERA_MODE ->
+                        "CAMERA_MODE (ถ่ายรูป)" to "ตาหรี่เส้นตรง (─ ─) + ไอคอนกล้อง DSLR ส้มดำ 📷"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EATING ->
+                        "EATING (กินเบอร์เกอร์)" to "ตากลม Squircle + มินิเบอร์เกอร์ชีสคั่นกลาง 🍔"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DRINKING ->
+                        "DRINKING (ดื่มเบียร์ชนแก้ว)" to "ตากลม Squircle + แก้วเบียร์ฟองนุ่ม 🍺"
+                    // ─── 30 Additional Moodset ───
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SICK ->
+                        "SICK (ป่วย/วัดไข้)" to "ตาก้นหอยลู่ลง + ปรอทวัดไข้แก้ว 🌡️"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.RICH ->
+                        "RICH (รวย/เศรษฐี)" to "ตาเครื่องหมายเงิน ($$) + ถุงเงิน + เหรียญทองคำร่วง 💰"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.CRYING ->
+                        "CRYING (ร้องไห้หนัก)" to "ตาโค้งคว่ำเศร้า + น้ำตาไหลพรากเป็นสาย 😭"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.READING ->
+                        "READING (อ่านหนังสือ)" to "แว่นตาทรงเหลี่ยมมน + หนังสือเปิดกาง 📖"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.GAMING ->
+                        "GAMING (เล่นเกม)" to "หูฟังเกมมิ่งมีไมค์ + จอยคอนโทรลเลอร์ 🎮"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.TRAVELING ->
+                        "TRAVELING (ท่องเที่ยว)" to "หมวกบัคเก็ตนักเดินทาง + พาสปอร์ต + ลูกโลก ✈️"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.WORKING ->
+                        "WORKING (ทำงาน)" to "แว่นตากลม + แล็ปท็อปเปิดจอ + แก้วกาแฟ 💻"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.COLD ->
+                        "COLD (หนาวจัด)" to "ตาสั่นสะท้าน (> <) + ปากสั่น + น้ำแข็งย้อย + เกล็ดหิมะ 🥶"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.HOT ->
+                        "HOT (ร้อนอบอ้าว)" to "ตาลู่เหงื่อหยด + พระอาทิตย์เปลวเพลิง + ปรอทแดง 🥵"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DETECTIVE ->
+                        "DETECTIVE (นักสืบ)" to "หมวกเฟโดร่า + ตาหรี่สงสัย + แว่นขยายส่อง 🕵️"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.COOKING ->
+                        "COOKING (ทำอาหาร)" to "หมวกเชฟสีขาว + ตายิ้มหวาน + กระทะด้ามยาว 👨‍🍳"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ART_MODE ->
+                        "ART_MODE (ศิลปิน)" to "หมวกเบเรต์สีแดง + จานสีแต้ม + พู่กัน 🎨"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SPACE ->
+                        "SPACE (นักบินอวกาศ)" to "หมวกนักบินอวกาศกระจกสะท้อน + ดวงดาวโคจร 🚀"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.PARTY ->
+                        "PARTY (ปาร์ตี้ฉลอง)" to "หมวกปาร์ตี้ทรงกรวย + แตรเป่า + กระดาษโปรย 🥳"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.DREAMING ->
+                        "DREAMING (ฝันหวาน)" to "ตาปิดพริ้ม (─ ─) + ก้อนเมฆฝันนุ่มฟู + อักษร Zzz ☁️"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EXHAUSTED ->
+                        "EXHAUSTED (หมดแรง)" to "ตาหรี่ลู่หนัก + ลิ้นห้อย + หยดเหงื่อเหนื่อยล้า 🫠"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ELECTRIC ->
+                        "ELECTRIC (ไฟฟ้าช็อต)" to "ตาสายฟ้าซิกแซก (⚡ ⚡) + ประกายไฟประกายดาว ⚡"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SNEAKY ->
+                        "SNEAKY (แอบย่อง)" to "หน้ากากโจรคาดตาสีดำ + ตาชำเลืองข้าง + ยิ้มมุมปาก 🦹"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.HERO ->
+                        "HERO (ซูเปอร์ฮีโร่)" to "หน้ากากฮีโร่ติดปีกสีน้ำเงิน + ตาฮึกเหิม + ประกายดาว 🦸"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.GLITCHED ->
+                        "GLITCHED (กลิตช์ดิจิทัล)" to "เส้นสแกนรบกวน + สีแยก RGB Shift แดง-ฟ้า 👾"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.MAGIC ->
+                        "MAGIC (พ่อมด/เวทมนตร์)" to "หมวกพ่อมดทรงแหลมสีม่วง + ไม้กายสิทธิ์ดาวเปล่งแสง 🧙"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SPORTY ->
+                        "SPORTY (นักกีฬา)" to "ผ้าคาดศีรษะสามสี + ตาเอาจริง + ลูกฟุตบอลขาวดำ ⚽"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SCIENTIST ->
+                        "SCIENTIST (นักวิทย์)" to "แว่นตานิรภัยแล็บ + ขวดแก้วทดลองมีฟองฟู่สีเขียว 🧪"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SCARED ->
+                        "SCARED (หวาดกลัว)" to "ตากลมเล็กสั่นระริก + ปากสั่น + วิญญาณหลอน 👻"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.WARRIOR ->
+                        "WARRIOR (นักรบ)" to "ผ้าคาดหัวสีแดงตราทอง + ตาขวางคม + ดาบซามูไรคู่ ⚔️"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LOW_BATTERY ->
+                        "LOW_BATTERY (แบตเตอรี่ต่ำ)" to "ตาหรี่แสงริบหรี่ + ไอคอนแบตเตอรี่สีแดงกะพริบ 🪫"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ROMANTIC ->
+                        "ROMANTIC (โรแมนติก)" to "แก้มชมพูระเรื่อ + ปากจู๋ '3' + คาบดอกกุหลาบแดง 🌹💋"
+                    com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.PUZZLED ->
+                        "PUZZLED (งุนงง)" to "ตาหยักคลื่นซิกแซก (~ ~) + เครื่องหมายคำถามกลับด้าน ¿ และ ?? สีแดง ❓"
                 }
                 _messages.value = _messages.value + Message(
                     "model",
@@ -343,19 +459,10 @@ class ChatController(
             else -> {
                 _messages.value = _messages.value + Message(
                     "model",
-                    "💡 **คำสั่งทดสอบ 10 Facial Expressions & Color Palettes:**\n" +
-                    "• `/avatar demo` — รันการแสดงโชว์วนลูปครบทั้ง 10 อารมณ์\n" +
-                    "• `/avatar <ชื่ออารมณ์>` หรือสั่งสั้นๆ เช่น:\n" +
-                    "  - `/avatar happy` (มีความสุข)\n" +
-                    "  - `/avatar excited` (ตื่นเต้น/ตาดาว)\n" +
-                    "  - `/avatar love` (ตาหัวใจ)\n" +
-                    "  - `/avatar angry` (โกรธ/เตือนภัย)\n" +
-                    "  - `/avatar sad` (เศร้า/น้ำตาไหล)\n" +
-                    "  - `/avatar sleeping` (หลับ/ZZZ)\n" +
-                    "  - `/avatar listening` (กำลังฟัง)\n" +
-                    "  - `/avatar thinking` (กำลังคิด/บอลลูน)\n" +
-                    "  - `/avatar speaking` (กำลังพูด)\n" +
-                    "  - `/avatar idle` (พร้อมทำงาน/วิ้งตา)\n" +
+                    "💡 **คำสั่งทดสอบ 50 LOOI Robot Moodsets & Facial Expressions:**\n" +
+                    "• `/avatar all` หรือ `/avatar demo` — รันการแสดงโชว์วนลูปครบทั้ง 50 หน้า (แผ่น 1: 1-20, แผ่น 2: 21-50)\n" +
+                    "• `/avatar <1-50>` — แสดง Moodset เฉพาะหน้าที่ 1 ถึง 50 (เช่น `/avatar 10`, `/avatar 11`)\n" +
+                    "• `/avatar <ชื่ออารมณ์>` เช่น `/avatar vr_mode`, `/avatar diving`, `/avatar sick`, `/avatar rich`\n" +
                     "• `/avatar reset` — ยกเลิกการทดสอบ กลับสู่โหมดอัตโนมัติ",
                     isStatic = true
                 )

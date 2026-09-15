@@ -127,6 +127,7 @@ object AmbientSoundEngine {
             BackgroundTheme.LOVE_BG -> generateLoveLoop(buffer, totalSamples)
             BackgroundTheme.THUNDER -> generateThunderLoop(buffer, totalSamples)
             BackgroundTheme.DEFAULT -> { /* Silent */ }
+            else -> { /* Silent / procedurally neutral */ }
         }
 
         // Apply seamless circular crossfade at endpoints (50ms) to ensure zero pop/click on loop boundary

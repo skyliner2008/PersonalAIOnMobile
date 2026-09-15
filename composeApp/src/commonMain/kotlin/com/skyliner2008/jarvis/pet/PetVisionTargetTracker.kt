@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.pet
 
+import kotlinx.datetime.Clock
 import com.skyliner2008.jarvis.camera.BoundingBox
 import com.skyliner2008.jarvis.camera.DetectedObject
 import kotlin.math.hypot
@@ -132,7 +133,7 @@ class PetVisionTargetTracker(
     fun processFrame(
         rawObjects: List<DetectedObject>,
         faces: List<BoundingBox> = emptyList(),
-        currentTimeMs: Long = System.currentTimeMillis()
+        currentTimeMs: Long = Clock.System.now().toEpochMilliseconds()
     ): List<DetectedObject> {
         val candidates = filterCandidates(rawObjects, faces)
 

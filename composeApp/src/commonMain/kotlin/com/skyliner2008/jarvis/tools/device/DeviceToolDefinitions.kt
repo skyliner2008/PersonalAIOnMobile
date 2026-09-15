@@ -4,6 +4,12 @@ import com.skyliner2008.jarvis.tools.FunctionDeclaration
 import com.skyliner2008.jarvis.tools.FunctionParameters
 import com.skyliner2008.jarvis.tools.ParameterProperty
 
+private val AVATAR_EMOTIONS = com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.entries.map { it.name.lowercase() }
+private val AVATAR_EYE_STYLES = com.skyliner2008.jarvis.ui.component.avatar.EyeStyle.entries.map { it.name.lowercase() }
+private val PROP_POSITIONS = com.skyliner2008.jarvis.ui.component.avatar.PropPosition.entries.map { it.name.lowercase() }
+private val PROP_ANIMATIONS = com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.entries.map { it.name.lowercase() }
+private val AVATAR_BACKGROUNDS = com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme.entries.map { it.name.lowercase() }
+
 /**
  * DeviceToolDefinitions — Function declarations สำหรับ device control tools ทั้งหมด
  *
@@ -91,76 +97,81 @@ object DeviceToolDefinitions {
         ),
         FunctionDeclaration(
             name = "device_avatar_emotion",
-            description = "ควบคุมการแสดงสีหน้า แววตา ฉากหลัง อุปกรณ์เสริม (Props) ท่าทาง (Gesture) อารมณ์ และชุดสีของ Robot Avatar บนหน้าจอ. รองรับ Layer-based rendering: Background Theme, Eye Style, Props/Stickers Overlay และ Body Language Gesture. ใช้เมื่อผู้ใช้สั่ง 'เดโม่อารมณ์', 'แสดงอารมณ์ทั้งหมด', 'ทำหน้าดีใจ', 'ทำหน้าตื่นเต้น', 'ทำหน้ารัก', 'ทำหน้าโกรธ', 'ทำหน้าเศร้า', 'ทำหน้าหลับ', 'ทำหน้าคิด', 'รีเซ็ตอารมณ์', 'avatar demo', 'avatar happy' ฯลฯ. คำสั่งเหล่านี้เกี่ยวกับใบหน้าของหุ่นยนต์บนจอ ห้ามสับสนกับอารมณ์ตลาดหุ้นหรือ Fear & Greed!",
+            description = "ควบคุมการแสดงสีหน้า แววตา ฉากหลัง อุปกรณ์เสริม (Props) ท่าทาง (Gesture) อารมณ์ และชุดสีของ Robot Avatar บนหน้าจอ. รองรับสารบัญ LOOI Robot Moodset ทั้งหมด 50 หน้า (แผ่นที่ 1: หน้าที่ 1 ถึง 20, แผ่นที่ 2: หน้าที่ 21 ถึง 50 เช่น หน้าที่ 10 = Laughing, หน้าที่ 11 = Music, หน้าที่ 12 = VR Mode, หน้าที่ 13 = Diving, หน้าที่ 22 = Sick, หน้าที่ 23 = Rich) โดยเมื่อผู้ใช้สั่ง 'หน้าที่ 1' ถึง 'หน้าที่ 50' หรือ 'หน้า 11' หรือ 'แบบที่ 11' ให้เรียก action='page', page='11' เสมอ (ระบบมีครบทั้ง 50 หน้า ห้ามบอกว่าไม่มีหน้าที่ 11 หรือมีแค่ 10 หน้าเด็ดขาด) และเมื่อสั่ง 'หน้าทั้งหมด' หรือ 'ทุกหน้า' ให้เรียก action='all'. นอกจากนี้ยังรองรับ Smart Scenes (action='scene'), ตั้งค่าอารมณ์เฉพาะ (action='set') และรีเซ็ต (action='reset'). ห้ามสับสนกับอารมณ์ตลาดหุ้น!",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "action" to ParameterProperty(
                         type = "STRING",
-                        description = "Action: 'demo' (เริ่มเล่นวนลูปครบทั้ง 10 อารมณ์), 'set' (ตั้งอารมณ์เฉพาะ พร้อม background/props/gesture), 'reset' (กลับสู่โหมดตรวจจับอัตโนมัติ)",
-                        enum = listOf("demo", "set", "reset")
+                        description = "Action: 'page' (แสดง Moodset เฉพาะหน้าที่ 1 ถึง 50 สำหรับการตรวจสอบ 3-5 วินาที), 'all' (เล่นแสดง Moodset ครบทั้งหมด 50 หน้าวนลูปแบบละ 4 วินาที), 'scene' (เล่นฉากสำเร็จรูป เช่น eating, drinking, thug_life, royal, angry_missile), 'set' (ตั้งอารมณ์/พร็อพ/ฉากหลังเฉพาะ), 'demo' (เล่นแสดงทุกหน้า), 'reset' (กลับสู่โหมดตรวจจับอัตโนมัติ)",
+                        enum = listOf("page", "all", "scene", "set", "demo", "reset")
+                    ),
+                    "page" to ParameterProperty(
+                        type = "STRING",
+                        description = "ลำดับหน้าที่ต้องการแสดงสำหรับตรวจสอบ (หน้าที่ 1 ถึง หน้าที่ 50 ตามสารบัญ LOOI Robot เช่น '1', '10', '11', '50')"
+                    ),
+                    "scene" to ParameterProperty(
+                        type = "STRING",
+                        description = "ชื่อฉากอัจฉริยะ (Smart Scene): 'eating' (กินอาหาร/สุ่มของกิน), 'drinking' (ดื่มเครื่องดื่ม/กาแฟ/ชา/ชานม), 'bath_clean' (อาบน้ำฟองสบู่), 'gaming' (เล่นเกม), 'study_work' (อ่านหนังสือ/ทำงาน), 'thug_life' (ใส่แว่นตาดำสุดเท่ Deal with it), 'rich' (เศรษฐีคริปโตเหรียญทองคำ), 'royal' (สวมมงกุฎทองคำ), 'fire' (ไฟไหม้ตูด), 'thunder' (โดนฟ้าผ่า), 'soul_out' (วิญญาณหลุด), 'angry_missile' (โกรธยิงจรวดถล่มหน้าจอ), 'super_love' (ปิ๊งรักหัวใจพุ่ง), 'cry' (ร้องไห้น้ำตาท่วม), 'celebrate' (ปาร์ตี้ฉลอง), 'rain_umbrella' (กางร่มกันฝน), 'vr_mode' (ใส่แว่น VR), 'music' (ฟังเพลง). เรื่องสั้นตามอารมณ์ (ตาเยลลี่): 'MoodIdleBall' (เล่นลูกบอล), 'MoodYoYo' (โยโย่), 'MoodStars' (นับดาว), 'MoodShocked' (ตกใจ), 'MoodSad' (เศร้า), 'MoodCurious' (สงสัย/แว่นขยาย), 'MoodAngryMissile' (โกรธยิงขีปนาวุธ), 'MoodFuming' (ควันออกหู), 'MoodGlitch' (โกรธกลิตช์), 'MoodThinking' (ครุ่นคิด), 'MoodHappy' (มีความสุข), 'MoodInLove' (ตกหลุมรัก), 'MoodGlad' (ยินดี), 'MoodAwesome' (เยี่ยมยอด), 'MoodShy' (เขิน), 'MoodEmbarrassed' (อาย), 'MoodShowOff' (เก๊กท่า), 'MoodListening' (กำลังฟัง), 'MoodArrogant' (เย่อหยิ่ง). ส่งชื่อฉากตามนี้ใน scene พร้อม action='scene' — ฉากจะเล่นจนจบเอง ห้ามเรียกซ้ำระหว่างเล่น"
                     ),
                     "emotion" to ParameterProperty(
                         type = "STRING",
-                        description = "อารมณ์: happy, excited, love, angry, sad, sleeping, listening, thinking, speaking, idle, wink, confused, pout, dizzy",
-                        enum = listOf("happy", "excited", "love", "angry", "sad", "sleeping", "listening", "thinking", "speaking", "idle", "wink", "confused", "pout", "dizzy")
+                        description = "อารมณ์ (ครบทุกแบบที่ Avatar รองรับ): idle, happy, excited, love, angry, sad, sleeping, listening, thinking, speaking, wink, confused, pout, dizzy, surprised, bored, enraged, dead, laughing, music, vr_mode, diving, evil, focused, shy, disgusted, camera_mode, eating, drinking, puzzled, sick, rich, crying, reading, gaming, traveling, working, cold, hot, detective, cooking, art_mode, space, party, dreaming, exhausted, electric, sneaky, romantic, hero, glitched, magic, sporty, scientist, scared, warrior, low_battery",
+                        enum = AVATAR_EMOTIONS
                     ),
                     "eye_style" to ParameterProperty(
                         type = "STRING",
-                        description = "รูปแบบดวงตา (optional): default, wink, heart, crying, star, question, cross, spiral",
-                        enum = listOf("default", "wink", "heart", "crying", "star", "question", "cross", "spiral")
+                        description = "รูปแบบดวงตา (optional): default, wink, heart, crying, star, question, cross, spiral, happy, angry, sleepy, curious, laughing, focused, excited, shy, shock",
+                        enum = AVATAR_EYE_STYLES
                     ),
                     "background" to ParameterProperty(
                         type = "STRING",
-                        description = "ธีมฉากหลัง (optional): default, rainy, sunny, night, sakura, matrix, love_bg, thunder",
-                        enum = listOf("default", "rainy", "sunny", "night", "sakura", "matrix", "love_bg", "thunder")
+                        description = "ธีมฉากหลัง (optional): default, rainy, sunny, night, sakura, matrix, love_bg, thunder, cyber_grid, space_nebula, magic_mystic, cinema_cozy, winter_blizzard, summer_heat, warrior_dojo, party_confetti, golden_vault, sick_lab, sports_arena, low_power_crt",
+                        enum = AVATAR_BACKGROUNDS
                     ),
                     "props" to ParameterProperty(
                         type = "STRING",
-                        description = "อุปกรณ์เสริม/สติกเกอร์ (optional, comma-separated): umbrella, question_mark, sweat_drop, hearts, music_notes, sparkles, zzzzz, exclamation, fire, snow"
+                        description = "อุปกรณ์เสริม/สติกเกอร์สำเร็จรูป 55 ชนิด (optional เช่น 'sunglasses', 'crown', 'coffee', 'pizza', 'burger', 'hearts', 'sparkles', 'fire', 'gold_coin', 'party_popper', 'gaming_controller', 'boba_tea', 'cake', 'ice_cream', 'popcorn', 'cat_paw', 'laptop', 'book', 'umbrella', 'lightning', 'skull' ฯลฯ) ระบุคั่นด้วยจุลภาคได้"
                     ),
                     "gesture" to ParameterProperty(
                         type = "STRING",
                         description = "ท่าทาง/ภาษากาย (optional): idle, tilt_left, tilt_right, bounce, jump, wobble, shake, nod",
                         enum = listOf("idle", "tilt_left", "tilt_right", "bounce", "jump", "wobble", "shake", "nod")
-                    ),
-                    "svg_path" to ParameterProperty("STRING", "SVG Path Data String สำหรับเสกพร็อพเวกเตอร์แบบ Custom (optional เช่น 'M12 2 C8 2 4 6 4 10 L20 10 Z')"),
-                    "prop_name" to ParameterProperty("STRING", "ชื่อพร็อพแบบ Custom (optional เช่น 'cowboy_hat', 'crown')"),
-                    "prop_color" to ParameterProperty("STRING", "สีเติม Hex ของ Custom prop (optional เช่น '#FFD700')"),
-                    "prop_position" to ParameterProperty("STRING", "ตำแหน่ง Custom prop (optional): forehead, left_eye, right_eye, cheeks, chin, floating_left, floating_right")
+                    )
                 ),
                 required = listOf("action")
             )
         ),
 
-        // ═══ Dynamic Vector Prop (Custom SVG Magic) ═══
         FunctionDeclaration(
-            name = "device_custom_prop",
-            description = "สร้าง สวมใส่ นำกลับมาใช้ซ้ำ หรือถอดอุปกรณ์เสริมเวกเตอร์ SVG (Dynamic SVG Vector Prop) บนใบหน้าของหุ่นยนต์แบบสดๆ และบันทึกถาวรในคลัง SQLite เมื่อสร้างแล้วสามารถหยิบมาใส่ซ้ำได้โดยระบุแค่ชื่อ (name) โดยไม่ต้องส่ง svg_path ซ้ำ! AI สามารถคิดเองเลือกเองสร้างเองตามบริบทบทสนทนา เช่น หมวกโจรสลัด หมวกเชฟ แว่นตาเลนส์เดียว (monocle) ฯลฯ",
+            name = "device_pet_care",
+            description = "ดูแลสัตว์เลี้ยงดิจิทัล (โหมดสัตว์เลี้ยง) ผ่านระบบค่าสถานะจริง (ความอิ่ม พลังงาน ความสะอาด ความสุข ความเครียด) — ต่างจาก device_avatar_emotion ที่แค่เปลี่ยนหน้าตา. ใช้เมื่อผู้ใช้สั่ง 'ให้อาหารน้อง', 'ป้อนข้าว', 'อาบน้ำให้น้อง', 'เล่นกับน้อง', 'พาน้องนอน', 'ปลุกน้อง', 'น้องหิวไหม', 'น้องเป็นยังไงบ้าง', 'ดูค่าสถานะ'. ใช้ได้เฉพาะตอนอยู่ในโหมดสัตว์เลี้ยง.",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "action" to ParameterProperty(
                         type = "STRING",
-                        description = "การกระทำ: 'add' (สร้าง/สวมใส่พร็อพใหม่ หรือหยิบพร็อพเดิมในคลังมาใส่ซ้ำ), 'remove' (ถอดพร็อพออกจากหน้า), 'delete' (ลบออกจากคลังถาวร), 'clear' (ล้างพร็อพทั้งหมด)",
-                        enum = listOf("add", "remove", "delete", "clear")
+                        description = "feed = ให้อาหาร, clean = อาบน้ำ, play = เล่นด้วย, sleep = พานอน, wake = ปลุก, status = อ่านค่าสถานะปัจจุบัน",
+                        enum = listOf("feed", "clean", "play", "sleep", "wake", "status")
                     ),
-                    "name" to ParameterProperty("STRING", "ชื่อของพร็อพ เช่น 'pirate_eyepatch', 'detective_monocle', 'chef_hat', 'cowboy_hat'"),
-                    "svg_path" to ParameterProperty("STRING", "SVG Path Data String มาตรฐาน (M, L, C, Z, ฯลฯ) เช่น 'M12 2 C8 2 4 6 4 10 L20 10 Z' (จำเป็นเมื่อสร้างพร็อพใหม่ หากเป็นพร็อพที่เคยสร้างไว้แล้วในคลังสามารถเว้นว่างได้)"),
-                    "color" to ParameterProperty("STRING", "รหัสสีเติม Hex (optional เช่น '#FFD700', '#FF5722', '#00E5FF') ค่าเริ่มต้นคือ #FFD700"),
-                    "stroke_color" to ParameterProperty("STRING", "รหัสสีเส้นขอบ Hex (optional เช่น '#FFFFFF', '#000000')"),
-                    "stroke_width" to ParameterProperty("NUMBER", "ความหนาของเส้นขอบ (optional ค่าเริ่มต้น 0f)"),
-                    "position" to ParameterProperty(
-                        type = "STRING",
-                        description = "ตำแหน่งยึดบนใบหน้า: 'forehead' (หน้าผาก/หัว), 'left_eye' (ตาซ้าย - สำหรับแว่นตา/ผ้าปิดตา/monocle), 'right_eye' (ตาขวา), 'cheeks' (แก้ม/หนวด), 'chin' (คาง/ปาก), 'floating_left' (ลอยด้านซ้าย), 'floating_right' (ลอยด้านขวา)",
-                        enum = listOf("forehead", "left_eye", "right_eye", "cheeks", "chin", "floating_left", "floating_right")
-                    ),
-                    "size" to ParameterProperty("NUMBER", "ขนาดแสดงผลเป็น dp หรือระบุ 0 เพื่อให้ระบบ Auto-Fit เท่ากับเส้นผ่านศูนย์กลางดวงตาของหุ่นยนต์ 1:1 พอดี (เช่น สำหรับ monocle/eyepatch/glasses)"),
-                    "animation" to ParameterProperty(
-                        type = "STRING",
-                        description = "แอนิเมชัน: 'float_bob' (ลอยขึ้นลงเบาๆ), 'pulse' (เต้นตุบๆ ย่อขยาย), 'rotate' (หมุนต่อเนื่อง), 'sway' (โยกแกว่งไปมา), 'static' (อยู่นิ่งๆ)",
-                        enum = listOf("float_bob", "pulse", "rotate", "sway", "static")
-                    )
+                    "food" to ParameterProperty("STRING", "อาหารที่จะให้ (optional, เฉพาะ feed) เช่น 'burger', 'pizza', 'coffee', 'cake', 'ice_cream', 'boba_tea'")
+                ),
+                required = listOf("action")
+            )
+        ),
+        FunctionDeclaration(
+            name = "device_custom_prop",
+            description = "สวม/ถอดอุปกรณ์เสริมบนหัวสัตว์เลี้ยง: หยิบจากคลังสำเร็จรูป (name เช่น 'crown', 'sunglasses', 'chef_hat') หรือเสกอุปกรณ์ใหม่จากรูปวาดเวกเตอร์ SVG (svg_path) แล้วจำไว้ใช้ครั้งหน้า. ใช้เมื่อผู้ใช้สั่ง 'เสก...', 'วาด...ใส่หัว', 'ใส่...', 'ถอด...', 'ถอดทั้งหมด'.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "add = สวม, remove = ถอดชิ้นที่ระบุ, clear = ถอดทั้งหมด", enum = listOf("add", "remove", "clear")),
+                    "name" to ParameterProperty("STRING", "ชื่ออุปกรณ์ เช่น 'crown', 'sunglasses', 'wizard_hat' หรือชื่อของชิ้นที่เสกเอง"),
+                    "svg_path" to ParameterProperty("STRING", "(optional) SVG path data ของอุปกรณ์ที่เสกใหม่ (พิกัดใดก็ได้ ระบบย่อขยายให้พอดีหัวอัตโนมัติ) เช่น 'M12 2L15 8H9Z'"),
+                    "color" to ParameterProperty("STRING", "(optional) สีเติม hex เช่น '#FFD700'"),
+                    "position" to ParameterProperty("STRING", "(optional) ตำแหน่ง", enum = PROP_POSITIONS),
+                    "animation" to ParameterProperty("STRING", "(optional) แอนิเมชัน", enum = PROP_ANIMATIONS),
+                    "size" to ParameterProperty("STRING", "(optional) ขนาด dp เช่น '48'")
                 ),
                 required = listOf("action")
             )

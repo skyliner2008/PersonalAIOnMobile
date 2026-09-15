@@ -20,6 +20,7 @@ import com.skyliner2008.jarvis.camera.DetectedObject
 import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.logError
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
+import com.skyliner2008.jarvis.ui.component.avatar.GazeStabilizer
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -76,6 +77,7 @@ class PetVisionDetector(
 
     private val objectDetector: ObjectDetector = ObjectDetection.getClient(objectOptions)
     private val targetTracker = PetVisionTargetTracker()
+    private val gazeStabilizer = GazeStabilizer()
 
     private var isProcessing = false
     private var lastProcessTime = 0L
@@ -85,6 +87,13 @@ class PetVisionDetector(
     private var hasLoggedFirstFrame = false
     private var lastFaceSeenTime = 0L
     private var isGazeActive = false
+
+    init {
+        PetVisionBridge.onResetAbsence = {
+            gazeStabilizer.resetAbsenceTimer()
+            lastFaceSeenTime = System.currentTimeMillis()
+        }
+    }
 
     override fun processFrame(rawBytes: ByteArray, isFrontCamera: Boolean) {
         val now = System.currentTimeMillis()
@@ -674,10 +683,16 @@ class PetVisionDetector(
 
         val now = System.currentTimeMillis()
         if (faces.isEmpty()) {
+            val absenceEmotion = gazeStabilizer.onNoFace(now)
             if (isGazeActive && (now - lastFaceSeenTime > 1000L)) {
                 isGazeActive = false
                 logDebug(TAG, "👀 Face lost for >1000ms -> Resetting pet gaze to center (0f, 0f)")
                 onGazeDetected(0f, 0f)
+                PetVisionBridge.onFaceDistanceDetected?.invoke(1f)
+            }
+            if (absenceEmotion != null) {
+                logDebug(TAG, "😴 Face absence timeout reached -> Triggering ${absenceEmotion.name}")
+                PetVisionBridge.onFaceAbsenceTimeout?.invoke(absenceEmotion)
             }
             return
         }
@@ -719,16 +734,21 @@ class PetVisionDetector(
         val finalNormX = if (abs(calibratedX) < 0.12f) 0f else calibratedX.coerceIn(-1f, 1f)
         val finalNormY = if (abs(calibratedY) < 0.15f) 0f else calibratedY.coerceIn(-1f, 1f)
 
+        // Pass through adaptive EMA GazeStabilizer (filters ±3% jitter & computes face distance scale)
+        val faceRatio = faceBox.width().toFloat() / imageWidth.toFloat()
+        val (stabilizedX, stabilizedY) = gazeStabilizer.update(finalNormX, finalNormY, faceRatio, now)
+
         if (now - lastGazeLogTime > 2000L) {
             lastGazeLogTime = now
-            val gx = (finalNormX * 100).toInt() / 100f
-            val gy = (finalNormY * 100).toInt() / 100f
+            val gx = (stabilizedX * 100).toInt() / 100f
+            val gy = (stabilizedY * 100).toInt() / 100f
             val rx = (rawNormX * 100).toInt() / 100f
             val ry = (rawNormY * 100).toInt() / 100f
-            logDebug(TAG, "👀 Face tracked at (normX=$gx, normY=$gy) [raw:($rx, $ry)] -> Pet gaze updated")
+            logDebug(TAG, "👀 Face tracked at (normX=$gx, normY=$gy) [raw:($rx, $ry), scale=${gazeStabilizer.faceScaleFactor}] -> Pet gaze updated")
         }
 
-        onGazeDetected(finalNormX, finalNormY)
+        onGazeDetected(stabilizedX, stabilizedY)
+        PetVisionBridge.onFaceDistanceDetected?.invoke(gazeStabilizer.faceScaleFactor)
 
         // ─── 6. Copycat Mini-Game: Smile & Wink Verification ──────────────
         val currentChallenge = getCopycatTarget()
@@ -771,6 +791,7 @@ class PetVisionDetector(
             targetTracker.clear()
             onObjectsDetected?.invoke(emptyList())
             PetVisionBridge.onObjectsDetected?.invoke(emptyList())
+            PetVisionBridge.onResetAbsence = null
             faceDetector.close()
             objectDetector.close()
             logDebug(TAG, "PetVisionDetector closed")

@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.pet
 
+import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
@@ -117,24 +118,39 @@ data class PetNeedsState(
     /**
      * อัปเดตการลดลงตามเวลาที่ผ่านไป (Time Decay)
      * @param elapsedMs เวลาที่ผ่านไปนับจากครั้งก่อนหน้า
+     * @param isSleeping กำลังหลับ: พลังงานฟื้นคืน ความเครียดลด หิวและสกปรกช้าลงครึ่งหนึ่ง
+     *   (เดิมพลังงานลดลงแม้ตอนหลับ — หลับเท่าไหร่ก็ไม่หายเหนื่อย ตื่นมาก็ง่วงวนซ้ำ)
      */
-    fun decay(elapsedMs: Long): PetNeedsState {
+    fun decay(elapsedMs: Long, isSleeping: Boolean = false): PetNeedsState {
         if (elapsedMs <= 0L) return this
         val minutes = elapsedMs / 60_000f
+        val bodyRate = if (isSleeping) 0.5f else 1f
 
-        // ความอิ่มลดลง ~1 แต้มทุก 3 นาที
-        val newSatiety = (satiety - (minutes * 0.33f)).coerceIn(0f, 100f)
-        // พลังงานลดลงเบาๆ เมื่อตื่น ~0.2 แต้มต่อนาที
-        val newEnergy = (energy - (minutes * 0.15f)).coerceIn(0f, 100f)
-        // ความสะอาดลดลง ~0.1 แต้มต่อนาที
-        val newHygiene = (hygiene - (minutes * 0.10f)).coerceIn(0f, 100f)
+        // ความอิ่มลดลง ~1 แต้มทุก 3 นาที (หลับ: ครึ่งหนึ่ง)
+        val newSatiety = (satiety - (minutes * 0.33f * bodyRate)).coerceIn(0f, 100f)
+        // ตื่น: พลังงานลดลงเบาๆ ~0.15 แต้มต่อนาที · หลับ: ฟื้นคืน ~0.8 แต้มต่อนาที (เต็มใน ~2 ชม.)
+        val newEnergy = if (isSleeping) {
+            (energy + minutes * 0.8f).coerceIn(0f, 100f)
+        } else {
+            (energy - (minutes * 0.15f)).coerceIn(0f, 100f)
+        }
+        // ความสะอาดลดลง ~0.1 แต้มต่อนาที (หลับ: ครึ่งหนึ่ง)
+        val newHygiene = (hygiene - (minutes * 0.10f * bodyRate)).coerceIn(0f, 100f)
 
-        // ความเครียดเพิ่มขึ้นถ้าหิวจัดหรือตัวสกปรก
-        val stressDelta = if (newSatiety < 25f || newHygiene < 25f) minutes * 0.25f else -minutes * 0.05f
+        // ความเครียดเพิ่มขึ้นถ้าหิวจัดหรือตัวสกปรก (หลับ: ลดลงเสมอ)
+        val stressDelta = when {
+            isSleeping -> -minutes * 0.10f
+            newSatiety < 25f || newHygiene < 25f -> minutes * 0.25f
+            else -> -minutes * 0.05f
+        }
         val newStress = (stress + stressDelta).coerceIn(0f, 100f)
 
-        // ความสุขลดลงช้าๆ หากละเลย
-        val happyDelta = if (newStress > 40f) -minutes * 0.20f else -minutes * 0.05f
+        // ความสุขลดลงช้าๆ หากละเลย (หลับ: คงที่)
+        val happyDelta = when {
+            isSleeping -> 0f
+            newStress > 40f -> -minutes * 0.20f
+            else -> -minutes * 0.05f
+        }
         val newHappiness = (happiness + happyDelta).coerceIn(0f, 100f)
 
         // ความโกรธค่อยๆ ลดลงตามเวลา
@@ -147,8 +163,25 @@ data class PetNeedsState(
             happiness = newHappiness,
             stress = newStress,
             rage = newRage,
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
+    }
+
+    /**
+     * เวลาที่ปิดแอปไป: นับเป็นช่วงหลับ และไม่ปล่อยให้หิว/สกปรกจนติดศูนย์เพราะปิดแอปข้ามคืน
+     * (เดิมปิดแอป ~3.5 ชม. เปิดมาอิ่ม 0% เครียด 59% แล้วโกรธหิววนทุก 20 วินาที)
+     */
+    fun decayOffline(elapsedMs: Long): PetNeedsState {
+        val slept = decay(elapsedMs, isSleeping = true)
+        return slept.copy(
+            satiety = slept.satiety.coerceAtLeast(minOf(satiety, OFFLINE_SATIETY_FLOOR)),
+            hygiene = slept.hygiene.coerceAtLeast(minOf(hygiene, OFFLINE_HYGIENE_FLOOR))
+        )
+    }
+
+    companion object {
+        const val OFFLINE_SATIETY_FLOOR = 25f
+        const val OFFLINE_HYGIENE_FLOOR = 30f
     }
 
     /** เพิ่มความโกรธสะสม 💢 */
@@ -156,7 +189,7 @@ data class PetNeedsState(
         return copy(
             rage = (rage + amount).coerceIn(0f, 100f),
             stress = (stress + amount * 0.5f).coerceIn(0f, 100f),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -165,7 +198,7 @@ data class PetNeedsState(
         return copy(
             rage = 0f,
             stress = (stress - 30f).coerceIn(0f, 100f),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -176,7 +209,7 @@ data class PetNeedsState(
             happiness = (happiness + 12f).coerceIn(0f, 100f),
             stress = (stress - 15f).coerceIn(0f, 100f),
             affectionPoints = (affectionPoints + 5).coerceAtMost(1000),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -187,7 +220,7 @@ data class PetNeedsState(
             happiness = (happiness + 10f).coerceIn(0f, 100f),
             stress = (stress - 10f).coerceIn(0f, 100f),
             affectionPoints = (affectionPoints + 5).coerceAtMost(1000),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -200,7 +233,7 @@ data class PetNeedsState(
             stress = (stress - 20f).coerceIn(0f, 100f),
             affectionPoints = (affectionPoints + 8).coerceAtMost(1000),
             hyperCalmTrait = (hyperCalmTrait + 2f).coerceIn(-100f, 100f),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -211,7 +244,7 @@ data class PetNeedsState(
             stress = (stress - 12f).coerceIn(0f, 100f),
             affectionPoints = (affectionPoints + 4).coerceAtMost(1000),
             clingyIndependentTrait = (clingyIndependentTrait + 1f).coerceIn(-100f, 100f),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 
@@ -220,7 +253,7 @@ data class PetNeedsState(
         return copy(
             energy = (energy + minutes * 3.5f).coerceIn(0f, 100f),
             stress = (stress - minutes * 1.5f).coerceIn(0f, 100f),
-            lastUpdateTimestamp = System.currentTimeMillis()
+            lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
 }

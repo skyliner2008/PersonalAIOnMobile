@@ -63,11 +63,12 @@ fun MissileBarrageOverlay(
 
     val trajectories = remember {
         listOf(
-            MissileTrajectory(0, 0.25f, 0.55f, 0.20f, 0.28f, -60f, -45f, 0, 850),
-            MissileTrajectory(1, 0.75f, 0.55f, 0.80f, 0.30f, -120f, -135f, 180, 850),
-            MissileTrajectory(2, 0.20f, 0.45f, 0.40f, 0.65f, 20f, 40f, 360, 800),
-            MissileTrajectory(3, 0.80f, 0.45f, 0.60f, 0.68f, 160f, 140f, 520, 800),
-            MissileTrajectory(4, 0.50f, 0.35f, 0.50f, 0.45f, -90f, -90f, 700, 750)
+            // ปรับเริ่มยิงหลังจาก Pet แสดงสีหน้าโกรธ 1200ms พร้อมยืดเวลาการบินเป็น 1150-1250ms เพื่อให้เห็นจรวดบินชัดเจน
+            MissileTrajectory(0, 0.25f, 0.55f, 0.20f, 0.28f, -60f, -45f, 1200, 1200),
+            MissileTrajectory(1, 0.75f, 0.55f, 0.80f, 0.30f, -120f, -135f, 1450, 1200),
+            MissileTrajectory(2, 0.20f, 0.45f, 0.40f, 0.65f, 20f, 40f, 1700, 1150),
+            MissileTrajectory(3, 0.80f, 0.45f, 0.60f, 0.68f, 160f, 140f, 1950, 1150),
+            MissileTrajectory(4, 0.50f, 0.35f, 0.50f, 0.45f, -90f, -90f, 2200, 1100)
         )
     }
 
@@ -99,23 +100,23 @@ fun MissileBarrageOverlay(
         animTime.snapTo(0f)
         animTime.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 3200, easing = LinearEasing)
+            animationSpec = tween(durationMillis = 5000, easing = LinearEasing)
         )
         onFinished()
     }
 
     val progress = animTime.value
-    val totalDurationMs = 3200f
+    val totalDurationMs = 5000f
     val currentMs = progress * totalDurationMs
 
-    // Trigger Screen Shake & Explosion Sound when first missile impacts
+    // Trigger Screen Shake & Explosion Sound when first missile impacts (~2400ms)
     LaunchedEffect(currentMs) {
-        if (currentMs >= 850f && !explosionSoundPlayed) {
+        if (currentMs >= 2400f && !explosionSoundPlayed) {
             explosionSoundPlayed = true
             RobotSoundPlayer.playExplosion()
         }
-        if (currentMs in 800f..1800f) {
-            val impactDecay = ((1800f - currentMs) / 1000f).coerceIn(0f, 1f)
+        if (currentMs in 2350f..3800f) {
+            val impactDecay = ((3800f - currentMs) / 1450f).coerceIn(0f, 1f)
             onScreenShake(impactDecay * 18f)
         } else {
             onScreenShake(0f)
@@ -127,9 +128,9 @@ fun MissileBarrageOverlay(
         val h = size.height
 
         // ─── 1. Screen Blast Flash Overlay ─────────────────────────────────────
-        if (currentMs in 850f..1900f) {
-            val flashProg = ((currentMs - 850f) / 1050f).coerceIn(0f, 1f)
-            val flashAlpha = (sin(flashProg * PI).toFloat() * 0.38f).coerceIn(0f, 0.40f)
+        if (currentMs in 2400f..3600f) {
+            val flashProg = ((currentMs - 2400f) / 1200f).coerceIn(0f, 1f)
+            val flashAlpha = (sin(flashProg * PI).toFloat() * 0.42f).coerceIn(0f, 0.45f)
             drawRect(
                 color = Color(0xFFFF5722).copy(alpha = flashAlpha),
                 size = size
@@ -193,8 +194,8 @@ fun MissileBarrageOverlay(
         }
 
         // ─── 4. Flying Shrapnel Spark Particles ────────────────────────────────
-        if (currentMs in 850f..2500f) {
-            val explTime = (currentMs - 850f) / 1000f // seconds
+        if (currentMs in 2400f..4200f) {
+            val explTime = (currentMs - 2400f) / 1000f // seconds
             for (p in particles) {
                 val px = (w * 0.5f) + (p.vx * explTime)
                 val py = (h * 0.45f) + (p.vy * explTime) + (0.5f * 800f * explTime * explTime) // with gravity

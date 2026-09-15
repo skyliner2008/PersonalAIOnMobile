@@ -238,6 +238,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // volume keys adjust the media stream (pet sound effects, ambience) inside the app
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.dark(
                 android.graphics.Color.TRANSPARENT
@@ -249,6 +251,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         com.skyliner2008.jarvis.automation.AndroidContextHolder.appContext = applicationContext
+
+        // Initialize Rive runtime native C++ library early
+        try {
+            System.loadLibrary("rive-android")
+        } catch (_: Throwable) {}
+        try {
+            app.rive.runtime.kotlin.core.Rive.init(applicationContext)
+            android.util.Log.i("MainActivity", "✅ Rive runtime initialized")
+        } catch (t: Throwable) {
+            android.util.Log.w("MainActivity", "Rive.init warning: ${t.message}")
+        }
 
         // Clear any leftover screen flags so normal mode never shows over lockscreen
         clearScreenFlags()

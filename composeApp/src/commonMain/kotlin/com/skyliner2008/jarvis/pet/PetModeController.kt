@@ -9,11 +9,14 @@ import com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme
 import com.skyliner2008.jarvis.ui.component.avatar.PropType
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp
 import com.skyliner2008.jarvis.ui.component.avatar.withFace
+import com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories
+import com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStory
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.random.Random
+import kotlinx.datetime.Clock
 
 /**
  * PetFeatureTab — แท็บฟีเจอร์ย่อยในโหมดสัตว์เลี้ยง
@@ -36,6 +39,13 @@ class PetModeController(
 ) {
     companion object {
         private const val TAG = "PetModeController"
+        private const val PASSIVE_EMOTION_COOLDOWN_MS = 60_000L
+        /** ค้างท้ายเรื่องสั้นๆ ก่อนคืนหน้าปกติ */
+        const val SCENE_TAIL_MS = 300L
+        private const val YAWN_COOLDOWN_MS = 90_000L
+        private const val LOUD_NOISE_COOLDOWN_MS = 8_000L
+        var activeInstance: PetModeController? = null
+            private set
     }
 
     // ─── State Machine & Memory ─────────────────────────────────────────────
@@ -59,17 +69,18 @@ class PetModeController(
             }
             PetFeatureTab.FOCUS -> {
                 RobotSoundPlayer.playHappy()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.THINKING,
-                    statusText = "⏱️ Focus Buddy พร้อมช่วยตั้งใจทำงานแล้วค่ะ"
-                ))
+                if (_isFocusRunning.value) {
+                    onUpdateAvatarState(avatarStateProvider().copy(
+                        emotion = AvatarEmotion.THINKING,
+                        statusText = "⏱️ Focus Buddy พร้อมช่วยตั้งใจทำงานแล้วค่ะ"
+                    ))
+                } else {
+                    showTransientEmotion(AvatarEmotion.THINKING, "⏱️ Focus Buddy พร้อมช่วยตั้งใจทำงานแล้วค่ะ", 3000L)
+                }
             }
             PetFeatureTab.GAMES -> {
                 RobotSoundPlayer.playHappy()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.EXCITED,
-                    statusText = "🎲 มินิเกมแก้เบื่อ! เลือกเกมด้านล่างเลยค่ะ"
-                ))
+                showTransientEmotion(AvatarEmotion.EXCITED, "🎲 มินิเกมแก้เบื่อ! เลือกเกมด้านล่างเลยค่ะ", 3000L)
             }
             PetFeatureTab.PET -> {
                 RobotSoundPlayer.playHappy()
@@ -82,7 +93,7 @@ class PetModeController(
     }
 
     // ─── Needs & Psychology Engine (Tamagotchi State) ──────────────────────────
-    private val _needsState = MutableStateFlow(PetNeedsState(lastUpdateTimestamp = System.currentTimeMillis()))
+    private val _needsState = MutableStateFlow(PetNeedsState(lastUpdateTimestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()))
     val needsState: StateFlow<PetNeedsState> = _needsState.asStateFlow()
 
     // ─── Face Recognition (5 Slots) ────────────────────────────────────────────
@@ -105,18 +116,20 @@ class PetModeController(
 
     // ─── 1. Idle Life & Gaze Wander System ─────────────────────────────────────
     private var idleJob: Job? = null
-    private var lastInteractionTime = System.currentTimeMillis()
+    private var lastInteractionTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
 
     fun start() {
         logDebug(TAG, "🟢 start(): Starting PetModeController idle loop & vision hooks")
-        lastInteractionTime = System.currentTimeMillis()
+        activeInstance = this
+        lastInteractionTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         PetCustomPropStore.loadCustomProps()
 
         // Load PetMemory and restore NeedsState
         val mem = PetMemoryStore.load()
         if (mem.savedNeedsState.lastUpdateTimestamp > 0L) {
-            val elapsed = System.currentTimeMillis() - mem.savedNeedsState.lastUpdateTimestamp
-            _needsState.value = mem.savedNeedsState.decay(elapsed)
+            val elapsed = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() - mem.savedNeedsState.lastUpdateTimestamp
+            // app closed = pet asleep: energy recovers, hunger / dirt don't hit zero overnight
+            _needsState.value = mem.savedNeedsState.decayOffline(elapsed)
             logDebug(TAG, "📦 Restored NeedsState (elapsed ${elapsed / 60000}min)")
         }
 
@@ -132,6 +145,9 @@ class PetModeController(
 
     fun stop() {
         logDebug(TAG, "🔴 stop(): Stopping PetModeController")
+        if (activeInstance === this) {
+            activeInstance = null
+        }
         idleJob?.cancel()
         idleJob = null
         autoSaveJob?.cancel()
@@ -150,16 +166,14 @@ class PetModeController(
     }
 
     fun notifyInteraction() {
-        lastInteractionTime = System.currentTimeMillis()
+        lastInteractionTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        PetVisionBridge.resetAbsenceTimer()
         val current = avatarStateProvider()
         // Cancel screensaver trick immediately on user touch/speech
         if (current.faceState.eyeTrick != com.skyliner2008.jarvis.ui.component.avatar.EyeTrickState.NONE) {
             onUpdateAvatarState(current.copy(
                 faceState = current.faceState.copy(eyeTrickName = "none")
             ))
-        }
-        if (current.emotion == AvatarEmotion.SLEEPING) {
-            wakeUp()
         }
     }
 
@@ -173,7 +187,7 @@ class PetModeController(
             name = name.ifBlank { "สล็อต ${slotIndex + 1}" },
             isEnrolled = true,
             landmarkRatios = landmarks,
-            enrolledAt = System.currentTimeMillis()
+            enrolledAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         )
         _faceProfiles.value = currentList
         _currentRecognizedPerson.value = currentList[slotIndex].name
@@ -207,7 +221,7 @@ class PetModeController(
 
     fun onHandGesture(gesture: HandGesture) {
         if (gesture == HandGesture.NONE) return
-        val now = System.currentTimeMillis()
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         // Defensive cooldown: at least 3.0s between any gesture triggers
         if (now - lastHandGestureTime < 3000L) {
             return
@@ -279,32 +293,54 @@ class PetModeController(
             HandGesture.NONE -> {}
         }
 
+        // gesture reactions are momentary: return to IDLE (only if nothing else took over),
+        // otherwise the idle life (gaze wander, sleep, screensaver) stays frozen on this face
+        val shown = avatarStateProvider().emotion
         scope.launch {
             delay(2800)
             val cur = avatarStateProvider()
-            if (cur.emotion != AvatarEmotion.SLEEPING && cur.emotion != AvatarEmotion.ANGRY) {
-                onUpdateAvatarState(cur.copy(statusText = null))
+            if (cur.emotion == shown) {
+                onUpdateAvatarState(cur.copy(emotion = AvatarEmotion.IDLE, statusText = null))
+            }
+        }
+    }
+
+    /** Show an emotion for a moment, then return to IDLE if it is still the one on screen. */
+    private fun showTransientEmotion(emotion: AvatarEmotion, statusText: String?, durationMs: Long) {
+        val generation = ++emotionGeneration
+        onUpdateAvatarState(avatarStateProvider().copy(emotion = emotion, statusText = statusText))
+        scope.launch {
+            delay(durationMs)
+            val cur = avatarStateProvider()
+            if (generation == emotionGeneration && cur.emotion == emotion) {
+                onUpdateAvatarState(cur.copy(emotion = AvatarEmotion.IDLE, statusText = null))
             }
         }
     }
 
     // ─── Pet Needs & Care Functions (StateMachine-Based) ─────────────────────
-    fun feedPet() {
+    fun feedPet(specificFood: PropType? = null) {
         notifyInteraction()
+        playScene(PetSceneArchetype.EATING, specificFood)
         val result = stateMachine.processTouch(InteractionType.FEED, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
-        applyStateMachineResult(result, InteractionType.FEED)
+        // the scene plays its own timed sounds: drop the reaction's one-shot sound
+        applyStateMachineResult(result.copy(soundAction = null), InteractionType.FEED)
     }
 
     fun cleanPet() {
         notifyInteraction()
+        playScene(PetSceneArchetype.BATH_CLEAN)
         val result = stateMachine.processTouch(InteractionType.CLEAN, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
-        applyStateMachineResult(result, InteractionType.CLEAN)
+        // the scene plays its own timed sounds: drop the reaction's one-shot sound
+        applyStateMachineResult(result.copy(soundAction = null), InteractionType.CLEAN)
     }
 
     fun playWithPet() {
         notifyInteraction()
+        playScene(PetSceneArchetype.PLAY_GAMING)
         val result = stateMachine.processTouch(InteractionType.PLAY, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
-        applyStateMachineResult(result, InteractionType.PLAY)
+        // the scene plays its own timed sounds: drop the reaction's one-shot sound
+        applyStateMachineResult(result.copy(soundAction = null), InteractionType.PLAY)
     }
 
     fun putToSleep() {
@@ -318,22 +354,33 @@ class PetModeController(
     fun applyStateMachineResult(
         result: EmotionTransitionResult,
         type: InteractionType = InteractionType.FEED,
-        zone: TouchZone = TouchZone.FACE_CENTER
+        zone: TouchZone = TouchZone.FACE_CENTER,
+        logToMemory: Boolean = true
     ) {
+        val current = avatarStateProvider()
+        val isCatalogTest = current.statusText?.startsWith("🎭") == true ||
+                current.faceState.speechText?.startsWith("🎭") == true
+        if (isCatalogTest && type != InteractionType.FEED) {
+            logDebug(TAG, "🛡️ applyStateMachineResult skipped emotion override — catalog test active (${current.statusText})")
+            return
+        }
+
         result.needsUpdate?.let { updateFn ->
             _needsState.value = updateFn(_needsState.value)
         }
         result.soundAction?.invoke()
 
-        val current = avatarStateProvider()
         val isDizzyNow = result.emotion == AvatarEmotion.DIZZY
+        val generation = ++emotionGeneration
         onUpdateAvatarState(current.copy(
             emotion = result.emotion,
             isDizzy = isDizzyNow,
             statusText = result.statusText
         ))
 
-        PetMemoryStore.logInteraction(type, zone, result.emotion.name.lowercase())
+        if (logToMemory) {
+            PetMemoryStore.logInteraction(type, zone, result.emotion.name.lowercase())
+        }
 
         if (result.triggerMissileBarrage) {
             onTriggerMissileBarrage?.invoke()
@@ -342,7 +389,9 @@ class PetModeController(
         if (result.emotion != AvatarEmotion.SLEEPING && result.durationMs < Long.MAX_VALUE) {
             scope.launch {
                 delay(result.durationMs)
-                if (avatarStateProvider().emotion == result.emotion) {
+                // only the latest reaction may end itself: an earlier poke's timer must not
+                // cut short a newer reaction that happens to show the same emotion
+                if (generation == emotionGeneration && avatarStateProvider().emotion == result.emotion) {
                     onUpdateAvatarState(avatarStateProvider().copy(
                         emotion = AvatarEmotion.IDLE,
                         isDizzy = false,
@@ -352,6 +401,9 @@ class PetModeController(
             }
         }
     }
+
+    /** Bumped on every state-machine reaction; revert timers check they are still the latest. */
+    private var emotionGeneration = 0L
 
     private fun startAutoSave() {
         autoSaveJob?.cancel()
@@ -381,6 +433,130 @@ class PetModeController(
             state.emotion == AvatarEmotion.EXCITED -> RobotSoundPlayer.playHappy()
             state.emotion == AvatarEmotion.ANGRY -> RobotSoundPlayer.playAlarm()
             else -> {}
+        }
+    }
+
+    private var activeSceneJob: kotlinx.coroutines.Job? = null
+    private var activeSceneEndJob: kotlinx.coroutines.Job? = null
+    private var sceneCounter = 0
+
+    /** มีฉาก (Pet Scene หรือเรื่องอารมณ์) กำลังเล่นอยู่ */
+    val isScenePlaying: Boolean
+        get() = avatarStateProvider().faceState.sceneName.isNotBlank()
+
+    /**
+     * สั่งเล่นฉากสำเร็จรูป (Smart Scene Archetype) พร้อมสุ่มหรือสลับไอเทมตามที่ระบุ
+     * เล่นครบตาม durationMs แล้วคืนสู่โหมดปกติอย่างนุ่มนวล
+     * @param label ข้อความบรรยายบนจอ (เช่นตอนเดโม่)
+     * @return ความยาวของฉาก (ms)
+     */
+    fun playScene(
+        archetype: PetSceneArchetype,
+        specificProp: PropType? = null,
+        durationMs: Long? = null,
+        label: String? = null
+    ): Long {
+        val (faceState, spec) = PetSceneEngine.resolveScene(archetype, specificProp)
+        val duration = durationMs ?: spec.durationMs
+        startScene(faceState.copy(speechText = label), spec.nameTh, spec.cues.ifEmpty { listOf(SceneCue(0L, spec.sound)) },
+            duration, spec.triggerMissileBarrage)
+        return duration
+    }
+
+    /**
+     * เล่นเรื่องสั้นตามอารมณ์ (ตาเยลลี่, seq 82–100) จนจบ — ใช้จากปุ่มเดโม่และคำสั่งเสียง
+     * @return ความยาวของเรื่อง (ms)
+     */
+    fun playMoodStory(story: RiveMoodStory, label: String? = null): Long {
+        val face = RobotFaceState(
+            emotionName = story.emotion.name.lowercase(),
+            sceneName = story.name,
+            speechText = label
+        )
+        val duration = story.durationMs + SCENE_TAIL_MS
+        startScene(face, story.nameTh, story.cues, duration, triggerMissileBarrage = false)
+        return duration
+    }
+
+    /**
+     * สั่งเล่นฉากจากชื่อหรือคีย์เวิร์ด (ไทยหรืออังกฤษ): เรื่องอารมณ์ (ชื่อ/คำเฉพาะ) ก่อน แล้วค่อย Pet Scene
+     * @return ชื่อฉากภาษาไทยที่เล่น หรือ null ถ้าไม่รู้จัก
+     */
+    fun playSceneByNameOrKeyword(keyword: String, specificProp: PropType? = null): String? {
+        val mood = RiveMoodStories.resolveKeyword(keyword)
+        if (mood != null) {
+            logDebug(TAG, "🎬 playSceneByNameOrKeyword: '$keyword' -> mood ${mood.name}")
+            playMoodStory(mood)
+            return mood.nameTh
+        }
+        val resolved = PetSceneEngine.resolveFromKeyword(keyword, specificProp)
+        if (resolved != null) {
+            val (faceState, spec) = resolved
+            logDebug(TAG, "🎬 playSceneByNameOrKeyword: '$keyword' -> ${spec.archetype.name}")
+            startScene(faceState, spec.nameTh, spec.cues.ifEmpty { listOf(SceneCue(0L, spec.sound)) },
+                spec.durationMs, spec.triggerMissileBarrage)
+            return spec.nameTh
+        }
+        logDebug(TAG, "⚠️ playSceneByNameOrKeyword: No match for '$keyword'")
+        return null
+    }
+
+    /** หยุดฉากที่กำลังเล่น (เสียง + ตัวจับเวลา) และคืนหน้าปกติ */
+    fun stopScene() {
+        activeSceneJob?.cancel()
+        activeSceneEndJob?.cancel()
+        activeSceneJob = null
+        activeSceneEndJob = null
+        val current = avatarStateProvider()
+        if (current.faceState.sceneName.isNotBlank()) {
+            onUpdateAvatarState(current.copy(emotion = AvatarEmotion.IDLE, faceState = RobotFaceState()))
+        }
+    }
+
+    /**
+     * เริ่มฉาก: ใส่ sceneId ใหม่ (Rive เล่น story ตั้งแต่ต้นแม้เป็นฉากเดิม), เล่นเสียงตามไทม์ไลน์ของบท,
+     * แล้วคืนหน้าปกติเมื่อจบ — ฉากใหม่ยกเลิกเสียง/ตัวจับเวลาของฉากเก่าทั้งหมด
+     */
+    private fun startScene(
+        faceState: RobotFaceState,
+        nameTh: String,
+        cues: List<SceneCue>,
+        durationMs: Long,
+        triggerMissileBarrage: Boolean
+    ) {
+        val face = faceState.copy(sceneId = ++sceneCounter)
+        logDebug(TAG, "🎬 startScene: ${face.sceneName} ($nameTh) item=${face.sceneItem} duration=${durationMs}ms cues=${cues.size}")
+
+        notifyInteraction()
+        activeSceneJob?.cancel()
+        activeSceneEndJob?.cancel()
+        onUpdateAvatarState(avatarStateProvider().withFace(face))
+
+        if (triggerMissileBarrage) {
+            onTriggerMissileBarrage?.invoke()
+        }
+
+        val sceneJob = scope.launch {
+            var elapsed = 0L
+            for (cue in cues.sortedBy { it.atMs }) {
+                if (cue.atMs >= durationMs) break
+                delay(cue.atMs - elapsed)
+                elapsed = cue.atMs
+                RobotSoundPlayer.play(cue.sound)
+            }
+        }
+        activeSceneJob = sceneJob
+        activeSceneEndJob = scope.launch {
+            delay(durationMs)
+            sceneJob.cancel()
+            val current = avatarStateProvider()
+            // คืนหน้าปกติเฉพาะเมื่อยังเป็นฉากนี้อยู่ (ไม่ทับหน้าที่ถูกตั้งใหม่ระหว่างฉาก)
+            if (current.faceState.sceneId != face.sceneId) return@launch
+            logDebug(TAG, "🎬 scene finished: ${face.sceneName} ($nameTh) after ${durationMs}ms")
+            onUpdateAvatarState(current.copy(
+                emotion = AvatarEmotion.IDLE,
+                faceState = RobotFaceState()
+            ))
         }
     }
 
@@ -469,6 +645,26 @@ class PetModeController(
         onUpdateAvatarState(current.copy(faceState = newFace))
     }
 
+    /** สวมอุปกรณ์เสริมจากคลัง (ไม่ถอดถ้าใส่อยู่แล้ว ต่างจาก toggleProp) */
+    fun wearStockProp(prop: PropType) {
+        val current = avatarStateProvider()
+        if (prop in current.faceState.props) return
+        toggleProp(prop)
+    }
+
+    /** ถอดอุปกรณ์เสริมจากคลังเฉพาะชิ้น (ไม่ทำอะไรถ้าไม่ได้ใส่) */
+    fun removeStockProp(prop: PropType) {
+        val current = avatarStateProvider()
+        if (prop !in current.faceState.props) return
+        toggleProp(prop)
+    }
+
+    /** ปลุกจาก tool (ใช้กฎเดียวกับหงายจอขึ้น: หลับพอแล้วดีใจ ยังง่วงอยู่ก็หงุดหงิด) */
+    fun wakeUpFromTool() {
+        notifyInteraction()
+        wakeUp()
+    }
+
     /**
      * อัปเดตสถานะใบหน้าจาก JSON string หรือ formatted command "EMOTION|key=val|..." หรือ "CUSTOM_PROP|action=..."
      */
@@ -553,35 +749,48 @@ class PetModeController(
     private fun startIdleLoop() {
         idleJob?.cancel()
         idleJob = scope.launch {
-            var lastDecayTime = System.currentTimeMillis()
+            var lastDecayTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            var lastPassiveTime = 0L
+            var lastYawnTime = 0L
             while (isActive) {
                 delay(Random.nextLong(2800, 5200))
 
                 val current = avatarStateProvider()
-                val now = System.currentTimeMillis()
+                val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
                 val inactiveDuration = now - lastInteractionTime
 
                 // ─── Tamagotchi Needs Decay & Passive Emotion Loop (Every ~20s) ───
                 if (now - lastDecayTime >= 20_000L) {
                     val elapsed = now - lastDecayTime
-                    _needsState.value = _needsState.value.decay(elapsed)
+                    _needsState.value = _needsState.value.decay(
+                        elapsed,
+                        isSleeping = current.emotion == AvatarEmotion.SLEEPING
+                    )
                     lastDecayTime = now
 
-                    // State machine passive emotion check (e.g. hungry -> angry, bored, tired)
-                    val passiveResult = stateMachine.resolvePassiveEmotion(_needsState.value, current.emotion)
-                    if (passiveResult != null) {
-                        applyStateMachineResult(passiveResult, InteractionType.PAT, TouchZone.FACE_CENTER)
+                    // State machine passive emotion check (e.g. hungry -> angry, bored, tired).
+                    // At most once a minute: a hungry pet used to turn ANGRY again every 20 s.
+                    // Not logged as an interaction: it used to be recorded as a "pat",
+                    // inflating pats and timesGotAngry in PetMemory.
+                    if (now - lastPassiveTime >= PASSIVE_EMOTION_COOLDOWN_MS && current.faceState.sceneName.isBlank()) {
+                        val passiveResult = stateMachine.resolvePassiveEmotion(_needsState.value, current.emotion)
+                        if (passiveResult != null) {
+                            lastPassiveTime = now
+                            applyStateMachineResult(passiveResult, InteractionType.PAT, TouchZone.FACE_CENTER, logToMemory = false)
+                        }
                     }
                 }
 
-                // If busy or speaking, don't wander gaze abruptly
-                if (current.isSpeaking || current.emotion == AvatarEmotion.LISTENING || current.isDizzy) {
+                // If busy, speaking or playing a scene, don't wander gaze abruptly
+                if (current.isSpeaking || current.emotion == AvatarEmotion.LISTENING || current.isDizzy ||
+                    current.faceState.sceneName.isNotBlank()
+                ) {
                     continue
                 }
 
                 when {
-                    // หลับลึกเมื่อไม่มีการแตะเล่นนานเกิน 150 วินาที (2.5 นาที)
-                    inactiveDuration > 150_000L -> {
+                    // หลับลึกเมื่อไม่มีการแตะเล่นนานเกิน 150 วินาที เฉพาะเมื่อพลังงานต่ำ (<= 35%)
+                    inactiveDuration > 150_000L && _needsState.value.energy <= 35f -> {
                         if (current.emotion != AvatarEmotion.SLEEPING) {
                             RobotSoundPlayer.playYawn()
                             onUpdateAvatarState(current.copy(
@@ -592,8 +801,23 @@ class PetModeController(
                             ))
                         }
                     }
-                    // หาวนอนเมื่อเงียบนานเกิน 60 วินาที
-                    inactiveDuration > 60_000L && current.emotion == AvatarEmotion.IDLE -> {
+                    // พักสายตาเมื่อไม่มีการใช้งานยาวนานมาก (> 10 นาที) แม้พลังงานจะยังเหลือ
+                    inactiveDuration > 600_000L -> {
+                        if (current.emotion != AvatarEmotion.SLEEPING) {
+                            RobotSoundPlayer.playYawn()
+                            onUpdateAvatarState(current.copy(
+                                emotion = AvatarEmotion.SLEEPING,
+                                gazeOffsetX = 0f,
+                                gazeOffsetY = 0f,
+                                statusText = "พักสายตาแป๊บนึงน้า Zzz..."
+                            ))
+                        }
+                    }
+                    // หาวนอนเมื่อเงียบนานเกิน 60 วินาที และพลังงานเริ่มลดลง (<= 60%)
+                    inactiveDuration > 60_000L && current.emotion == AvatarEmotion.IDLE &&
+                            _needsState.value.energy <= 60f && now - lastYawnTime >= YAWN_COOLDOWN_MS -> {
+                        // once per cooldown: this branch used to fire on every loop tick (3-5 s)
+                        lastYawnTime = now
                         RobotSoundPlayer.playYawn()
                         onUpdateAvatarState(current.copy(
                             emotion = AvatarEmotion.SLEEPING,
@@ -658,7 +882,14 @@ class PetModeController(
     }
 
     private fun wakeUp() {
-        val result = stateMachine.processTouch(InteractionType.WAKE_UP, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
+        val current = avatarStateProvider()
+        val isCatalogTest = current.statusText?.startsWith("🎭") == true ||
+                current.faceState.speechText?.startsWith("🎭") == true
+        if (isCatalogTest) {
+            logDebug(TAG, "🛡️ wakeUp() skipped — catalog test active (${current.statusText})")
+            return
+        }
+        val result = stateMachine.processTouch(InteractionType.WAKE_UP, TouchZone.FACE_CENTER, _needsState.value, current.emotion)
         applyStateMachineResult(result, InteractionType.WAKE_UP, TouchZone.FACE_CENTER)
     }
 
@@ -705,16 +936,71 @@ class PetModeController(
     }
 
     /** สไลด์นิ้วตามหน้าจอ (Gaze Following Touch) */
-    fun onGazeTouch(normX: Float, normY: Float) {
+    fun onGazeTouch(normX: Float, normY: Float, faceScaleFactor: Float = 1f) {
         notifyInteraction()
         val current = avatarStateProvider()
         if (current.emotion != AvatarEmotion.SLEEPING && !current.isDizzy) {
             onUpdateAvatarState(current.copy(
                 gazeOffsetX = normX.coerceIn(-1f, 1f),
-                gazeOffsetY = normY.coerceIn(-1f, 1f)
+                gazeOffsetY = normY.coerceIn(-1f, 1f),
+                faceScaleFactor = faceScaleFactor
             ))
         }
     }
+
+    /** ปรับขนาดดวงตาตามระยะห่างของใบหน้า (Face Distance Scale Factor) */
+    fun onFaceDistance(scale: Float) {
+        val current = avatarStateProvider()
+        if (kotlin.math.abs(current.faceScaleFactor - scale) > 0.02f) {
+            onUpdateAvatarState(current.copy(faceScaleFactor = scale))
+        }
+    }
+
+    /** จัดการเมื่อใบหน้าหายไปจากระยะสายตาเกินเวลา (>45s -> BORED, >180s -> SLEEPING) */
+    fun onFaceAbsenceTimeout(emotion: AvatarEmotion) {
+        val current = avatarStateProvider()
+        // ไม่ขัดจังหวะขณะกำลังคุย กำลังฟัง หรือกำลังรันฉาก/แคตตาล็อกทดสอบ
+        val isCatalogTest = current.statusText?.startsWith("🎭") == true ||
+                current.faceState.speechText?.startsWith("🎭") == true
+        if (current.isSpeaking ||
+            current.emotion == AvatarEmotion.LISTENING ||
+            current.emotion == AvatarEmotion.SPEAKING ||
+            isCatalogTest) {
+            return
+        }
+
+        if (emotion == AvatarEmotion.SLEEPING) {
+            // หากพลังงานยังสูง (> 30f) จะไม่ถูกบังคับหลับลึกเพียงเพราะมองไม่เห็นหน้า
+            // แต่จะเปลี่ยนเป็น BORED (เหงา/รอบอส)
+            if (_needsState.value.energy > 30f) {
+                if (current.emotion == AvatarEmotion.IDLE) {
+                    logDebug(TAG, "😴 Face absence reached sleep timeout, but energy is high (${_needsState.value.energy}%) -> transitioning to BORED")
+                    onUpdateAvatarState(current.copy(
+                        emotion = AvatarEmotion.BORED,
+                        statusText = "บอสหายไปไหนน้า... น้องเหงาแล้ว 🥺"
+                    ))
+                }
+                return
+            }
+            // พลังงานต่ำ (<= 30f) หลับพักผ่อนตามธรรมชาติ
+            if (current.emotion == AvatarEmotion.IDLE || current.emotion == AvatarEmotion.BORED) {
+                logDebug(TAG, "😴 Low energy (${_needsState.value.energy}%) + face absent -> Sleeping")
+                RobotSoundPlayer.playYawn()
+                onUpdateAvatarState(current.copy(
+                    emotion = AvatarEmotion.SLEEPING,
+                    statusText = "พลังงานหมดแล้ว... ขอหลับก่อนน้า Zzz 💤"
+                ))
+            }
+        } else if (emotion == AvatarEmotion.BORED) {
+            if (current.emotion == AvatarEmotion.IDLE) {
+                onUpdateAvatarState(current.copy(
+                    emotion = AvatarEmotion.BORED,
+                    statusText = "บอสอยู่ไหนน้าา... 👀"
+                ))
+            }
+        }
+    }
+
 
     /** แสดงอาการวิงเวียนเมื่อถูกเขย่า (Dizzy Spiral Eyes) */
     fun onDizzy() {
@@ -749,7 +1035,12 @@ class PetModeController(
     }
 
     /** เสียงดัง / ตะโกน / ตะคอก (Loud Noise -> Surprised or Sad) */
+    private var lastLoudNoiseTime = 0L
+
     fun onLoudNoise(audioLevel: Float = 0.8f) {
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        if (now - lastLoudNoiseTime < LOUD_NOISE_COOLDOWN_MS) return
+        lastLoudNoiseTime = now
         logDebug(TAG, "📢 [Audio] onLoudNoise(level=$audioLevel) -> StateMachine LOUD_NOISE")
         notifyInteraction()
         val result = stateMachine.processTouch(InteractionType.LOUD_NOISE, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
@@ -881,10 +1172,13 @@ class PetModeController(
             ))
         } else {
             RobotSoundPlayer.playHappy()
-            onUpdateAvatarState(avatarStateProvider().copy(
-                emotion = AvatarEmotion.IDLE,
-                statusText = "ปิดโหมดสายตรวจแล้วค่ะ"
-            ))
+            val offText = "ปิดโหมดสายตรวจแล้วค่ะ"
+            onUpdateAvatarState(avatarStateProvider().copy(emotion = AvatarEmotion.IDLE, statusText = offText))
+            scope.launch {
+                delay(3000L)
+                val cur = avatarStateProvider()
+                if (cur.statusText == offText) onUpdateAvatarState(cur.copy(statusText = null))
+            }
         }
     }
 
@@ -950,7 +1244,9 @@ class PetModeController(
         focusJob?.cancel()
         focusJob = null
         RobotSoundPlayer.playConfused()
-        onUpdateAvatarState(avatarStateProvider().copy(
+        val cur = avatarStateProvider()
+        onUpdateAvatarState(cur.copy(
+            emotion = if (cur.emotion == AvatarEmotion.THINKING) AvatarEmotion.IDLE else cur.emotion,
             statusText = "⏸️ พักการจับเวลาชั่วคราวค่ะ"
         ))
     }
@@ -972,10 +1268,7 @@ class PetModeController(
     private fun onFocusComplete() {
         _isFocusRunning.value = false
         RobotSoundPlayer.playWakeUp()
-        onUpdateAvatarState(avatarStateProvider().copy(
-            emotion = AvatarEmotion.EXCITED,
-            statusText = "🎉 ยอดเยี่ยมมากค่ะ! ครบเวลาโฟกัสแล้ว ได้เวลาพักผ่อนแล้วนะคะ!"
-        ))
+        showTransientEmotion(AvatarEmotion.EXCITED, "🎉 ยอดเยี่ยมมากค่ะ! ครบเวลาโฟกัสแล้ว ได้เวลาพักผ่อนแล้วนะคะ!", 5000L)
     }
 
     // ─── 5. Mini-Games: Fortune Oracle ─────────────────────────────────────────
@@ -996,9 +1289,6 @@ class PetModeController(
         RobotSoundPlayer.playSurprise()
         val picked = oraclePredictions.random()
         _fortuneText.value = picked
-        onUpdateAvatarState(avatarStateProvider().copy(
-            emotion = AvatarEmotion.EXCITED,
-            statusText = picked
-        ))
+        showTransientEmotion(AvatarEmotion.EXCITED, picked, 6000L)
     }
 }

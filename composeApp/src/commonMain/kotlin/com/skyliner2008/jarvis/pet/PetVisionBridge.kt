@@ -59,6 +59,25 @@ object PetVisionBridge {
     var onAiVisionStreamToggle: ((Boolean) -> Unit)? = null
 
     /**
+     * Callback ส่งสเกลระยะห่างของใบหน้า (Face Distance Scale Factor) สำหรับปรับขนาดดวงตาแบบ 2.5D
+     */
+    var onFaceDistanceDetected: ((Float) -> Unit)? = null
+
+    /**
+     * Callback แจ้งเตือนเมื่อใบหน้าหายไปจากระยะสายตาเกินเวลาที่กำหนด (>45s -> BORED, >180s -> SLEEPING)
+     */
+    var onFaceAbsenceTimeout: ((AvatarEmotion) -> Unit)? = null
+
+    /**
+     * Callback รีเซ็ต Absence Timer เมื่อมีการปฏิสัมพันธ์ (Touch, Voice, Care)
+     */
+    var onResetAbsence: (() -> Unit)? = null
+
+    fun resetAbsenceTimer() {
+        onResetAbsence?.invoke()
+    }
+
+    /**
      * สั่งเปิดหรือปิดสายตาสัตว์เลี้ยง (Camera Preview Window)
      */
     fun requestEyeOpen(open: Boolean) {

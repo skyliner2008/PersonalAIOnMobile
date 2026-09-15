@@ -62,6 +62,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                 "device_always_live"   -> executeAlwaysLive(args)
                 "device_avatar_emotion" -> executeAvatarEmotion(args)
                 "device_custom_prop"   -> executeCustomProp(args)
+                "device_pet_care"      -> executePetCare(args)
 
                 // ── Smart Notifications (Driving Mode) ──
                 "device_notification_read"  -> executeNotificationRead(args)
@@ -557,23 +558,36 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         }
     }
 
-    private fun executeAvatarEmotion(args: Map<String, String>): String {
+    private suspend fun executeAvatarEmotion(args: Map<String, String>): String {
         val action = args["action"]?.lowercase()?.trim() ?: "demo"
         val rawEmotion = (args["emotion"] ?: args["name"])?.lowercase()?.trim()
-
         val mainActivity = MainActivity.instance
+
+        // 1. ตรวจสอบการสั่งเจาะจงหน้าที่ 1 ถึง 50 (LOOI Robot Moodset Catalog)
+        val targetPage = args["page"]?.toIntOrNull()
+            ?: args["page_number"]?.toIntOrNull()
+            ?: if (action in listOf("page", "หน้า", "หน้าที่")) rawEmotion?.toIntOrNull() else null
+            ?: rawEmotion?.toIntOrNull()?.takeIf { it in 1..50 }
+
+        if (targetPage != null && targetPage in 1..50) {
+            mainActivity?.triggerTestEmotion("PAGE|$targetPage")
+                ?: broadcastEmotionIntent("PAGE|$targetPage")
+            val item = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.findByPage(targetPage)
+            return "📖 แสดง Moodset หน้าที่ $targetPage: ${item?.nameEn} (${item?.nameTh}) บนหน้าจอเรียบร้อยแล้วค่ะบอส! [แผ่นที่ ${item?.sheet}: ${item?.description}]"
+        }
+
         return when (action) {
-            "demo", "โชว์", "แสดงทั้งหมด", "all" -> {
-                mainActivity?.triggerTestEmotion("DEMO")
-                    ?: broadcastEmotionIntent("DEMO")
-                "🎭 เริ่มโหมด Emotion Showcase Demo แล้วค่ะ! Avatar กำลังแสดงสีหน้า แววตา และสีพื้นหลังครบทั้ง 10 อารมณ์บนหน้าจอเรียบร้อยแล้วค่ะ"
+            "demo", "โชว์", "แสดงทั้งหมด", "all", "play_all", "หน้าทั้งหมด", "ทุกหน้า" -> {
+                mainActivity?.triggerTestEmotion("ALL")
+                    ?: broadcastEmotionIntent("ALL")
+                "🎭 เริ่มเล่นแสดง Moodset ครบทั้งหมด 50 หน้า (แผ่นที่ 1: หน้า 1-20 และ แผ่นที่ 2: หน้า 21-50) วนตรวจหน้าจอแบบละ 4 วินาทีเรียบร้อยแล้วค่ะบอส!"
             }
             "reset", "clear", "ปกติ", "รีเซ็ต", "auto" -> {
                 mainActivity?.triggerTestEmotion("RESET")
                     ?: broadcastEmotionIntent("RESET")
                 "🎭 รีเซ็ตเรียบร้อยค่ะ Avatar กลับสู่โหมดตรวจจับอัตโนมัติตามธรรมชาติแล้วค่ะ"
             }
-            "set", "ตั้งค่า", "เปลี่ยน", "ทำหน้า" -> {
+            "scene", "ฉาก", "set", "ตั้งค่า", "เปลี่ยน", "ทำหน้า" -> {
                 val emotionKey = when {
                     rawEmotion.isNullOrBlank() -> "HAPPY"
                     rawEmotion.contains("happy") || rawEmotion.contains("ดีใจ") || rawEmotion.contains("ยิ้ม") -> "HAPPY"
@@ -598,6 +612,54 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                 val background = args["background"]?.lowercase()?.trim() ?: ""
                 val props = args["props"]?.lowercase()?.trim() ?: ""
                 val gesture = args["gesture"]?.lowercase()?.trim() ?: ""
+                val sceneName = args["scene"] ?: args["scene_name"]
+
+                // ถ้ามีการระบุ scene ให้ดึงค่าจาก PetSceneEngine
+                if (action == "scene" || action == "ฉาก" || !sceneName.isNullOrBlank()) {
+                    val detectedProp = com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState.resolvePropType(props)
+                        ?: com.skyliner2008.jarvis.pet.PetSceneEngine.detectSpecificPropFromText(props)
+                        ?: sceneName?.let { com.skyliner2008.jarvis.pet.PetSceneEngine.detectSpecificPropFromText(it) }
+
+                    val keyword = sceneName?.takeIf { it.isNotBlank() }
+                        ?: props.takeIf { it.isNotBlank() }
+                        ?: rawEmotion?.takeIf { it.isNotBlank() }
+                        ?: "eating"
+                    // the model often opens Pet mode and asks for a scene in the same round:
+                    // give the pet screen a moment to start its controller
+                    var activePet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+                    var waited = 0
+                    while (activePet == null && waited < 3000) {
+                        kotlinx.coroutines.delay(100)
+                        waited += 100
+                        activePet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+                    }
+                    if (activePet != null) {
+                        val played = activePet.playSceneByNameOrKeyword(keyword, detectedProp)
+                        if (played != null) {
+                            return "🎬 เริ่มเล่นฉาก '$played' แล้ว จะเล่นจนจบเองค่ะบอส (ไม่ต้องสั่งซ้ำ)"
+                        }
+                    }
+                    val resolved = com.skyliner2008.jarvis.pet.PetSceneEngine.resolveFromKeyword(keyword, detectedProp)
+                    if (resolved != null) {
+                        val (sceneFace, spec) = resolved
+                        val faceCmd = buildString {
+                            append(sceneFace.emotion.name.uppercase())
+                            val extras = mutableListOf<String>()
+                            if (sceneFace.eyeStyleName.isNotBlank() && sceneFace.eyeStyleName != "default") extras.add("eye_style=${sceneFace.eyeStyleName}")
+                            if (sceneFace.backgroundName.isNotBlank() && sceneFace.backgroundName != "default") extras.add("background=${sceneFace.backgroundName}")
+                            if (sceneFace.propsRaw.isNotBlank()) extras.add("props=${sceneFace.propsRaw}")
+                            if (sceneFace.gestureName.isNotBlank() && sceneFace.gestureName != "idle") extras.add("gesture=${sceneFace.gestureName}")
+                            if (extras.isNotEmpty()) {
+                                append("|")
+                                append(extras.joinToString("|"))
+                            }
+                        }
+                        mainActivity?.triggerTestEmotion(faceCmd) ?: broadcastEmotionIntent(faceCmd)
+                        spec.sound.let { com.skyliner2008.jarvis.sound.RobotSoundPlayer.play(it) }
+                        // (the missile barrage overlay only exists inside Pet mode, handled above)
+                        return "🎬 เริ่มเล่นฉาก '${spec.nameTh}' เรียบร้อยแล้วค่ะบอส!"
+                    }
+                }
 
                 // Encode all parameters into the emotion command string as JSON-like
                 val faceCmd = buildString {
@@ -607,15 +669,6 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                     if (background.isNotBlank()) extras.add("background=$background")
                     if (props.isNotBlank()) extras.add("props=$props")
                     if (gesture.isNotBlank()) extras.add("gesture=$gesture")
-                    val svgPath = args["svg_path"]?.trim()
-                    if (!svgPath.isNullOrBlank()) {
-                        extras.add("svg_path=$svgPath")
-                        args["prop_name"]?.let { extras.add("prop_name=$it") }
-                        args["prop_color"]?.let { extras.add("prop_color=$it") }
-                        args["prop_position"]?.let { extras.add("prop_position=$it") }
-                        args["prop_anim"]?.let { extras.add("prop_anim=$it") }
-                        args["prop_size"]?.let { extras.add("prop_size=$it") }
-                    }
                     if (extras.isNotEmpty()) {
                         append("|")
                         append(extras.joinToString("|"))
@@ -631,7 +684,6 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                     if (background.isNotBlank()) append(" ฉากหลัง=$background")
                     if (props.isNotBlank()) append(" Props=$props")
                     if (gesture.isNotBlank()) append(" ท่าทาง=$gesture")
-                    if (!args["svg_path"].isNullOrBlank()) append(" CustomProp=${args["prop_name"] ?: "SVG"}")
                     append(" เรียบร้อยแล้วค่ะบอส!")
                 }
                 desc
@@ -643,7 +695,6 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                     "🎭 ปรับสีหน้า Avatar เป็นโหมด ${rawEmotion.uppercase()} เรียบร้อยแล้วค่ะบอส!"
                 } else {
                     mainActivity?.triggerTestEmotion("DEMO")
-                        ?: broadcastEmotionIntent("DEMO")
                     "🎭 เริ่มโหมด Emotion Showcase Demo เรียบร้อยแล้วค่ะ!"
                 }
             }
@@ -652,81 +703,119 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
     private fun executeCustomProp(args: Map<String, String>): String {
         val action = args["action"]?.lowercase()?.trim() ?: "add"
-        val name = args["name"]?.trim() ?: "custom_prop"
+        val name = args["name"]?.trim().orEmpty().ifBlank { "prop" }
+        val svgPath = args["svg_path"]?.trim().orEmpty()
         val mainActivity = MainActivity.instance
+        val pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+
+        fun sendCustomPropCommand(extra: Map<String, String>) {
+            val cmd = "CUSTOM_PROP|" + extra.entries.joinToString("|") { "${it.key}=${it.value.replace("|", " ")}" }
+            if (pet != null) pet.updateRobotFace(cmd)
+            else mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+        }
 
         return when (action) {
             "clear", "ล้าง", "ถอดหมด", "reset" -> {
-                val cmd = "CUSTOM_PROP|action=clear"
-                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
-                "✨ ล้างอุปกรณ์เสริมเวกเตอร์ทั้งหมดเรียบร้อยแล้วค่ะ"
+                if (pet != null) {
+                    pet.clearProps()
+                } else {
+                    val cmd = "IDLE|props=|background=default"
+                    mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                }
+                "✨ ถอดอุปกรณ์เสริมทั้งหมดเรียบร้อยแล้วค่ะ"
             }
-            "remove", "ถอด", "ลบ" -> {
-                val cmd = "CUSTOM_PROP|action=remove|name=$name"
-                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+            "remove", "ถอด", "ลบ", "delete" -> {
+                // remove only the named item (it used to clear every prop and reset the face)
+                val stock = com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState.resolvePropType(name)
+                if (pet != null) {
+                    if (stock != null) pet.removeStockProp(stock)
+                    pet.removeCustomProp(name)
+                } else {
+                    sendCustomPropCommand(mapOf("action" to "remove", "name" to name))
+                }
                 "✨ ถอดอุปกรณ์เสริม '$name' ออกเรียบร้อยแล้วค่ะ"
             }
-            "delete", "ลบถาวร" -> {
-                com.skyliner2008.jarvis.pet.PetCustomPropStore.deleteCustomProp(name)
-                val cmd = "CUSTOM_PROP|action=remove|name=$name"
-                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
-                "🗑️ ลบอุปกรณ์เสริม '$name' ออกจากคลังถาวรเรียบร้อยแล้วค่ะ"
-            }
             "add", "ใส่", "เพิ่ม", "สวม", "set" -> {
-                val svgPath = args["svg_path"]?.trim()
-                val existingProp = if (svgPath.isNullOrBlank()) {
-                    com.skyliner2008.jarvis.pet.PetCustomPropStore.findPropByNameOrId(name)
-                } else null
-
-                if (svgPath.isNullOrBlank() && existingProp == null) {
-                    return "❌ ไม่พบอุปกรณ์เสริม '$name' ในคลัง และไม่ได้ระบุ svg_path สำหรับการสร้างใหม่"
+                if (svgPath.isNotBlank()) {
+                    // a freshly conjured vector prop (persisted by PetCustomPropStore)
+                    val extra = linkedMapOf("action" to "add", "name" to name, "svg_path" to svgPath)
+                    args["color"]?.let { extra["color"] = it }
+                    args["position"]?.let { extra["position"] = it }
+                    args["animation"]?.let { extra["animation"] = it }
+                    args["size"]?.let { extra["size"] = it }
+                    sendCustomPropCommand(extra)
+                    return "✨ เสกอุปกรณ์เสริม '$name' จากเวกเตอร์ SVG และสวมให้เรียบร้อยแล้วค่ะ!"
                 }
-
-                val finalSvg = svgPath ?: existingProp?.svgPath ?: ""
-                val color = args["color"] ?: args["fill_color"] ?: existingProp?.fillColor ?: "#FFD700"
-                val strokeColor = args["stroke_color"] ?: existingProp?.strokeColor ?: ""
-                val strokeWidth = args["stroke_width"] ?: existingProp?.strokeWidth?.toString() ?: "0"
-                val position = args["position"] ?: existingProp?.position?.name?.lowercase() ?: "forehead"
-                val size = args["size"] ?: existingProp?.sizeDp?.toString() ?: "0"
-                val animation = args["animation"] ?: args["anim"] ?: existingProp?.animation?.name?.lowercase() ?: "float_bob"
-
-                val posEnum = try {
-                    com.skyliner2008.jarvis.ui.component.avatar.PropPosition.valueOf(position.uppercase())
-                } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.PropPosition.FOREHEAD }
-                val animEnum = try {
-                    com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.valueOf(animation.uppercase())
-                } catch (_: Exception) { com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation.FLOAT_BOB }
-
-                val propToSave = com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp(
-                    id = existingProp?.id ?: name,
-                    name = name,
-                    svgPath = finalSvg,
-                    fillColor = color,
-                    strokeColor = strokeColor.ifBlank { null },
-                    strokeWidth = strokeWidth.toFloatOrNull() ?: 0f,
-                    position = posEnum,
-                    sizeDp = size.toFloatOrNull() ?: 0f,
-                    animation = animEnum
-                )
-                com.skyliner2008.jarvis.pet.PetCustomPropStore.saveCustomProp(propToSave)
-
-                val cmd = buildString {
-                    append("CUSTOM_PROP|action=add")
-                    append("|name=$name")
-                    append("|svg_path=$finalSvg")
-                    append("|color=$color")
-                    if (strokeColor.isNotBlank()) append("|stroke_color=$strokeColor")
-                    append("|stroke_width=$strokeWidth")
-                    append("|position=$position")
-                    append("|size=$size")
-                    append("|animation=$animation")
+                val stored = com.skyliner2008.jarvis.pet.PetCustomPropStore.findPropByNameOrId(name)
+                if (stored != null) {
+                    sendCustomPropCommand(mapOf("action" to "add", "name" to name))
+                    return "✨ หยิบ '$name' ที่เคยเสกไว้มาสวมให้แล้วค่ะ!"
                 }
-                mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
-                val sourceMsg = if (svgPath.isNullOrBlank()) "จากคลังถาวร" else "และบันทึกเข้าคลังถาวร"
-                "✨ เสกและสวมใส่อุปกรณ์เสริมเวกเตอร์ '$name' $sourceMsg ที่ตำแหน่ง $position ให้หุ่นยนต์เรียบร้อยแล้วค่ะ!"
+                val stock = com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState.resolvePropType(name)
+                if (stock != null) {
+                    if (pet != null) {
+                        pet.wearStockProp(stock)
+                    } else {
+                        val cmd = "HAPPY|props=${stock.name.lowercase()}"
+                        mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    }
+                    return "✨ สวมใส่อุปกรณ์เสริม '${stock.name.lowercase()}' จากคลังสำเร็จรูปเรียบร้อยแล้วค่ะ!"
+                }
+                val resolved = com.skyliner2008.jarvis.pet.PetSceneEngine.resolveFromKeyword(name)
+                if (resolved != null) {
+                    val (_, spec) = resolved
+                    if (pet != null) {
+                        pet.playSceneByNameOrKeyword(name)
+                    } else {
+                        val (faceState, _) = resolved
+                        val cmd = faceState.emotion.name.uppercase() +
+                            (if (faceState.propsRaw.isNotBlank()) "|props=${faceState.propsRaw}" else "")
+                        mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    }
+                    return "✨ ไม่มี '$name' ในคลัง เลยเล่นฉาก '${spec.nameTh}' ที่ใกล้เคียงให้แทนค่ะ"
+                }
+                "❌ ไม่พบอุปกรณ์เสริม '$name' ในคลัง — ส่ง svg_path มาเพื่อเสกชิ้นใหม่ได้ค่ะ"
             }
-            else -> "❌ action ที่รองรับ: add, remove, delete, clear"
+            else -> "❌ action ที่รองรับ: add, remove, clear"
         }
+    }
+
+    /** Pet care through the real needs system (PetModeController / PetStateMachine). */
+    private suspend fun executePetCare(args: Map<String, String>): String {
+        val action = args["action"]?.lowercase()?.trim() ?: "status"
+        // the model often opens Pet mode and cares for the pet in the same round:
+        // give the pet screen a moment to start its controller
+        var pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+        var waited = 0
+        while (pet == null && waited < 3000) {
+            kotlinx.coroutines.delay(100)
+            waited += 100
+            pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+        }
+        pet ?: return "❌ ยังไม่ได้อยู่ในโหมดสัตว์เลี้ยง — เปิดด้วย device_always_live(action='on', mode='pet') ก่อนค่ะ"
+        val food = args["food"]?.let { com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState.resolvePropType(it) }
+        when (action) {
+            "feed" -> pet.feedPet(food)
+            "clean" -> pet.cleanPet()
+            "play" -> pet.playWithPet()
+            "sleep" -> pet.putToSleep()
+            "wake" -> pet.wakeUpFromTool()
+            "status" -> Unit
+            else -> return "❌ action ที่รองรับ: feed, clean, play, sleep, wake, status"
+        }
+        val n = pet.needsState.value
+        fun pct(v: Float) = "${v.toInt()}%"
+        val done = when (action) {
+            "feed" -> "ให้อาหารแล้ว"
+            "clean" -> "อาบน้ำแล้ว"
+            "play" -> "เล่นด้วยแล้ว"
+            "sleep" -> "พานอนแล้ว"
+            "wake" -> "ปลุกแล้ว"
+            else -> "ค่าสถานะปัจจุบัน"
+        }
+        return "🐾 $done — อิ่ม ${pct(n.satiety)} · พลังงาน ${pct(n.energy)} · สะอาด ${pct(n.hygiene)} · " +
+            "สุข ${pct(n.happiness)} · เครียด ${pct(n.stress)} · โกรธสะสม ${pct(n.rage)} · " +
+            "อารมณ์รวม ${n.moodSummary.label} ${n.moodSummary.emoji} · ความสนิท Lv.${n.affectionLevel} (${n.affectionLevelName()})"
     }
 
     private fun broadcastEmotionIntent(cmd: String) {

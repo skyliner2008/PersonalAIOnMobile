@@ -238,10 +238,23 @@ fun App(
         }
         registerTestEmotion?.invoke { emotionCmd ->
             val trimmed = emotionCmd.trim()
-            if (trimmed.equals("DEMO", ignoreCase = true)) {
+            if (trimmed.equals("DEMO", ignoreCase = true) || trimmed.equals("ALL", ignoreCase = true)) {
                 showAlwaysLive = true
                 onStartAlwaysLive()
-                viewModel.startEmotionDemo()
+                viewModel.playAllMoodsets()
+            } else if (trimmed.startsWith("PAGE|") || trimmed.startsWith("PAGE_") || trimmed.startsWith("PAGE:")) {
+                val pageStr = trimmed.substring(5).trim()
+                val pageNum = pageStr.toIntOrNull()
+                if (pageNum != null && pageNum in 1..50) {
+                    showAlwaysLive = true
+                    onStartAlwaysLive()
+                    viewModel.showMoodsetPage(pageNum)
+                }
+            } else if (trimmed.toIntOrNull() != null && trimmed.toInt() in 1..50) {
+                val pageNum = trimmed.toInt()
+                showAlwaysLive = true
+                onStartAlwaysLive()
+                viewModel.showMoodsetPage(pageNum)
             } else if (trimmed.equals("RESET", ignoreCase = true) || trimmed.equals("AUTO", ignoreCase = true) || trimmed.equals("CLEAR", ignoreCase = true)) {
                 viewModel.stopEmotionDemo()
             } else if (trimmed.startsWith("CUSTOM_PROP|")) {
@@ -431,6 +444,8 @@ fun App(
                             onSwitchCamera = { viewModel.switchCamera() },
                             onToggleMute = { viewModel.toggleMute() },
                             onEndLive = {
+                                onStopAlwaysLive()
+                                onSetAlwaysLiveProfile?.invoke(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                                 viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                                 viewModel.stopVoiceInput()
                             },
@@ -746,6 +761,7 @@ fun App(
             onEndLive = {
                 showAlwaysLive = false
                 onStopAlwaysLive()
+                onSetAlwaysLiveProfile?.invoke(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                 viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                 viewModel.stopVoiceInput()
             },
@@ -760,7 +776,7 @@ fun App(
                 if (isDemoRunning) {
                     viewModel.stopEmotionDemo()
                 } else {
-                    viewModel.startEmotionDemo()
+                    viewModel.playSceneShowcase()
                 }
             },
             onSetImmersiveMode = onSetImmersiveMode,

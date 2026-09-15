@@ -165,6 +165,8 @@ class JarvisViewModel(
     val testStatusOverride = MutableStateFlow<String?>(null)
     val testFaceStateOverride = MutableStateFlow<RobotFaceState?>(null)
     private var demoJob: kotlinx.coroutines.Job? = null
+    /** ช่วงพักระหว่างฉากในเดโม่ ให้เห็นหน้าปกติสั้นๆ ก่อนฉากถัดไป */
+    private val SHOWCASE_GAP_MS = 900L
 
     private val _isDemoRunning = MutableStateFlow(false)
     val isDemoRunning: StateFlow<Boolean> = _isDemoRunning.asStateFlow()
@@ -207,6 +209,7 @@ class JarvisViewModel(
         testFaceStateOverride.value = null
         testEmotionOverride.value = null
         testStatusOverride.value = null
+        com.skyliner2008.jarvis.pet.PetModeController.activeInstance?.updateRobotFace(RobotFaceState())
         AmbientSoundPlayer.setTheme(BackgroundTheme.DEFAULT)
         com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🌙 Reverted to normal IDLE face (dark OLED theme, silent ambient)")
     }
@@ -279,14 +282,172 @@ class JarvisViewModel(
         setTestFaceState(currentFace.copy(customProps = emptyList()))
     }
 
+    /**
+     * ปุ่ม "เดโม่": เล่นทุกฉากต่อกันจนจบทีละฉาก — Pet Scene 18 ฉาก แล้วเรื่องอารมณ์ 19 เรื่อง
+     * แต่ละฉากรอจนเล่นจบ (ความยาวจริงของฉาก) ก่อนเริ่มฉากถัดไป
+     */
+    fun playSceneShowcase() {
+        demoJob?.cancel()
+        faceAutoDecayJob?.cancel()
+        testFaceStateOverride.value = null
+        testEmotionOverride.value = null
+        testStatusOverride.value = null
+        _isDemoRunning.value = true
+
+        if (_alwaysLiveProfile.value != AlwaysLiveProfile.PET) {
+            setAlwaysLiveProfile(AlwaysLiveProfile.PET)
+        }
+
+        demoJob = viewModelScope.launch {
+            // wait for the pet screen to start its controller
+            var pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+            var waited = 0
+            while (pet == null && waited < 5000) {
+                delay(100)
+                waited += 100
+                pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
+            }
+            if (pet == null) {
+                com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⚠️ Scene showcase: pet controller not ready")
+                _isDemoRunning.value = false
+                return@launch
+            }
+            val scenes = com.skyliner2008.jarvis.pet.PetSceneArchetype.entries
+            val moods = com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories.ALL
+            val total = scenes.size + moods.size
+            com.skyliner2008.jarvis.logDebug("JarvisAvatar", "▶️ Scene showcase: $total scenes, each played to the end")
+            try {
+                var index = 0
+                for (archetype in scenes) {
+                    index++
+                    val spec = com.skyliner2008.jarvis.pet.PetSceneEngine.ARCHETYPE_SPECS.getValue(archetype)
+                    val label = "🎬 $index/$total · ${spec.nameTh}"
+                    val duration = pet.playScene(archetype, label = label)
+                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎬 Showcase $index/$total ${archetype.name} ${duration}ms")
+                    delay(duration + SHOWCASE_GAP_MS)
+                }
+                for (story in moods) {
+                    index++
+                    val label = "🎬 $index/$total · ${story.nameTh}"
+                    val duration = pet.playMoodStory(story, label = label)
+                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎬 Showcase $index/$total ${story.name} ${duration}ms")
+                    delay(duration + SHOWCASE_GAP_MS)
+                }
+                com.skyliner2008.jarvis.logDebug("JarvisAvatar", "✅ Scene showcase finished all $total scenes")
+            } finally {
+                _isDemoRunning.value = false
+                com.skyliner2008.jarvis.pet.PetModeController.activeInstance?.stopScene()
+            }
+        }
+    }
+
+    /** "เดโม่" (ปุ่ม/เสียง/แชท): ในโหมดสัตว์เลี้ยงเล่นทุกฉากจนจบ, โหมดอื่นใช้โชว์หน้าตาเดิม */
+    private fun startDemoForProfile() {
+        if (_alwaysLiveProfile.value == AlwaysLiveProfile.PET) playSceneShowcase() else startEmotionDemo()
+    }
+
     fun stopEmotionDemo() {
         demoJob?.cancel()
         demoJob = null
+        com.skyliner2008.jarvis.pet.PetModeController.activeInstance?.stopScene()
         faceAutoDecayJob?.cancel()
         faceAutoDecayJob = null
         _isDemoRunning.value = false
         resetToIdleFace()
         com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⏹️ Emotion Demo stopped — returned to Auto mode")
+    }
+
+    private var lastMoodsetPageNumber: Int? = null
+    private var lastMoodsetPageTime: Long = 0L
+
+    /**
+     * แสดง Moodset เฉพาะหน้าที่ 1 ถึง 50 สำหรับการตรวจสอบ
+     * แสดงผล 3-5 วินาที (ดีฟอลต์ 4500ms) แล้วค่อยกลับสู่โหมดปกติ
+     */
+    fun showMoodsetPage(page: Int, durationMs: Long = 8000L) {
+        val item = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.findByPage(page) ?: return
+        demoJob?.cancel()
+        demoJob = null
+        faceAutoDecayJob?.cancel()
+        _isDemoRunning.value = false
+
+        if (_alwaysLiveProfile.value != AlwaysLiveProfile.PET) {
+            setAlwaysLiveProfile(AlwaysLiveProfile.PET)
+        }
+
+        val speech = "🎭 [หน้าที่ ${item.pageNumber}/50: ${item.nameEn} (${item.nameTh})] ${item.description}"
+        val moodFace = RobotFaceState(
+            emotionName = item.emotion.name.lowercase(),
+            eyeStyleName = "default",
+            backgroundName = item.backgroundTheme.name.lowercase(),
+            foregroundName = item.foregroundEffect.name.lowercase(),
+            gestureName = "idle",
+            speechText = speech
+        )
+        testFaceStateOverride.value = moodFace
+        testEmotionOverride.value = item.emotion
+        testStatusOverride.value = speech
+        com.skyliner2008.jarvis.pet.PetModeController.activeInstance?.updateRobotFace(moodFace)
+
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        if (lastMoodsetPageNumber != page || (now - lastMoodsetPageTime) > 1500L) {
+            lastMoodsetPageNumber = page
+            lastMoodsetPageTime = now
+            item.soundEffect?.invoke()
+        }
+        com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎭 Showing Moodset Page ${item.pageNumber}/50: ${item.nameEn} (${item.nameTh}) for ${durationMs}ms")
+
+        faceAutoDecayJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(durationMs)
+            while (voice.isAiSpeaking.value) {
+                kotlinx.coroutines.delay(500L)
+            }
+            kotlinx.coroutines.delay(2500L)
+            if (!_isDemoRunning.value && testEmotionOverride.value == item.emotion) {
+                resetToIdleFace()
+            }
+        }
+    }
+
+    /**
+     * เล่น Moodset ครบทั้งหมด 50 หน้าตามลำดับ (หน้าที่ 1 ถึง 50)
+     * โดยจะแสดงแต่ละหน้า 3-5 วินาที (ดีฟอลต์ 4000ms = 4 วินาที) สลับไปจนครบเพื่อให้ User ตรวจสอบ
+     */
+    fun playAllMoodsets(durationPerMoodMs: Long = 4000L) {
+        demoJob?.cancel()
+        _isDemoRunning.value = true
+
+        if (_alwaysLiveProfile.value != AlwaysLiveProfile.PET) {
+            setAlwaysLiveProfile(AlwaysLiveProfile.PET)
+        }
+
+        demoJob = viewModelScope.launch {
+            com.skyliner2008.jarvis.logDebug("JarvisAvatar", "▶️ Starting All 50 LOOI Moodset Verification Showcase (4.0s per page)...")
+            try {
+                for (item in com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.ITEMS) {
+                    val speech = "🎭 [หน้าที่ ${item.pageNumber}/50: ${item.nameEn} (${item.nameTh})] ${item.description}"
+                    val moodFace = RobotFaceState(
+                        emotionName = item.emotion.name.lowercase(),
+                        eyeStyleName = "default",
+                        backgroundName = item.backgroundTheme.name.lowercase(),
+                        foregroundName = item.foregroundEffect.name.lowercase(),
+                        gestureName = "idle",
+                        speechText = speech
+                    )
+                    testFaceStateOverride.value = moodFace
+                    testEmotionOverride.value = item.emotion
+                    testStatusOverride.value = speech
+                    com.skyliner2008.jarvis.pet.PetModeController.activeInstance?.updateRobotFace(moodFace)
+                    item.soundEffect?.invoke()
+                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎭 Page ${item.pageNumber}/50: ${item.nameEn} (${item.nameTh}) [Sheet ${item.sheet}]")
+                    kotlinx.coroutines.delay(durationPerMoodMs)
+                }
+            } finally {
+                com.skyliner2008.jarvis.logDebug("JarvisAvatar", "⏹️ All 50 LOOI Moodset Showcase finished — returning to normal IDLE")
+                _isDemoRunning.value = false
+                resetToIdleFace()
+            }
+        }
     }
 
     fun startEmotionDemo() {
@@ -439,8 +600,10 @@ class JarvisViewModel(
 
     init {
         chat.onTestEmotion = { emo, status -> setTestEmotion(emo, status) }
-        chat.onStartDemo = { startEmotionDemo() }
+        chat.onStartDemo = { startDemoForProfile() }
         chat.onStopDemo = { stopEmotionDemo() }
+        chat.onPlayMoodsetPage = { showMoodsetPage(it) }
+        chat.onPlayAllMoodsets = { playAllMoodsets() }
 
         // Auto-check and initialize local ONNX if files exist on disk.
         // After init, if the model loaded successfully, mark progress = 2f
@@ -601,8 +764,10 @@ class JarvisViewModel(
 
     init {
         voice.onTestEmotion = { emo, status -> setTestEmotion(emo, status) }
-        voice.onStartDemo = { startEmotionDemo() }
+        voice.onStartDemo = { startDemoForProfile() }
         voice.onStopDemo = { stopEmotionDemo() }
+        voice.onPlayMoodsetPage = { showMoodsetPage(it) }
+        voice.onPlayAllMoodsets = { playAllMoodsets() }
 
         // Track winning live model; do NOT silently overwrite user's DB settings during transient runtime fallback
         orchestrator.onLiveModelChanged = { winningModel ->

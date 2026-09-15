@@ -66,6 +66,9 @@ kotlin {
             // Firebase
             implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.firebase.vertexai.get().toString())
+
+            // Rive Runtime for Android (State Machine & Vector Animation)
+            implementation(libs.rive.android)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -140,6 +143,12 @@ android {
     }
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("androidx.core:core:1.15.0")
+        force("androidx.core:core-ktx:1.15.0")
+    }
+}
 
 sqldelight {
     databases {

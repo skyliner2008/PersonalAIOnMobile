@@ -17,8 +17,8 @@ class AlwaysLiveTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    fun `AvatarEmotion has exactly 17 states`() {
-        assertEquals(17, AvatarEmotion.entries.size)
+    fun `AvatarEmotion has exactly 57 states`() {
+        assertEquals(57, AvatarEmotion.entries.size)
     }
 
     @Test
@@ -27,7 +27,13 @@ class AlwaysLiveTest {
             "IDLE", "LISTENING", "THINKING", "SPEAKING",
             "HAPPY", "SAD", "ANGRY", "LOVE", "SLEEPING", "EXCITED",
             "WINK", "CONFUSED", "POUT", "DIZZY", "SURPRISED", "BORED",
-            "ENRAGED"
+            "ENRAGED",
+            "DEAD", "LAUGHING", "MUSIC", "VR_MODE", "DIVING", "EVIL",
+            "FOCUSED", "SHY", "DISGUSTED", "CAMERA_MODE", "EATING", "DRINKING",
+            "PUZZLED", "SICK", "RICH", "CRYING", "READING", "GAMING", "TRAVELING", "WORKING",
+            "COLD", "HOT", "DETECTIVE", "COOKING", "ART_MODE", "SPACE", "PARTY",
+            "DREAMING", "EXHAUSTED", "ELECTRIC", "SNEAKY", "ROMANTIC", "HERO", "GLITCHED",
+            "MAGIC", "SPORTY", "SCIENTIST", "SCARED", "WARRIOR", "LOW_BATTERY"
         )
         val actualStates = AvatarEmotion.entries.map { it.name }.toSet()
         assertEquals(expectedStates, actualStates)

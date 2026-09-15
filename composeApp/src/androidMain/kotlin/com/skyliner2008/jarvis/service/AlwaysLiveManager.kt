@@ -15,7 +15,10 @@ import com.skyliner2008.jarvis.sound.RobotSoundEngine
 import com.skyliner2008.jarvis.sound.RobotSoundPlayer
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -77,49 +80,13 @@ class AlwaysLiveManager(private val context: Context) {
     val currentProfile: StateFlow<AlwaysLiveProfile> = _currentProfile.asStateFlow()
 
     private var petMotionDetector: PetMotionDetector? = null
+    private var voiceManager: com.skyliner2008.jarvis.voice.VoiceManager? = null
 
-    init {
-        RobotSoundPlayer.handler = { sound ->
-            when (sound) {
-                com.skyliner2008.jarvis.sound.RobotSound.HAPPY -> RobotSoundEngine.playHappyChirp()
-                com.skyliner2008.jarvis.sound.RobotSound.PURR -> RobotSoundEngine.playPurr()
-                com.skyliner2008.jarvis.sound.RobotSound.SURPRISE -> RobotSoundEngine.playSurprise()
-                com.skyliner2008.jarvis.sound.RobotSound.CONFUSED -> RobotSoundEngine.playConfused()
-                com.skyliner2008.jarvis.sound.RobotSound.ALARM -> RobotSoundEngine.playAlarm()
-                com.skyliner2008.jarvis.sound.RobotSound.YAWN -> RobotSoundEngine.playYawn()
-                com.skyliner2008.jarvis.sound.RobotSound.GIGGLE -> RobotSoundEngine.playGiggle()
-                com.skyliner2008.jarvis.sound.RobotSound.WAKE_UP -> RobotSoundEngine.playWakeUp()
-                com.skyliner2008.jarvis.sound.RobotSound.SNORE -> RobotSoundEngine.playSnore()
-                com.skyliner2008.jarvis.sound.RobotSound.CHIRP_START -> RobotSoundEngine.playChirpStart()
-                com.skyliner2008.jarvis.sound.RobotSound.CHIRP_END -> RobotSoundEngine.playChirpEnd()
-                com.skyliner2008.jarvis.sound.RobotSound.ACKNOWLEDGE -> RobotSoundEngine.playAcknowledge()
-                com.skyliner2008.jarvis.sound.RobotSound.SPARKLE -> RobotSoundEngine.playSparkle()
-                com.skyliner2008.jarvis.sound.RobotSound.MISSILE_LAUNCH -> RobotSoundEngine.playMissileLaunch()
-                com.skyliner2008.jarvis.sound.RobotSound.EXPLOSION -> RobotSoundEngine.playExplosion()
-                com.skyliner2008.jarvis.sound.RobotSound.CRUNCH_EAT -> RobotSoundEngine.playCrunchEat()
-                com.skyliner2008.jarvis.sound.RobotSound.BUBBLE_POP -> RobotSoundEngine.playBubblePop()
-                com.skyliner2008.jarvis.sound.RobotSound.BELL_TOY -> RobotSoundEngine.playBellToy()
-                com.skyliner2008.jarvis.sound.RobotSound.SCAN_RADAR -> RobotSoundEngine.playScanRadar()
-            }
-        }
-        com.skyliner2008.jarvis.pet.PetVisionDetector.installBridge()
-        com.skyliner2008.jarvis.sound.AmbientSoundEngine.installBridge()
+    private fun getOrCreateVoiceManager(): com.skyliner2008.jarvis.voice.VoiceManager {
+        return voiceManager ?: com.skyliner2008.jarvis.voice.VoiceManager(context).also { voiceManager = it }
     }
 
-    fun setProfile(profile: AlwaysLiveProfile) {
-        val prev = _currentProfile.value
-        _currentProfile.value = profile
-        Log.i(TAG, "Profile changed: $prev -> $profile")
-        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = (profile == AlwaysLiveProfile.PET)
-        if (profile == AlwaysLiveProfile.PET) {
-            startPetMode()
-        } else if (prev == AlwaysLiveProfile.PET) {
-            stopPetMode()
-        }
-    }
-
-    private fun startPetMode() {
-        Log.i(TAG, "🐾 Starting Pet Mode (Virtual Desk Pet)")
+    private fun installSoundHandler() {
         RobotSoundPlayer.handler = { sound ->
             when (sound) {
                 RobotSound.HAPPY -> RobotSoundEngine.playHappyChirp()
@@ -141,62 +108,82 @@ class AlwaysLiveManager(private val context: Context) {
                 RobotSound.BUBBLE_POP -> RobotSoundEngine.playBubblePop()
                 RobotSound.BELL_TOY -> RobotSoundEngine.playBellToy()
                 RobotSound.SCAN_RADAR -> RobotSoundEngine.playScanRadar()
+                RobotSound.WHOOSH -> RobotSoundEngine.play(RobotSoundEngine.SoundType.WHOOSH)
+                RobotSound.POP -> RobotSoundEngine.play(RobotSoundEngine.SoundType.POP)
+                RobotSound.SLURP -> RobotSoundEngine.play(RobotSoundEngine.SoundType.SLURP)
+                RobotSound.COIN -> RobotSoundEngine.play(RobotSoundEngine.SoundType.COIN)
+                RobotSound.ZAP -> RobotSoundEngine.play(RobotSoundEngine.SoundType.ZAP)
+                RobotSound.SIZZLE -> RobotSoundEngine.play(RobotSoundEngine.SoundType.SIZZLE)
+                RobotSound.RAIN -> RobotSoundEngine.play(RobotSoundEngine.SoundType.RAIN)
+                RobotSound.GAME_BLIP -> RobotSoundEngine.play(RobotSoundEngine.SoundType.GAME_BLIP)
+                RobotSound.TYPING -> RobotSoundEngine.play(RobotSoundEngine.SoundType.TYPING)
+                RobotSound.SOB -> RobotSoundEngine.play(RobotSoundEngine.SoundType.SOB)
+                RobotSound.FANFARE -> RobotSoundEngine.play(RobotSoundEngine.SoundType.FANFARE)
+                RobotSound.POWER_UP -> RobotSoundEngine.play(RobotSoundEngine.SoundType.POWER_UP)
+                RobotSound.MELODY -> RobotSoundEngine.play(RobotSoundEngine.SoundType.MELODY)
+                RobotSound.HEARTBEAT -> RobotSoundEngine.play(RobotSoundEngine.SoundType.HEARTBEAT)
+                RobotSound.GHOST -> RobotSoundEngine.play(RobotSoundEngine.SoundType.GHOST)
             }
+        }
+    }
+
+    init {
+        installSoundHandler()
+        com.skyliner2008.jarvis.pet.PetVisionDetector.installBridge()
+        com.skyliner2008.jarvis.sound.AmbientSoundEngine.installBridge()
+        installDriveBridge()
+    }
+
+    private var faceDownSoundJob: Job? = null
+    private var faceUpSoundJob: Job? = null
+    private var shakeSoundJob: Job? = null
+
+    fun setProfile(profile: AlwaysLiveProfile) {
+        val prev = _currentProfile.value
+        _currentProfile.value = profile
+        Log.i(TAG, "Profile changed: $prev -> $profile")
+        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = (profile == AlwaysLiveProfile.PET)
+        if (profile == AlwaysLiveProfile.PET) {
+            stopDriveMode()
+            if (_state.value == AlwaysLiveState.FULL_SCREEN) {
+                startPetMode()
+            }
+        } else {
+            if (prev == AlwaysLiveProfile.PET) {
+                stopPetMode()
+            }
+            if (_state.value == AlwaysLiveState.FULL_SCREEN) {
+                startDriveMode()
+            }
+        }
+    }
+
+    private fun startPetMode() {
+        Log.i(TAG, "🐾 Starting Pet Mode (Virtual Desk Pet)")
+        installSoundHandler()
+
+        // Only activate motion detection sensor when actively in FULL_SCREEN Desk Pet mode
+        if (_state.value != AlwaysLiveState.FULL_SCREEN || _currentProfile.value != AlwaysLiveProfile.PET) {
+            Log.d(TAG, "Not in FULL_SCREEN PET mode (state=${_state.value}, profile=${_currentProfile.value}) — skipping motion sensor start")
+            return
         }
 
         if (petMotionDetector == null) {
+            // The detector reports every event through PetMotionBridge, which
+            // AlwaysLiveScreen routes into PetModeController -> PetStateMachine
+            // (needs, rage, escalation, sounds). These constructor callbacks used
+            // to ALSO write the avatar state directly, so each shake / flip was
+            // handled twice and the direct write (always DIZZY / SLEEPING / HAPPY)
+            // overwrote the state machine's result (ANGRY, fight-back, grumpy
+            // wake-up). They only log now; the bridge is the single source.
             petMotionDetector = PetMotionDetector(
                 context = context,
-                onShake = {
-                    _avatarState.value = _avatarState.value.copy(
-                        emotion = AvatarEmotion.DIZZY,
-                        isDizzy = true,
-                        statusText = "โอ๊ยย เวียนหัวจังง! @_@"
-                    )
-                    RobotSoundEngine.playConfused()
-                    PetMotionBridge.triggerShake()
-                    scope.launch {
-                        delay(3500)
-                        if (_avatarState.value.isDizzy) {
-                            _avatarState.value = _avatarState.value.copy(
-                                emotion = AvatarEmotion.IDLE,
-                                isDizzy = false,
-                                statusText = null
-                            )
-                        }
-                    }
-                },
-                onFaceDown = {
-                    _avatarState.value = _avatarState.value.copy(
-                        emotion = AvatarEmotion.SLEEPING,
-                        statusText = "คว่ำหน้าจอ -> หลับฟี้ๆ Zzz..."
-                    )
-                    RobotSoundEngine.playYawn()
-                    PetMotionBridge.triggerFaceDown()
-                    scope.launch {
-                        delay(1200)
-                        if (_avatarState.value.emotion == AvatarEmotion.SLEEPING) {
-                            RobotSoundEngine.playSnore()
-                        }
-                    }
-                },
-                onFaceUp = {
-                    _avatarState.value = _avatarState.value.copy(
-                        emotion = AvatarEmotion.HAPPY,
-                        statusText = "หงายหน้าจอขึ้น -> ตื่นแล้วค่าา! ✨"
-                    )
-                    RobotSoundEngine.playWakeUp()
-                    PetMotionBridge.triggerFaceUp()
-                    scope.launch {
-                        delay(2200)
-                        if (_avatarState.value.emotion == AvatarEmotion.HAPPY) {
-                            _avatarState.value = _avatarState.value.copy(
-                                emotion = AvatarEmotion.IDLE,
-                                statusText = null
-                            )
-                        }
-                    }
-                }
+                onShake = { Log.d(TAG, "🌀 shake -> PetMotionBridge") },
+                onFaceDown = { Log.d(TAG, "😴 face down -> PetMotionBridge") },
+                onFaceUp = { Log.d(TAG, "☀️ face up -> PetMotionBridge") },
+                onHeavyShake = { Log.d(TAG, "⚡ heavy shake -> PetMotionBridge") },
+                onBoatRocking = { Log.d(TAG, "⛵ boat rocking -> PetMotionBridge") },
+                onTableThump = { Log.d(TAG, "💥 table thump -> PetMotionBridge") }
             )
         }
         petMotionDetector?.start()
@@ -208,8 +195,132 @@ class AlwaysLiveManager(private val context: Context) {
         com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
         RobotSoundPlayer.handler = null
         com.skyliner2008.jarvis.sound.AmbientSoundEngine.stop()
+        faceDownSoundJob?.cancel()
+        faceDownSoundJob = null
+        faceUpSoundJob?.cancel()
+        faceUpSoundJob = null
+        shakeSoundJob?.cancel()
+        shakeSoundJob = null
         petMotionDetector?.stop()
         petMotionDetector = null
+    }
+
+    // ─── Drive Mode & Telemetry Controller ───────────────────────────────
+    private var drivePollingJob: Job? = null
+
+    private fun startDriveMode() {
+        Log.i(TAG, "🚗 Starting Drive & Control Mode")
+        installDriveBridge()
+        startDriveTelemetryPolling()
+    }
+
+    private fun stopDriveMode() {
+        Log.i(TAG, "🚗 Stopping Drive & Control Mode")
+        drivePollingJob?.cancel()
+        drivePollingJob = null
+    }
+
+    private fun installDriveBridge() {
+        val mediaInfo = com.skyliner2008.jarvis.media.MediaInfoProvider(context)
+
+        com.skyliner2008.jarvis.drive.DriveBridge.onPlayPause = {
+            val (handled, _) = mediaInfo.controlPlayback("toggle")
+            if (!handled) {
+                dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            }
+            refreshMediaState()
+        }
+
+        com.skyliner2008.jarvis.drive.DriveBridge.onNextTrack = {
+            val (handled, _) = mediaInfo.controlPlayback("next")
+            if (!handled) {
+                dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+            }
+            refreshMediaState()
+        }
+
+        com.skyliner2008.jarvis.drive.DriveBridge.onPrevTrack = {
+            val (handled, _) = mediaInfo.controlPlayback("previous")
+            if (!handled) {
+                dispatchMediaKey(android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            }
+            refreshMediaState()
+        }
+
+        com.skyliner2008.jarvis.drive.DriveBridge.onReadNotifications = {
+            val notifText = com.skyliner2008.jarvis.notification.NotificationBridge.readRecent(count = 3)
+            com.skyliner2008.jarvis.drive.DriveBridge.updateRecentNotification(notifText)
+            if (notifText.isNotBlank()) {
+                getOrCreateVoiceManager().speak(notifText, null)
+            }
+        }
+
+        com.skyliner2008.jarvis.drive.DriveBridge.onStartNavigation = { destination ->
+            val uri = if (!destination.isNullOrBlank()) {
+                android.net.Uri.parse("google.navigation:q=${android.net.Uri.encode(destination)}")
+            } else {
+                android.net.Uri.parse("geo:0,0?q=")
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.google.android.apps.maps")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                val fallback = Intent(Intent.ACTION_VIEW, uri).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                try { context.startActivity(fallback) } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun refreshMediaState() {
+        val mediaInfo = com.skyliner2008.jarvis.media.MediaInfoProvider(context)
+        val nowPlaying = mediaInfo.getNowPlaying()
+        if (nowPlaying != null) {
+            com.skyliner2008.jarvis.drive.DriveBridge.updateMedia(
+                title = nowPlaying.title,
+                artist = nowPlaying.artist,
+                appName = nowPlaying.appName,
+                isPlaying = nowPlaying.isPlaying
+            )
+        } else {
+            com.skyliner2008.jarvis.drive.DriveBridge.updateMedia(null, null, null, false)
+        }
+    }
+
+    private fun startDriveTelemetryPolling() {
+        drivePollingJob?.cancel()
+        drivePollingJob = scope.launch(Dispatchers.IO) {
+            val locationProvider = com.skyliner2008.jarvis.location.LocationProvider(context)
+            while (isActive) {
+                try {
+                    val loc = locationProvider.getCurrentLocation()
+                    if (loc != null) {
+                        com.skyliner2008.jarvis.drive.DriveBridge.updateTelemetry(
+                            speedKmh = loc.speedKmh,
+                            address = loc.address,
+                            lat = loc.latitude,
+                            lng = loc.longitude
+                        )
+                    }
+                    refreshMediaState()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Drive telemetry polling error: ${e.message}")
+                }
+                delay(4000L)
+            }
+        }
+    }
+
+    private fun dispatchMediaKey(keyCode: Int) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+        val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode)
+        val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keyCode)
+        audioManager.dispatchMediaKeyEvent(downEvent)
+        audioManager.dispatchMediaKeyEvent(upEvent)
     }
 
     // ─── Configuration ───────────────────────────────────────────────────
@@ -308,6 +419,11 @@ class AlwaysLiveManager(private val context: Context) {
         acquireScreenBrightLock()
         FloatingWidgetService.stopWidget(context)
         wakeScreen()
+        if (_currentProfile.value == AlwaysLiveProfile.PET) {
+            startPetMode()
+        } else {
+            startDriveMode()
+        }
     }
 
     /**
@@ -318,6 +434,7 @@ class AlwaysLiveManager(private val context: Context) {
         transitionTo(AlwaysLiveState.OFF)
         unregisterScreenReceiver()
         stopHotwordDetection()
+        stopDriveMode()
         stopPetMode()
         _currentProfile.value = AlwaysLiveProfile.CONTROL
         com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
@@ -341,6 +458,8 @@ class AlwaysLiveManager(private val context: Context) {
             Log.i(TAG, "minimize() → MINI_FLOATING")
             transitionTo(AlwaysLiveState.MINI_FLOATING)
             acquireScreenBrightLock()
+            // Stop pet motion sensor when minimized to floating widget
+            stopPetMode()
             FloatingWidgetService.startWidget(context)
         }
     }
@@ -357,6 +476,9 @@ class AlwaysLiveManager(private val context: Context) {
             acquireScreenBrightLock()
             FloatingWidgetService.stopWidget(context)
             wakeScreen()
+            if (_currentProfile.value == AlwaysLiveProfile.PET) {
+                startPetMode()
+            }
             try {
                 if (!com.skyliner2008.jarvis.MainActivity.isActivityResumed) {
                     val intent = Intent(context, com.skyliner2008.jarvis.MainActivity::class.java).apply {
@@ -383,6 +505,8 @@ class AlwaysLiveManager(private val context: Context) {
             transitionTo(AlwaysLiveState.BACKGROUND_LISTEN)
             setEmotion(AvatarEmotion.SLEEPING)
             releaseScreenBrightLock()
+            // Immediately stop pet motion sensor and sound routines when screen turns off!
+            stopPetMode()
             if (_config.value.backgroundListenEnabled) {
                 acquireWakeLock()
                 startHotwordDetection()
@@ -500,22 +624,96 @@ class AlwaysLiveManager(private val context: Context) {
     }
 
     /**
-     * Detect emotion from AI response sentiment
-     * Simple keyword-based approach — can be improved with NLP
+     * Detect emotion from AI response sentiment or explicit structured tags.
+     * Supports:
+     * 1. Bracketed structured tags: [HAPPY], [LOVE], [EXCITED], [SAD], [ANGRY], [CONFUSED], [WINK], [POUT], [DIZZY], [SURPRISED], [BORED], [ENRAGED], [SLEEPING], [THINKING], [LISTENING], [IDLE]
+     * 2. Pipe-delimited commands: HAPPY|..., SPEAKING|...
+     * 3. Comprehensive natural sentiment keyword matching
      */
     fun detectSentiment(text: String) {
+        if (text.isBlank()) return
+
+        // 1. Check for bracketed structured tags: [EMOTION]
+        val tagRegex = Regex("\\[(HAPPY|LOVE|EXCITED|SAD|ANGRY|CONFUSED|WINK|POUT|DIZZY|SURPRISED|SHOCK|BORED|ENRAGED|SLEEPING|THINKING|LISTENING|IDLE|DEAD|LAUGHING|LAUGH|MUSIC|VR_MODE|VR|DIVING|EVIL|FOCUSED|FOCUS|SHY|DISGUSTED|DISGUST|CAMERA_MODE|CAMERA|EATING|EAT|DRINKING|DRINK)\\]", RegexOption.IGNORE_CASE)
+        val tagMatch = tagRegex.find(text)
+        if (tagMatch != null) {
+            val rawName = tagMatch.groupValues[1].uppercase()
+            val mappedEmotion = when (rawName) {
+                "LAUGH" -> AvatarEmotion.LAUGHING
+                "VR" -> AvatarEmotion.VR_MODE
+                "FOCUS" -> AvatarEmotion.FOCUSED
+                "DISGUST" -> AvatarEmotion.DISGUSTED
+                "CAMERA" -> AvatarEmotion.CAMERA_MODE
+                "EAT" -> AvatarEmotion.EATING
+                "DRINK" -> AvatarEmotion.DRINKING
+                "SHOCK" -> AvatarEmotion.SURPRISED
+                else -> try { AvatarEmotion.valueOf(rawName) } catch (_: Exception) { null }
+            }
+            if (mappedEmotion != null) {
+                setEmotion(mappedEmotion)
+                return
+            }
+        }
+
+        // 2. Check for pipe-delimited syntax: EMOTION|...
+        if (text.contains("|")) {
+            val head = text.substringBefore("|").trim().uppercase()
+            try {
+                val emotion = AvatarEmotion.valueOf(head)
+                setEmotion(emotion)
+                return
+            } catch (_: Exception) {}
+        }
+
+        // 3. Fallback to comprehensive natural sentiment keyword matching
         val lower = text.lowercase()
         when {
-            lower.containsAny("ยินดี", "สำเร็จ", "เสร็จแล้ว", "ดีใจ", "congratulations", "success", "great", "awesome") ->
+            lower.containsAny("ยินดี", "สำเร็จ", "เสร็จแล้ว", "ดีใจ", "ยิ้ม", "congratulations", "success", "great", "awesome", "perfect", "สุขสันต์", "มีความสุข") ->
                 setEmotion(AvatarEmotion.HAPPY)
-            lower.containsAny("เสียใจ", "ขอโทษ", "sorry", "unfortunately", "ไม่สามารถ", "failed") ->
-                setEmotion(AvatarEmotion.SAD)
-            lower.containsAny("ผิดพลาด", "error", "crash", "bug", "ปัญหา") ->
-                setEmotion(AvatarEmotion.ANGRY)
-            lower.containsAny("รัก", "love", "ขอบคุณ", "thank", "appreciate") ->
-                setEmotion(AvatarEmotion.LOVE)
-            lower.containsAny("พบแล้ว", "eureka", "breakthrough", "ทำได้", "amazing", "incredible") ->
+            lower.containsAny("หัวเราะ", "ขำ", "555", "ฮา", "laugh", "funny", "lol", "kpop") ->
+                setEmotion(AvatarEmotion.LAUGHING)
+            lower.containsAny("ตื่นเต้น", "ว้าว", "สุดยอด", "พบแล้ว", "eureka", "breakthrough", "ทำได้", "amazing", "incredible", "excited") ->
                 setEmotion(AvatarEmotion.EXCITED)
+            lower.containsAny("รัก", "love", "ขอบคุณ", "thank", "appreciate", "ชอบคุณ", "หัวใจ", "เอ็นดู", "น่ารัก") ->
+                setEmotion(AvatarEmotion.LOVE)
+            lower.containsAny("เสียใจ", "ขอโทษ", "sorry", "unfortunately", "ไม่สามารถ", "failed", "ร้องไห้", "เศร้า", "ผิดหวัง") ->
+                setEmotion(AvatarEmotion.SAD)
+            lower.containsAny("ผิดพลาด", "error", "crash", "bug", "ปัญหา", "โกรธ", "โมโห", "หงุดหงิด", "angry", "furious") ->
+                setEmotion(AvatarEmotion.ANGRY)
+            lower.containsAny("ตัวร้าย", "ปีศาจ", "ปิศาจ", "evil", "demon", "devil") ->
+                setEmotion(AvatarEmotion.EVIL)
+            lower.containsAny("สงสัย", "งง", "ไม่เข้าใจ", "คืออะไรนะ", "confused", "puzzled", "hmm") ->
+                setEmotion(AvatarEmotion.CONFUSED)
+            lower.containsAny("ตกใจ", "ประหลาดใจ", "surprised", "shocked", "เหวอ") ->
+                setEmotion(AvatarEmotion.SURPRISED)
+            lower.containsAny("เบื่อ", "เซ็ง", "bored", "dull") ->
+                setEmotion(AvatarEmotion.BORED)
+            lower.containsAny("ง่วง", "นอน", "พักผ่อน", "ฝันดี", "sleep", "goodnight", "zzz") ->
+                setEmotion(AvatarEmotion.SLEEPING)
+            lower.containsAny("เวียนหัว", "มึน", "ตาลาย", "dizzy") ->
+                setEmotion(AvatarEmotion.DIZZY)
+            lower.containsAny("ตาย", "สลบ", "สลบเหมือด", "dead", "knockout") ->
+                setEmotion(AvatarEmotion.DEAD)
+            lower.containsAny("งอน", "หน้าบูด", "pout") ->
+                setEmotion(AvatarEmotion.POUT)
+            lower.containsAny("เขิน", "อาย", "หน้าแดง", "แก้มแดง", "shy", "blush") ->
+                setEmotion(AvatarEmotion.SHY)
+            lower.containsAny("รังเกียจ", "อี๋", "ขยะ", "เหม็น", "disgusted", "gross", "yuck") ->
+                setEmotion(AvatarEmotion.DISGUSTED)
+            lower.containsAny("ฟังเพลง", "เปิดเพลง", "เพลง", "หูฟัง", "music", "song", "headphones") ->
+                setEmotion(AvatarEmotion.MUSIC)
+            lower.containsAny("แว่น vr", "vision pro", "โลกเสมือน", "ดูหนัง", "vr") ->
+                setEmotion(AvatarEmotion.VR_MODE)
+            lower.containsAny("ดำน้ำ", "ว่ายน้ำ", "ท่อหายใจ", "diving", "snorkel") ->
+                setEmotion(AvatarEmotion.DIVING)
+            lower.containsAny("สมาธิ", "โฟกัส", "สแกน", "focus", "scanning") ->
+                setEmotion(AvatarEmotion.FOCUSED)
+            lower.containsAny("ถ่ายรูป", "แชะ", "กล้อง", "camera", "photo") ->
+                setEmotion(AvatarEmotion.CAMERA_MODE)
+            lower.containsAny("กิน", "อร่อย", "หิวข้าว", "เบอร์เกอร์", "eat", "yummy", "burger", "food") ->
+                setEmotion(AvatarEmotion.EATING)
+            lower.containsAny("ดื่ม", "จิบ", "หิวน้ำ", "กาแฟ", "เบียร์", "drink", "coffee", "beer") ->
+                setEmotion(AvatarEmotion.DRINKING)
         }
     }
 
@@ -658,6 +856,8 @@ class AlwaysLiveManager(private val context: Context) {
 
     fun destroy() {
         disable()
+        voiceManager?.shutdown()
+        voiceManager = null
         _instance = null
         Log.i(TAG, "AlwaysLiveManager destroyed")
     }

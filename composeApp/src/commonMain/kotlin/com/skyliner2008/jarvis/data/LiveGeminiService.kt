@@ -355,7 +355,22 @@ class LiveGeminiService(
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // คลังความจำระยะสั้น: เก็บประโยคสุดท้ายที่ผู้ใช้พูด เพื่อใช้เตือนสมาธิ AI ตอนเปิดเครื่องมือ
+    /** ประโยคของผู้ใช้ใน turn ล่าสุด (รวมทุกชิ้นของ transcription แล้ว) — guard ต่างๆ ใช้ตัดสินคำขอ */
     var lastUserText: String = ""
+    /** เพิ่มขึ้นทุกครั้งที่ผู้ใช้เริ่มพูด turn ใหม่ — ใช้นับ tool call ต่อ turn */
+    var userTurnSerial: Int = 0
+        private set
+
+    /**
+     * Live API ส่ง transcription มาเป็น "ชิ้น" (เช่น "ราคา", " ทอง", " ตอนนี้") ไม่ใช่ประโยคสะสม —
+     * เดิมโค้ดเขียนทับด้วยชิ้นล่าสุด ทำให้แชท/ประวัติ/guard เห็นแค่คำท้ายๆ ของประโยค
+     * รองรับทั้งแบบชิ้นและแบบสะสม (ถ้าข้อความใหม่ขึ้นต้นด้วยของเดิม ถือว่าเป็นแบบสะสม)
+     */
+    private fun mergeTranscript(previous: String?, chunk: String): String = when {
+        previous.isNullOrEmpty() -> chunk
+        chunk.startsWith(previous) -> chunk
+        else -> previous + chunk
+    }
 
     /** ข้อความที่จะส่งให้ model พูดทันทีหลัง session READY (เช่นทักยืนยันเสียงใหม่หลังเปลี่ยนเสียง). */
     var pendingGreetingOnReady: String? = null
@@ -975,12 +990,16 @@ class LiveGeminiService(
                     }
                 }
 
-                content.inputTranscription?.text?.let { text ->
-                    if (text.isNotBlank()) {
+                content.inputTranscription?.text?.let { chunk ->
+                    if (chunk.isNotBlank()) {
                         val isFirst = pendingUserTurnText == null
-                        if (isFirst) turnWasInterrupted = false
+                        if (isFirst) {
+                            turnWasInterrupted = false
+                            userTurnSerial++
+                        }
+                        val text = mergeTranscript(pendingUserTurnText, chunk)
                         pendingUserTurnText = text
-                        lastUserText = text
+                        lastUserText = text.trim()
                         logDebug("LiveGemini", "🎤 User (Progress): $text")
 
                         // Input transcription was previously only logged. That made the UI look
@@ -998,9 +1017,10 @@ class LiveGeminiService(
                     }
                 }
                 
-                content.outputTranscription?.text?.let { text ->
-                    if (text.isNotBlank()) {
+                content.outputTranscription?.text?.let { chunk ->
+                    if (chunk.isNotBlank()) {
                         val isFirst = pendingModelTurnText == null
+                        val text = mergeTranscript(pendingModelTurnText, chunk)
                         pendingModelTurnText = text
                         logDebug("LiveGemini", "🤖 JARVIS (Progress): $text")
                         

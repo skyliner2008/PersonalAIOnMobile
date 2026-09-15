@@ -52,6 +52,7 @@ class PetMotionDetector(
 
     // Table thump detection (sharp impulse while stationary)
     private var lastGForce = 1.0f
+    private var isRunning = false
     private var stationaryFrames = 0
     private var lastThumpTriggerTime = 0L
 
@@ -60,11 +61,16 @@ class PetMotionDetector(
     private var faceDownStartTime = 0L
 
     fun start() {
+        if (isRunning) {
+            logDebug(TAG, "PetMotionDetector already running — skipping duplicate start()")
+            return
+        }
         try {
             sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
             accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
             accelerometer?.let {
                 sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+                isRunning = true
                 logDebug(TAG, "PetMotionDetector registered")
             }
         } catch (e: Exception) {
@@ -73,18 +79,28 @@ class PetMotionDetector(
     }
 
     fun stop() {
+        if (!isRunning && sensorManager == null) {
+            return
+        }
+        isRunning = false
         try {
             sensorManager?.unregisterListener(this)
-            sensorManager = null
-            accelerometer = null
             logDebug(TAG, "PetMotionDetector stopped")
         } catch (e: Exception) {
             logError(TAG, "Failed to stop PetMotionDetector: ${e.message}")
+        } finally {
+            sensorManager = null
+            accelerometer = null
+            shakeCount = 0
+            isCurrentlyFaceDown = false
+            faceDownStartTime = 0L
+            stationaryFrames = 0
+            recentShakeTimestamps.clear()
         }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+        if (!isRunning || event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
 
         val x = event.values[0]
         val y = event.values[1]

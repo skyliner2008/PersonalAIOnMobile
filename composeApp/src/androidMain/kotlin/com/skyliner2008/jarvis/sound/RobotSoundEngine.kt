@@ -48,7 +48,22 @@ object RobotSoundEngine {
         CRUNCH_EAT,
         BUBBLE_POP,
         BELL_TOY,
-        SCAN_RADAR
+        SCAN_RADAR,
+        WHOOSH,
+        POP,
+        SLURP,
+        COIN,
+        ZAP,
+        SIZZLE,
+        RAIN,
+        GAME_BLIP,
+        TYPING,
+        SOB,
+        FANFARE,
+        POWER_UP,
+        MELODY,
+        HEARTBEAT,
+        GHOST
     }
 
     private val waveformCache = ConcurrentHashMap<SoundType, ShortArray>()
@@ -117,6 +132,21 @@ object RobotSoundEngine {
             SoundType.BUBBLE_POP -> generateBubblePop()
             SoundType.BELL_TOY -> generateBellToy()
             SoundType.SCAN_RADAR -> generateScanRadar()
+            SoundType.WHOOSH -> generateWhoosh()
+            SoundType.POP -> generatePop()
+            SoundType.SLURP -> generateSlurp()
+            SoundType.COIN -> generateCoin()
+            SoundType.ZAP -> generateZap()
+            SoundType.SIZZLE -> generateSizzle()
+            SoundType.RAIN -> generateRain()
+            SoundType.GAME_BLIP -> generateGameBlip()
+            SoundType.TYPING -> generateTyping()
+            SoundType.SOB -> generateSob()
+            SoundType.FANFARE -> generateFanfare()
+            SoundType.POWER_UP -> generatePowerUp()
+            SoundType.MELODY -> generateMelody()
+            SoundType.HEARTBEAT -> generateHeartbeat()
+            SoundType.GHOST -> generateGhost()
         }
     }
 
@@ -639,6 +669,160 @@ object RobotSoundEngine {
         return buffer
     }
 
+    // ─── Scene cue synthesis ───────────────────────────────────────────────────
+
+    /** Render [durationMs] of audio from a per-sample function of (time s, progress 0..1). */
+    private inline fun render(durationMs: Int, fn: (t: Double, p: Double) -> Double): ShortArray {
+        val n = SAMPLE_RATE * durationMs / 1000
+        val out = ShortArray(n)
+        for (i in 0 until n) {
+            val v = fn(i.toDouble() / SAMPLE_RATE, i.toDouble() / n)
+            out[i] = (v.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+        }
+        return out
+    }
+
+    private val noiseRng = java.util.Random(7L)
+    private fun noise(): Double = noiseRng.nextDouble() * 2.0 - 1.0
+
+    /** Rising-falling filtered noise sweep: something flying past. */
+    private fun generateWhoosh(): ShortArray {
+        var lp = 0.0
+        return render(420) { _, p ->
+            val cutoff = 0.04 + 0.30 * sin(PI * p)
+            lp += (noise() - lp) * cutoff
+            lp * sin(PI * p).pow(1.5) * 1.6
+        }
+    }
+
+    /** Short bubbly pop. */
+    private fun generatePop(): ShortArray {
+        var ph = 0.0
+        return render(130) { _, p ->
+            ph += 2.0 * PI * (900.0 - 600.0 * p) / SAMPLE_RATE
+            sin(ph) * kotlin.math.exp(-p * 7.0) * 0.8
+        }
+    }
+
+    /** Two slurpy wobbles. */
+    private fun generateSlurp(): ShortArray {
+        var ph = 0.0
+        var lp = 0.0
+        return render(520) { t, p ->
+            ph += 2.0 * PI * (320.0 + 180.0 * sin(2.0 * PI * 9.0 * t)) / SAMPLE_RATE
+            lp += (noise() - lp) * 0.12
+            (sin(ph) * 0.45 + lp * 0.5) * sin(PI * p) * (0.6 + 0.4 * sin(2.0 * PI * 4.0 * t))
+        }
+    }
+
+    /** Classic coin: two bright square-ish tones. */
+    private fun generateCoin(): ShortArray = render(360) { t, _ ->
+        val f = if (t < 0.08) 988.0 else 1319.0
+        val env = if (t < 0.08) 0.6 else kotlin.math.exp(-(t - 0.08) * 9.0) * 0.6
+        kotlin.math.sign(sin(2.0 * PI * f * t)) * env * 0.5 + sin(2.0 * PI * f * 2 * t) * env * 0.2
+    }
+
+    /** Electric crackle. */
+    private fun generateZap(): ShortArray = render(380) { t, p ->
+        val buzz = kotlin.math.sign(sin(2.0 * PI * (120.0 + 60.0 * sin(2.0 * PI * 30.0 * t)) * t))
+        val crackle = if (noiseRng.nextDouble() > 0.93) noise() else 0.0
+        (buzz * 0.35 + crackle * 0.9) * (1.0 - p)
+    }
+
+    /** Fire sizzle: bright hissing noise with pops. */
+    private fun generateSizzle(): ShortArray {
+        var hp = 0.0
+        var last = 0.0
+        return render(700) { _, p ->
+            val n = noise()
+            hp = 0.85 * (hp + n - last)
+            last = n
+            val pop = if (noiseRng.nextDouble() > 0.995) 0.8 else 0.0
+            (hp * 0.35 + pop) * sin(PI * p)
+        }
+    }
+
+    /** Rain patter: soft noise plus random droplets. */
+    private fun generateRain(): ShortArray {
+        var lp = 0.0
+        return render(900) { _, p ->
+            lp += (noise() - lp) * 0.25
+            val drop = if (noiseRng.nextDouble() > 0.992) noise() * 0.7 else 0.0
+            (lp * 0.35 + drop) * sin(PI * p).pow(0.4)
+        }
+    }
+
+    /** 8-bit jump blip. */
+    private fun generateGameBlip(): ShortArray = render(160) { t, p ->
+        kotlin.math.sign(sin(2.0 * PI * (440.0 + 880.0 * p) * t)) * (1.0 - p) * 0.35
+    }
+
+    /** Three quick key clicks. */
+    private fun generateTyping(): ShortArray = render(330) { t, _ ->
+        val local = (t % 0.11)
+        if (local < 0.012) noise() * kotlin.math.exp(-local * 400.0) * 0.8 else 0.0
+    }
+
+    /** Sob: three falling hiccup tones. */
+    private fun generateSob(): ShortArray {
+        var ph = 0.0
+        return render(720) { t, _ ->
+            val k = (t / 0.24).toInt()
+            val local = t - k * 0.24
+            ph += 2.0 * PI * (560.0 - k * 60.0 - local * 700.0) / SAMPLE_RATE
+            sin(ph) * sin(PI * (local / 0.24)).pow(2.0) * 0.55
+        }
+    }
+
+    /** Fanfare: C-E-G-C arpeggio. */
+    private fun generateFanfare(): ShortArray {
+        val notes = doubleArrayOf(523.25, 659.25, 783.99, 1046.5)
+        return render(760) { t, _ ->
+            val k = minOf((t / 0.14).toInt(), 3)
+            val local = t - k * 0.14
+            val env = if (k == 3) kotlin.math.exp(-local * 3.0) else kotlin.math.exp(-local * 10.0)
+            (kotlin.math.sign(sin(2.0 * PI * notes[k] * t)) * 0.25 + sin(2.0 * PI * notes[k] * t) * 0.3) * env
+        }
+    }
+
+    /** Power up: rising hum with shimmer. */
+    private fun generatePowerUp(): ShortArray {
+        var ph = 0.0
+        return render(650) { t, p ->
+            ph += 2.0 * PI * (180.0 + 900.0 * p * p) / SAMPLE_RATE
+            (sin(ph) * 0.5 + sin(ph * 2.01) * 0.2) * sin(PI * p).pow(0.6) * (0.8 + 0.2 * sin(2.0 * PI * 25.0 * t))
+        }
+    }
+
+    /** Short happy melody (G-A-B-D). */
+    private fun generateMelody(): ShortArray {
+        val notes = doubleArrayOf(783.99, 880.0, 987.77, 1174.66, 987.77)
+        return render(900) { t, _ ->
+            val k = minOf((t / 0.18).toInt(), notes.size - 1)
+            val local = t - k * 0.18
+            val env = kotlin.math.exp(-local * 6.0)
+            (sin(2.0 * PI * notes[k] * t) * 0.55 + sin(2.0 * PI * notes[k] * 2 * t) * 0.12) * env
+        }
+    }
+
+    /** Heartbeat: lub-dub. */
+    private fun generateHeartbeat(): ShortArray = render(620) { t, _ ->
+        fun thump(at: Double, f: Double): Double {
+            val d = t - at
+            return if (d < 0) 0.0 else sin(2.0 * PI * f * d) * kotlin.math.exp(-d * 28.0)
+        }
+        (thump(0.0, 70.0) + thump(0.18, 58.0) * 0.8) * 0.9
+    }
+
+    /** Ghostly wail: slow vibrato glide. */
+    private fun generateGhost(): ShortArray {
+        var ph = 0.0
+        return render(1000) { t, p ->
+            ph += 2.0 * PI * (420.0 + 160.0 * sin(PI * p) + 18.0 * sin(2.0 * PI * 6.0 * t)) / SAMPLE_RATE
+            (sin(ph) * 0.45 + sin(ph * 1.5) * 0.12) * sin(PI * p)
+        }
+    }
+
     // ─── Playback using MODE_STATIC AudioTrack ─────────────────────────────────
 
     private fun playPcmStatic(samples: ShortArray) {
@@ -648,7 +832,10 @@ object RobotSoundEngine {
             track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        // USAGE_GAME plays on the MEDIA volume: the user's media slider and the
+                        // volume keys control the pet's sound effects (ASSISTANCE_SONIFICATION
+                        // followed the system/notification volume and ignored the media slider)
+                        .setUsage(AudioAttributes.USAGE_GAME)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )

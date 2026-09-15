@@ -5,6 +5,8 @@ import com.skyliner2008.jarvis.camera.DetectedObject
 import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
 import com.skyliner2008.jarvis.pet.PetFeatureTab
 import com.skyliner2008.jarvis.pet.PetModeController
+import com.skyliner2008.jarvis.pet.PetSceneArchetype
+import com.skyliner2008.jarvis.pet.PetSceneEngine
 import com.skyliner2008.jarvis.pet.PetVisionTargetTracker
 import com.skyliner2008.jarvis.pet.PetStateMachine
 import com.skyliner2008.jarvis.pet.TouchZone
@@ -503,7 +505,7 @@ class PetModeTest {
         assertTrue(soundNames.contains("BUBBLE_POP"))
         assertTrue(soundNames.contains("BELL_TOY"))
         assertTrue(soundNames.contains("SCAN_RADAR"))
-        assertEquals(19, RobotSound.entries.size)
+        assertEquals(34, RobotSound.entries.size)
     }
 
     @Test
@@ -1236,21 +1238,30 @@ class PetModeTest {
     }
 
     @Test
-    fun `BackgroundTheme contains all 8 themes and serializes correctly`() {
-        assertEquals(8, BackgroundTheme.entries.size)
-        val expectedThemes = setOf("DEFAULT", "RAINY", "SUNNY", "NIGHT", "SAKURA", "MATRIX", "LOVE_BG", "THUNDER")
+    fun `BackgroundTheme contains all 20 themes and serializes correctly`() {
+        assertEquals(20, BackgroundTheme.entries.size)
+        val expectedThemes = setOf(
+            "DEFAULT", "RAINY", "SUNNY", "NIGHT", "SAKURA", "MATRIX", "LOVE_BG", "THUNDER",
+            "CYBER_GRID", "SPACE_NEBULA", "MAGIC_MYSTIC", "CINEMA_COZY", "WINTER_BLIZZARD",
+            "SUMMER_HEAT", "WARRIOR_DOJO", "PARTY_CONFETTI", "GOLDEN_VAULT", "SICK_LAB",
+            "SPORTS_ARENA", "LOW_POWER_CRT"
+        )
         assertEquals(expectedThemes, BackgroundTheme.entries.map { it.name }.toSet())
     }
 
     @Test
-    fun `PropType contains all 55 built-in props across all 4 categories`() {
-        assertEquals(55, PropType.entries.size)
+    fun `PropType contains all 96 built-in props across all categories`() {
+        assertEquals(96, PropType.entries.size)
         // Verify key props exist
         val sampleProps = listOf(
             PropType.HEARTS, PropType.SUNGLASSES, PropType.CROWN,
             PropType.COFFEE, PropType.BOBA_TEA, PropType.GAMING_CONTROLLER,
             PropType.RAINBOW, PropType.LIGHTNING, PropType.GHOST,
-            PropType.ROCKET, PropType.SHIELD, PropType.CAT_PAW, PropType.GOLD_COIN
+            PropType.ROCKET, PropType.SHIELD, PropType.CAT_PAW, PropType.GOLD_COIN,
+            PropType.HEADPHONES, PropType.VR_HEADSET, PropType.SNORKEL_MASK,
+            PropType.DEVIL_HORNS, PropType.SCANNER_GRID, PropType.TRASH_BIN, PropType.CAMERA_ICON,
+            PropType.THERMOMETER, PropType.MONEY_BAG, PropType.GLASSES_SQUARE,
+            PropType.ASTRONAUT_HELMET, PropType.PARTY_HAT, PropType.ROSE, PropType.SWORD
         )
         sampleProps.forEach { prop ->
             assertNotNull(PropType.valueOf(prop.name))
@@ -1434,6 +1445,263 @@ class PetModeTest {
         val soundNames = RobotSound.entries.map { it.name }.toSet()
         assertTrue(soundNames.contains("MISSILE_LAUNCH"))
         assertTrue(soundNames.contains("EXPLOSION"))
+    }
+
+    @Test
+    fun `PetSceneEngine all 18 archetypes resolve accurately with valid FaceState and Spec`() {
+        assertEquals(18, PetSceneArchetype.entries.size, "Should have 18 archetypes")
+        for (archetype: PetSceneArchetype in PetSceneArchetype.entries) {
+            val (faceState, spec) = PetSceneEngine.resolveScene(archetype)
+            assertEquals(archetype, spec.archetype)
+            assertNotNull(spec.sound)
+            assertTrue(spec.durationMs in 7000L..9500L, "Animated scene duration must be within 7.0s to 9.5s, was ${spec.durationMs}")
+            assertNotNull(faceState.emotion)
+            assertNotNull(faceState.eyeStyle)
+            assertNotNull(faceState.backgroundTheme)
+        }
+    }
+
+    @Test
+    fun `PetSceneEngine item pools randomize within valid subsets`() {
+        val eatingPool = setOf(PropType.BURGER, PropType.PIZZA, PropType.CAKE, PropType.ICE_CREAM, PropType.POPCORN)
+        for (i in 0 until 20) {
+            val (face, _) = PetSceneEngine.resolveScene(PetSceneArchetype.EATING)
+            assertTrue(face.props.any { it in eatingPool }, "Food prop should be from eating pool")
+        }
+
+        val drinkingPool = setOf(PropType.COFFEE, PropType.BOBA_TEA, PropType.TEA_CUP, PropType.BEER)
+        for (i in 0 until 20) {
+            val (face, _) = PetSceneEngine.resolveScene(PetSceneArchetype.DRINKING)
+            assertTrue(face.props.any { it in drinkingPool }, "Drink prop should be from drinking pool")
+        }
+    }
+
+    @Test
+    fun `PetSceneEngine specific prop overrides work exactly`() {
+        val (pizzaFace, _) = PetSceneEngine.resolveScene(PetSceneArchetype.EATING, PropType.PIZZA)
+        assertTrue(pizzaFace.props.contains(PropType.PIZZA), "Must contain requested PIZZA")
+
+        val (coffeeFace, _) = PetSceneEngine.resolveScene(PetSceneArchetype.DRINKING, PropType.COFFEE)
+        assertTrue(coffeeFace.props.contains(PropType.COFFEE), "Must contain requested COFFEE")
+
+        val (sunglassesFace, _) = PetSceneEngine.resolveScene(PetSceneArchetype.MEME_THUG_LIFE, PropType.SUNGLASSES)
+        assertTrue(sunglassesFace.props.contains(PropType.SUNGLASSES), "Must contain requested SUNGLASSES")
+    }
+
+    @Test
+    fun `PetSceneEngine time-aware background calculation functions across all periods`() {
+        // Morning / Day: 06:00 - 16:59 -> SUNNY
+        assertEquals(BackgroundTheme.SUNNY, PetSceneEngine.resolveSmartBackground(currentHour = 10))
+        assertEquals(BackgroundTheme.SUNNY, PetSceneEngine.resolveSmartBackground(currentHour = 6))
+        assertEquals(BackgroundTheme.SUNNY, PetSceneEngine.resolveSmartBackground(currentHour = 16))
+
+        // Evening / Sunset: 17:00 - 19:59 -> SAKURA
+        assertEquals(BackgroundTheme.SAKURA, PetSceneEngine.resolveSmartBackground(currentHour = 17))
+        assertEquals(BackgroundTheme.SAKURA, PetSceneEngine.resolveSmartBackground(currentHour = 19))
+
+        // Night / Midnight: 20:00 - 05:59 -> NIGHT
+        assertEquals(BackgroundTheme.NIGHT, PetSceneEngine.resolveSmartBackground(currentHour = 20))
+        assertEquals(BackgroundTheme.NIGHT, PetSceneEngine.resolveSmartBackground(currentHour = 23))
+        assertEquals(BackgroundTheme.NIGHT, PetSceneEngine.resolveSmartBackground(currentHour = 0))
+        assertEquals(BackgroundTheme.NIGHT, PetSceneEngine.resolveSmartBackground(currentHour = 5))
+
+        // Override theme takes priority over time
+        assertEquals(BackgroundTheme.RAINY, PetSceneEngine.resolveSmartBackground(overrideTheme = BackgroundTheme.RAINY, currentHour = 12))
+    }
+
+    @Test
+    fun `PetSceneEngine keyword resolver handles Thai and English terms accurately`() {
+        // Voice: "กินข้าว" -> EATING
+        val eatingRes = PetSceneEngine.resolveFromKeyword("กินข้าว")
+        assertNotNull(eatingRes)
+        assertEquals(PetSceneArchetype.EATING, eatingRes.second.archetype)
+
+        // Voice: "ขอดื่มกาแฟหน่อย" -> DRINKING with COFFEE
+        val coffeeRes = PetSceneEngine.resolveFromKeyword("ขอดื่มกาแฟหน่อย")
+        assertNotNull(coffeeRes)
+        assertEquals(PetSceneArchetype.DRINKING, coffeeRes.second.archetype)
+        assertTrue(coffeeRes.first.props.contains(PropType.COFFEE))
+
+        // Voice: "ใส่แว่นตาหน่อย" -> MEME_THUG_LIFE with SUNGLASSES
+        val glassesRes = PetSceneEngine.resolveFromKeyword("ใส่แว่นตาหน่อย")
+        assertNotNull(glassesRes)
+        assertEquals(PetSceneArchetype.MEME_THUG_LIFE, glassesRes.second.archetype)
+        assertTrue(glassesRes.first.props.contains(PropType.SUNGLASSES))
+
+        // Voice: "ยิงจรวด" -> ANGRY_MISSILE with missile barrage triggered
+        val missileRes = PetSceneEngine.resolveFromKeyword("ยิงจรวด")
+        assertNotNull(missileRes)
+        assertEquals(PetSceneArchetype.ANGRY_MISSILE, missileRes.second.archetype)
+        assertTrue(missileRes.second.triggerMissileBarrage)
+
+        // English: "celebrate" -> CELEBRATION
+        val celebrateRes = PetSceneEngine.resolveFromKeyword("celebrate")
+        assertNotNull(celebrateRes)
+        assertEquals(PetSceneArchetype.CELEBRATION, celebrateRes.second.archetype)
+
+        // English: "pizza" -> EATING with PIZZA
+        val pizzaRes = PetSceneEngine.resolveFromKeyword("pizza")
+        assertNotNull(pizzaRes)
+        assertEquals(PetSceneArchetype.EATING, pizzaRes.second.archetype)
+        assertTrue(pizzaRes.first.props.contains(PropType.PIZZA))
+    }
+
+    @Test
+    fun `RobotFaceState resolvePropType maps Thai and English aliases to built-in props`() {
+        assertEquals(PropType.SUNGLASSES, RobotFaceState.resolvePropType("แว่นตา"))
+        assertEquals(PropType.SUNGLASSES, RobotFaceState.resolvePropType("glasses"))
+        assertEquals(PropType.SUNGLASSES, RobotFaceState.resolvePropType("sunglasses"))
+        assertEquals(PropType.PIZZA, RobotFaceState.resolvePropType("พิซซ่า"))
+        assertEquals(PropType.COFFEE, RobotFaceState.resolvePropType("กาแฟ"))
+        assertEquals(PropType.ROCKET, RobotFaceState.resolvePropType("จรวด"))
+        assertEquals(PropType.CROWN, RobotFaceState.resolvePropType("มงกุฎ"))
+    }
+
+    @Test
+    fun `PetModeController playSceneByNameOrKeyword updates state and missile barrage correctly`() = runBlocking {
+        var currentState = AvatarState()
+        var missileBarrageTriggered = false
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+        controller.onTriggerMissileBarrage = { missileBarrageTriggered = true }
+
+        // Test missile barrage scene via keyword
+        controller.playSceneByNameOrKeyword("ยิงจรวด")
+        assertTrue(missileBarrageTriggered, "Missile barrage must be triggered on missile scene")
+        assertEquals(AvatarEmotion.ANGRY, currentState.faceState.emotion)
+
+        // Test eating scene via keyword
+        controller.playSceneByNameOrKeyword("กินพิซซ่า")
+        assertEquals(AvatarEmotion.HAPPY, currentState.faceState.emotion)
+        assertTrue(currentState.faceState.props.contains(PropType.PIZZA))
+    }
+
+    @Test
+    fun `PetSceneEngine detects specific props from text accurately`() {
+        assertEquals(PropType.BURGER, PetSceneEngine.detectSpecificPropFromText("ขอเบอร์เกอร์หน่อย"))
+        assertEquals(PropType.BURGER, PetSceneEngine.detectSpecificPropFromText("give me a burger"))
+        assertEquals(PropType.PIZZA, PetSceneEngine.detectSpecificPropFromText("อยากกินพิซซ่า"))
+        assertEquals(PropType.POPCORN, PetSceneEngine.detectSpecificPropFromText("ขอป๊อปคอร์นหน่อย"))
+        assertEquals(PropType.CAKE, PetSceneEngine.detectSpecificPropFromText("กินเค้กวันเกิด"))
+        assertEquals(PropType.ICE_CREAM, PetSceneEngine.detectSpecificPropFromText("ไอติมรสช็อกโกแลต"))
+        assertEquals(PropType.COFFEE, PetSceneEngine.detectSpecificPropFromText("ขอดื่มกาแฟร้อนๆ"))
+        assertEquals(PropType.BOBA_TEA, PetSceneEngine.detectSpecificPropFromText("ชานมไข่มุกหวานร้อย"))
+        assertEquals(PropType.UMBRELLA, PetSceneEngine.detectSpecificPropFromText("กางร่มหน่อยฝนตก"))
+        assertEquals(PropType.SUNGLASSES, PetSceneEngine.detectSpecificPropFromText("ใส่แว่นตาดำเท่ๆ"))
+        assertEquals(PropType.CROWN, PetSceneEngine.detectSpecificPropFromText("สวมมงกุฎทองคำ"))
+    }
+
+    @Test
+    fun `PetSceneEngine resolves RAIN_UMBRELLA archetype with umbrella and raindrops`() {
+        val rainRes = PetSceneEngine.resolveFromKeyword("กางร่ม")
+        assertNotNull(rainRes)
+        assertEquals(PetSceneArchetype.RAIN_UMBRELLA, rainRes.second.archetype)
+        assertTrue(rainRes.first.props.contains(PropType.UMBRELLA))
+        assertTrue(rainRes.first.props.contains(PropType.RAIN_DROPS))
+        assertEquals(BackgroundTheme.RAINY, rainRes.first.backgroundTheme)
+    }
+
+    @Test
+    fun `PetSceneEngine resolveFromKeyword prioritizes specificProp override over random pool`() {
+        // When user asks for burger, specificProp should override default random food selection
+        val burgerRes = PetSceneEngine.resolveFromKeyword("eating", specificProp = PropType.BURGER)
+        assertNotNull(burgerRes)
+        assertEquals(PetSceneArchetype.EATING, burgerRes.second.archetype)
+        assertTrue(burgerRes.first.props.contains(PropType.BURGER))
+        assertFalse(burgerRes.first.props.contains(PropType.PIZZA))
+
+        // When user asks for popcorn, specificProp is POPCORN
+        val popcornRes = PetSceneEngine.resolveFromKeyword("กินอาหาร", specificProp = PropType.POPCORN)
+        assertNotNull(popcornRes)
+        assertTrue(popcornRes.first.props.contains(PropType.POPCORN))
+    }
+
+    // ─── Face Absence & High Energy Guard Tests ──────────────────────────────
+
+    @Test
+    fun `onFaceAbsenceTimeout transitions to BORED instead of SLEEPING when energy is high`() = runBlocking {
+        var currentState = AvatarState(emotion = AvatarEmotion.IDLE)
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+
+        // Default needs energy is ~100f
+        assertTrue(controller.needsState.value.energy > 30f)
+
+        // When face absence fires SLEEPING, high energy should prevent deep sleep -> transition to BORED
+        controller.onFaceAbsenceTimeout(AvatarEmotion.SLEEPING)
+        assertEquals(AvatarEmotion.BORED, currentState.emotion)
+        assertTrue(currentState.statusText?.contains("เหงา") == true)
+    }
+
+    @Test
+    fun `onFaceAbsenceTimeout transitions to SLEEPING when energy is low`() = runBlocking {
+        var currentState = AvatarState(emotion = AvatarEmotion.IDLE)
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+
+        // Deplete energy below 30f by fast-forwarding decay
+        val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        val mem = PetNeedsState(energy = 20f, lastUpdateTimestamp = now)
+        PetMemoryStore.saveNeedsState(mem)
+        controller.start()
+
+        assertEquals(20f, controller.needsState.value.energy, 0.1f)
+
+        // When energy <= 30f, face absence timeout allows falling asleep
+        controller.onFaceAbsenceTimeout(AvatarEmotion.SLEEPING)
+        assertEquals(AvatarEmotion.SLEEPING, currentState.emotion)
+        controller.stop()
+    }
+
+    @Test
+    fun `onFaceAbsenceTimeout does NOT interrupt when robot is speaking or listening`() = runBlocking {
+        var currentState = AvatarState(emotion = AvatarEmotion.SPEAKING, isSpeaking = true)
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+
+        controller.onFaceAbsenceTimeout(AvatarEmotion.SLEEPING)
+        assertEquals(AvatarEmotion.SPEAKING, currentState.emotion)
+
+        currentState = currentState.copy(emotion = AvatarEmotion.LISTENING, isSpeaking = false)
+        controller.onFaceAbsenceTimeout(AvatarEmotion.BORED)
+        assertEquals(AvatarEmotion.LISTENING, currentState.emotion)
+    }
+
+    @Test
+    fun `notifyInteraction resets PetVisionBridge absence timer`() = runBlocking {
+        var absenceResetCalled = false
+        com.skyliner2008.jarvis.pet.PetVisionBridge.onResetAbsence = {
+            absenceResetCalled = true
+        }
+
+        var currentState = AvatarState(emotion = AvatarEmotion.IDLE)
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+
+        controller.notifyInteraction()
+        assertTrue(absenceResetCalled, "notifyInteraction must call PetVisionBridge onResetAbsence")
+
+        com.skyliner2008.jarvis.pet.PetVisionBridge.onResetAbsence = null
     }
 }
 

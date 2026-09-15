@@ -43,6 +43,19 @@ fun PetBackgroundLayer(
             BackgroundTheme.MATRIX -> MatrixBackground()
             BackgroundTheme.LOVE_BG -> LoveBackground()
             BackgroundTheme.THUNDER -> ThunderBackground()
+            // ─── 50 Moodset Dynamic Environments ───
+            BackgroundTheme.CYBER_GRID -> CyberGridBackground()
+            BackgroundTheme.SPACE_NEBULA -> SpaceNebulaBackground()
+            BackgroundTheme.MAGIC_MYSTIC -> MagicMysticBackground()
+            BackgroundTheme.CINEMA_COZY -> CinemaCozyBackground()
+            BackgroundTheme.WINTER_BLIZZARD -> WinterBlizzardBackground()
+            BackgroundTheme.SUMMER_HEAT -> SummerHeatBackground()
+            BackgroundTheme.WARRIOR_DOJO -> WarriorDojoBackground()
+            BackgroundTheme.PARTY_CONFETTI -> PartyConfettiBackground()
+            BackgroundTheme.GOLDEN_VAULT -> GoldenVaultBackground()
+            BackgroundTheme.SICK_LAB -> SickLabBackground()
+            BackgroundTheme.SPORTS_ARENA -> SportsArenaBackground()
+            BackgroundTheme.LOW_POWER_CRT -> LowPowerCrtBackground()
         }
     }
 }
@@ -60,12 +73,36 @@ private data class Particle(
 )
 
 /**
- * DEFAULT — โทนมืดสนิท (Pure Dark OLED Tone) ไม่มีฉากหลังไดนามิก เพื่อให้หน้าตาหุ่นยนต์ LOOI โดดเด่น ชัดเจน และประหยัดพลังงาน
+ * DEFAULT — มืดสนิท OLED พร้อมออร่าหายใจแผ่วเบาเพื่อมิติความลึก (Subtle Organic Depth Aura)
  */
 @Composable
 private fun DefaultBackground() {
+    val detailLevel = LocalAvatarDetailLevel.current
+    val transition = rememberInfiniteTransition(label = "default_bg")
+    val pulse by transition.animateFloat(
+        initialValue = 0.03f,
+        targetValue = 0.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
     Canvas(modifier = Modifier.fillMaxSize()) {
         drawRect(color = Color(0xFF000000))
+        if (detailLevel == AvatarDetailLevel.RICH) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF00F5FF).copy(alpha = pulse),
+                        Color(0xFF001A29).copy(alpha = pulse * 0.4f),
+                        Color.Transparent
+                    ),
+                    center = center,
+                    radius = size.minDimension * 0.65f
+                )
+            )
+        }
     }
 }
 
@@ -357,4 +394,545 @@ private fun DrawScope.drawPetHeart(center: Offset, size: Float, color: Color) {
         close()
     }
     drawPath(path = heartPath, color = color)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 50 MOODSET DYNAMIC BACKGROUND ENVIRONMENTS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * CYBER_GRID — ไซเบอร์กริดมุมมอง 3D Perspective + ละอองข้อมูลดิจิทัล
+ */
+@Composable
+private fun CyberGridBackground() {
+    val transition = rememberInfiniteTransition(label = "cyber_grid")
+    val gridProgress by transition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
+        label = "grid"
+    )
+    val particles = remember {
+        List(20) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.4f + 0.2f, Random.nextFloat() * 0.4f + 0.2f, Random.nextFloat() * 2f + 1.5f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF020714), Color(0xFF000308))))
+
+        val vpX = size.width / 2f
+        val vpH = size.height * 0.38f
+
+        // Perspective vertical rays
+        for (i in -4..4) {
+            val bottomX = vpX + i * (size.width * 0.18f)
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = 0.12f),
+                start = Offset(vpX, vpH),
+                end = Offset(bottomX, size.height),
+                strokeWidth = 1.2f
+            )
+        }
+
+        // Perspective moving horizontal lines
+        for (i in 0..7) {
+            val normY = ((i + gridProgress) / 8f).coerceIn(0f, 1f)
+            val y = vpH + normY * normY * (size.height - vpH)
+            val lineAlpha = (normY * 0.25f).coerceIn(0f, 0.28f)
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = lineAlpha),
+                start = Offset(0f, y),
+                end = Offset(size.width, y),
+                strokeWidth = 1.2f
+            )
+        }
+
+        // Digital floating data particles
+        particles.forEach { p ->
+            val py = ((p.y - gridProgress * p.speed) % 1f + 1f) % 1f * size.height
+            val px = p.x * size.width
+            drawCircle(
+                color = Color(0xFF00F5FF).copy(alpha = p.alpha * 0.7f),
+                radius = p.size,
+                center = Offset(px, py)
+            )
+        }
+    }
+}
+
+/**
+ * SPACE_NEBULA — ห้วงอวกาศลึก 2 ชั้น (ดวงดาวระยิบระยับ + กลุ่มก๊าซเนบิวลาจักรวาล)
+ */
+@Composable
+private fun SpaceNebulaBackground() {
+    val transition = rememberInfiniteTransition(label = "space_nebula")
+    val pulse by transition.animateFloat(
+        0.5f, 1f,
+        infiniteRepeatable(tween(3600, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "nebula_pulse"
+    )
+    val starRot by transition.animateFloat(
+        0f, 360f,
+        infiniteRepeatable(tween(48000, easing = LinearEasing), RepeatMode.Restart),
+        label = "star_rot"
+    )
+    val stars = remember {
+        List(35) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.8f + 0.2f, Random.nextFloat() * 0.6f + 0.3f, Random.nextFloat() * 2.5f + 1f, Random.nextFloat())
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF0D0624), Color(0xFF04010E), Color(0xFF000000)),
+            center = center,
+            radius = size.maxDimension * 0.8f
+        ))
+
+        // Cosmic Nebula Clouds
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFF6200EA).copy(alpha = 0.08f * pulse), Color(0xFF00E5FF).copy(alpha = 0.04f * pulse), Color.Transparent),
+                center = Offset(size.width * 0.35f, size.height * 0.4f),
+                radius = size.minDimension * 0.6f
+            )
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFFFF007F).copy(alpha = 0.06f * pulse), Color.Transparent),
+                center = Offset(size.width * 0.7f, size.height * 0.6f),
+                radius = size.minDimension * 0.5f
+            )
+        )
+
+        // Twinkling stars
+        stars.forEach { star ->
+            val twinkle = (sin((starRot * 0.05f + star.extra * 10f).toDouble()).toFloat() * 0.4f + 0.6f)
+            val sx = star.x * size.width
+            val sy = star.y * size.height
+            val color = if (star.speed > 0.6f) Color(0xFF80D8FF) else Color.White
+            drawCircle(
+                color = color.copy(alpha = (star.alpha * twinkle).coerceIn(0f, 1f)),
+                radius = star.size,
+                center = Offset(sx, sy)
+            )
+        }
+    }
+}
+
+/**
+ * MAGIC_MYSTIC — หมอกมนตราสีม่วง-อินดิโก + ละอองอักขระเวทมนตร์ลอยหมุนวน
+ */
+@Composable
+private fun MagicMysticBackground() {
+    val transition = rememberInfiniteTransition(label = "magic_mystic")
+    val rot by transition.animateFloat(
+        0f, 360f,
+        infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Restart),
+        label = "rune_rot"
+    )
+    val runePulse by transition.animateFloat(
+        0.1f, 0.28f,
+        infiniteRepeatable(tween(2500, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "rune_pulse"
+    )
+    val particles = remember {
+        List(22) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 0.5f + 0.4f, Random.nextFloat() * 3f + 1.5f, Random.nextFloat() * 360f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF1F0338), Color(0xFF090014), Color(0xFF000000)),
+            center = center,
+            radius = size.minDimension * 0.85f
+        ))
+
+        // Arcane rune circle in background
+        val ringRadius = size.minDimension * 0.48f
+        rotate(rot, pivot = center) {
+            drawCircle(
+                color = Color(0xFFBA68C8).copy(alpha = runePulse),
+                radius = ringRadius,
+                style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f)))
+            )
+            drawCircle(
+                color = Color(0xFFFFD54F).copy(alpha = runePulse * 0.7f),
+                radius = ringRadius * 0.82f,
+                style = Stroke(width = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 16f)))
+            )
+        }
+
+        // Floating mystic sparkles
+        particles.forEach { p ->
+            val py = ((p.y - (rot / 360f) * p.speed) % 1f + 1f) % 1f * size.height
+            val px = p.x * size.width + sin((py * 0.05f).toDouble()).toFloat() * 14f
+            drawCircle(
+                color = if (p.speed > 0.5f) Color(0xFFFFD54F) else Color(0xFFE040FB),
+                radius = p.size,
+                center = Offset(px, py)
+            )
+        }
+    }
+}
+
+/**
+ * CINEMA_COZY — บรรยากาศคาเฟ่/โรงหนัง แสงไฟโบเก้อบอุ่นนุ่มลึก
+ */
+@Composable
+private fun CinemaCozyBackground() {
+    val transition = rememberInfiniteTransition(label = "cinema_cozy")
+    val breathe by transition.animateFloat(
+        0.7f, 1.15f,
+        infiniteRepeatable(tween(3200, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "breathe"
+    )
+    val bokehList = remember {
+        List(14) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.2f + 0.1f, Random.nextFloat() * 0.25f + 0.15f, Random.nextFloat() * 45f + 35f, Random.nextFloat())
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF1A0E04), Color(0xFF080401), Color(0xFF000000)),
+            center = center,
+            radius = size.maxDimension * 0.75f
+        ))
+
+        // Warm out-of-focus bokeh lamps
+        bokehList.forEach { b ->
+            val bx = b.x * size.width
+            val by = b.y * size.height
+            val color = if (b.extra > 0.5f) Color(0xFFFFB300) else Color(0xFFFF7043)
+            drawCircle(
+                color = color.copy(alpha = (b.alpha * breathe).coerceIn(0f, 0.35f)),
+                radius = b.size * breathe,
+                center = Offset(bx, by)
+            )
+        }
+    }
+}
+
+/**
+ * WINTER_BLIZZARD — พายุหิมะโปรยปราย + ลมหนาวพัดเฉียง
+ */
+@Composable
+private fun WinterBlizzardBackground() {
+    val transition = rememberInfiniteTransition(label = "winter_blizzard")
+    val snowProgress by transition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
+        label = "snow"
+    )
+    val flakes = remember {
+        List(35) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.7f + 0.8f, Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 3.5f + 1.5f, Random.nextFloat() * 6.28f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF071524), Color(0xFF020912))))
+
+        flakes.forEach { flake ->
+            val prog = (flake.y + snowProgress * flake.speed) % 1f
+            val fy = prog * size.height
+            val fx = (flake.x * size.width + sin((prog * 4f * PI + flake.extra).toDouble()).toFloat() * 18f - prog * 28f) % size.width
+            drawCircle(
+                color = Color.White.copy(alpha = flake.alpha * 0.85f),
+                radius = flake.size,
+                center = Offset(if (fx < 0) fx + size.width else fx, fy)
+            )
+        }
+    }
+}
+
+/**
+ * SUMMER_HEAT — แสงแดดแผดเผา + รัศมีสุริยะและคลื่นไอความร้อน
+ */
+@Composable
+private fun SummerHeatBackground() {
+    val transition = rememberInfiniteTransition(label = "summer_heat")
+    val sunRot by transition.animateFloat(
+        0f, 360f,
+        infiniteRepeatable(tween(36000, easing = LinearEasing), RepeatMode.Restart),
+        label = "sun_rot"
+    )
+    val heatShimmer by transition.animateFloat(
+        0.85f, 1.15f,
+        infiniteRepeatable(tween(1400, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "heat"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF2E1000), Color(0xFF120400), Color(0xFF000000)),
+            center = Offset(size.width * 0.5f, size.height * 0.25f),
+            radius = size.maxDimension * 0.75f
+        ))
+
+        // Sunburst rays
+        rotate(sunRot, pivot = Offset(size.width * 0.5f, size.height * 0.25f)) {
+            val rayCount = 12
+            val sweep = 360f / rayCount
+            for (i in 0 until rayCount step 2) {
+                drawArc(
+                    color = Color(0xFFFFB300).copy(alpha = 0.05f * heatShimmer),
+                    startAngle = i * sweep,
+                    sweepAngle = sweep * 0.7f,
+                    useCenter = true,
+                    topLeft = Offset(size.width * 0.5f - size.maxDimension, size.height * 0.25f - size.maxDimension),
+                    size = Size(size.maxDimension * 2f, size.maxDimension * 2f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * WARRIOR_DOJO — โดโจซามูไร ท้องฟ้าสีชาดเลือดหมู + ประกายไฟลอยพวยพุ่ง
+ */
+@Composable
+private fun WarriorDojoBackground() {
+    val transition = rememberInfiniteTransition(label = "warrior_dojo")
+    val fireProgress by transition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+        label = "fire"
+    )
+    val sparks = remember {
+        List(25) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.6f + 0.4f, Random.nextFloat() * 0.6f + 0.4f, Random.nextFloat() * 3f + 1f, Random.nextFloat() * 6.28f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF240306), Color(0xFF0B0002), Color(0xFF000000))))
+
+        // Rising fire sparks & embers
+        sparks.forEach { s ->
+            val prog = ((s.y - fireProgress * s.speed) % 1f + 1f) % 1f
+            val sy = prog * size.height
+            val sx = s.x * size.width + sin((prog * 3f * PI + s.extra).toDouble()).toFloat() * 20f
+            val color = if (s.speed > 0.6f) Color(0xFFFFAB00) else Color(0xFFFF3D00)
+            drawCircle(
+                color = color.copy(alpha = (s.alpha * (1f - prog * 0.6f)).coerceIn(0f, 1f)),
+                radius = s.size,
+                center = Offset(sx, sy)
+            )
+        }
+    }
+}
+
+/**
+ * PARTY_CONFETTI — งานสังสรรค์ฉลอง สปอตไลต์หลายเฉดสี
+ */
+@Composable
+private fun PartyConfettiBackground() {
+    val transition = rememberInfiniteTransition(label = "party_confetti")
+    val spotRot by transition.animateFloat(
+        0f, 360f,
+        infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Restart),
+        label = "spot"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF140424), Color(0xFF05000C), Color(0xFF000000)),
+            center = center,
+            radius = size.maxDimension * 0.7f
+        ))
+
+        // Rotating colorful party spotlight cones
+        val colors = listOf(Color(0xFF00E5FF), Color(0xFFFF007F), Color(0xFFFFEA00))
+        for (i in colors.indices) {
+            val angle = spotRot + i * 120f
+            val rad = angle * PI.toFloat() / 180f
+            val beamX = center.x + cos(rad.toDouble()).toFloat() * size.width * 0.4f
+            val beamY = center.y + sin(rad.toDouble()).toFloat() * size.height * 0.4f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(colors[i].copy(alpha = 0.10f), Color.Transparent),
+                    center = Offset(beamX, beamY),
+                    radius = size.minDimension * 0.45f
+                )
+            )
+        }
+    }
+}
+
+/**
+ * GOLDEN_VAULT — คลังสมบัติทองคำ ประกายเหรียญทองและลำแสงรวย
+ */
+@Composable
+private fun GoldenVaultBackground() {
+    val transition = rememberInfiniteTransition(label = "golden_vault")
+    val coinProgress by transition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
+        label = "coins"
+    )
+    val shinePulse by transition.animateFloat(
+        0.05f, 0.18f,
+        infiniteRepeatable(tween(1800, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "shine"
+    )
+    val coins = remember {
+        List(22) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.4f, Random.nextFloat() * 0.5f + 0.4f, Random.nextFloat() * 4f + 3f, Random.nextFloat() * 6.28f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF2E2002), Color(0xFF0E0A00), Color(0xFF000000)),
+            center = center,
+            radius = size.maxDimension * 0.7f
+        ))
+
+        // Center golden radiance
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFFFFD54F).copy(alpha = shinePulse), Color.Transparent),
+                center = center,
+                radius = size.minDimension * 0.65f
+            )
+        )
+
+        // Falling gold coin particles
+        coins.forEach { coin ->
+            val prog = (coin.y + coinProgress * coin.speed) % 1f
+            val cy = prog * size.height
+            val cx = coin.x * size.width
+            val coinSquash = kotlin.math.abs(cos((prog * 8f * PI + coin.extra).toDouble())).toFloat()
+            drawOval(
+                color = Color(0xFFFFD700).copy(alpha = coin.alpha),
+                topLeft = Offset(cx - coin.size, cy - coin.size * coinSquash),
+                size = Size(coin.size * 2f, coin.size * 2f * coinSquash)
+            )
+        }
+    }
+}
+
+/**
+ * SICK_LAB — ห้องทดลองชีวเคมี แสงเรืองชีวภาพสีเขียวมรกต + ฟองเดือด
+ */
+@Composable
+private fun SickLabBackground() {
+    val transition = rememberInfiniteTransition(label = "sick_lab")
+    val bubbleProgress by transition.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
+        label = "bubbles"
+    )
+    val glowPulse by transition.animateFloat(
+        0.06f, 0.16f,
+        infiniteRepeatable(tween(2200, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "glow"
+    )
+    val bubbles = remember {
+        List(22) {
+            Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.4f, Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 5f + 2f, Random.nextFloat() * 6.28f)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF022413), Color(0xFF000D06), Color(0xFF000000)),
+            center = Offset(size.width * 0.5f, size.height * 0.7f),
+            radius = size.maxDimension * 0.7f
+        ))
+
+        // Green bio glow
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFF00E676).copy(alpha = glowPulse), Color.Transparent),
+                center = Offset(size.width * 0.5f, size.height * 0.65f),
+                radius = size.minDimension * 0.55f
+            )
+        )
+
+        // Rising chemical bubbles
+        bubbles.forEach { b ->
+            val prog = ((b.y - bubbleProgress * b.speed) % 1f + 1f) % 1f
+            val by = prog * size.height
+            val bx = b.x * size.width + sin((prog * 4f * PI + b.extra).toDouble()).toFloat() * 12f
+            drawCircle(
+                color = Color(0xFF69F0AE).copy(alpha = b.alpha * 0.7f),
+                radius = b.size,
+                center = Offset(bx, by),
+                style = Stroke(width = 1.2f)
+            )
+        }
+    }
+}
+
+/**
+ * SPORTS_ARENA — สนามกีฬา ลำแสงไฟสปอตไลต์ส่องตัดผ่านความมืด
+ */
+@Composable
+private fun SportsArenaBackground() {
+    val transition = rememberInfiniteTransition(label = "sports_arena")
+    val sweep by transition.animateFloat(
+        -15f, 15f,
+        infiniteRepeatable(tween(4000, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "sweep"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF04192B), Color(0xFF010A14), Color(0xFF000000))))
+
+        // Stadium Left Floodlight Cone
+        val leftLight = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(size.width * 0.75f + sweep * 6f, size.height)
+            lineTo(size.width * 0.45f + sweep * 6f, size.height)
+            close()
+        }
+        drawPath(leftLight, brush = Brush.linearGradient(listOf(Color(0xFF00E5FF).copy(alpha = 0.08f), Color.Transparent)))
+
+        // Stadium Right Floodlight Cone
+        val rightLight = Path().apply {
+            moveTo(size.width, 0f)
+            lineTo(size.width * 0.25f - sweep * 6f, size.height)
+            lineTo(size.width * 0.55f - sweep * 6f, size.height)
+            close()
+        }
+        drawPath(rightLight, brush = Brush.linearGradient(listOf(Color(0xFF2979FF).copy(alpha = 0.08f), Color.Transparent)))
+    }
+}
+
+/**
+ * LOW_POWER_CRT — จอเรโทร CRT แบตเตอรี่วิกฤต ไฟเตือนกะพริบสีแดงหม่น
+ */
+@Composable
+private fun LowPowerCrtBackground() {
+    val transition = rememberInfiniteTransition(label = "low_power_crt")
+    val redPulse by transition.animateFloat(
+        0.04f, 0.18f,
+        infiniteRepeatable(tween(1100, easing = EaseInOutSine), RepeatMode.Reverse),
+        label = "red_pulse"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(brush = Brush.radialGradient(
+            colors = listOf(Color(0xFF260404).copy(alpha = redPulse * 2.2f), Color(0xFF080101), Color(0xFF000000)),
+            center = center,
+            radius = size.maxDimension * 0.65f
+        ))
+
+        // Faint horizontal CRT scan grid lines
+        val lineSpacing = 6f
+        var y = 0f
+        while (y < size.height) {
+            drawLine(
+                color = Color.Black.copy(alpha = 0.35f),
+                start = Offset(0f, y),
+                end = Offset(size.width, y),
+                strokeWidth = 1.2f
+            )
+            y += lineSpacing
+        }
+    }
 }

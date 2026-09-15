@@ -118,23 +118,16 @@ fun DynamicPropRenderer(
     }
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        val cX = size.width / 2f
-        val cY = size.height / 2f
-
-        val isLandscape = size.width > size.height
-        val eyeDiameter = if (isLandscape) {
-            minOf(size.height * 0.52f, size.width * 0.28f)
-        } else {
-            minOf(size.width * 0.38f, size.height * 0.24f)
-        }
-        val baseEyeW = eyeDiameter
-        val baseEyeH = eyeDiameter
-        val baseSpacing = eyeDiameter * 0.65f
+        val layout = calculateAvatarLayout(size.width, size.height)
+        val cX = layout.cX
+        val cY = layout.cY
+        val eyeDiameter = layout.eyeDiameter
+        val baseSpacing = layout.baseSpacing
 
         val leftEyeCenterX = cX - baseSpacing
         val rightEyeCenterX = cX + baseSpacing
         val eyeCenterY = cY
-        val mouthY = cY + eyeDiameter * 0.65f
+        val mouthY = layout.mouthY
 
         // Anchor coordinate mapping based on PropPosition aligned to robot facial geometry
         val (anchorX, anchorY) = when (prop.position) {
@@ -147,8 +140,8 @@ fun DynamicPropRenderer(
             PropPosition.FLOATING_RIGHT -> Pair(rightEyeCenterX + eyeDiameter * 0.85f, eyeCenterY - eyeDiameter * 0.35f)
         }
 
-        val finalAnchorX = anchorX + (prop.offsetXRatio * baseEyeW)
-        val finalAnchorY = anchorY + (prop.offsetYRatio * baseEyeH) + bobOffset.dp.toPx()
+        val finalAnchorX = anchorX + (prop.offsetXRatio * layout.baseEyeW)
+        val finalAnchorY = anchorY + (prop.offsetYRatio * layout.baseEyeH) + bobOffset.dp.toPx()
 
         // Auto-fit scale normalizer: scale bounds to prop.sizeDp or auto-fit robot eye diameter
         val targetSizePx = if (prop.sizeDp <= 0f) {
