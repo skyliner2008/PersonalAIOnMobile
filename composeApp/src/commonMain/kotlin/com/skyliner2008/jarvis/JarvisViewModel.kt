@@ -47,6 +47,8 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -178,24 +180,30 @@ class JarvisViewModel(
         val prev = _alwaysLiveProfile.value
         _alwaysLiveProfile.value = profile
         val isPet = profile == AlwaysLiveProfile.PET
-        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = isPet
+        // LiveModeState เป็นแหล่งความจริงเดียว (เซ็ต isPetMode ให้ด้วย) — ใช้ตัดสินสิทธิ์ควบคุมเครื่อง
+        com.skyliner2008.jarvis.pet.LiveModeState.update(profile)
         voice.setRobotVoiceEnabled(isPet)
 
         if (prev != profile) {
             com.skyliner2008.jarvis.logDebug("JarvisVM", "AlwaysLiveProfile switched: $prev -> $profile (isPet=$isPet)")
             orchestrator.resetLiveSessionResumption()
-            val greeting = if (isPet) "สวัสดีฮับ พร้อมเล่นแล้ว" else "สวัสดีจาวิส พร้อมคุยไหม"
+            // greeting นี้จะถูกพูดตอน session READY (ทั้งการเปิดครั้งแรกและการ restart ด้านล่าง)
+            val greeting = if (isPet) {
+                "สวัสดีฮับ พร้อมเล่นแล้ว"
+            } else {
+                "สวัสดีจาวิส พร้อมคุยไหม"
+            }
             orchestrator.setLiveGreetingOnReady(greeting)
 
             if (voice.isListening.value) {
+                // ต้อง restart session จริง — system prompt (JARVIS vs Pet), ชุด tool และ voice config
+                // ถูกส่งตอน setup เท่านั้น การส่ง realtime prompt แบบเดิมเปลี่ยนแค่ "คำพูด" แต่ persona จริงยังเป็นของเก่า
                 viewModelScope.launch {
-                    val prompt = if (isPet) {
-                        "[ระบบ]: สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดทักทายและตอบรับผู้ใช้สั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ มีเสียงหุ่นยนต์ตัวน้อย แล้วเล่นกับเจ้านายทันที (ห้ามใช้ markdown ห้ามตอบเป็นทางการ)"
-                    } else {
-                        "[ระบบ]: สลับเข้าสู่โหมดควบคุม/Always AI Live แล้ว! — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ"
-                    }
-                    com.skyliner2008.jarvis.logDebug("JarvisVM", "Sending realtime persona prompt to active Live session: $prompt")
-                    orchestrator.sendLiveRealtimeText(prompt)
+                    // ปิด Always Live จะเรียก setAlwaysLiveProfile(CONTROL) แล้วตามด้วย stopVoiceInput() ทันที
+                    // — เช็คอีกครั้งก่อน restart ไม่ให้ session ที่ผู้ใช้เพิ่งปิดถูกเปิดขึ้นมาใหม่
+                    if (!voice.isListening.value || _alwaysLiveProfile.value != profile) return@launch
+                    com.skyliner2008.jarvis.logDebug("JarvisVM", "Restarting Live session for persona switch -> $profile")
+                    voice.restartVoiceSession()
                 }
             }
         }
@@ -762,12 +770,80 @@ class JarvisViewModel(
         }
     )
 
+    /**
+     * โหมดประชุม (ถอดเสียง) และโหมดแปลภาษา — ใช้โมเดล Live เฉพาะทาง คนละ session กับผู้ช่วย
+     * เปิดจากปุ่มบนแถบเครื่องมือ แล้วทำงานในหน้าจอของตัวเอง (ไม่ปนกับห้องแชท)
+     */
+    val specialist = com.skyliner2008.jarvis.controller.SpecialistSessionController(
+        scope = viewModelScope,
+        service = com.skyliner2008.jarvis.data.LiveSpecialistService(client),
+        apiKeyProvider = { settings.apiKey.value },
+        summarizer = { prompt ->
+            val out = StringBuilder()
+            orchestrator.chatWithHistory(text = prompt).collect { event ->
+                if (event is com.skyliner2008.jarvis.ai.ChatStreamEvent.Text) out.append(event.content)
+            }
+            out.toString().trim().ifBlank { "ไม่มีเนื้อหาให้สรุป" }
+        },
+        stopAssistantSession = { if (voice.isListening.value) voice.stopVoiceInput() },
+        pushToChat = { body ->
+            chat.messagesMutable.value = chat.messagesMutable.value + Message("model", body, isStatic = true)
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { memoryManager.storeMessage("model", body, metadata = "{\"mode\": \"specialist_session\"}") }
+            }
+        },
+        // ถามด้วยเสียงระหว่างประชุม: ใช้ greeting-on-ready เป็น "คำถามแรก" ผู้ช่วยจึงตอบทันทีที่ session พร้อม
+        startAssistantWithPrompt = { prompt ->
+            orchestrator.setLiveGreetingOnReady(prompt)
+            voice.startVoiceInput()
+        },
+        // ข้อความที่ผู้ช่วยพูด (transcript สด) — เอาไปบันทึกเป็นคำตอบในบทประชุม
+        assistantAnswerFlow = orchestrator.textOutputFlow
+            .filter { it.role == "model" && !it.isStatic }
+            .map { it.text },
+        assistantTurnCompleteFlow = orchestrator.liveTurnCompleteFlow,
+        assistantUserQuestionFlow = orchestrator.liveUserTurnFinalFlow,
+        // บันทึกการประชุมเก็บเป็น JSON ก้อนเดียวใน settings — ไม่ต้องเพิ่มตารางใหม่
+        archiveLoad = {
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.getSetting("meeting_records_v1").executeAsOneOrNull() ?: ""
+            }
+        },
+        archiveSave = { raw ->
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("meeting_records_v1", raw)
+            }
+        }
+    )
+
     init {
         voice.onTestEmotion = { emo, status -> setTestEmotion(emo, status) }
         voice.onStartDemo = { startDemoForProfile() }
         voice.onStopDemo = { stopEmotionDemo() }
         voice.onPlayMoodsetPage = { showMoodsetPage(it) }
         voice.onPlayAllMoodsets = { playAllMoodsets() }
+
+        // Live เป็นเอเจนต์หลัก: งานที่ใช้เวลานานถูกมอบให้ chat session (flash-lite + tool ครบ) ทำเบื้องหลัง
+        // ผลลัพธ์เข้าแชทเป็นการ์ดและถูกส่งกลับเข้า Live ให้พูดรายงานผ่านท่อ LongTaskRunner.completions ด้านล่าง
+        com.skyliner2008.jarvis.automation.agent.AgentTaskManager.initRunner { instruction ->
+            val core = runCatching { buildRuntimeCoreContext() }.getOrDefault("")
+            val output = StringBuilder()
+            orchestrator.chatWithHistory(text = instruction, coreContext = core).collect { event ->
+                when (event) {
+                    is com.skyliner2008.jarvis.ai.ChatStreamEvent.Text -> output.append(event.content)
+                    is com.skyliner2008.jarvis.ai.ChatStreamEvent.ToolResult ->
+                        logDebug("AgentTask", "tool ${event.toolName} → ${event.result.take(120)}")
+                    else -> Unit
+                }
+            }
+            output.toString().trim().ifBlank { "ไม่มีผลลัพธ์กลับมาจากงานเบื้องหลัง" }
+        }
+
+        // Background alerts ต้องพูดผ่าน Live session หลักเมื่อผู้ใช้เปิดคุยอยู่ (กันเปิด session ที่สองซ้อน/เสียงเข้าไมค์)
+        com.skyliner2008.jarvis.ai.LiveSessionBridge.register(
+            isActive = { voice.isListening.value },
+            deliver = { text -> orchestrator.sendLiveRealtimeTextWhenReady(text, timeoutMs = 8_000L) }
+        )
 
         // Track winning live model; do NOT silently overwrite user's DB settings during transient runtime fallback
         orchestrator.onLiveModelChanged = { winningModel ->
@@ -833,11 +909,10 @@ class JarvisViewModel(
 
                 // Immediate Apply: Restart session if active
                 if (voice.isListening.value) {
-                    stopVoiceInput()
-                    delay(800) // เพิ่ม delay เล็กน้อยเพื่อให้ระบบเคลียร์ resources และบันทึกความจำได้ทัน
                     // ตั้ง greeting ให้ AI พูดยืนยันเสียงใหม่อัตโนมัติทันทีที่ session READY (ภาษาไทยล้วน ไม่มี [SYSTEM])
                     orchestrator.setLiveGreetingOnReady("เปลี่ยนมาใช้เสียง $newVoice แล้ว ลองทักทายสั้นๆ ด้วยเสียงใหม่นี้")
-                    startVoiceInput()
+                    // restartVoiceSession รอ disconnect ของ session เดิมให้เสร็จก่อนเปิดใหม่ (ไม่ต้อง delay เดา)
+                    voice.restartVoiceSession()
                 }
             }
         }
@@ -1178,11 +1253,13 @@ class JarvisViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        com.skyliner2008.jarvis.ai.LiveSessionBridge.unregister()
         mt5.shutdown()
         com.skyliner2008.jarvis.pet.PetVisionBridge.onAiVisionStreamToggle = null
         stopCameraAnalysis()
         cameraService.release()
         voice.shutdown()
+        specialist.shutdown()
         voiceManager.shutdown()
         client.close()
     }

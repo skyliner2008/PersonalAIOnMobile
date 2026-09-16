@@ -1,5 +1,9 @@
 package com.skyliner2008.jarvis.data
 
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
+
 /**
  * Centralized dynamic configuration for AI models used in JARVIS.
  * Synchronizes with Google Gemini API's ModelService.ListModels (/v1beta/models)
@@ -7,25 +11,51 @@ package com.skyliner2008.jarvis.data
  */
 object ModelConfig {
     /**
-     * Initial safe default main model used before API sync or when DB has no setting.
+     * โมเดลแชทหลัก — free tier ใช้เฉพาะตระกูล flash-lite เท่านั้น
+     *
+     * เหตุผล (ยืนยันกับ AI Studio console 2026-09-16):
+     * - flash-lite: 15 RPM / 250K TPM / **500 req ต่อวัน** ต่อโมเดล → 2 ตัวรวม 1,000 req/วัน
+     * - flash (3.x): 5 RPM / 250K TPM / **20 req ต่อวัน** → ไม่พอสำหรับผู้ช่วยที่ใช้ tool เยอะ
+     * งานวนลูป (เฝ้าราคา/เงื่อนไขตลาด) ใช้ automation engine ของแอปเอง ไม่เรียกโมเดล
+     * โมเดลถูกเรียกเฉพาะตอนมีเหตุการณ์จริงเท่านั้น
      */
-    const val DEFAULT_MAIN_MODEL = "gemini-3.6-flash"
+    const val DEFAULT_MAIN_MODEL = "gemini-3.5-flash-lite"
+
+    /** โมเดลแชทที่อนุญาตบน free tier (เรียงตามลำดับที่ใช้) */
+    val CHAT_MODELS = listOf(
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+    )
 
     /**
      * Initial safe default model used for Real-time Voice and Camera (Live mode).
      * gemini-3.1-flash-live-preview delivers superior real-time speech prosody, sub-second latency, and native tools.
+     *
+     * ใช้เฉพาะก่อน sync กับ ListModels — หลัง sync ระบบจะจัดอันดับจากโมเดล bidi จริงที่ project มองเห็น
+     * (โมเดล Live ใหม่ๆ จะถูกใช้เองโดยไม่ต้องแก้โค้ด)
      */
-    const val DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"
+    const val DEFAULT_LIVE_MODEL = "gemini-3.8-live"
 
-    // Seed list of known verified models in order of priority (used only before first API sync)
+    /** โมเดล Live ที่ใช้เมื่อผู้ใช้ขอให้ "คิดลึก" — ช้ากว่าแต่เหตุผลแน่นกว่า */
+    const val DEEP_THINKING_LIVE_MODEL = "gemini-3.8-live-extended-thinking"
+
+    // ─── Free tier reality check (ตรวจกับ AI Studio console 2026-09-16) ─────────
+    // • RPD ของโมเดล text-out ตระกูล flash = 20/วัน ต่อโมเดล, flash-lite = 500/วัน
+    // • Live API: RPD ไม่จำกัด แต่จำกัด TPM (65K สำหรับตระกูล Live รุ่นใหม่)
+    // • โควตาเป็น "ต่อ project" ไม่ใช่ต่อ key — key หลายใบใน project เดียวกันไม่ได้เพิ่ม RPD
+    // • RPD รีเซ็ตเที่ยงคืน Pacific time (เอกสาร rate-limits)
+    /** โมเดลที่โควตา "ต่อวัน" หมดแล้ว → ดันไปท้าย chain จนกว่าจะรีเซ็ต */
+    private val _quotaExhaustedModels = mutableMapOf<String, Long>()
+
+    // Seed list — ใช้ก่อน sync กับ API เท่านั้น; ตระกูล flash-lite มาก่อนเสมอเพราะโควตาต่อวันสูงกว่า 25 เท่า
     private val SEED_FALLBACK_MODELS = listOf(
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash-lite",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash-lite",
         "gemini-2.5-flash",
         "gemini-flash-latest"
     )
@@ -74,25 +104,27 @@ object ModelConfig {
             !lc.contains("1.0")
         }
 
-        // จัดลำดับความสำคัญ:
-        // 1. Flash / Flash-Lite models (เร็ว, โควต้าสูง, เหมาะกับแอพมือถือ) เรียงตามเวอร์ชันใหม่ -> เก่า
-        // 2. Pro / Thinking / General preview models
+        // จัดลำดับความสำคัญ (free tier):
+        // 1. flash-lite — 500 req/วัน ต่อโมเดล คือสายหลักของแอป
+        // 2. flash — 20 req/วัน เก็บไว้เป็นตัวเลือกให้ผู้ใช้เลือกเองใน Settings เท่านั้น
+        // ภายในกลุ่มเดียวกันเรียงตามเวอร์ชันใหม่ -> เก่า
         val sortedChatModels = filteredChatModels.sortedWith(
-            compareByDescending<String> { isFlashModel(it) }
+            compareByDescending<String> { isChatAllowedModel(it) }
+                .thenByDescending { isFlashModel(it) }
                 .thenByDescending { extractModelVersion(it) }
-                .thenBy { it.contains("lite") }
         )
 
-        // Live models: รวม bidiGenerateContent + preview endpoints (3.1 flash live -> 2.5 native audio 09-2025 -> latest)
-        val liveCandidates = (listOf(
-            "gemini-3.1-flash-live-preview",
-            "gemini-2.5-flash-native-audio-preview-09-2025",
-            "gemini-2.5-flash-native-audio-latest",
-            "gemini-2.0-flash-exp"
-        ) + bidiModels).distinct().filter { id ->
-            val lc = id.lowercase()
-            !lc.contains("transcribe") && id != "gemini-2.5-flash-native-audio-preview-12-2025"
-        }
+        // Live models: ใช้ bidiGenerateContent จริงจาก API เป็นหลัก แล้วค่อยเติม seed ที่รู้จัก
+        // (เดิม hardcode 4 ตัวไว้หน้าสุด โมเดล Live ใหม่ที่ Google เพิ่มเข้ามาจึงไม่เคยถูกเลือกเลย)
+        val liveCandidates = (bidiModels + SEED_LIVE_MODELS)
+            .distinct()
+            .filter { isConversationalLiveModel(it) }
+            .sortedWith(
+                // คุยโต้ตอบได้ก่อน → เวอร์ชันใหม่ก่อน → ตัว extended thinking ไว้ท้าย (latency สูงกว่าสำหรับสนทนาสด)
+                compareByDescending<String> { extractModelVersion(it) }
+                    .thenBy { it.lowercase().contains("thinking") }
+                    .thenBy { it.lowercase().contains("native-audio") }
+            )
 
         synchronized(dynamicLock) {
             _dynamicGeminiModels = sortedChatModels
@@ -101,16 +133,126 @@ object ModelConfig {
 
         com.skyliner2008.jarvis.logDebug(
             "ModelConfig",
-            "Updated dynamic models from API (${sortedChatModels.size} chat, ${liveCandidates.size} live). Top: ${sortedChatModels.take(5)}"
+            "Updated dynamic models from API (${sortedChatModels.size} chat, ${liveCandidates.size} live) | chat=${sortedChatModels.take(5)} | live=$liveCandidates"
         )
     }
 
+    /**
+     * Seed สำหรับ Live — ใช้เฉพาะก่อน sync ListModels เท่านั้น
+     * (2026-09-16: ตัด `gemini-2.0-flash-exp` และ `...native-audio-preview-09-2025` ที่ปิดบริการ/ไม่อยู่ใน console แล้ว
+     *  และเลิกกันโมเดล native audio 12-2025 ซึ่งตอนนี้คือ "Gemini 2.5 Flash Native Audio Dialog" ที่ใช้ได้บน free tier)
+     */
     val SEED_LIVE_MODELS = listOf(
-        "gemini-3.1-flash-live-preview",
-        "gemini-2.5-flash-native-audio-preview-09-2025",
-        "gemini-2.5-flash-native-audio-latest",
-        "gemini-2.0-flash-exp"
+        "gemini-3.8-live",                                // ใหม่สุด 65K TPM, RPD ไม่จำกัด
+        "gemini-3.1-flash-live-preview",                  // ตัวที่ผ่านการใช้งานจริงมาแล้ว
+        "gemini-3.8-live-extended-thinking",              // เหตุผลแน่นกว่า แต่ latency สูงกว่า
+        "gemini-2.5-flash-native-audio-preview-12-2025"   // native audio dialog — สำรองสุดท้าย
     )
+
+    /** โมเดล Live เฉพาะทาง — ใช้เฉพาะโหมดของมัน ไม่เอามาเป็นผู้ช่วยทั่วไป */
+    const val TRANSLATE_LIVE_MODEL = "gemini-3.5-live-translate-preview"
+    const val TRANSCRIBE_LIVE_MODEL = "gemini-3.5-transcribe-live"
+
+    /**
+     * Live model ที่ "คุยโต้ตอบ" ได้จริง — ตัดรุ่นเฉพาะทางที่เปิด WebSocket ได้แต่ใช้เป็นผู้ช่วยไม่ได้
+     * (transcribe = แปลงเสียงเป็นข้อความอย่างเดียว, live-translate = แปลภาษาอย่างเดียว, tts = อ่านออกเสียงอย่างเดียว)
+     */
+    fun isConversationalLiveModel(modelId: String): Boolean {
+        val lc = modelId.removePrefix("models/").lowercase()
+        if (lc.isBlank()) return false
+        if (lc.contains("transcribe") || lc.contains("translate") || lc.contains("tts")) return false
+        if (lc.contains("embedding") || lc.contains("image") || lc.contains("banana")) return false
+        return lc.contains("live") || lc.contains("native-audio") || lc.contains("realtime") || lc.contains("dialog")
+    }
+
+    /**
+     * โควตารายวันของโมเดลนี้หมดแล้ว (429 แบบ PerDay) — ดันไปท้าย chain จนกว่าจะรีเซ็ต
+     * free tier: flash = 20 req/วัน, flash-lite = 500 req/วัน, รีเซ็ตเที่ยงคืน Pacific
+     */
+    fun markModelQuotaExhausted(modelName: String, dailyQuota: Boolean) {
+        val clean = modelName.removePrefix("models/").trim()
+        if (clean.isBlank()) return
+        val until = if (dailyQuota) nextPacificResetMs() else System.currentTimeMillis() + 60_000L
+        synchronized(dynamicLock) { _quotaExhaustedModels[clean] = until }
+        val minutesLeft = (until - System.currentTimeMillis()) / 60_000L
+        com.skyliner2008.jarvis.logDebug(
+            "ModelConfig",
+            "🪫 Model '$clean' quota exhausted (${if (dailyQuota) "daily" else "per-minute"}) — deprioritized for ~${minutesLeft} min"
+        )
+    }
+
+    fun isModelQuotaExhausted(modelName: String): Boolean {
+        val clean = modelName.removePrefix("models/").trim()
+        val now = System.currentTimeMillis()
+        return synchronized(dynamicLock) {
+            val until = _quotaExhaustedModels[clean] ?: return@synchronized false
+            if (until > now) true else {
+                _quotaExhaustedModels.remove(clean)
+                false
+            }
+        }
+    }
+
+    /** โมเดลที่ใช้เป็นสายแชทได้บน free tier — ตระกูล lite เท่านั้น (โควตาต่อวันสูงพอ) */
+    fun isChatAllowedModel(modelId: String): Boolean {
+        val clean = modelId.removePrefix("models/").lowercase()
+        if (clean in CHAT_MODELS) return true
+        return clean.contains("lite") && clean.startsWith("gemini-") && !isLiveModel(clean)
+    }
+
+    /**
+     * โควตารายวันของโมเดลแชทหลักหมดทั้งหมดหรือยัง — ใช้แจ้งผู้ใช้แทนการปล่อยให้ error ดิบๆ
+     * @return ข้อความแจ้งเตือน หรือ null ถ้ายังใช้ได้
+     */
+    fun chatQuotaExhaustedMessage(): String? {
+        val usable = getFallbackChain().filter { !isModelQuotaExhausted(it) }
+        if (usable.isNotEmpty()) return null
+        return "⚠️ โควตาแชทรายวันของ Gemini free tier หมดแล้ว (flash-lite 500 ครั้ง/วัน ต่อโมเดล) " +
+            "โควตาจะรีเซ็ตเที่ยงคืนเวลา Pacific (ประมาณ 14:00–15:00 ตามเวลาไทย) — " +
+            "ระหว่างนี้ยังใช้โหมดเสียง (Live) ได้ตามปกติเพราะไม่จำกัดจำนวนครั้ง"
+    }
+
+    /**
+     * ชื่อที่อ่านง่ายจาก model id — ใช้แทน label ที่ hardcode ไว้ (ชื่อโมเดลเปลี่ยนบ่อย)
+     * เช่น "gemini-3.8-flash" → "Gemini 3.8 Flash", "gemini-3.1-flash-live-preview" → "Gemini 3.1 Flash Live (preview)"
+     */
+    fun displayNameFor(modelId: String): String {
+        val clean = modelId.removePrefix("models/").trim()
+        if (clean.isBlank()) return modelId
+        val isPreview = clean.contains("preview")
+        val words = clean.split("-").filter { it.isNotBlank() && it != "preview" }
+        val pretty = words.joinToString(" ") { part ->
+            when {
+                part.equals("gemini", true) -> "Gemini"
+                part.equals("tts", true) -> "TTS"
+                part.firstOrNull()?.isDigit() == true -> part
+                else -> part.replaceFirstChar { it.uppercase() }
+            }
+        }
+        return if (isPreview) "$pretty (preview)" else pretty
+    }
+
+    /**
+     * โมเดลสำหรับงานปริมาณมาก/เบื้องหลัง บน free tier
+     * — ตระกูล flash-lite มีโควตา 500 req/วัน เทียบกับ flash ที่มีแค่ 20 req/วัน
+     */
+    fun getHighVolumeModel(): String {
+        val pool = getActiveGeminiModels()
+        return pool.firstOrNull { it.contains("lite", ignoreCase = true) && !isModelQuotaExhausted(it) }
+            ?: pool.firstOrNull { it.contains("lite", ignoreCase = true) }
+            ?: SEED_FALLBACK_MODELS.first { it.contains("lite") }
+    }
+
+    /** เที่ยงคืนถัดไปตามเวลา Pacific — เวลารีเซ็ต RPD ของ Gemini API */
+    private fun nextPacificResetMs(): Long {
+        val zone = runCatching { kotlinx.datetime.TimeZone.of("America/Los_Angeles") }
+            .getOrElse { kotlinx.datetime.TimeZone.UTC }
+        val now = kotlinx.datetime.Clock.System.now()
+        val localDate = now.toLocalDateTime(zone).date
+        val nextMidnight = localDate.plus(1, kotlinx.datetime.DateTimeUnit.DAY)
+            .atStartOfDayIn(zone)
+        return nextMidnight.toEpochMilliseconds()
+    }
 
     /**
      * เลื่อนโมเดล Live ที่เชื่อมต่อสำเร็จและสุขภาพดีขึ้นเป็นอันดับ 1
@@ -222,15 +364,23 @@ object ModelConfig {
 
         val primaryClean = primaryModel?.removePrefix("models/")?.trim()
         val result = mutableListOf<String>()
+        // 1. โมเดลที่ผู้ใช้เลือกเองใน Settings มาก่อนเสมอ (แม้จะไม่ใช่ lite ก็เคารพการตั้งค่า)
         if (!primaryClean.isNullOrBlank() && !isModelDead(primaryClean)) {
             result.add(primaryClean)
         }
-        for (m in pool) {
-            if (m !in result) {
-                result.add(m)
-            }
+        // 2. โมเดลแชทที่อนุญาต: flash-lite เท่านั้น (500 req/วัน) โดย 2 ตัวหลักมาก่อน
+        for (m in CHAT_MODELS) {
+            if (m !in result && !isModelDead(m)) result.add(m)
         }
-        return if (result.isNotEmpty()) result else listOf(DEFAULT_MAIN_MODEL)
+        for (m in pool) {
+            if (m !in result && isChatAllowedModel(m)) result.add(m)
+        }
+        // ตระกูล flash (20 req/วัน) ไม่ถูกใส่ในสายแชท — งานวนลูปใช้ automation engine ของแอปแทน
+        if (result.isEmpty()) return listOf(DEFAULT_MAIN_MODEL)
+        // โมเดลที่โควตารายวันหมดแล้วถูกดันไปท้าย (ไม่ตัดทิ้ง — เผื่อโควตารีเซ็ตเร็วกว่าที่คำนวณ)
+        // free tier: flash 20 req/วัน หมดเร็วมาก ถ้าไม่ลดลำดับจะเสียเวลาไล่ยิงตัวที่ตายไปแล้วทุกครั้ง
+        val (available, exhausted) = result.partition { !isModelQuotaExhausted(it) }
+        return available + exhausted
     }
 
     /**
@@ -354,6 +504,7 @@ object ModelConfig {
             _dynamicLiveModels = emptyList()
             _promotedLiveModel = null
             _penalizedLiveModels.clear()
+            _quotaExhaustedModels.clear()
         }
     }
 }

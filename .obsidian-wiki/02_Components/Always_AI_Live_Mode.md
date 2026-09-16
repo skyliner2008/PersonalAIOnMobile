@@ -70,6 +70,17 @@ stateDiagram-v2
 - **Wake-from-Sleep**:
   - `PARTIAL_WAKE_LOCK`: Keeps CPU active for low-power audio detection when screen is off.
   - Screen Wake (`ACQUIRE_CAUSES_WAKEUP` + `turnScreenOn` / `showWhenLocked` in `MainActivity`): Automatically awakens display and presents full-screen AI interface over lock screen upon hotword trigger.
+- **Live session active (2026-09-16)**: `onScreenOff()` does **not** start `HotwordDetector` while `LiveSessionBridge.isActive()` — the Live mic (`VOICE_COMMUNICATION`) is already listening, and a second `AudioRecord` (`MIC` 8 kHz) would starve one of them. The wake lock is still acquired.
+- **Wake-word confirmation (2026-09-16)**: the RMS trigger is only the first stage. `onHotwordEnergyDetected()` releases the mic, then `HotwordVerifier` runs one short `SpeechRecognizer` pass (offline preferred, ~5 s) and `WakeWordMatcher` checks it for "จาวิส / jarvis" (plus the configured `wakeWord`).
+  - match → `onHotwordDetected()` wakes the screen
+  - no match → go back to listening (TV/room noise no longer wakes the phone)
+  - recognizer unavailable or errors → legacy behaviour (wake on energy)
+
+### 1.4 Pet persona across minimize / screen-off (2026-09-16)
+- `stopPetSensors()` (minimize, screen off) only stops the motion sensor and ambient sounds; `JarvisPersona.isPetMode` stays true while the profile is PET.
+- `stopPetMode()` (profile switch, disable) also clears `isPetMode` and the robot sound handler.
+- `startPetMode()` re-asserts `isPetMode = (profile == PET)`; `onScreenOn()` and `onHotwordDetected()` restart pet sensors when the profile is PET.
+- Before this fix a minimize/expand or screen off/on silently turned the next Live reconnect back into the JARVIS persona.
 
 ---
 

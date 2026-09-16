@@ -111,13 +111,13 @@ class DynamicModelTest {
         val chain = ModelConfig.getLiveFallbackChain("gemini-3.1-flash-live-preview")
         assertTrue(chain.isNotEmpty(), "Live fallback chain should not be empty")
         assertEquals("gemini-3.1-flash-live-preview", chain.first(), "Primary live model should be first")
-        assertTrue(chain.any { it.contains("2.5-flash-native-audio") }, "Fallback chain must contain 2.5 flash native audio fallback")
+        assertTrue(chain.any { it.contains("2.5-flash-native-audio") }, "Native audio dialog stays as the last-resort fallback")
 
         // Mark a model as dead and verify it is filtered out
         ModelConfig.markModelDead("gemini-3.1-flash-live-preview")
         val chainAfterDead = ModelConfig.getLiveFallbackChain("gemini-3.1-flash-live-preview")
         assertFalse(chainAfterDead.contains("gemini-3.1-flash-live-preview"), "Dead live model must be excluded from chain")
-        assertTrue(chainAfterDead.first().contains("2.5-flash-native-audio"), "Chain must fall back to next live model")
+        assertEquals("gemini-3.8-live", chainAfterDead.first(), "Chain must fall back to the newest live model")
     }
 
     @Test
@@ -128,8 +128,10 @@ class DynamicModelTest {
     }
 
     @Test
-    fun testDefaultLiveModel_IsGemini31FlashLivePreview() {
-        assertEquals("gemini-3.1-flash-live-preview", ModelConfig.DEFAULT_LIVE_MODEL)
+    fun testDefaultLiveModel_IsNewestFlashLive() {
+        // 2026-09-16: console ของ project มี Gemini 3.8 Live (65K TPM, RPD ไม่จำกัด) เป็นรุ่นใหม่สุด
+        assertEquals("gemini-3.8-live", ModelConfig.DEFAULT_LIVE_MODEL)
+        assertEquals("gemini-3.8-live-extended-thinking", ModelConfig.DEEP_THINKING_LIVE_MODEL)
     }
 
     @Test

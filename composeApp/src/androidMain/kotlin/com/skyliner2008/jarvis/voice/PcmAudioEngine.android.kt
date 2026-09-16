@@ -20,7 +20,10 @@ actual class PcmAudioEngine {
     private var audioTrack: AudioTrack? = null
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
+    // อ่านจาก JarvisMicThread / เขียนจาก main — ต้อง @Volatile ไม่งั้น thread อาจไม่เห็นค่า false และวน read ต่อ
+    @Volatile
     private var isRecording = false
+    private var micThread: Thread? = null
     actual var onVolumeChanged: ((Float) -> Unit)? = null
 
     actual var isRobotVoiceEnabled: Boolean = false
@@ -121,11 +124,11 @@ actual class PcmAudioEngine {
             isRecording = true
             logDebug("PcmAudio", "MIC_STARTED successfully")
             
-            thread(name = "JarvisMicThread") {
+            micThread = thread(name = "JarvisMicThread") {
                 val buffer = ByteArray(minRecSize)
                 while (isRecording) {
                     val read = record.read(buffer, 0, buffer.size)
-                    if (read > 0) {
+                    if (read > 0 && isRecording) {
                         onAudioData(buffer.copyOf(read))
                         
                         // Compute RMS volume for Speech Detection
@@ -146,13 +149,19 @@ actual class PcmAudioEngine {
         logDebug("PcmAudio", "Stopping Mic...")
         isRecording = false
         try {
+            // stop() ปลุก read() ที่ blocking อยู่ → รอ mic thread ออกจาก loop ก่อน release
+            // (เดิม release ขณะ thread ยังอยู่ใน read() ของ AudioRecord ตัวเดียวกัน)
             audioRecord?.stop()
+            micThread?.let { t ->
+                if (t !== Thread.currentThread()) t.join(300)
+            }
             audioRecord?.release()
             aec?.release()
             ns?.release()
         } catch (e: Exception) {
             logError("PcmAudio", "Error stopping mic", e)
         }
+        micThread = null
         audioRecord = null
         aec = null
         ns = null

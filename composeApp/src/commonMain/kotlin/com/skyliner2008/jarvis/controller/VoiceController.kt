@@ -10,6 +10,8 @@ import io.ktor.util.encodeBase64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,7 +60,13 @@ class VoiceController(
     var onPlayMoodsetPage: ((Int) -> Unit)? = null
     var onPlayAllMoodsets: (() -> Unit)? = null
 
-    private var liveSessionJob: kotlinx.coroutines.Job? = null
+    private var liveSessionJob: Job? = null
+
+    /** disconnect ของ session ก่อนหน้า — session ใหม่ต้องรอให้เสร็จก่อน ไม่งั้น disconnect ที่มาช้าจะปิด socket ใหม่ */
+    private var disconnectJob: Job? = null
+
+    /** hangover หลัง chunk เสียงสุดท้าย — ยกเลิกเมื่อถูกขัดจังหวะ */
+    private var playbackFinishJob: Job? = null
 
     /** คิวเสียงไมค์แบบ bounded — กัน launch-per-chunk สะสมจนเสียงส่งช้า (เคยวัดได้เสียงตกค้าง 48 วิ 2026-08-18) */
     private var liveMicChannel: kotlinx.coroutines.channels.Channel<String>? = null
@@ -76,8 +84,19 @@ class VoiceController(
     }
 
     fun toggleMute() {
-        _isMuted.value = !_isMuted.value
+        setMicMuted(!_isMuted.value)
         logDebug("JARVIS_VM", "Microphone muted: ${_isMuted.value}")
+    }
+
+    /** ปิด/เปิดไมค์ — ตอนปิดส่ง audioStreamEnd ให้ server VAD ปิดท้าย utterance ที่ค้าง */
+    private fun setMicMuted(muted: Boolean) {
+        val wasMuted = _isMuted.value
+        _isMuted.value = muted
+        if (muted && !wasMuted && _isListening.value) {
+            scope.launch(Dispatchers.IO) {
+                runCatching { orchestrator.sendLiveAudioStreamEnd() }
+            }
+        }
     }
 
     fun startVoiceInput() {
@@ -100,28 +119,40 @@ class VoiceController(
         } else {
             "สวัสดีจาวิส พร้อมคุยไหม"
         }
-        orchestrator.setLiveGreetingOnReady(defaultGreeting)
+        // ไม่ทับ greeting ที่ตั้งไว้ก่อน (เช่นยืนยันเสียงใหม่หลังเปลี่ยนเสียง)
+        orchestrator.setLiveGreetingOnReadyIfAbsent(defaultGreeting)
 
-        // Barge-in: ผู้ใช้พูดแทรก (VAD interrupt) ต้อง flush คิวเสียง AI ที่ค้างเล่นทันที
-        // ไม่งั้นเสียงเก่าเล่นต่อทับ turn ใหม่ — handler มีใน LiveGeminiService/orchestrator แต่ไม่เคยถูก wire (review 2026-08-18)
+        // Barge-in: ผู้ใช้พูดแทรก (VAD interrupt) → flush เสียง AI ที่ค้างเล่นทันที
+        // chunk ที่ค้างใน flow ถูกทิ้งด้วย audio epoch ใน collector ด้านล่าง
         orchestrator.setLiveInterruptionHandler {
+            playbackFinishJob?.cancel()
+            _isAiSpeaking.value = false
+            _audioLevel.value = 0f
             pcmAudioEngine.stopPlaying()
         }
 
         // Turn ที่ model ตอบเป็น text ล้วน (ไม่มีเสียงออกเลย) → ใช้ Android TTS พูดแทน กัน AI เงียบเฉย
-        // สำคัญ: ต้อง mute mic ชั่วคราวขณะ TTS พูด เพื่อป้องกันไมค์อัดเสียงลำโพงตัวเองแล้วส่งกลับไปหา AI ทำให้เกิดลูปพูดซ้ำ 2 รอบ
+        // สำคัญ: ต้อง mute mic ชั่วคราวขณะ TTS พูด เพื่อป้องกันไมค์อัดเสียงลำโพงตัวเองแล้วส่งกลับไปหา AI
+        // และคืนค่าเดิมหลังพูดจบ (เดิมตั้ง false เสมอ ทับการปิดไมค์ของผู้ใช้)
         orchestrator.setLiveNoAudioFallback { text ->
             if (voiceManager.isAvailable()) {
-                _isMuted.value = true
+                val prevMuted = _isMuted.value
+                setMicMuted(true)
                 voiceManager.speak(text) {
-                    _isMuted.value = false
+                    _isMuted.value = prevMuted
                 }
             }
         }
 
-        liveSessionJob?.cancel()
+        val previousSessionJob = liveSessionJob
+        val previousDisconnectJob = disconnectJob
         liveSessionJob = scope.launch(Dispatchers.IO) {
             try {
+                // 0. รอ session ก่อนหน้าปิดสนิท — restart เร็ว (เปลี่ยนเสียง/สลับโหมด) เคยทำให้
+                //    disconnect() ที่มาช้าไปปิด socket ใหม่และตั้ง userRequestedDisconnect ทำให้ไม่ reconnect เอง
+                previousSessionJob?.cancelAndJoin()
+                previousDisconnectJob?.join()
+
                 // 1. Build core memory context for live session/tool bridge
                 val coreContext = coreContextProvider()
 
@@ -150,47 +181,59 @@ class VoiceController(
                     orchestrator.startLiveVoiceSessionWithMemory(coreContext, historySnapshot)
                 }
 
-                // 3b. ถ้า READY ช้ากว่า 2.5 วิ (เช่น gemini-3.1-flash-live-preview ใช้ 7–15 วิ)
-                // แจ้งสถานะในแชทให้ผู้ใช้รู้ว่ายังเชื่อมต่อไม่เสร็จ — เสียงที่พูดช่วงนี้ถูก buffer ไว้แล้ว ไม่หาย
+                // 3b. ถ้า READY ช้ากว่า 2.5 วิ แจ้งสถานะในแชท
+                // เสียงก่อน READY ถูกทิ้งโดยตั้งใจ (burst-flush เคยทำให้ session ปิด) → บอกให้รอ AI ทักก่อนพูด
                 launch {
                     kotlinx.coroutines.delay(2500)
                     if (orchestrator.liveConnectionState.value !is com.skyliner2008.jarvis.data.ConnectionState.Connected && _isListening.value) {
                         withContext(Dispatchers.Main) {
                             messages.value = messages.value + Message(
                                 "model",
-                                "⏳ กำลังเชื่อมต่อ Live session… เมื่อ AI ทักกลับมาแปลว่าพร้อมแล้ว (เสียงที่พูดระหว่างนี้ถูกเก็บไว้ให้อัตโนมัติ)",
+                                "⏳ กำลังเชื่อมต่อ Live session… รอให้ AI ทักก่อนแล้วค่อยพูดนะคะ",
                                 isStatic = true
                             )
                         }
                     }
                 }
 
-                // 3c. Observable UI transition: Connected is emitted only by setupComplete,
-                // not by session-resumption handle updates.
+                // 3c. Observable UI transition: Connected is emitted only by setupComplete.
+                // แสดง READY ครั้งเดียวต่อการกดเริ่ม — reconnect หลัง GoAway ไม่ต้องขึ้นซ้ำในแชท
                 launch {
+                    var readyAnnounced = false
                     orchestrator.liveConnectionState.collect { state ->
-                        if (state is com.skyliner2008.jarvis.data.ConnectionState.Connected && _isListening.value) {
-                            withContext(Dispatchers.Main) {
-                                messages.value = messages.value + Message(
-                                    "model",
-                                    "🟢 LIVE READY — พร้อมคุยแล้วค่ะ",
-                                    isStatic = true
-                                )
+                        if (!_isListening.value) return@collect
+                        when (state) {
+                            is com.skyliner2008.jarvis.data.ConnectionState.Connected -> {
+                                if (readyAnnounced) {
+                                    logDebug("JARVIS_VM", "🔁 Live session reconnected")
+                                } else {
+                                    readyAnnounced = true
+                                    withContext(Dispatchers.Main) {
+                                        messages.value = messages.value + Message(
+                                            "model",
+                                            "🟢 LIVE READY — พร้อมคุยแล้วค่ะ",
+                                            isStatic = true
+                                        )
+                                    }
+                                }
                             }
+                            // service เลิกพยายามต่อแล้ว — เดิมไมค์ยังอัดต่อทั้งที่ไม่มีใครรับ
+                            is com.skyliner2008.jarvis.data.ConnectionState.Error ->
+                                endSessionAfterFailure(state.message)
+                            // Disconnected ระหว่างที่ผู้ใช้ยังเปิดไมค์อยู่ = retry loop จบแล้ว (ไม่ใช่การกดหยุดเอง)
+                            is com.skyliner2008.jarvis.data.ConnectionState.Disconnected ->
+                                if (readyAnnounced) endSessionAfterFailure(null)
+                            else -> Unit
                         }
                     }
                 }
 
                 // 4. Collect audio output -> speaker & UI visualizer
                 launch {
-                    var playbackFinishJob: kotlinx.coroutines.Job? = null
-                    orchestrator.setLiveInterruptionHandler {
-                        playbackFinishJob?.cancel()
-                        _isAiSpeaking.value = false
-                        _audioLevel.value = 0f
-                        pcmAudioEngine.stopPlaying()
-                    }
-                    orchestrator.audioOutputFlow.collect { pcmBytes ->
+                    orchestrator.audioOutputFlow.collect { chunk ->
+                        // chunk ของ generation ที่ถูกขัดจังหวะไปแล้ว — ทิ้ง ไม่เล่นทับ turn ใหม่
+                        if (chunk.epoch != orchestrator.currentLiveAudioEpoch) return@collect
+                        val pcmBytes = chunk.pcm
                         if (!_isAiSpeaking.value && pcmAudioEngine.isRobotVoiceEnabled) {
                             runCatching { com.skyliner2008.jarvis.sound.RobotSoundPlayer.playChirpStart() }
                         }
@@ -214,8 +257,12 @@ class VoiceController(
                 }
 
                 // 5. Collect text output -> Chat UI
+                // ห้องแชทแสดงเฉพาะ "เนื้อหาสำคัญ" (รายงาน/ผล tool ที่ส่งมาแบบ isStatic) เท่านั้น
+                // ไม่แสดงคำพูดสดของ AI/ผู้ใช้ — เสียงคือช่องทางหลัก ส่วนแชทไว้เก็บรายงานที่อ่านย้อนหลังได้
+                // (transcript ยังถูกบันทึกลง memory/DB ตามปกติ)
                 launch {
                     orchestrator.textOutputFlow.collect { update ->
+                        if (!update.isStatic) return@collect
                         withContext(Dispatchers.Main) {
                             val msgList = messages.value.toMutableList()
 
@@ -234,161 +281,15 @@ class VoiceController(
                                 msgList.add(Message(update.role, update.text, isStatic = update.isStatic))
                             }
                             messages.value = msgList
-
-                            // Fast-path local trigger for Avatar emotion/demo when user speaks
-                            if (update.role == "user") {
-                                val lower = update.text.lowercase().trim()
-                                val isPlayAll = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(lower)
-                                val pageNumber = com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(lower)
-
-                                val isDemo = isPlayAll || lower.contains("ทดสอบเดโม") || lower.contains("เดโม") ||
-                                    lower.contains("demo") || lower.contains("ทดสอบระบบ") ||
-                                    lower.contains("ทดสอบหุ่นยนต์") || lower.contains("โชว์หุ่นยนต์") ||
-                                    lower.contains("แสดงเดโม") || lower.contains("แสดงอารมณ์ทั้งหมด") ||
-                                    lower.contains("โชว์อารมณ์") || lower.contains("ทดสอบอารมณ์") ||
-                                    lower.contains("avatar demo")
-                                val isReset = lower.contains("หยุดเดโม") || lower.contains("หยุดทดสอบ") ||
-                                    lower.contains("รีเซ็ต") || lower.contains("avatar reset") ||
-                                    lower.contains("กลับสู่โหมดปกติ") || lower.contains("โหมดปกติ") ||
-                                    lower == "หยุด" || lower.startsWith("หยุด")
-                                if (isPlayAll) {
-                                    onPlayAllMoodsets?.invoke() ?: onStartDemo?.invoke()
-                                } else if (pageNumber != null) {
-                                    onPlayMoodsetPage?.invoke(pageNumber)
-                                } else if (isDemo) {
-                                    onStartDemo?.invoke()
-                                } else if (isReset) {
-                                    onStopDemo?.invoke() ?: onTestEmotion?.invoke(null, null)
-                                } else if (lower.contains("ทำหน้า") || lower.contains("สีหน้า") || lower.contains("ยิ้มหน่อย")) {
-                                    val emo = when {
-                                        lower.contains("ดีใจ") || lower.contains("ยิ้ม") || lower.contains("มีความสุข") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.HAPPY
-                                        lower.contains("ตื่นเต้น") || lower.contains("ดาว") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.EXCITED
-                                        lower.contains("รัก") || lower.contains("หัวใจ") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LOVE
-                                        lower.contains("โกรธ") || lower.contains("โมโห") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ANGRY
-                                        lower.contains("เศร้า") || lower.contains("เสียใจ") || lower.contains("ร้องไห้") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SAD
-                                        lower.contains("ง่วง") || lower.contains("นอน") || lower.contains("หลับ") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SLEEPING
-                                        lower.contains("กำลังคิด") || lower.contains("คิด") || lower.contains("สงสัย") ->
-                                            com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.THINKING
-                                        else -> null
-                                    }
-                                    if (emo != null) {
-                                        onTestEmotion?.invoke(emo, "🧪 [VOICE] สั่งเปลี่ยนเป็น ${emo.name}")
-                                    }
-                                }
-
-                                // Fast-path local trigger for Always Live (โหมดควบคุม / โหมดขับขี่ / โหมดรถยนต์ / โหมดสัตว์เลี้ยง)
-                                val isControlOrDriveOn = lower.contains("โหมดควบคุม") || lower.contains("โหมดขับขี่") || lower.contains("โหมดรถยนต์") || lower.contains("โหมดสัตว์เลี้ยง") ||
-                                    lower.contains("เปิดโหมดควบคุม") || lower.contains("เปิดโหมดขับขี่") || lower.contains("เปิดโหมดรถยนต์") || lower.contains("เปิดโหมดสัตว์เลี้ยง") ||
-                                    lower.contains("เข้าโหมดควบคุม") || lower.contains("เข้าโหมดขับขี่") || lower.contains("เข้าโหมดรถยนต์") || lower.contains("เข้าโหมดสัตว์เลี้ยง") ||
-                                    lower.contains("โหมดแก้เบื่อ") || lower.contains("pet mode")
-                                val isControlOrDriveOff = lower.contains("ปิดโหมดควบคุม") || lower.contains("ปิดโหมดขับขี่") || lower.contains("ปิดโหมดรถยนต์") || lower.contains("ปิดโหมดสัตว์เลี้ยง") ||
-                                    lower.contains("ออกจากโหมดควบคุม") || lower.contains("ออกจากโหมดขับขี่") || lower.contains("ออกจากโหมดรถยนต์") || lower.contains("ออกจากโหมดสัตว์เลี้ยง")
-
-                                if (isControlOrDriveOn && !isControlOrDriveOff) {
-                                    val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-                                    if (now - lastAlwaysLiveTriggerTime > 1500L) {
-                                        lastAlwaysLiveTriggerTime = now
-                                        val mode = when {
-                                            lower.contains("สัตว์เลี้ยง") || lower.contains("แก้เบื่อ") || lower.contains("pet") -> "pet"
-                                            lower.contains("ขับขี่") || lower.contains("รถยนต์") -> "drive"
-                                            else -> "control"
-                                        }
-                                        scope.launch {
-                                            com.skyliner2008.jarvis.tools.ToolExecutor.execute(
-                                                com.skyliner2008.jarvis.tools.ToolCall("device_always_live", mapOf("action" to "on", "mode" to mode))
-                                            )
-                                        }
-                                    }
-                                } else if (isControlOrDriveOff) {
-                                    val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-                                    if (now - lastAlwaysLiveTriggerTime > 1500L) {
-                                        lastAlwaysLiveTriggerTime = now
-                                        val mode = when {
-                                            lower.contains("สัตว์เลี้ยง") || lower.contains("แก้เบื่อ") || lower.contains("pet") -> "pet"
-                                            lower.contains("ขับขี่") || lower.contains("รถยนต์") -> "drive"
-                                            else -> "control"
-                                        }
-                                        scope.launch {
-                                            com.skyliner2008.jarvis.tools.ToolExecutor.execute(
-                                                com.skyliner2008.jarvis.tools.ToolCall("device_always_live", mapOf("action" to "off", "mode" to mode))
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Fast-path local trigger for Pet Vision Eye / Camera (ลืมตา / เปิดกล้อง / นี่คืออะไร / ดูนี่ / หลับตา / ปิดกล้อง)
-                                val isEyeOpenCmd = lower.contains("ลืมตา") || lower.contains("เปิดกล้อง") || lower.contains("เปิดตา") ||
-                                    lower.contains("นี่คืออะไร") || lower.contains("นี้คืออะไร") || lower.contains("นี่อะไร") || lower.contains("นี้อะไร") ||
-                                    lower.contains("อะไรนี่") || lower.contains("อะไรนี้") ||
-                                    lower.contains("ดูนี่") || lower.contains("ดูนี้") || lower.contains("ดูอันนี้") || lower.contains("มองอันนี้") ||
-                                    lower.contains("ช่วยดู") || lower.contains("ดูหน่อย") || lower.contains("มองหน่อย") || lower.contains("มองซิ") ||
-                                    lower.contains("มองดู") || lower.contains("ส่องดู") || lower.contains("ส่องหน่อย") || lower.contains("ตรวจดู") ||
-                                    lower.contains("อ่านนี่") || lower.contains("อ่านตรงนี้") || lower.contains("อ่านข้อความ") ||
-                                    lower.contains("เห็นมั้ย") || lower.contains("เห็นไหม") || lower.contains("เห็นอะไร") ||
-                                    lower.contains("กี่นิ้ว") || lower.contains("ชูกี่นิ้ว") || lower.contains("ชูนิ้ว") || lower.contains("โชว์กี่นิ้ว") ||
-                                    lower.contains("ดูมาอีก") || lower.contains("ดูอีก") || lower.contains("ดูใหม่") ||
-                                    lower.contains("อันนี้กี่นิ้ว") || lower.contains("อันนี้คืออะไร") || lower.contains("อันนี้อะไร") ||
-                                    lower.contains("ถืออยู่") || lower.contains("ถืออะไร") || lower.contains("ถืออะไรอยู่") ||
-                                    lower.contains("สีอะไร") || lower.contains("ตัวอะไร") || lower.contains("ท่าอะไร") ||
-                                    lower.contains("what is this") || lower.contains("what's this") || lower.contains("look at this") ||
-                                    lower.contains("see this") || lower.contains("open camera") || lower.contains("open your eyes") ||
-                                    lower.contains("how many fingers")
-
-                                val isEyeCloseCmd = lower.contains("หลับตา") || lower.contains("ปิดกล้อง") || lower.contains("ปิดตา") ||
-                                    lower.contains("พอแล้ว") || lower.contains("หยุดดู") ||
-                                    lower.contains("close camera") || lower.contains("close your eyes")
-
-                                if (isEyeOpenCmd && !isEyeCloseCmd) {
-                                    com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(true)
-                                } else if (isEyeCloseCmd) {
-                                    com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
-                                }
-
-                                // Fast-path local trigger for Notification Quick Reply
-                                val isReplyCmd = lower.startsWith("ตอบว่า") || lower.startsWith("ตอบไลน์ว่า") ||
-                                    lower.startsWith("reply ว่า") || lower.startsWith("ส่งข้อความตอบว่า")
-                                if (isReplyCmd) {
-                                    val replyMsg = update.text.substringAfter("ว่า").trim()
-                                    if (replyMsg.isNotBlank()) {
-                                        scope.launch {
-                                            com.skyliner2008.jarvis.tools.ToolExecutor.execute(
-                                                com.skyliner2008.jarvis.tools.ToolCall("device_notification_reply", mapOf("message" to replyMsg))
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Fast-path local trigger for Now Playing check
-                                val isNowPlayingCmd = lower.contains("เพลงอะไรกำลังเล่น") || lower.contains("ตอนนี้เล่นเพลงอะไร") ||
-                                    lower.contains("เช็คเพลง")
-                                if (isNowPlayingCmd) {
-                                    scope.launch {
-                                        com.skyliner2008.jarvis.tools.ToolExecutor.execute(
-                                            com.skyliner2008.jarvis.tools.ToolCall("device_media_control", mapOf("action" to "now_playing"))
-                                        )
-                                    }
-                                }
-
-                                // Fast-path local trigger for Notification Read
-                                val isReadNotifCmd = lower.contains("อ่านไลน์") || lower.contains("อ่านข้อความ") ||
-                                    lower.contains("มีข้อความใหม่ไหม") || lower.contains("ใครทักมา")
-                                if (isReadNotifCmd) {
-                                    val appFilter = if (lower.contains("ไลน์") || lower.contains("line")) "line" else null
-                                    scope.launch {
-                                        val args = if (appFilter != null) mapOf("app_filter" to appFilter) else emptyMap()
-                                        com.skyliner2008.jarvis.tools.ToolExecutor.execute(
-                                            com.skyliner2008.jarvis.tools.ToolCall("device_notification_read", args)
-                                        )
-                                    }
-                                }
-                            }
                         }
+                    }
+                }
+
+                // 5b. คำสั่งลัดฝั่งเครื่อง — ตรวจจากประโยคที่ "พูดจบแล้ว" ครั้งเดียวต่อ turn
+                // (เดิมตรวจทุกชิ้นของ transcript ระหว่างพูด → คำสั่งยิงซ้ำ, ส่งข้อความตอบกลับเป็นท่อนๆ)
+                launch {
+                    orchestrator.liveUserTurnFinalFlow.collect { text ->
+                        withContext(Dispatchers.Main) { handleLocalCommands(text) }
                     }
                 }
 
@@ -424,6 +325,8 @@ class VoiceController(
                     }
                 }
 
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 logError("JARVIS_VM", "Live Voice Error", e)
                 _isListening.value = false
@@ -432,27 +335,83 @@ class VoiceController(
         }
     }
 
+    /** Live session จบเองโดยผู้ใช้ไม่ได้สั่งหยุด — แจ้งในแชทแล้วปล่อยไมค์ */
+    private suspend fun endSessionAfterFailure(errorMessage: String?) {
+        if (!_isListening.value) return
+        logError("JARVIS_VM", "Live session ended unexpectedly: ${errorMessage ?: "disconnected"}")
+        errorMessage?.let { _voiceError.value = it }
+        val detail = errorMessage?.let { ": $it" } ?: ""
+        withContext(Dispatchers.Main) {
+            messages.value = messages.value + Message(
+                "model",
+                "🔴 Live session หยุดทำงาน$detail — กดไมค์อีกครั้งเพื่อเริ่มใหม่ได้เลยค่ะ",
+                isStatic = true
+            )
+        }
+        // เรียกผ่าน scope ของ VM: stopVoiceInput() cancel liveSessionJob ซึ่งเป็น parent ของ collector นี้
+        scope.launch { stopVoiceInput() }
+    }
+
+    /** คำสั่งลัดที่ทำงานทันทีโดยไม่รอ model (avatar / always live / กล้อง) — idempotent ทั้งหมด */
+    private fun handleLocalCommands(text: String) {
+        val command = LiveLocalCommandParser.parse(text)
+
+        when (val avatar = command.avatar) {
+            LiveLocalCommandParser.AvatarCommand.PlayAll -> onPlayAllMoodsets?.invoke() ?: onStartDemo?.invoke()
+            is LiveLocalCommandParser.AvatarCommand.Page -> onPlayMoodsetPage?.invoke(avatar.page)
+            LiveLocalCommandParser.AvatarCommand.Demo -> onStartDemo?.invoke()
+            LiveLocalCommandParser.AvatarCommand.Reset -> onStopDemo?.invoke() ?: onTestEmotion?.invoke(null, null)
+            is LiveLocalCommandParser.AvatarCommand.Emotion ->
+                onTestEmotion?.invoke(avatar.emotion, "🧪 [VOICE] สั่งเปลี่ยนเป็น ${avatar.emotion.name}")
+            null -> Unit
+        }
+
+        command.alwaysLive?.let { alwaysLive ->
+            val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            if (now - lastAlwaysLiveTriggerTime > 1500L) {
+                lastAlwaysLiveTriggerTime = now
+                scope.launch {
+                    com.skyliner2008.jarvis.tools.ToolExecutor.execute(
+                        com.skyliner2008.jarvis.tools.ToolCall(
+                            "device_always_live",
+                            mapOf("action" to if (alwaysLive.turnOn) "on" else "off", "mode" to alwaysLive.mode)
+                        )
+                    )
+                }
+            }
+        }
+
+        command.eyeOpen?.let { open ->
+            com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(open)
+        }
+        // หมายเหตุ: ไม่มีคำสั่งลัดส่งข้อความตอบกลับ/อ่านแจ้งเตือน/เช็คเพลงอีกต่อไป —
+        // ผลของคำสั่งอ่านถูกทิ้งเงียบๆ (ไม่มีใครรับผล) และคำสั่งตอบกลับซ้ำซ้อนกับ tool ที่ model เรียกเอง
+    }
+
     fun stopVoiceInput() {
         logDebug("JARVIS_VM", "Stopping Live Voice Input")
         _isListening.value = false
         _isMuted.value = false
         _isAiSpeaking.value = false
         _audioLevel.value = 0f
+        playbackFinishJob?.cancel()
         pcmAudioEngine.isRobotVoiceEnabled = false
         pcmAudioEngine.stopRecording()
+        // ตัดเสียง AI ที่ค้างอยู่ใน AudioTrack — ผู้ใช้กดหยุดแล้วต้องเงียบทันที
+        pcmAudioEngine.stopPlaying()
         liveMicChannel?.close()
         liveMicChannel = null
         liveSessionJob?.cancel()
-        liveSessionJob = null
-        scope.launch(Dispatchers.IO) {
+        disconnectJob = scope.launch(Dispatchers.IO) {
             orchestrator.endLiveVoiceSession()
         }
     }
 
     /** รีสตาร์ท Live Voice Session เพื่อเชื่อมต่อ WebSocket ใหม่ด้วย Setup Parameters ของ Persona ใหม่ */
     suspend fun restartVoiceSession() {
+        if (!_isListening.value) return // ผู้ใช้ปิด Live ไปแล้ว — ห้ามปลุก session ขึ้นมาใหม่
         stopVoiceInput()
-        kotlinx.coroutines.delay(200)
+        disconnectJob?.join()
         startVoiceInput()
     }
 
@@ -467,11 +426,12 @@ class VoiceController(
      */
     fun announceNotification(appName: String, sender: String, content: String) {
         scope.launch {
-            val isLiveReady = liveConnectionState.value is com.skyliner2008.jarvis.data.ConnectionState.Connected
-            if (isLiveReady) {
+            // ถ้าผู้ใช้เปิด Live อยู่ ให้ AI พูดเอง — รอสั้นๆ เผื่อกำลัง reconnect (เดิมเช็คแค่ Connected ตอนนั้น
+            // แล้วตกไป TTS ทันที ทำให้เสียงหุ่นยนต์แทรกกลางบทสนทนา)
+            if (_isListening.value) {
                 val senderText = if (sender.isNotBlank()) "โดยคุณ $sender" else ""
                 val prompt = "[แจ้งเตือนข้อความใหม่]: มีข้อความใหม่จาก $appName $senderText ว่า: \"$content\" (โปรดแจ้งเตือนผู้ใช้สั้นๆ 1 ประโยคอย่างเป็นธรรมชาติ ห้ามใช้ markdown)"
-                val sent = orchestrator.sendLiveRealtimeText(prompt)
+                val sent = orchestrator.sendLiveRealtimeTextWhenReady(prompt, timeoutMs = 5_000L)
                 if (sent) return@launch
             }
             // Fallback ไปใช้ Offline TTS เฉพาะกรณีที่ Live session ไม่ได้เชื่อมต่ออยู่
@@ -479,7 +439,7 @@ class VoiceController(
                 val senderPart = if (sender.isNotBlank()) "จากคุณ $sender" else ""
                 val speech = "มีข้อความใหม่ใน $appName $senderPart ว่า: $content"
                 val prevMuted = _isMuted.value
-                _isMuted.value = true
+                setMicMuted(true)
                 voiceManager.speak(speech) {
                     _isMuted.value = prevMuted
                 }

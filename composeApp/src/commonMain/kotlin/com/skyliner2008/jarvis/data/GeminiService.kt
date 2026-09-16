@@ -215,6 +215,9 @@ class GeminiService(
                 else -> KEY_COOLDOWN_MINUTE_MS
             }
             keyHealthMutex.withLock { keyDeadUntilMs[bucket] = nowMs() + cooldown }
+            // แจ้ง ModelConfig ด้วย — โควตา free tier ผูกกับ "project + model" ไม่ใช่ key
+            // (key หลายใบใน project เดียวกันเจอลิมิตเดียวกัน) → ต้องลดลำดับทั้งโมเดลใน fallback chain
+            ModelConfig.markModelQuotaExhausted(model, dailyQuota = daily)
             logDebug("GeminiService", "Key health: ${com.skyliner2008.jarvis.maskApiKey(key)} model=$model พัก ${cooldown / 1000}s ($quotaClass quota)")
         }
 

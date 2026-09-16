@@ -277,6 +277,27 @@ internal class LiveVoiceAlertEngine(
         val short = AlertPresentationFormatter.sanitizeForSpeech(shortText)
         val full = AlertPresentationFormatter.sanitizeForSpeech(fullText ?: shortText)
         logDebug("AutomationService", "🔊 speakAlert engine=$engine ttsReady=$ttsReady liveSummary=$liveSummary")
+
+        // ผู้ใช้เปิด Live คุยอยู่ → ให้ session หลักพูดแจ้งเตือนเอง
+        // (เดิมเปิด WebSocket Live เส้นที่สอง + AudioTrack แยก หรือ Android TTS → ไมค์ของ session หลักได้ยิน
+        //  แล้ว AI ตอบซ้อน/ตัดคำตอบตัวเอง และเสียโควตาเพิ่มอีก session)
+        if (full.isNotBlank() && com.skyliner2008.jarvis.ai.LiveSessionBridge.isActive()) {
+            val prompt = if (liveSummary) {
+                "[SYSTEM][แจ้งเตือนสัญญาณเทรด] ข้อมูล: $full\n" +
+                    "โปรดพูดแจ้งผู้ใช้เป็นภาษาไทย 1-2 ประโยค ระบุ Signal/ทิศทาง และ Entry/SL/TP เท่าที่มีในข้อมูล " +
+                    "ห้ามเดาหรือเพิ่มตัวเลข ห้ามใช้ markdown (การ์ดรายละเอียดลงแชทแล้ว)"
+            } else {
+                "[SYSTEM][แจ้งเตือน] $full\nโปรดแจ้งผู้ใช้สั้นๆ 1-2 ประโยคอย่างเป็นธรรมชาติ ห้ามใช้ markdown"
+            }
+            val delivered = com.skyliner2008.jarvis.ai.LiveSessionBridge.deliver(prompt)
+            if (delivered) {
+                logDebug("AutomationService", "🔊 → delivered through active Live session (no second session)")
+                try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
+                return VoiceDeliveryResult("Live (active session)", null)
+            }
+            logDebug("AutomationService", "🔊 Active Live session not ready within timeout → fallback to standalone voice engine")
+        }
+
         AlwaysLiveManager.getInstanceOrNull()?.let { mgr ->
             mgr.onAiStateChanged("speaking")
             val sentimentText = if (full.isBlank()) short else full
@@ -399,17 +420,19 @@ internal class LiveVoiceAlertEngine(
         val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRate, channel, encoding)
         val queue = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
         val done = java.util.concurrent.atomic.AtomicBoolean(false)
-        var gotAudio = false
+        // เขียนจาก WS reader, อ่านจาก watchdog คนละ dispatcher — ต้องเป็น atomic
+        val gotAudio = java.util.concurrent.atomic.AtomicBoolean(false)
         var totalBytes = 0
         val transcriptBuilder = StringBuilder()
         var lastLoggedTranscriptChars = 0
+        var lengthCapLogged = false
         val t0 = System.currentTimeMillis()
         var setupAt = 0L
         var requestAt = 0L
         var firstChunkAt = 0L
         var firstTranscriptAt = 0L
         var turnCompleteAt = 0L
-        var lastProgressAt = 0L
+        val lastProgressAt = java.util.concurrent.atomic.AtomicLong(0L)
         var diagnosticPhase = "CONNECTING"
         var timeoutCause = "NONE"
         var apiErrorMessage: String? = null
@@ -547,10 +570,10 @@ internal class LiveVoiceAlertEngine(
                                 
                                 setupWatchdog?.cancel()
                                 logDebug("AutomationService", "🔊 Live[$sessionId] READY total=${setupAt - t0}ms afterWs=${setupAt - wsConnectedAt}ms → ส่ง ${if (liveSummary) "Signal Summary" else "ข้อความ"}")
-                                lastProgressAt = System.currentTimeMillis()
+                                lastProgressAt.set(System.currentTimeMillis())
                                 audioWatchdog = launch(Dispatchers.IO) {
                                     delay(liveVoiceFirstOutputTimeoutMs)
-                                    if (!gotAudio) {
+                                    if (!gotAudio.get()) {
                                         timeoutCause = if (transcriptBuilder.isNotEmpty()) "FIRST_AUDIO_TIMEOUT_TRANSCRIPT_ONLY" else "FIRST_AUDIO_TIMEOUT_NO_OUTPUT"
                                         diagnosticPhase = "FIRST_AUDIO_TIMEOUT"
                                         logDebug(
@@ -592,14 +615,14 @@ internal class LiveVoiceAlertEngine(
                                         val pcmChunk = android.util.Base64.decode(blob.data, android.util.Base64.DEFAULT)
                                         if (firstChunkAt == 0L) {
                                             firstChunkAt = System.currentTimeMillis()
-                                            lastProgressAt = firstChunkAt
+                                            lastProgressAt.set(firstChunkAt)
                                             audioWatchdog?.cancel()
                                             audioIdleWatchdog?.cancel()
                                             audioIdleWatchdog = launch(Dispatchers.IO) {
                                                 while (isActive && !done.get()) {
                                                     delay(2_000L)
-                                                    val idleMs = System.currentTimeMillis() - lastProgressAt
-                                                    if (gotAudio && idleMs >= liveVoiceAudioIdleTimeoutMs) {
+                                                    val idleMs = System.currentTimeMillis() - lastProgressAt.get()
+                                                    if (gotAudio.get() && idleMs >= liveVoiceAudioIdleTimeoutMs) {
                                                         timeoutCause = "AUDIO_STREAM_IDLE_TIMEOUT"
                                                         diagnosticPhase = "AUDIO_STREAM_STALLED"
                                                         logDebug(
@@ -614,10 +637,10 @@ internal class LiveVoiceAlertEngine(
                                             }
                                             logDebug("AutomationService", "🔊 Live first audio chunk (${firstChunkAt - t0}ms)")
                                         }
-                                        lastProgressAt = System.currentTimeMillis()
+                                        lastProgressAt.set(System.currentTimeMillis())
                                         queue.add(pcmChunk)
                                         totalBytes += pcmChunk.size
-                                        gotAudio = true
+                                        gotAudio.set(true)
                                         diagnosticPhase = "AUDIO_STREAMING"
                                     }
                                 }
@@ -625,27 +648,27 @@ internal class LiveVoiceAlertEngine(
                                     if (transcript.isNotBlank()) {
                                         if (firstTranscriptAt == 0L) {
                                             firstTranscriptAt = System.currentTimeMillis()
-                                            diagnosticPhase = if (gotAudio) "AUDIO_TRANSCRIPT" else "TRANSCRIPT_NO_AUDIO"
+                                            diagnosticPhase = if (gotAudio.get()) "AUDIO_TRANSCRIPT" else "TRANSCRIPT_NO_AUDIO"
                                             logDebug(
                                                 "AutomationService",
-                                                "📝 Live[$sessionId] first transcript (${firstTranscriptAt - t0}ms, audio=$gotAudio)"
+                                                "📝 Live[$sessionId] first transcript (${firstTranscriptAt - t0}ms, audio=${gotAudio.get()})"
                                             )
                                         }
                                         transcriptBuilder.append(transcript)
-                                        if (liveSummary && gotAudio && transcriptBuilder.length >= liveVoiceSummaryCharCap) {
-                                            timeoutCause = "AUDIO_RESPONSE_LENGTH_CAP"
-                                            diagnosticPhase = "AUDIO_LENGTH_CAPPED"
-                                            logDebug("AutomationService", "🔊 Live[$sessionId] RESPONSE_LENGTH_CAP ${liveVoiceSummaryCharCap} chars; audioBytes=$totalBytes → close")
-                                            shouldClose = true
+                                        if (liveSummary && gotAudio.get() && !lengthCapLogged && transcriptBuilder.length >= liveVoiceSummaryCharCap) {
+                                            // ไม่ปิด socket ที่นี่: transcript มาก่อนเสียงที่ตรงกัน ปิดทันทีทำให้เสียงท้ายประโยคหาย
+                                            // ความยาวถูกคุมด้วย prompt + turnComplete + idle/session watchdog อยู่แล้ว
+                                            lengthCapLogged = true
+                                            logDebug("AutomationService", "🔊 Live[$sessionId] RESPONSE_LENGTH_CAP ${liveVoiceSummaryCharCap} chars exceeded; audioBytes=$totalBytes → keep streaming until turnComplete")
                                         }
-                                        lastProgressAt = System.currentTimeMillis()
+                                        lastProgressAt.set(System.currentTimeMillis())
                                         // Keep logcat readable: transcript is still accumulated in full,
                                         // but operational logs emit only meaningful progress checkpoints.
                                         val transcriptChars = transcriptBuilder.length
                                         if (transcriptChars - lastLoggedTranscriptChars >= 50 ||
                                             transcriptChars >= liveVoiceSummaryCharCap ||
                                             transcriptChars == transcript.length) {
-                                            logDebug("AutomationService", "📝 Live transcript progress chars=$transcriptChars audio=$gotAudio")
+                                            logDebug("AutomationService", "📝 Live transcript progress chars=$transcriptChars audio=${gotAudio.get()}")
                                             lastLoggedTranscriptChars = transcriptChars
                                         }
                                     }
@@ -669,7 +692,7 @@ internal class LiveVoiceAlertEngine(
                                 "AutomationService",
                                 "🔊 Live[$sessionId] CLOSE_REASON_TIMEOUT 1500ms → force fallback " +
                                     "phase=$diagnosticPhase cause=$timeoutCause " +
-                                    "(${System.currentTimeMillis() - t0}ms, gotAudio=$gotAudio, transcriptChars=${transcriptBuilder.length})"
+                                    "(${System.currentTimeMillis() - t0}ms, gotAudio=${gotAudio.get()}, transcriptChars=${transcriptBuilder.length})"
                             )
                         } else {
                             logDebug(
@@ -681,7 +704,7 @@ internal class LiveVoiceAlertEngine(
                                     "firstAudio=${if (firstChunkAt > 0) firstChunkAt - t0 else -1}ms, " +
                                     "firstTranscript=${if (firstTranscriptAt > 0) firstTranscriptAt - t0 else -1}ms, " +
                                     "turnComplete=${if (turnCompleteAt > 0) turnCompleteAt - t0 else -1}ms, " +
-                                    "gotAudio=$gotAudio, transcriptChars=${transcriptBuilder.length}, apiError=${apiErrorMessage ?: "-"})"
+                                    "gotAudio=${gotAudio.get()}, transcriptChars=${transcriptBuilder.length}, apiError=${apiErrorMessage ?: "-"})"
                             )
                         }
                     }
@@ -698,9 +721,9 @@ internal class LiveVoiceAlertEngine(
                         when {
                             apiErrorMessage != null -> "API_ERROR"
                             setupAt == 0L -> "API_OR_NETWORK_BEFORE_SETUP"
-                            !gotAudio && transcriptBuilder.isNotEmpty() -> "API_AUDIO_OUTPUT_STALL"
-                            !gotAudio -> "API_GENERATION_OR_NETWORK_STALL"
-                            gotAudio && turnCompleteAt == 0L -> "LONG_AUDIO_STREAM_NO_TURN_COMPLETE"
+                            !gotAudio.get() && transcriptBuilder.isNotEmpty() -> "API_AUDIO_OUTPUT_STALL"
+                            !gotAudio.get() -> "API_GENERATION_OR_NETWORK_STALL"
+                            gotAudio.get() && turnCompleteAt == 0L -> "LONG_AUDIO_STREAM_NO_TURN_COMPLETE"
                             else -> "UNKNOWN"
                         } +
                         " setup=${if (setupAt > 0) setupAt - t0 else -1}ms request=${if (requestAt > 0) requestAt - t0 else -1}ms " +
@@ -709,7 +732,7 @@ internal class LiveVoiceAlertEngine(
             }
             done.set(true)
             player.await()
-            if (gotAudio) {
+            if (gotAudio.get()) {
                 logDebug(
                     "AutomationService",
                     "🔊 → Live ($model) AUDIO_DELIVERED $totalBytes bytes (${System.currentTimeMillis() - t0}ms, " +
@@ -720,7 +743,7 @@ internal class LiveVoiceAlertEngine(
             val finalCause = when {
                 timeoutCause != "NONE" -> timeoutCause
                 apiErrorMessage != null -> "API_ERROR"
-                gotAudio -> "AUDIO_SUCCESS"
+                gotAudio.get() -> "AUDIO_SUCCESS"
                 transcriptBuilder.isNotEmpty() -> "TRANSCRIPT_ONLY"
                 else -> diagnosticPhase
             }
@@ -735,7 +758,7 @@ internal class LiveVoiceAlertEngine(
                     "turnComplete=${if (turnCompleteAt > 0) turnCompleteAt - t0 else -1}ms " +
                     "audioBytes=$totalBytes transcriptChars=${transcriptBuilder.length} apiError=${apiErrorMessage ?: "-"}"
             )
-            return LiveSpeechResult(gotAudio, transcriptBuilder.toString().trim(), finalCause)
+            return LiveSpeechResult(gotAudio.get(), transcriptBuilder.toString().trim(), finalCause)
         } finally {
             done.set(true)
             try { track?.stop() } catch (_: Exception) {}

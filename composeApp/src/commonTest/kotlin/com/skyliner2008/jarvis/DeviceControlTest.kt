@@ -139,11 +139,17 @@ class DeviceControlTest {
             )
             assertTrue(navRes.result.contains("Central World"))
 
-            // Read Screen
+            // Read Screen — ควบคุมเครื่องเต็มรูปแบบใช้ได้เฉพาะโหมดขับรถ (2026-09-16)
+            val blocked = ToolExecutor.execute(ToolCall("device_read_screen", emptyMap()))
+            assertTrue(blocked.isError, "device_read_screen ต้องถูกบล็อกนอกโหมดขับรถ")
+            assertTrue(blocked.result.contains("DEVICE_CONTROL_NOT_ALLOWED"))
+
+            com.skyliner2008.jarvis.pet.LiveModeState.update(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.DRIVE)
             val screenRes = ToolExecutor.execute(
                 ToolCall("device_read_screen", emptyMap())
             )
             assertTrue(screenRes.result.contains("ตรวจพบ 5 องค์ประกอบ"))
+            com.skyliner2008.jarvis.pet.LiveModeState.update(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
 
             // Avatar Emotion
             val emoRes = ToolExecutor.execute(

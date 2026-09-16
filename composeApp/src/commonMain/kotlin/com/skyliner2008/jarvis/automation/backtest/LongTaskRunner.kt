@@ -2,7 +2,9 @@ package com.skyliner2008.jarvis.automation.backtest
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -51,6 +53,29 @@ object LongTaskRunner {
      * เริ่มงานพื้นหลัง — block คืน (chatBody, speech)
      * คืน task id ทันที (caller เอาไปตอบ ack ให้ผู้ใช้ได้เลย)
      */
+    /** งานพร้อมกันสูงสุด — งานเบื้องหลังส่วนใหญ่สั้น ที่ยาวจริงคือโหมดประชุม/เฝ้าติดตาม */
+    const val MAX_CONCURRENT = 3
+
+    private val jobs = mutableMapOf<Long, Job>()
+
+    /** ยังเปิดงานใหม่ได้อีกไหม */
+    fun canStartNew(): Boolean = _running.value.size < MAX_CONCURRENT
+
+    /** รายการงานที่กำลังรัน (id → title) */
+    fun snapshot(): Map<Long, String> = _running.value
+
+    /** ยกเลิกงานที่กำลังรัน — คืน true ถ้าพบและยกเลิกสำเร็จ */
+    fun cancel(id: Long): Boolean {
+        val job = synchronized(jobs) { jobs.remove(id) } ?: return false
+        job.cancel()
+        _running.value = _running.value - id
+        synchronized(activeKeys) {
+            activeKeys.entries.removeAll { it.value == id }
+        }
+        com.skyliner2008.jarvis.logDebug("LongTask", "🛑 ยกเลิกงาน #$id ตามคำสั่ง")
+        return true
+    }
+
     fun launch(kind: String, title: String, block: suspend () -> Pair<String, String>): Long {
         val key = "$kind|${title.trim().lowercase()}"
         synchronized(activeKeys) {
@@ -63,7 +88,7 @@ object LongTaskRunner {
         synchronized(activeKeys) { activeKeys[key] = id }
         _running.value = _running.value + (id to title)
         com.skyliner2008.jarvis.logDebug("LongTask", "▶ เริ่มงานพื้นหลัง #$id [$kind] $title (กำลังรัน ${_running.value.size} งาน)")
-        scope.launch {
+        val job = scope.launch {
             val t0 = Clock.System.now().toEpochMilliseconds()
             val (body, speech, ok) = try {
                 val (b, s) = block()
@@ -78,10 +103,12 @@ object LongTaskRunner {
                 if (activeKeys[key] == id) activeKeys.remove(key)
             }
             _running.value = _running.value - id
+            synchronized(jobs) { jobs.remove(id) }
             val elapsed = Clock.System.now().toEpochMilliseconds() - t0
             com.skyliner2008.jarvis.logDebug("LongTask", "✅ งาน #$id [$kind] เสร็จใน ${elapsed}ms — ส่งต่อให้ผู้ใช้")
             _completions.emit(Completion(id, kind, title, body, buildChatMeta(kind, id), speech, ok))
         }
+        synchronized(jobs) { jobs[id] = job }
         return id
     }
 

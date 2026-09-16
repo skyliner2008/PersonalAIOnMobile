@@ -96,12 +96,28 @@ object ToolExecutor {
                 else -> safeCall.name
             }
             val routedArgs = enrichMt5Args(routedToolName, safeCall.args)
+            // ควบคุมเครื่องเต็มรูปแบบ (แตะจอ/พิมพ์/เลื่อน/ปุ่ม/เปิดแอป) เปิดเฉพาะโหมดขับรถ
+            // โหมดอื่นทำงานเบื้องหลังได้ตามปกติ แต่ห้ามเข้าไปกดหน้าจอหรือปลุก/พักจอแทนผู้ใช้
+            if (routedToolName in ToolRegistry.DEVICE_CONTROL_TOOLS &&
+                !com.skyliner2008.jarvis.pet.LiveModeState.canControlDevice
+            ) {
+                logDebug("ToolExecutor", "🚧 Blocked $routedToolName — ใช้ได้เฉพาะโหมดขับรถ (profile=${com.skyliner2008.jarvis.pet.LiveModeState.profile})")
+                return ToolResult(
+                    routedToolName,
+                    "DEVICE_CONTROL_NOT_ALLOWED: การควบคุมหน้าจอ/แอปโดยตรงเปิดใช้เฉพาะ 'โหมดขับรถ' เท่านั้น " +
+                        "(โหมดปัจจุบัน: ${com.skyliner2008.jarvis.pet.LiveModeState.profile}) — " +
+                        "โปรดแจ้งผู้ใช้ว่าถ้าต้องการให้ควบคุมเครื่องแทน ให้สั่ง 'เปิดโหมดขับรถ' ก่อน แล้วทำงานอื่นต่อได้ตามปกติ",
+                    isError = true
+                )
+            }
             val result = when {
                 // ─── Automation Alerts (intercept ก่อน trading — ใช้ AutomationManager ผ่าน delegate) ──
                 routedToolName == "automation_manage_alerts" -> executeManageAlerts(routedArgs)
                 routedToolName == "trading_signal_anticipation" -> executeSignalAnticipation(routedArgs)
                 // ─── Scheduled Tasks (งานตามเวลา — ปลุก AI เมื่อถึงเวลา) ──
                 routedToolName == "automation_manage_schedule" -> executeManageSchedule(routedArgs)
+                // ─── Agent multi-session (Live มอบงานให้ chat session ทำเบื้องหลัง) ──
+                routedToolName.startsWith("agent_task_") -> executeAgentTask(routedToolName, routedArgs)
                 // ─── Live Control (Vision/Voice) — intercept ก่อน camera branch ──
                 routedToolName in liveControlToolNames -> executeLiveControl(routedToolName, routedArgs)
                 // ─── System Tools (Diagnostics / Connectivity / Create Tool) ────
@@ -783,6 +799,22 @@ object ToolExecutor {
             }
 
             else -> "❌ ไม่รองรับ action '$action' — ใช้ create, scan, analyze, inspect, history, learning, performance, config, list_factors, recommend, หรือ status"
+        }
+    }
+
+    /** Live มอบงานให้ chat session ทำเบื้องหลัง แล้วรายงานกลับเมื่อเสร็จ */
+    private fun executeAgentTask(toolName: String, args: Map<String, String>): String {
+        val manager = com.skyliner2008.jarvis.automation.agent.AgentTaskManager
+        val taskId = (args["task_id"] ?: args["id"])?.trim()?.toLongOrNull()
+        return when (toolName) {
+            "agent_task_start" -> manager.start(
+                title = args["title"] ?: "",
+                instruction = args["instruction"] ?: args["task"] ?: args["prompt"] ?: ""
+            )
+            "agent_task_list" -> manager.list()
+            "agent_task_status" -> manager.status(taskId)
+            "agent_task_cancel" -> manager.cancel(taskId)
+            else -> "❌ ไม่รู้จักคำสั่งงานเบื้องหลัง: $toolName"
         }
     }
 

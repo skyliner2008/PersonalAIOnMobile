@@ -89,8 +89,16 @@ class JarvisOrchestrator(
         scope          = CoroutineScope(Dispatchers.IO)
     )
 
-    val audioOutputFlow: Flow<ByteArray> = liveService.audioOutputFlow
+    val audioOutputFlow: Flow<com.skyliner2008.jarvis.data.LiveAudioChunk> = liveService.audioOutputFlow
     val textOutputFlow: Flow<com.skyliner2008.jarvis.data.LiveGeminiService.LiveTextUpdate> = liveService.textOutputFlow
+    /** ประโยคผู้ใช้ที่พูดจบแล้ว (1 ครั้งต่อ turn) — ใช้ตรวจคำสั่งลัดฝั่งเครื่อง */
+    val liveUserTurnFinalFlow: Flow<String> = liveService.userTurnFinalFlow
+    /** ผู้ช่วยพูดจบ turn — โหมดประชุมใช้ปิดคำตอบแต่ละรอบตอนถามด้วยเสียง */
+    val liveTurnCompleteFlow: Flow<Long> = liveService.turnCompleteFlow
+    /** epoch ปัจจุบันของเสียง Live — chunk ที่ epoch ไม่ตรง (ก่อน barge-in) ต้องทิ้ง */
+    val currentLiveAudioEpoch: Long get() = liveService.audioEpoch
+    /** Live session READY และ socket ยังเปิดอยู่ */
+    val isLiveReady: Boolean get() = liveService.isReady
     val activeToolName: StateFlow<String?> = toolBridge.activeToolName
     val lastToolResult: StateFlow<Pair<String, String>?> = toolBridge.lastToolResult
 
@@ -619,7 +627,13 @@ class JarvisOrchestrator(
         toolBridge.startCollecting(memoryContextProvider = { coreContext })
 
         val toolsForSetup = if (supportsNativeTools(liveModelName)) {
-            ToolRegistry.getGeminiTool()
+            // ทุกโหมดใช้เครื่องมือชุดเดียวกัน ยกเว้นกลุ่มควบคุมเครื่องเต็มรูปแบบที่เปิดเฉพาะโหมดขับรถ
+            ToolRegistry.getLiveGeminiTool(com.skyliner2008.jarvis.pet.LiveModeState.profile).also {
+                com.skyliner2008.jarvis.logDebug(
+                    "Orchestrator",
+                    "🧰 Live tools for setup: ${it.functionDeclarations.size} (profile=${com.skyliner2008.jarvis.pet.LiveModeState.profile})"
+                )
+            }
         } else {
             null
         }
@@ -629,6 +643,9 @@ class JarvisOrchestrator(
 
     suspend fun sendLiveAudioChunk(base64Pcm: String) =
         liveService.sendAudioChunk(base64Pcm)
+
+    /** ไมค์หยุดสตรีมชั่วคราว (mute) — ให้ server VAD ปิดท้าย utterance ที่ค้าง */
+    suspend fun sendLiveAudioStreamEnd() = liveService.sendAudioStreamEnd()
 
     /** สถานะการเชื่อมต่อ Live session — ใช้แสดง "กำลังเชื่อมต่อ…" ในแชทกันเคส 3.1 READY ช้า 7–15 วิ */
     val liveConnectionState: StateFlow<com.skyliner2008.jarvis.data.ConnectionState> = liveService.connectionState

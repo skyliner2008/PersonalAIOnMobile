@@ -36,14 +36,18 @@ class SettingsController(
     private val defaultLiveModel = com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_LIVE_MODEL
     private val defaultVoiceName = "Aoede" // Female (Soothing)
 
-    // List of old/deprecated models to auto-migrate from
+    // โมเดล Live ที่ปิดบริการ/ไม่อยู่ใน console แล้ว — ย้ายค่าที่ผู้ใช้เคยเซฟไว้ไปยัง DEFAULT_LIVE_MODEL
+    // (2026-09-16: `native-audio-preview-12-2025` ถูกเอาออกจากลิสต์นี้ — ตอนนี้คือ "2.5 Flash Native Audio Dialog"
+    //  ที่ยังใช้ได้บน free tier และมีโควตา TPM สูงสุด จึงเป็นตัวสำรองที่ดี ไม่ใช่ตัวตกยุค)
     private val deprecatedLiveModels = listOf(
-        "gemini-2.0-flash-live-001",
+        "gemini-2.0-flash-live-001",   // shutdown 2025-12-09
+        "gemini-live-2.5-flash-preview", // shutdown 2025-12-09
+        "gemini-2.0-flash-exp",        // ไม่ใช่ Live model แล้ว
         "gemini-1.5-flash-latest",
         "gemini-live-preview",
-        "gemini-2.5-flash-native-audio-preview-12-2025",
         "gemini-2.5-flash-native-audio-preview",
-        "gemini-2.5-flash-native-audio-preview-09-2025" // Auto-upgrade old default to gemini-3.1-flash-live-preview
+        "gemini-2.5-flash-native-audio-latest",
+        "gemini-2.5-flash-native-audio-preview-09-2025"
     )
 
     private val _apiKey = MutableStateFlow("")
@@ -133,9 +137,14 @@ class SettingsController(
             "gemini-1.5-pro-latest",
             "gemini-1.0-pro"
         )
-        if (deprecatedMainModels.contains(savedModel) || com.skyliner2008.jarvis.data.ModelConfig.isModelDead(savedModel)) {
-            val best = com.skyliner2008.jarvis.data.ModelConfig.getBestActiveModel()
-            logDebug("JarvisVM", "Migrating deprecated/dead model '$savedModel' to active '$best'")
+        // free tier: แชทใช้ตระกูล flash-lite (500 req/วัน) เท่านั้น — ตระกูล flash มีแค่ 20 req/วัน
+        // ค่าที่เคยบันทึกไว้ (เช่น gemini-3.6-flash) จึงถูกย้ายมาเป็น flash-lite อัตโนมัติ
+        val needsChatModelMigration = deprecatedMainModels.contains(savedModel) ||
+            com.skyliner2008.jarvis.data.ModelConfig.isModelDead(savedModel) ||
+            !com.skyliner2008.jarvis.data.ModelConfig.isChatAllowedModel(savedModel)
+        if (needsChatModelMigration) {
+            val best = com.skyliner2008.jarvis.data.ModelConfig.getFallbackChain().first()
+            logDebug("JarvisVM", "Migrating chat model '$savedModel' → '$best' (free tier: flash-lite only)")
             savedModel = best
             withContext(Dispatchers.IO) {
                 database.jarvisDatabaseQueries.insertSetting("model_name", savedModel)
@@ -165,6 +174,25 @@ class SettingsController(
             // Save the corrected model back to the database
             withContext(Dispatchers.IO) {
                 database.jarvisDatabaseQueries.insertSetting("live_model_name", savedLiveModel)
+            }
+        }
+
+        // อัปเกรดครั้งเดียวไปยังโมเดล Live รุ่นใหม่สุดของ project (2026-09-16: gemini-3.8-live)
+        // ทำครั้งเดียวและจำไว้ใน DB — หลังจากนี้ผู้ใช้เลือกรุ่นไหนใน Settings ก็เคารพค่านั้นตลอด
+        // ถ้ารุ่นใหม่ต่อไม่ติด ระบบจะ fallback ไปรุ่นถัดใน chain เองภายใน 6 วินาที แล้ว promote ตัวที่ใช้ได้จริง
+        val liveUpgradeFlag = withContext(Dispatchers.IO) {
+            database.jarvisDatabaseQueries.getSetting("live_model_upgraded_2026_09_16").executeAsOneOrNull()
+        }
+        if (liveUpgradeFlag != "true") {
+            if (savedLiveModel != defaultLiveModel) {
+                logDebug("JarvisVM", "One-time live model upgrade: '$savedLiveModel' → '$defaultLiveModel'")
+                savedLiveModel = defaultLiveModel
+                withContext(Dispatchers.IO) {
+                    database.jarvisDatabaseQueries.insertSetting("live_model_name", savedLiveModel)
+                }
+            }
+            withContext(Dispatchers.IO) {
+                database.jarvisDatabaseQueries.insertSetting("live_model_upgraded_2026_09_16", "true")
             }
         }
 
@@ -409,32 +437,21 @@ class SettingsController(
         val liveByCapability = all.filter { it.supportsLive }
         if (liveByCapability.isNotEmpty()) return liveByCapability
         // Fallback heuristic for providers that don't expose capability flags
+        // (transcribe / live-translate เปิด WebSocket ได้แต่คุยเป็นผู้ช่วยไม่ได้ — ตัดออกที่นี่ด้วย)
         val fallback = all.filter { m ->
-            val n = (m.id + " " + m.displayName).lowercase()
-            n.contains("live") || n.contains("realtime") || n.contains("native-audio")
+            com.skyliner2008.jarvis.data.ModelConfig.isConversationalLiveModel(m.id) ||
+                com.skyliner2008.jarvis.data.ModelConfig.isConversationalLiveModel(m.displayName)
         }
         if (fallback.isNotEmpty()) return fallback
-        // Default safe live models if nothing matched
-        return listOf(
+        // Default safe live models if nothing matched — อิงลิสต์กลางที่ ModelConfig ดูแล
+        return com.skyliner2008.jarvis.data.ModelConfig.getLiveFallbackChain().map { id ->
             com.skyliner2008.jarvis.data.providers.LlmModelInfo(
-                id = com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_LIVE_MODEL,
-                displayName = "Gemini 3.1 Flash Live Preview",
-                supportsLive = true,
-                supportsVision = true
-            ),
-            com.skyliner2008.jarvis.data.providers.LlmModelInfo(
-                id = "gemini-2.5-flash-native-audio-preview-12-2025",
-                displayName = "Gemini 2.5 Flash Native Audio",
-                supportsLive = true,
-                supportsVision = true
-            ),
-            com.skyliner2008.jarvis.data.providers.LlmModelInfo(
-                id = "gemini-2.0-flash-exp",
-                displayName = "Gemini 2.0 Flash Experimental (Realtime)",
+                id = id,
+                displayName = com.skyliner2008.jarvis.data.ModelConfig.displayNameFor(id),
                 supportsLive = true,
                 supportsVision = true
             )
-        )
+        }
     }
 
     /**

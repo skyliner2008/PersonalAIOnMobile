@@ -6,6 +6,29 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Free Tier Model Policy, Live Modes & Agent Multi-Session (2026-09-16):** the app now matches what the project's free tier actually offers.
+> - **Chat runs on flash-lite only** (`gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`, 500 requests a day each). The 20-a-day flash models are out of the chat path, a saved flash model is migrated automatically, and a per-day 429 pushes that model to the back of the chain until the Pacific-midnight reset.
+> - **Live picks its own model**: seeds are `gemini-3.8-live`, `gemini-3.1-flash-live-preview`, `gemini-3.8-live-extended-thinking` and native audio dialog as the last resort, but after the model list syncs the newest bidirectional model wins — so new Live models are used without a code change. Transcribe and translate models are kept out of the assistant path.
+> - **Modes are roles, not capabilities**: assistant, drive and pet are the same assistant with the same tools. Only drive mode may drive the phone itself (read screen, tap, type, scroll, buttons, launch apps, wake/sleep the screen), blocked both at session setup and at execution.
+> - **Live is the main agent**: `agent_task_start` hands long work to a background chat session and the voice conversation continues immediately; when the work finishes the result lands in chat and comes back through Live to be spoken. `agent_task_list` / `status` / `cancel` round it out, with at most 3 concurrent tasks.
+>
+> - **Meeting and Translate are their own modes now**: two toolbar buttons (two-people icon, translate icon) open dedicated screens that run a separate Live session on the specialist models. Meeting transcribes speech live in 85+ languages, auto-renews the session every 8 minutes (the model caps a session at 10), and on stop summarises the notes into chat. Translate streams speech-to-speech in 70+ languages with the heard text and the translation side by side. Live speaker separation is not offered because the streaming model does not support it.
+>
+> Details: `.obsidian-wiki/04_Tasks/Changelog_2026-09-16_Free_Tier_Model_Policy_And_Agent_Tasks.md`, `.obsidian-wiki/02_Components/Meeting_And_Translate_Modes.md`.
+
+> **Live Voice Review & Fixes (2026-09-16):** a full review of the phone's Live voice path, with every finding fixed.
+> - **Commands:** on-device voice shortcuts now run once per finished sentence instead of on every partial transcript, so notification replies are no longer sent in fragments. Separately, "เปิดโหมด…" and "เปิดกล้อง" were being read as *close* commands; that is fixed.
+> - **API keys:** quota key rotation now really uses the next key, because the WebSocket URL is rebuilt on every attempt.
+> - **Barge-in:** a turn counter (audio epoch) drops buffered speech after the user talks over the AI.
+> - **Tool calls:** calls run in parallel and can be cancelled (`toolCallCancellation`), and array arguments no longer drop the whole frame.
+> - **Connection:** session resumption is enabled from the first setup and switches itself off if the server rejects it. Restarting the session (for example after a voice change) no longer races with the old socket.
+> - **Other flows:** alerts speak through the active Live session instead of opening a second one, and Pet persona survives minimize and screen-off.
+> - **Guards:** price questions are no longer redirected to navigation, and D1 is allowed when the user asks for it.
+>
+> - **Second pass:** Pet mode now ships a smaller tool set (no trading/MT5/SMC/file tools), switching persona or voice restarts the session so the new system prompt, tools and voice actually apply, the wake word is confirmed by a short transcription instead of any loud sound, sliding-window context compression is on (and disables itself if the server rejects it), and a dead session releases the mic and says so in chat.
+>
+> New testable helpers: `LiveProtocol`, `LiveIntentMatchers`, `LiveLocalCommandParser`, `LiveSessionBridge`, `WakeWordMatcher`. Details: `.obsidian-wiki/04_Tasks/Changelog_2026-09-16_Live_Voice_Review_Fixes.md`.
+
 > **Softer, Livelier Eyes (2026-09-15):** round eyes are now soft vertical ovals; each eye is a bright front layer over a darker back layer, and the front shifts toward where the pet looks (from camera gaze and from every story look), so the back's rim shows on the opposite side instead of always one side. The gleam dot is gone. Eye/head keyframes use a small-overshoot `jelly` ease, breathing is a squash-and-stretch, and gaze/gyro tilt follow an under-damped spring.
 
 > **Demo Button & Voice Scenes Play to the End (2026-09-15):** in Pet mode the Demo button (and saying/typing "เดโม่") now plays all 37 animated scenes — 18 pet scenes then 19 mood stories — one after another, each to its end, labelled "🎬 n/37". Voice/tool scene commands reach every scene (mood stories too), wait for the pet screen, and report the scene actually played. Fixed keyword bugs ("อาบน้ำ"/"ราชา" playing the drinking scene, `royal`/`soul_out` not found) and scenes are no longer interrupted by touches or the idle loop.

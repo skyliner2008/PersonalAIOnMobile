@@ -303,7 +303,9 @@ class PetModeTest {
             assertTrue(petPrompt.contains("หุ่นยนต์สัตว์เลี้ยง"), "Pet prompt should mention robot pet")
             assertTrue(petPrompt.contains("ห้ามพูดคำเลียนเสียงหุ่นยนต์"), "Pet prompt should forbid spoken robot sound words")
             assertTrue(petPrompt.contains("NO SPOKEN SOUND WORDS"), "Pet prompt should have NO SPOKEN SOUND WORDS tag")
-            assertTrue(petPrompt.contains("ห้ามวิเคราะห์การเงิน"), "Pet prompt should forbid finance analysis")
+            // โหมดสัตว์เลี้ยงคือผู้ช่วยคนเดิม เปลี่ยนแค่บทบาท ใช้ tool ได้ครบทุกตัวรวมถึงการเงิน
+            // (ตัดสินใจ 2026-09-16 — จุดที่ต่างกันมีเพียงการควบคุมเครื่อง 100% ที่ทำได้เฉพาะโหมดขับรถ)
+            assertFalse(petPrompt.contains("ห้ามวิเคราะห์การเงิน"), "Pet mode must keep every tool, finance included")
         } finally {
             com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
         }

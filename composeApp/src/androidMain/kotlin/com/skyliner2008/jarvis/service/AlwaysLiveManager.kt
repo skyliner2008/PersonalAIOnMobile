@@ -142,7 +142,7 @@ class AlwaysLiveManager(private val context: Context) {
         val prev = _currentProfile.value
         _currentProfile.value = profile
         Log.i(TAG, "Profile changed: $prev -> $profile")
-        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = (profile == AlwaysLiveProfile.PET)
+        com.skyliner2008.jarvis.pet.LiveModeState.update(profile)
         if (profile == AlwaysLiveProfile.PET) {
             stopDriveMode()
             if (_state.value == AlwaysLiveState.FULL_SCREEN) {
@@ -160,6 +160,8 @@ class AlwaysLiveManager(private val context: Context) {
 
     private fun startPetMode() {
         Log.i(TAG, "🐾 Starting Pet Mode (Virtual Desk Pet)")
+        // persona flag ต้องตาม profile เสมอ — minimize/screen-off เคยล้าง flag นี้แล้ว expand ไม่ตั้งคืน
+        com.skyliner2008.jarvis.pet.LiveModeState.update(_currentProfile.value)
         installSoundHandler()
 
         // Only activate motion detection sensor when actively in FULL_SCREEN Desk Pet mode
@@ -190,10 +192,19 @@ class AlwaysLiveManager(private val context: Context) {
         RobotSoundEngine.playWakeUp()
     }
 
+    /**
+     * ออกจาก Pet profile จริง (สลับ profile / ปิด Always Live) — ล้าง persona flag และเสียงหุ่นยนต์
+     * ถ้าแค่พับจอหรือปิดหน้าจอให้ใช้ [stopPetSensors] (profile ยังเป็น PET อยู่)
+     */
     private fun stopPetMode() {
         Log.i(TAG, "🐾 Stopping Pet Mode")
         com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
         RobotSoundPlayer.handler = null
+        stopPetSensors()
+    }
+
+    /** หยุด sensor/เสียงแวดล้อมของ Pet ชั่วคราว (minimize / screen off) โดยไม่เปลี่ยน persona */
+    private fun stopPetSensors() {
         com.skyliner2008.jarvis.sound.AmbientSoundEngine.stop()
         faceDownSoundJob?.cancel()
         faceDownSoundJob = null
@@ -349,14 +360,59 @@ class AlwaysLiveManager(private val context: Context) {
     private var hotwordDetector: HotwordDetector? = null
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + kotlinx.coroutines.SupervisorJob())
 
+    private var hotwordVerifier: HotwordVerifier? = null
+    @Volatile
+    private var verifyingHotword = false
+
     private fun startHotwordDetection() {
         if (hotwordDetector == null) {
             hotwordDetector = HotwordDetector(context) {
-                onHotwordDetected()
+                onHotwordEnergyDetected()
             }
         }
         hotwordDetector?.start(scope)
         Log.d(TAG, "Hotword detector started")
+    }
+
+    /**
+     * HotwordDetector จับได้แค่ "เสียงดังพอ" — เสียงทีวี/เสียงคุยในรถก็เข้าเงื่อนไข
+     * จึงถอดเสียงสั้นๆ ยืนยันคำปลุกก่อนปลุกจอ; ถ้าเครื่องถอดเสียงไม่ได้ ใช้พฤติกรรมเดิม (ปลุกเลย)
+     * (review 2026-09-16)
+     */
+    private fun onHotwordEnergyDetected() {
+        if (verifyingHotword) return
+        verifyingHotword = true
+        // ปล่อยไมค์จาก detector ก่อน — SpeechRecognizer ต้องใช้ไมค์เดียวกัน
+        stopHotwordDetection()
+        scope.launch {
+            try {
+                val verifier = hotwordVerifier ?: HotwordVerifier(context).also { hotwordVerifier = it }
+                val heard = verifier.heardWakeWord(_config.value.wakeWord)
+                when (heard) {
+                    true -> onHotwordDetected()
+                    null -> {
+                        Log.d(TAG, "Wake word verification unavailable — waking on energy (legacy behaviour)")
+                        onHotwordDetected()
+                    }
+                    false -> {
+                        Log.d(TAG, "Sound was not the wake word — staying asleep")
+                        if (_state.value == AlwaysLiveState.BACKGROUND_LISTEN &&
+                            _config.value.backgroundListenEnabled &&
+                            !com.skyliner2008.jarvis.ai.LiveSessionBridge.isActive()
+                        ) {
+                            startHotwordDetection()
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Hotword verification failed — waking on energy", e)
+                onHotwordDetected()
+            } finally {
+                verifyingHotword = false
+            }
+        }
     }
 
     private fun stopHotwordDetection() {
@@ -437,7 +493,7 @@ class AlwaysLiveManager(private val context: Context) {
         stopDriveMode()
         stopPetMode()
         _currentProfile.value = AlwaysLiveProfile.CONTROL
-        com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode = false
+        com.skyliner2008.jarvis.pet.LiveModeState.update(AlwaysLiveProfile.CONTROL)
         releaseWakeLock()
         releaseScreenBrightLock()
         // Stop floating widget if running
@@ -458,8 +514,8 @@ class AlwaysLiveManager(private val context: Context) {
             Log.i(TAG, "minimize() → MINI_FLOATING")
             transitionTo(AlwaysLiveState.MINI_FLOATING)
             acquireScreenBrightLock()
-            // Stop pet motion sensor when minimized to floating widget
-            stopPetMode()
+            // Stop pet motion sensor when minimized to floating widget (profile/persona ยังเป็น PET)
+            stopPetSensors()
             FloatingWidgetService.startWidget(context)
         }
     }
@@ -506,10 +562,17 @@ class AlwaysLiveManager(private val context: Context) {
             setEmotion(AvatarEmotion.SLEEPING)
             releaseScreenBrightLock()
             // Immediately stop pet motion sensor and sound routines when screen turns off!
-            stopPetMode()
+            // (ไม่ล้าง persona — เดิม stopPetMode() ตั้ง isPetMode=false ทำให้ reconnect ถัดไปกลายเป็น JARVIS)
+            stopPetSensors()
             if (_config.value.backgroundListenEnabled) {
                 acquireWakeLock()
-                startHotwordDetection()
+                if (com.skyliner2008.jarvis.ai.LiveSessionBridge.isActive()) {
+                    // Live session ฟังผ่านไมค์ VOICE_COMMUNICATION อยู่แล้ว — HotwordDetector (MIC 8k) จะแย่งไมค์
+                    // ทำให้ตัวใดตัวหนึ่งได้ความเงียบ จึงไม่เปิดซ้อน
+                    Log.i(TAG, "Live session active — skipping energy hotword detector (Live keeps listening)")
+                } else {
+                    startHotwordDetection()
+                }
             }
             // Stop floating widget when screen is off
             FloatingWidgetService.stopWidget(context)
@@ -528,6 +591,9 @@ class AlwaysLiveManager(private val context: Context) {
             releaseWakeLock()
             acquireScreenBrightLock()
             FloatingWidgetService.stopWidget(context)
+            if (_currentProfile.value == AlwaysLiveProfile.PET) {
+                startPetMode()
+            }
 
             try {
                 if (!com.skyliner2008.jarvis.MainActivity.isActivityResumed) {
@@ -557,6 +623,9 @@ class AlwaysLiveManager(private val context: Context) {
         releaseWakeLock()
         acquireScreenBrightLock()
         FloatingWidgetService.stopWidget(context)
+        if (_currentProfile.value == AlwaysLiveProfile.PET) {
+            startPetMode()
+        }
 
         try {
             if (!com.skyliner2008.jarvis.MainActivity.isActivityResumed) {

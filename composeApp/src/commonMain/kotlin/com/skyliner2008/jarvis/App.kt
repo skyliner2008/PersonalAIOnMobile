@@ -58,6 +58,8 @@ import com.skyliner2008.jarvis.ui.screen.AutomationScreen
 import com.skyliner2008.jarvis.ui.screen.BacktestScreen
 import com.skyliner2008.jarvis.ui.screen.ChatInputBar
 import com.skyliner2008.jarvis.ui.screen.LiveModePanel
+import com.skyliner2008.jarvis.ui.screen.MeetingScreen
+import com.skyliner2008.jarvis.ui.screen.TranslateScreen
 import com.skyliner2008.jarvis.ui.screen.AlwaysLiveScreen
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
@@ -126,6 +128,8 @@ fun App(
     var showTradingTerminal by remember { mutableStateOf(false) }
     var showBacktest by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showMeeting by remember { mutableStateOf(false) }
+    var showTranslate by remember { mutableStateOf(false) }
     var chartSettingsSignal by remember { mutableLongStateOf(0L) }
     val backtestRuns by com.skyliner2008.jarvis.automation.backtest.BacktestResultStore.runs.collectAsStateWithLifecycle()
 
@@ -179,6 +183,8 @@ fun App(
     val scope = rememberCoroutineScope()
 
     val currentOverlayTitle = when {
+        showMeeting -> "บันทึกการประชุม"
+        showTranslate -> "แปลภาษาสด"
         showToolList -> "Tool List"
         showAutomation -> "Cron Jobs"
         showTradingTerminal -> "MT5 Terminal"
@@ -191,6 +197,14 @@ fun App(
 
     fun closeOverlay() {
         when {
+            showMeeting -> {
+                viewModel.specialist.stop(summarize = false)
+                showMeeting = false
+            }
+            showTranslate -> {
+                viewModel.specialist.stop(summarize = false)
+                showTranslate = false
+            }
             showToolList -> showToolList = false
             showAutomation -> showAutomation = false
             showTradingTerminal -> {
@@ -463,7 +477,10 @@ fun App(
                                 viewModel.startVoiceInput()
                             },
                             enabled = !isTyping,
-                            voiceAvailable = voiceManager.isAvailable()
+                            voiceAvailable = voiceManager.isAvailable(),
+                            // Speed Dial ในปุ่มแนบไฟล์ — แนบไฟล์ / บันทึกการประชุม / แปลภาษา
+                            onOpenMeeting = { showMeeting = true },
+                            onOpenTranslate = { showTranslate = true }
                         )
                     }
                 }
@@ -485,6 +502,20 @@ fun App(
                             requestAllFilesPermission = requestAllFilesPermission,
                             allFilesAccessGranted = allFilesAccessGranted,
                             setupChecks = setupChecks
+                        )
+                    }
+
+                    showMeeting -> {
+                        MeetingScreen(
+                            controller = viewModel.specialist,
+                            onClose = { showMeeting = false }
+                        )
+                    }
+
+                    showTranslate -> {
+                        TranslateScreen(
+                            controller = viewModel.specialist,
+                            onClose = { showTranslate = false }
                         )
                     }
 

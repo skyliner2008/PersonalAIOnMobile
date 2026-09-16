@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -48,155 +49,81 @@ class LiveToolBridge(
     private var visionPromptJob: Job? = null
 
     // Trading AI Profile guard: keep one analysis family per user turn and only M15/H1/H4 by default.
+    // tool call รันขนานกันแล้ว → counter ต้องอยู่ใต้ mutex
+    private val tradingProfileMutex = kotlinx.coroutines.sync.Mutex()
     private var tradingProfilePromptKey: String = ""
     private var tradingProfileCallCount: Int = 0
 
-    private fun tradingProfileFor(prompt: String): String {
-        val p = prompt.lowercase()
-        return when {
-            p.contains("smc") || p.contains("smart money") || p.contains("order block") || p.contains("fvg") -> "SMC"
-            p.contains("rsi") || p.contains("ema") || p.contains("sma") || p.contains("atr") ||
-                p.contains("แนวรับ") || p.contains("แนวต้าน") || p.contains("support") || p.contains("resistance") ||
-                p.contains("เท่าไร") || p.contains("เท่าไหร่") -> "USER_QUERY"
-            p.contains("วิเคราะห์") || p.contains("analysis") || p.contains("overview") ||
-                p.contains("ภาพรวม") || p.contains("5 มิติ") || p.contains("5มิติ") || p.contains("confluence") -> "AI"
-            else -> "NONE"
+    /** tool call ที่กำลังรัน (callId → job) — ใช้ยกเลิกเมื่อ server ส่ง toolCallCancellation */
+    private val runningCallsMutex = kotlinx.coroutines.sync.Mutex()
+    private val runningCalls = mutableMapOf<String, Job>()
+
+    /** id ที่ server ยกเลิกแล้ว — ห้ามส่ง toolResponse กลับไปอีก (ตาม Live API) */
+    private val cancelledCallIds = ArrayDeque<String>()
+
+    private suspend fun markCancelled(ids: List<String>) = runningCallsMutex.withLock {
+        ids.forEach { id ->
+            cancelledCallIds.addLast(id)
+            while (cancelledCallIds.size > 64) cancelledCallIds.removeFirst()
         }
     }
 
-    private fun isTradingAnalysisTool(name: String): Boolean = name in setOf(
-        "trading_deep_analysis_suite",
-        "trading_technical_analysis",
-        "trading_smc_analysis"
+    private suspend fun isCancelled(callId: String): Boolean =
+        runningCallsMutex.withLock { callId in cancelledCallIds }
+
+    /** turn ที่ผู้ใช้เรียก custom tool / skill แบบ chain — ขั้นตอนของ skill กำหนด TF เอง จึงไม่ให้ profile guard ไปขวาง */
+    private var skillChainTurnKey: String = ""
+
+    /** กันส่งข้อความตอบกลับซ้ำเมื่อ model เรียก device_notification_reply ด้วยข้อความเดิมติดกัน */
+    private var lastNotificationReply: Pair<String, Long>? = null
+
+    private fun tradingProfileFor(prompt: String) = LiveIntentMatchers.tradingProfileFor(prompt)
+    private fun isTradingAnalysisTool(name: String) = LiveIntentMatchers.isTradingAnalysisTool(name)
+    private fun isSignalAlertRequest(prompt: String) = LiveIntentMatchers.isSignalAlertRequest(prompt)
+    private fun isTradingQuestion(prompt: String) = LiveIntentMatchers.isTradingQuestion(prompt)
+    private fun isAvatarEmotionRequest(prompt: String) = LiveIntentMatchers.isAvatarEmotionRequest(prompt)
+    private fun isSceneRequest(prompt: String) = LiveIntentMatchers.isSceneRequest(prompt)
+    private fun isAlwaysLiveRequest(prompt: String) = LiveIntentMatchers.isAlwaysLiveRequest(prompt)
+    private fun isMediaRequest(prompt: String) = LiveIntentMatchers.isMediaRequest(prompt)
+    private fun isNavigationRequest(prompt: String) = LiveIntentMatchers.isNavigationRequest(prompt)
+    private fun isNotificationRequest(prompt: String) = LiveIntentMatchers.isNotificationRequest(prompt)
+    private fun isLocationOrSpeedRequest(prompt: String) = LiveIntentMatchers.isLocationOrSpeedRequest(prompt)
+    private fun isParkingRequest(prompt: String) = LiveIntentMatchers.isParkingRequest(prompt)
+    private fun isNightModeRequest(prompt: String) = LiveIntentMatchers.isNightModeRequest(prompt)
+
+    /**
+     * ส่งผล tool กลับ Live model
+     * - ส่งเข้า session ที่ออก call เท่านั้น (ถ้า reconnect ระหว่างรัน tool, id เก่าใช้กับ session ใหม่ไม่ได้)
+     * - [deliverIfStale] = true: ถ้าส่ง toolResponse ไม่ได้ ให้ส่งผลเป็น realtime text เข้า session ใหม่แทน
+     *   (เดิมผล tool ยาวๆ หายเงียบเมื่อโดน GoAway ระหว่างรัน)
+     */
+    /** tool ที่ผลลัพธ์คือการเปลี่ยน UI/โหมด — ถ้า session restart ไปแล้วไม่ต้องเล่าผลย้อนหลัง (greeting ของ session ใหม่พูดแทน) */
+    private val uiOnlyTools = setOf(
+        "device_avatar_emotion", "device_custom_prop", "device_pet_care",
+        "device_always_live", "vision_activate", "vision_deactivate"
     )
 
-    private fun allowedTradingTimeframe(args: Map<String, String>): Boolean {
-        val raw = args["symbol"] ?: args["timeframe"] ?: ""
-        val tf = raw.substringAfter("@", "").lowercase().ifBlank { "1h" }
-        return tf in setOf("15m", "m15", "1h", "h1", "4h", "h4")
-    }
-
-    private fun profileToolAllowed(prompt: String, toolName: String, args: Map<String, String>): Boolean {
-        val profile = tradingProfileFor(prompt)
-        if (profile == "NONE" || !isTradingAnalysisTool(toolName)) return true
-        if (!allowedTradingTimeframe(args)) return false
-        return when (profile) {
-            "SMC" -> toolName == "trading_smc_analysis"
-            // "RSI / แนวรับ / เท่าไหร่" needs real indicator values: one technical analysis, no deep suite
-            "USER_QUERY" -> toolName == "trading_technical_analysis"
-            else -> toolName == "trading_deep_analysis_suite"
+    private suspend fun respond(event: LiveToolCallEvent, result: String, deliverIfStale: Boolean = false) {
+        // tool บางตัวจับ CancellationException ไว้เองแล้วคืน error ปกติ — ถ้าไม่เช็คตรงนี้เราจะส่งผล
+        // ของ call ที่ server ยกเลิกไปแล้ว (เคสจริง 2026-09-16: SMC analysis ถูกยกเลิกแต่ยังส่ง response)
+        if (isCancelled(event.callId)) {
+            logDebug("LiveBridge", "🚫 ไม่ส่งผล  callId= — server ยกเลิก call นี้แล้ว")
+            return
         }
-    }
-
-    private fun isSignalAlertRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val alertTerms = listOf("แจ้งเตือน", "signal alert", "signal", "สัญญาณ")
-        val tradeTerms = listOf("ทอง", "gold", "xau", "buy", "sell", "ซื้อ", "ขาย")
-        return alertTerms.any { p.contains(it) } && tradeTerms.any { p.contains(it) }
-    }
-
-    /** คำขอเรื่องตลาด/เทรดจริง — guard ที่เปลี่ยน trading tool เป็นอย่างอื่นต้องไม่ทำงาน */
-    private fun isTradingQuestion(prompt: String): Boolean =
-        TradingIntentUtility.isTradingPrompt(prompt) || TradingIntentUtility.isMt5Prompt(prompt) ||
-            TradingIntentUtility.isSmcPrompt(prompt) ||
-            listOf("ราคา", "หุ้น", "ตลาด", "กราฟ", "เทรด", "xau", "btc", "บิทคอยน์", "ดัชนี", "set50", "nasdaq", "ดาวโจนส์")
-                .any { prompt.lowercase().contains(it) }
-
-    private fun isAvatarEmotionRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        // ("หน้า" / "แบบ" / "mood" alone matched ordinary sentences like "แบบไหนดี" or "หน้าจอ")
-        val avatarTerms = listOf(
-            "หน้าที่", "แบบที่", "moodset",
-            "เดโม", "เดโม่", "demo",
-            "แสดงอารมณ์", "โชว์อารมณ์", "ทดสอบอารมณ์", "อารมณ์ทั้งหมด",
-            "ซะแดงเดโมอารมณ์", "แสดงเดโม่อารมณ์", "ซะแดงอารมณ์",
-            "ทำหน้า", "สีหน้า", "avatar", "อวาตาร์", "ขยิบตา", "ยิ้มหน่อย", "หน้าตา",
-            "ทุกหน้า", "ทุกแบบ", "หน้าทั้งหมด", "all pages", "all moods", "play all", "show all"
+        val sent = liveService.sendNativeToolResponse(
+            callId = event.callId,
+            toolName = event.name,
+            result = result,
+            sessionGeneration = event.sessionGeneration
         )
-        return avatarTerms.any { p.contains(it) } ||
-                com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.parsePageNumber(prompt) != null ||
-                com.skyliner2008.jarvis.ui.component.avatar.LooiMoodsetCatalog.isPlayAllCommand(prompt)
-    }
-
-    private fun isSceneRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val sceneTerms = listOf(
-            "ฉาก", "กินข้าว", "ให้อาหาร", "กินพิซซ่า", "กินเบอร์เกอร์", "กินเค้ก", "กินไอติม", "กินป๊อปคอร์น", "หิวข้าว",
-            "ดื่มน้ำ", "ขอดื่ม", "กินกาแฟ", "ดื่มกาแฟ", "กินชา", "ดื่มชา", "กินโค้ก", "กินชานม", "หิวน้ำ",
-            "อาบน้ำ", "ถูสบู่", "แปรงฟัน", "สระผม",
-            "เล่นเกม", "จอยเกม", "ทำงาน", "อ่านหนังสือ",
-            // (no "ทองคำ" / "เหรียญทอง" / "คนรวย": those are gold-price questions far more often than scenes)
-            "ใส่แว่น", "แว่นตา", "thug life", "แว่นดำ", "มงกุฎ", "ราชา", "เจ้าหญิง",
-            "ไฟลุก", "วิ่งหนีไฟ", "ไฟไหม้", "โดนช็อต", "ฟ้าผ่า", "ไฟดูด", "วิญญาณหลุด", "เหนื่อยมาก", "หมดแรง", "ตายแป๊บ",
-            "ยิงจรวด", "มิสไซล์", "ถล่มจอ", "ซุปเปอร์เลิฟ", "คลั่งรัก", "หัวใจเต็มจอ", "อกหัก", "ร้องไห้หนักมาก", "ปาร์ตี้", "ฉลอง"
-        )
-        return sceneTerms.any { p.contains(it) }
-    }
-
-    private fun isAlwaysLiveRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "โหมดควบคุม", "โหมดขับขี่", "โหมดรถยนต์", "โหมดสัตว์เลี้ยง",
-            "เปิดโหมดควบคุม", "เปิดโหมดขับขี่", "เปิดโหมดรถยนต์", "เปิดโหมดสัตว์เลี้ยง",
-            "เข้าโหมดควบคุม", "เข้าโหมดขับขี่", "เข้าโหมดรถยนต์", "เข้าโหมดสัตว์เลี้ยง",
-            "โหมด always", "always live", "drive mode", "car mode", "pet mode"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isMediaRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "เปิดเพลง", "เล่นเพลง", "หยุดเพลง", "ข้ามเพลง", "เพลงถัดไป", "เพลงก่อนหน้า",
-            "เพลงอะไร", "พักเพลง", "สลับเพลง", "play music", "stop music", "next song", "previous song"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isNavigationRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "นำทางไป", "นำทาง", "เปิดแผนที่ไป", "เปิด google maps ไป", "พาไปที่", "ไปที่",
-            "navigate to", "directions to"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isNotificationRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "อ่านแจ้งเตือน", "อ่านข้อความ", "มีแจ้งเตือนอะไร", "เช็คแจ้งเตือน", "มีไลน์เข้าไหม",
-            "read notifications", "read notification", "check notifications"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isLocationOrSpeedRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "ขับเร็วเท่าไหร่", "ความเร็วเท่าไหร่", "วิ่งเร็วเท่าไหร่", "ตอนนี้อยู่ที่ไหน",
-            "พิกัดปัจจุบัน", "เช็คตำแหน่ง", "ตำแหน่งปัจจุบัน", "current speed", "where am i"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isParkingRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "จอดรถอยู่ที่ไหน", "จอดรถไว้ตรงไหน", "รถจอดอยู่ที่ไหน", "รถจอดที่ไหน",
-            "หาที่จอดรถ", "รถอยู่ไหน", "จำที่จอดรถ", "บันทึกที่จอดรถ", "บันทึกจุดจอด",
-            "จอดรถตรงนี้", "where did i park", "where is my car", "save parking", "remember parking"
-        )
-        return terms.any { p.contains(it) }
-    }
-
-    private fun isNightModeRequest(prompt: String): Boolean {
-        val p = prompt.lowercase()
-        val terms = listOf(
-            "เปิดโหมดกลางคืน", "ปิดโหมดกลางคืน", "โหมดกลางคืน", "ลดแสงสะท้อน", "หรี่แสง",
-            "night mode", "low glare"
-        )
-        return terms.any { p.contains(it) }
+        if (!sent && deliverIfStale && event.name !in uiOnlyTools) {
+            val delivered = liveService.sendRealtimeTextWhenReady(
+                "[SYSTEM] ผลจากเครื่องมือ ${event.name} ที่ผู้ใช้ขอไว้ก่อนการเชื่อมต่อใหม่: ${result.take(3000)}\n" +
+                    "โปรดแจ้งผู้ใช้สั้นๆ แบบสนทนา ห้ามใช้ markdown",
+                timeoutMs = 20_000L
+            )
+            logDebug("LiveBridge", "↪️ Stale tool response for ${event.name} delivered via realtime text: $delivered")
+        }
     }
 
     private suspend fun handleNativeToolCall(event: LiveToolCallEvent, memoryContext: String = "") {
@@ -206,14 +133,9 @@ class LiveToolBridge(
         // This prevents the Live model from expanding one analysis request into Deep+SMC+TA+D1 chains.
         val userPrompt = liveService.lastUserText
         val turnKey = "turn-${liveService.userTurnSerial}"
-        if (turnKey != tradingProfilePromptKey) {
-            tradingProfilePromptKey = turnKey
-            tradingProfileCallCount = 0
-        }
 
         // Always Live Guard: If Gemini mistakenly calls trading tools when user meant Always Live / Control / Drive mode
-        val tradingQuestion = isTradingQuestion(userPrompt)
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && !tradingQuestion && isAlwaysLiveRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isAlwaysLiveRequest(userPrompt)) {
             val p = userPrompt.lowercase()
             val pWithoutOpen = p.replace("เปิด", "")
             val action = if (pWithoutOpen.contains("ปิด") || pWithoutOpen.contains("ออก") || pWithoutOpen.contains("off") || pWithoutOpen.contains("stop")) "off" else "on"
@@ -236,17 +158,15 @@ class LiveToolBridge(
             } else {
                 "\n\n[VOICE RULE - ALWAYS LIVE] สลับโหมดควบคุม/โหมดขับขี่/Always AI Live เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ (เช่น 'เข้าสู่โหมดควบคุมแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา' หรือ 'เปิดโหมดขับขี่เรียบร้อยแล้วค่ะ เดินทางปลอดภัยนะคะ') ห้ามอธิบายยาว ห้ามใช้ markdown"
             }
-            liveService.sendNativeToolResponse(
-                callId   = event.callId,
-                toolName = event.name,
-                result   = result.result + voiceGuide
+            respond(event, result.result + voiceGuide,
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Avatar Emotion & Smart Scene Guard: If Gemini mistakenly calls Fear & Greed or Sentiment when user meant Avatar face or Scene
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price") && !tradingQuestion && (isAvatarEmotionRequest(userPrompt) || isSceneRequest(userPrompt))) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && (isAvatarEmotionRequest(userPrompt) || isSceneRequest(userPrompt))) {
             val p = userPrompt.lowercase()
             val isScene = isSceneRequest(userPrompt)
             val args = if (isScene) {
@@ -296,17 +216,15 @@ class LiveToolBridge(
                     "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว (ระบบมี Moodset ทั้งหมด 50 หน้า) — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ ห้ามตอบว่าไม่มีหน้าตา ห้ามพูดว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
                 }
             }
-            liveService.sendNativeToolResponse(
-                callId   = event.callId,
-                toolName = event.name,
-                result   = result.result + voiceRule
+            respond(event, result.result + voiceRule,
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Media Control Guard: If Gemini mistakenly calls trading/other tools when user wants music control
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && !tradingQuestion && isMediaRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isMediaRequest(userPrompt)) {
             val p = userPrompt.lowercase()
             val action = when {
                 p.contains("หยุด") || p.contains("pause") || p.contains("พัก") -> "pause"
@@ -334,26 +252,16 @@ class LiveToolBridge(
                 logError("LiveBridge", "Redirected media control execution failed", e)
                 com.skyliner2008.jarvis.tools.ToolResult("device_media_control", "Error: ${e.message}", true)
             }
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = result.result + "\n\n[VOICE RULE - MEDIA] ควบคุมการเล่นเพลงเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างกระชับ เช่น 'กำลังเล่นเพลงให้แล้วนะคะ' หรือ 'หยุดเล่นเพลงแล้วค่ะ' ห้ามอธิบายยาว ห้ามใช้ markdown"
+            respond(event, result.result + "\n\n[VOICE RULE - MEDIA] ควบคุมการเล่นเพลงเรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างกระชับ เช่น 'กำลังเล่นเพลงให้แล้วนะคะ' หรือ 'หยุดเล่นเพลงแล้วค่ะ' ห้ามอธิบายยาว ห้ามใช้ markdown",
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Navigation Guard: If Gemini mistakenly calls trading tools when user asks for navigation
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isNavigationRequest(userPrompt)) {
-            val p = userPrompt.lowercase()
-            val destination = p.replace("นำทางไป", "")
-                .replace("เปิดแผนที่ไป", "")
-                .replace("เปิด google maps ไป", "")
-                .replace("พาไปที่", "")
-                .replace("ไปที่", "")
-                .replace("navigate to", "")
-                .replace("directions to", "")
-                .trim()
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isNavigationRequest(userPrompt)) {
+            val destination = LiveIntentMatchers.extractNavigationDestination(userPrompt)
             val args = mapOf("destination" to destination, "action" to "navigate", "mode" to "drive")
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_navigate($args)")
             val redirectCall = ToolCall(name = "device_navigate", args = args)
@@ -363,17 +271,15 @@ class LiveToolBridge(
                 logError("LiveBridge", "Redirected navigate execution failed", e)
                 com.skyliner2008.jarvis.tools.ToolResult("device_navigate", "Error: ${e.message}", true)
             }
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = result.result + "\n\n[VOICE RULE - NAVIGATION] เปิดระบบนำทางไปยัง $destination เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยค เช่น 'เปิดระบบนำทางไป $destination ให้แล้วค่ะ เดินทางปลอดภัยนะคะ' ห้ามอธิบายยาว ห้ามใช้ markdown"
+            respond(event, result.result + "\n\n[VOICE RULE - NAVIGATION] เปิดระบบนำทางไปยัง $destination เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยค เช่น 'เปิดระบบนำทางไป $destination ให้แล้วค่ะ เดินทางปลอดภัยนะคะ' ห้ามอธิบายยาว ห้ามใช้ markdown",
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Notification Read Guard: If Gemini mistakenly calls trading tools when user asks for notifications
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isNotificationRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isNotificationRequest(userPrompt)) {
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_notification_read")
             val redirectCall = ToolCall(name = "device_notification_read", args = mapOf("count" to "3"))
             val result = try {
@@ -382,17 +288,15 @@ class LiveToolBridge(
                 logError("LiveBridge", "Redirected notification read failed", e)
                 com.skyliner2008.jarvis.tools.ToolResult("device_notification_read", "Error: ${e.message}", true)
             }
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = result.result + "\n\n[VOICE RULE - NOTIFICATIONS] อ่านการแจ้งเตือนล่าสุดเรียบร้อยแล้ว — สรุปหรือแจ้งเตือนสั้นๆ ให้ผู้ใช้ทราบอย่างกระชับและเป็นธรรมชาติ"
+            respond(event, result.result + "\n\n[VOICE RULE - NOTIFICATIONS] อ่านการแจ้งเตือนล่าสุดเรียบร้อยแล้ว — สรุปหรือแจ้งเตือนสั้นๆ ให้ผู้ใช้ทราบอย่างกระชับและเป็นธรรมชาติ",
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Location & Speed Guard: If Gemini mistakenly calls trading tools when user asks for speed / current location
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isLocationOrSpeedRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isLocationOrSpeedRequest(userPrompt)) {
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Redirecting to device_location")
             val redirectCall = ToolCall(name = "device_location", args = mapOf("action" to "get_current"))
             val result = try {
@@ -401,17 +305,15 @@ class LiveToolBridge(
                 logError("LiveBridge", "Redirected location failed", e)
                 com.skyliner2008.jarvis.tools.ToolResult("device_location", "Error: ${e.message}", true)
             }
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = result.result + "\n\n[VOICE RULE - LOCATION] ได้ข้อมูลพิกัด/ตำแหน่งเรียบร้อยแล้ว — ตอบความเร็วหรือตำแหน่งปัจจุบันให้ผู้ใช้ทราบอย่างกระชับและชัดเจน"
+            respond(event, result.result + "\n\n[VOICE RULE - LOCATION] ได้ข้อมูลพิกัด/ตำแหน่งเรียบร้อยแล้ว — ตอบความเร็วหรือตำแหน่งปัจจุบันให้ผู้ใช้ทราบอย่างกระชับและชัดเจน",
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Parking Location Guard: If Gemini mistakenly calls trading tools when user asks about parking
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && isParkingRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isParkingRequest(userPrompt)) {
             val p = userPrompt.lowercase()
             val isSave = listOf("จำ", "บันทึก", "ตรงนี้", "save", "remember").any { p.contains(it) }
             val responseText = if (isSave) {
@@ -429,26 +331,22 @@ class LiveToolBridge(
                 }
             }
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Handled Parking Intent: $responseText")
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = responseText
+            respond(event, responseText,
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
         }
 
         // Night / Low-Glare Driving Mode Guard
-        if (event.name in setOf("trading_fear_greed", "trading_sentiment", "trading_market_snapshot", "trading_price", "trading_indicators") && !tradingQuestion && isNightModeRequest(userPrompt)) {
+        if (LiveIntentMatchers.canRedirectMisroutedTool(event.name, userPrompt) && isNightModeRequest(userPrompt)) {
             val p = userPrompt.lowercase()
             val isTurnOff = listOf("ปิด", "ยกเลิก", "off", "disable").any { p.contains(it) }
             DriveBridge.setLowGlareMode(!isTurnOff)
             val msg = if (isTurnOff) "ปิดโหมดกลางคืนและปรับความสว่างปกติแล้วค่ะ" else "เปิดโหมดลดแสงสะท้อนสำหรับการขับขี่ตอนกลางคืนเรียบร้อยแล้วค่ะ"
             logDebug("LiveBridge", "🛡️ Intercepted ${event.name} -> Handled Low Glare Mode: $msg")
-            liveService.sendNativeToolResponse(
-                callId = event.callId,
-                toolName = event.name,
-                result = "$msg\n\n[VOICE RULE - NIGHT_MODE] ยืนยันการปรับโหมดลดแสงสะท้อนสำหรับการขับขี่สั้นๆ 1 ประโยค"
+            respond(event, "$msg\n\n[VOICE RULE - NIGHT_MODE] ยืนยันการปรับโหมดลดแสงสะท้อนสำหรับการขับขี่สั้นๆ 1 ประโยค",
+                deliverIfStale = true
             )
             _activeToolName.value = null
             return
@@ -468,10 +366,7 @@ class LiveToolBridge(
                 if (!isExplicitUserClose) {
                     logDebug("LiveBridge", "🛡️ Blocked hallucinated device_always_live(action=off) — userPrompt='$userPrompt'")
                     val activeMode = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) "สัตว์เลี้ยง" else "Always AI Live"
-                    liveService.sendNativeToolResponse(
-                        callId   = event.callId,
-                        toolName = event.name,
-                        result   = "โหมด$activeMode ยังคงเปิดทำงานอยู่ตามปกติค่ะ (ผู้ใช้ไม่ได้สั่งให้ปิดโหมด หากต้องการปิดกรุณาสั่ง 'ปิดโหมด' ชัดเจนนะคะ)\n\n[VOICE RULE] โหมด$activeMode ยังคงทำงานอยู่ตามปกติ — ให้ตอบรับหรือช่วยเหลือผู้ใช้ตามคำพูดล่าสุด ('$userPrompt') อย่างเป็นธรรมชาติ ห้ามบอกว่าปิดโหมดแล้วเด็ดขาด"
+                    respond(event, "โหมด$activeMode ยังคงเปิดทำงานอยู่ตามปกติค่ะ (ผู้ใช้ไม่ได้สั่งให้ปิดโหมด หากต้องการปิดกรุณาสั่ง 'ปิดโหมด' ชัดเจนนะคะ)\n\n[VOICE RULE] โหมด$activeMode ยังคงทำงานอยู่ตามปกติ — ให้ตอบรับหรือช่วยเหลือผู้ใช้ตามคำพูดล่าสุด ('$userPrompt') อย่างเป็นธรรมชาติ ห้ามบอกว่าปิดโหมดแล้วเด็ดขาด"
                     )
                     _activeToolName.value = null
                     return
@@ -493,10 +388,7 @@ class LiveToolBridge(
 
             if (userPrompt.isNotBlank() && !hasVisionIntent) {
                 logDebug("LiveBridge", "🛡️ Blocked hallucinated vision_activate — userPrompt='$userPrompt'")
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "EYES_NOT_NEEDED: ผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (คำพูดล่าสุด: \"$userPrompt\") — โปรดสนทนาหรือตอบคำถามของผู้ใช้ตามปกติโดยไม่ต้องเปิดกล้อง"
+                respond(event, "EYES_NOT_NEEDED: ผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (คำพูดล่าสุด: \"$userPrompt\") — โปรดสนทนาหรือตอบคำถามของผู้ใช้ตามปกติโดยไม่ต้องเปิดกล้อง"
                 )
                 _activeToolName.value = null
                 return
@@ -509,33 +401,41 @@ class LiveToolBridge(
             val hasVoiceIntent = listOf("เสียง", "voice", "สำเนียง", "โทน", "เปลี่ยนเสียง").any { p.contains(it) }
             if (userPrompt.isNotBlank() && !hasVoiceIntent) {
                 logDebug("LiveBridge", "🛡️ Blocked hallucinated ${event.name} — userPrompt='$userPrompt'")
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "VOICE_COMMAND_NOT_REQUESTED: ผู้ใช้ไม่ได้สั่งเปลี่ยนเสียงหรือขอดูรายชื่อเสียง (คำพูด: \"$userPrompt\") — โปรดตอบรับหรือคุยกับผู้ใช้ตามปกติ"
+                respond(event, "VOICE_COMMAND_NOT_REQUESTED: ผู้ใช้ไม่ได้สั่งเปลี่ยนเสียงหรือขอดูรายชื่อเสียง (คำพูด: \"$userPrompt\") — โปรดตอบรับหรือคุยกับผู้ใช้ตามปกติ"
                 )
                 _activeToolName.value = null
                 return
             }
         }
 
-        if (isTradingAnalysisTool(event.name)) {
+        val inSkillChain = turnKey.isNotBlank() && turnKey == skillChainTurnKey
+        if (isTradingAnalysisTool(event.name) && !inSkillChain) {
             val profile = tradingProfileFor(userPrompt)
-            if (!profileToolAllowed(userPrompt, event.name, event.args)) {
+            if (!LiveIntentMatchers.profileToolAllowed(userPrompt, event.name, event.args)) {
                 val reason = when {
-                    !allowedTradingTimeframe(event.args) -> "AI Profile จำกัด timeframe เริ่มต้นไว้ที่ M15, H1, H4; โปรดไม่เรียก D1/1D เว้นแต่ผู้ใช้ระบุเอง"
+                    !LiveIntentMatchers.allowedTradingTimeframe(event.args, userPrompt) -> "AI Profile จำกัด timeframe เริ่มต้นไว้ที่ M15, H1, H4; โปรดไม่เรียก D1/1D เว้นแต่ผู้ใช้ระบุเอง"
                     profile == "USER_QUERY" -> "คำถามนี้ถามค่าเฉพาะ ไม่ใช่ full analysis; ใช้ trading_technical_analysis หรือ trading_price แทน"
                     profile == "SMC" -> "ผู้ใช้เลือก SMC Profile แล้ว ไม่ต้องเรียก Technical/Deep Analysis ซ้ำ"
                     else -> "AI Profile ใช้ trading_deep_analysis_suite เป็น consolidated analysis path เท่านั้น"
                 }
-                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: $reason — tool นี้ไม่ได้ดึงข้อมูลให้ ห้ามแต่งราคาหรือตัวเลขเอง ถ้ายังไม่มีข้อมูลจาก tool ใน turn นี้ให้เรียก tool ที่ระบุ หรือบอกผู้ใช้ตรงๆ ว่ายังไม่มีข้อมูล")
+                respond(event, "PROFILE_GUARD: $reason — tool นี้ไม่ได้ดึงข้อมูลให้ ห้ามแต่งราคาหรือตัวเลขเอง ถ้ายังไม่มีข้อมูลจาก tool ใน turn นี้ให้เรียก tool ที่ระบุ หรือบอกผู้ใช้ตรงๆ ว่ายังไม่มีข้อมูล")
                 logDebug("LiveBridge", "🛡️ Profile guard blocked ${event.name} for profile=$profile")
                 return
             }
-            tradingProfileCallCount++
-            if (tradingProfileCallCount > 3) {
-                liveService.sendNativeToolResponse(event.callId, event.name, "PROFILE_GUARD: ได้ข้อมูลครบ 3 TF (M15/H1/H4) ใน turn นี้แล้ว ไม่ต้องเรียก analysis tool เพิ่ม โปรดสังเคราะห์จากผล tool ที่ได้รับแล้วเท่านั้น ห้ามเพิ่มตัวเลขที่ไม่มีในผล tool")
-                logDebug("LiveBridge", "🛡️ Profile guard capped analysis chain at 3 calls")
+        }
+        if (isTradingAnalysisTool(event.name)) {
+            val callCountThisTurn = tradingProfileMutex.withLock {
+                if (turnKey != tradingProfilePromptKey) {
+                    tradingProfilePromptKey = turnKey
+                    tradingProfileCallCount = 0
+                }
+                ++tradingProfileCallCount
+            }
+            // skill chain ระบุจำนวน TF เอง (เช่น 15m/1h/4h/1D) จึงให้โควตามากกว่าปกติ
+            val callCap = if (inSkillChain) 6 else 3
+            if (callCountThisTurn > callCap) {
+                respond(event, "PROFILE_GUARD: เรียก analysis tool ครบ $callCap ครั้งใน turn นี้แล้ว โปรดสังเคราะห์จากผล tool ที่ได้รับแล้วเท่านั้น ห้ามเพิ่มตัวเลขที่ไม่มีในผล tool")
+                logDebug("LiveBridge", "🛡️ Profile guard capped analysis chain at $callCap calls (skillChain=$inSkillChain)")
                 return
             }
         }
@@ -546,7 +446,7 @@ class LiveToolBridge(
         // source selection: DEMO/PAPER -> TradingView; LIVE+connected -> MT5; LIVE+offline -> TV.
         if (event.name == "trading_mt5_symbol_search" && isSignalAlertRequest(userPrompt)) {
             val guard = "SIGNAL_DATA_SOURCE_GUARD: ไม่ต้องค้นหา symbol ผ่าน MT5 สำหรับ Signal Alert — ให้สร้าง trading_signal_alert แล้ว TradingSignalMarketDataRouter จะเลือก MT5 LIVE หรือ TradingView ตาม runtime policy อัตโนมัติ"
-            liveService.sendNativeToolResponse(event.callId, event.name, guard)
+            respond(event, guard)
             logDebug("LiveBridge", "🛡️ Signal alert blocked premature MT5 symbol search callId=${event.callId}")
             _activeToolName.value = null
             return
@@ -581,15 +481,42 @@ class LiveToolBridge(
             event.args
         }
 
+        // Outgoing message guard: model บางครั้งเรียก reply ซ้ำด้วยข้อความเดิม (เช่นหลัง reconnect) — ห้ามส่งซ้ำ
+        if (event.name == "device_notification_reply") {
+            val message = (effectiveArgs["message"] ?: effectiveArgs["text"] ?: "").trim()
+            val now = System.currentTimeMillis()
+            val previous = lastNotificationReply
+            if (message.isNotBlank() && previous != null && previous.first == message && now - previous.second < 20_000L) {
+                logDebug("LiveBridge", "🛡️ Duplicate device_notification_reply blocked: '$message'")
+                respond(event, "ALREADY_SENT: ข้อความ \"$message\" ถูกส่งตอบกลับไปแล้วเมื่อสักครู่ ไม่ต้องส่งซ้ำ — ยืนยันกับผู้ใช้สั้นๆ ว่าส่งแล้ว")
+                _activeToolName.value = null
+                return
+            }
+            if (message.isNotBlank()) lastNotificationReply = message to now
+        }
+
         val toolCall = ToolCall(name = event.name, args = effectiveArgs)
         val rawResult = try {
             ToolExecutor.execute(toolCall, memoryContext)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            _activeToolName.value = null
+            throw e
         } catch (e: Exception) {
             logError("LiveBridge", "Tool execution failed", e)
             com.skyliner2008.jarvis.tools.ToolResult(event.name, "Error: ${e.message}", true)
         }
 
         val finalResultText = processInterceptedRequest(rawResult.result)
+
+        // ผลของ custom tool / skill แบบ chain ไม่ใช่ "ผลลัพธ์" แต่เป็น "ขั้นตอนที่ต้องทำต่อ"
+        // ถ้าปล่อยให้ VOICE PRESENTATION POLICY ต่อท้าย โมเดลจะสรุปให้ผู้ใช้ฟังแล้วหยุด แทนที่จะเรียก tool ตามขั้นตอน
+        // (เคสจริง 2026-09-16: custom_gold_check ตอบขั้นตอนมาแล้วจบเลย ไม่ได้ทำ deep analysis ต่อ)
+        val isSkillInstruction = finalResultText.trimStart().startsWith("🛠️ เปิดใช้งานเครื่องมือ")
+        if (isSkillInstruction) {
+            // ขั้นตอนของ skill ระบุ TF/ชุด tool เอง (เช่น deep analysis 15m/1h/4h/1D) — ปลด profile guard ให้ turn นี้
+            skillChainTurnKey = turnKey
+            logDebug("LiveBridge", "🔗 Skill chain started for $turnKey (${event.name}) — profile guard relaxed")
+        }
 
         val isInternalUiTool = event.name in setOf(
             "device_avatar_emotion",
@@ -610,10 +537,7 @@ class LiveToolBridge(
                 onAiVisionToggle?.invoke(true)
                 com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(true)
 
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "OK_EYES_OPEN. กล้องกำลังเปิดและเริ่มสตรีมภาพสดเข้าสู่ระบบ... ในเทิร์นนี้โปรดพูดตอบรับสั้นๆ 1 ประโยคเท่านั้น เช่น 'ไหนขอน้องจาวิสดูก่อนนะฮับบอส ถือของไว้ใกล้ๆ กล้องนะฮับ' ห้ามเดาสุ่มหรือตอบสิ่งที่เห็นในเทิร์นนี้เด็ดขาด ให้รอรับภาพสดที่ชัดเจนในอีก 1-2 วินาทีข้างหน้า"
+                respond(event, "OK_EYES_OPEN. กล้องกำลังเปิดและเริ่มสตรีมภาพสดเข้าสู่ระบบ... ในเทิร์นนี้โปรดพูดตอบรับสั้นๆ 1 ประโยคเท่านั้น เช่น 'ไหนขอน้องจาวิสดูก่อนนะฮับบอส ถือของไว้ใกล้ๆ กล้องนะฮับ' ห้ามเดาสุ่มหรือตอบสิ่งที่เห็นในเทิร์นนี้เด็ดขาด ให้รอรับภาพสดที่ชัดเจนในอีก 1-2 วินาทีข้างหน้า"
                 )
                 
                 // Record to history
@@ -655,10 +579,7 @@ class LiveToolBridge(
                 visionPromptJob?.cancel()
                 onAiVisionToggle?.invoke(false)
                 com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "OK_EYES_CLOSED. กล้องปิดเรียบร้อยแล้ว"
+                respond(event, "OK_EYES_CLOSED. กล้องปิดเรียบร้อยแล้ว"
                 )
                 logDebug("LiveBridge", "🕶️ Vision deactivated by AI")
                 return
@@ -667,10 +588,7 @@ class LiveToolBridge(
                 // In Live mode, the video frames are already streaming through the WebSocket.
                 // A separate REST API call would fail because it's a different session.
                 // Tell the AI to just look at the stream it's already receiving.
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "เครื่องมือ ${event.name} ไม่จำเป็นต้องใช้ในตอนนี้ เนื่องจากคุณได้เปิดโหมด Vision และกำลังรับวิดีโอสด (Live Stream) อยู่แล้ว โปรดประมวลผลสิ่งที่คุณเห็นจากสตรีมวิดีโอที่ได้รับในปัจจุบันและอธิบายให้ผู้ใช้ฟังทันที"
+                respond(event, "เครื่องมือ ${event.name} ไม่จำเป็นต้องใช้ในตอนนี้ เนื่องจากคุณได้เปิดโหมด Vision และกำลังรับวิดีโอสด (Live Stream) อยู่แล้ว โปรดประมวลผลสิ่งที่คุณเห็นจากสตรีมวิดีโอที่ได้รับในปัจจุบันและอธิบายให้ผู้ใช้ฟังทันที"
                 )
                 logDebug("LiveBridge", "📹 Redirected ${event.name} to Live Stream (no separate API needed)")
                 return
@@ -681,32 +599,31 @@ class LiveToolBridge(
                 if (report.isNotBlank()) {
                     liveService.emitTextToChat(report)
                 }
-                liveService.sendNativeToolResponse(
-                    callId   = event.callId,
-                    toolName = event.name,
-                    result   = "✅ รายงานถูกส่งเข้าแชทแล้ว โปรดอธิบายสาระสำคัญให้ผู้ใช้ฟังเป็นภาษาไทยแบบสนทนาอย่างครบถ้วน โดยครอบคลุมข้อสรุป เหตุผล ตัวเลขสำคัญ และจุดที่ควรระวัง ไม่ต้องอ่านตารางหรือ markdown ตามตัวอักษร และบอกผู้ใช้ว่าสามารถดูรายละเอียดเต็มในแชทได้"
+                respond(event, "✅ รายงานถูกส่งเข้าแชทแล้ว โปรดอธิบายสาระสำคัญให้ผู้ใช้ฟังเป็นภาษาไทยแบบสนทนาอย่างครบถ้วน โดยครอบคลุมข้อสรุป เหตุผล ตัวเลขสำคัญ และจุดที่ควรระวัง ไม่ต้องอ่านตารางหรือ markdown ตามตัวอักษร และบอกผู้ใช้ว่าสามารถดูรายละเอียดเต็มในแชทได้"
                 )
                 logDebug("LiveBridge", "📊 Report tool executed")
                 return
             }
             event.name == "voice_get_profiles" -> {
                 val list = com.skyliner2008.jarvis.data.GeminiVoiceProfiles.getVoiceListSummary()
-                liveService.sendNativeToolResponse(event.callId, event.name, "📋 รายชื่อเสียงที่สามารถใช้ได้:\n$list")
+                respond(event, "📋 รายชื่อเสียงที่สามารถใช้ได้:\n$list")
                 return
             }
             event.name == "voice_set_profile" -> {
                 val name = event.args["name"] ?: ""
                 if (name.isNotBlank()) {
+                    // ตอบ tool ก่อน แล้วค่อยสั่งเปลี่ยนเสียง (ซึ่ง restart session) — ไม่งั้น response ส่งไม่ทันก่อน socket ปิด
+                    respond(event, "✅ รับทราบครับ ผมกำลังเปลี่ยนเสียงเป็น '$name' กรุณารอสักครู่ขณะผมปรับจูนระบบ...")
                     onVoiceChange?.invoke(name)
-                    liveService.sendNativeToolResponse(event.callId, event.name, "✅ รับทราบครับ ผมกำลังเปลี่ยนเสียงเป็น '$name' กรุณารอสักครู่ขณะผมปรับจูนระบบ...")
                 } else {
-                    liveService.sendNativeToolResponse(event.callId, event.name, "❌ ผิดพลาด: ไม่ระบุชื่อเสียง")
+                    respond(event, "❌ ผิดพลาด: ไม่ระบุชื่อเสียง")
                 }
                 return
             }
             else -> {
                 // เครื่องมือทั่วไป ให้พ่นลงแชทตามปกติ (ใช้ระบบ isStatic อัตโนมัติ)
-                liveService.emitTextToChat(finalResultText)
+                // ยกเว้นขั้นตอนของ skill/custom tool ซึ่งเป็นคำสั่งภายใน ไม่ใช่เนื้อหาสำหรับผู้ใช้
+                if (!isSkillInstruction) liveService.emitTextToChat(finalResultText)
             }
         }
 
@@ -725,6 +642,11 @@ class LiveToolBridge(
             "\n\n[PROFILE COMPLETE] ได้ข้อมูลครบ canonical TF แล้ว (M15/H1/H4) โปรดหยุดเรียก Trading analysis tools เพิ่มและสังเคราะห์คำตอบสุดท้ายให้ผู้ใช้ทันที"
         } else ""
         val voiceRule = when {
+            isSkillInstruction ->
+                "\n\n[CHAIN RULE — ห้ามหยุดตรงนี้] ข้อความข้างบนคือ *ขั้นตอนที่ต้องทำต่อ* ไม่ใช่ผลลัพธ์ " +
+                    "ให้เรียก tool ตามขั้นตอนทันทีจนครบทุกข้อ แล้วค่อยสรุปผลจริงให้ผู้ใช้ฟัง " +
+                    "ระหว่างนี้พูดกับผู้ใช้สั้นๆ 1 ประโยคว่ากำลังดึงข้อมูลให้ (เช่น 'กำลังวิเคราะห์ให้อยู่ค่ะ รอสักครู่นะคะ') " +
+                    "ห้ามสรุปหรือเดาผลก่อนได้ข้อมูลจริงจาก tool เด็ดขาด"
             event.name == "device_always_live" -> {
                 val mode = event.args["mode"]?.lowercase() ?: ""
                 if (mode == "pet") {
@@ -794,10 +716,8 @@ class LiveToolBridge(
                 "\n\n[VOICE PRESENTATION POLICY] รายละเอียดเต็มแสดงในแชทแล้ว โปรดอธิบายให้ผู้ใช้ฟังเป็นภาษาไทยแบบสนทนา ไม่อ่านรายงาน ตาราง หรือลิสต์ตามตัวอักษร และไม่ใช้ markdown ในเสียงพูด ให้เริ่มจากข้อสรุปหลัก แล้วอธิบายเหตุผลพร้อมตัวเลขสำคัญประมาณ 3-5 จุด ความหมายของโซน/สัญญาณที่สำคัญ และจุดที่ควรระวังหรือเงื่อนไขยืนยัน สรุปให้ครบทุกส่วนที่มีนัยสำคัญ โดยทั่วไปประมาณ 8-12 ประโยคสำหรับผลวิเคราะห์ที่ซับซ้อน แต่ลดหรือเพิ่มได้ตามความจำเป็น ห้ามตัดข้อมูลสำคัญเพียงเพื่อให้สั้น"
             }
         }
-        liveService.sendNativeToolResponse(
-            callId   = event.callId,
-            toolName = event.name,
-            result   = finalResultText + profileFinalization + dataFailureRule + voiceRule
+        respond(event, finalResultText + profileFinalization + dataFailureRule + voiceRule,
+            deliverIfStale = true
         )
         logDebug("LiveBridge", "✅ Path A done: ${event.name} → ${finalResultText.take(80)}")
     }
@@ -949,13 +869,37 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
         
         collectionJob = scope.launch {
             // Path A: Native Tool Calls (Function Calling)
+            // แต่ละ call รันใน job ของตัวเอง — tool ช้า (deep analysis / grounding) ต้องไม่บล็อก call อื่น
+            // และต้องยกเลิกได้เมื่อ server ส่ง toolCallCancellation
             launch {
                 liveService.nativeToolCallFlow.collect { event ->
-                    try {
-                        handleNativeToolCall(event, memoryContextProvider())
-                    } catch (e: Exception) {
-                        logError("LiveBridge", "Native tool handling error", e)
+                    val job = launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                        try {
+                            handleNativeToolCall(event, memoryContextProvider())
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            logDebug("LiveBridge", "🚫 Tool call ${event.name} callId=${event.callId} cancelled")
+                            _activeToolName.value = null
+                            throw e
+                        } catch (e: Exception) {
+                            logError("LiveBridge", "Native tool handling error", e)
+                        } finally {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                                runningCallsMutex.withLock { runningCalls.remove(event.callId) }
+                            }
+                        }
                     }
+                    runningCallsMutex.withLock { runningCalls[event.callId] = job }
+                    job.start()
+                }
+            }
+
+            // server ยกเลิก function call (เช่นผู้ใช้พูดแทรก) → หยุดงานและไม่ส่ง response
+            launch {
+                liveService.toolCallCancellationFlow.collect { ids ->
+                    markCancelled(ids)
+                    val jobs = runningCallsMutex.withLock { ids.mapNotNull { runningCalls.remove(it) } }
+                    jobs.forEach { it.cancel() }
+                    if (jobs.isNotEmpty()) logDebug("LiveBridge", "🚫 Cancelled ${jobs.size} running tool call(s): $ids")
                 }
             }
 

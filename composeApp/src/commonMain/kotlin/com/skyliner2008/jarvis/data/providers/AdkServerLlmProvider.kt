@@ -27,11 +27,18 @@ class AdkServerLlmProvider(
 
     private fun getFallbackModels(): List<LlmModelInfo> {
         return listOf(
-            LlmModelInfo("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live (ADK Primary)", supportsVision = true, supportsLive = true),
-            LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio (ADK Secondary)", supportsVision = true, supportsLive = true),
-            LlmModelInfo("gemini-3.5-live-translate-preview", "Gemini 3.5 Live Translate (ADK)", supportsVision = true, supportsLive = true),
-            LlmModelInfo("gemini-2.0-flash-exp", "Gemini 2.0 Flash (ADK)", supportsVision = true, supportsLive = false),
-            LlmModelInfo("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite (ADK)", supportsVision = true, supportsLive = false)
+            LlmModelInfo(
+                com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_LIVE_MODEL,
+                "${com.skyliner2008.jarvis.data.ModelConfig.displayNameFor(com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_LIVE_MODEL)} (ADK Primary)",
+                supportsVision = true, supportsLive = true
+            ),
+            LlmModelInfo("gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio (ADK Secondary)", supportsVision = true, supportsLive = true),
+            LlmModelInfo(
+                com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_MAIN_MODEL,
+                "${com.skyliner2008.jarvis.data.ModelConfig.displayNameFor(com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_MAIN_MODEL)} (ADK)",
+                supportsVision = true, supportsLive = false
+            ),
+            LlmModelInfo("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite (ADK, high volume)", supportsVision = true, supportsLive = false)
         )
     }
 

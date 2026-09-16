@@ -115,13 +115,16 @@ class GeminiLlmProvider(
             }
             
             // Inject Preview Models ที่ /v1beta/models มักไม่คืนมา (กรองเฉพาะตัวที่ยังไม่ตาย)
-            val knownPreviews = listOf(
-                LlmModelInfo("gemini-3.1-flash-live-preview", "Gemini 3.1 Flash Live Preview", supportsVision = true, supportsLive = true),
-                LlmModelInfo("gemini-2.5-flash-native-audio-preview-12-2025", "Gemini 2.5 Flash Native Audio (12-2025)", supportsVision = true, supportsLive = true),
-                LlmModelInfo("gemini-2.5-flash-native-audio-preview-09-2025", "Gemini 2.5 Flash Native Audio (09-2025)", supportsVision = true, supportsLive = true),
-                LlmModelInfo("gemini-2.0-flash-exp", "Gemini 2.0 Flash Experimental (Realtime)", supportsVision = true, supportsLive = true),
-                LlmModelInfo("gemini-3.5-live-translate-preview", "Gemini 3.5 Live Translate Preview", supportsVision = false, supportsLive = true)
-            ).filter { !com.skyliner2008.jarvis.data.ModelConfig.isModelDead(it.id) }
+            // 2026-09-16: อิงลิสต์กลางของ ModelConfig แทนการ hardcode — โมเดล Live ที่ Google เพิ่มใหม่
+            // (เช่น 3.8 Live) จะโผล่มาจาก ListModels เองอยู่แล้ว ตรงนี้เหลือไว้เฉพาะตัวที่ API มักไม่คืนมา
+            val knownPreviews = com.skyliner2008.jarvis.data.ModelConfig.SEED_LIVE_MODELS.map { id ->
+                LlmModelInfo(
+                    id = id,
+                    displayName = com.skyliner2008.jarvis.data.ModelConfig.displayNameFor(id),
+                    supportsVision = true,
+                    supportsLive = true
+                )
+            }.filter { !com.skyliner2008.jarvis.data.ModelConfig.isModelDead(it.id) }
             val existingIds = mappedList.map { it.id }.toSet()
             mappedList + knownPreviews.filter { it.id !in existingIds }
         } catch (e: Exception) {

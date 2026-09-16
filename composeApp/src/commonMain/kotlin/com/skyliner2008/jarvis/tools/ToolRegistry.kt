@@ -81,6 +81,44 @@ object ToolRegistry {
             description = "Gets the current date and time.",
             parameters = null
         ))
+        // ── Agent multi-session: Live เป็นเอเจนต์หลัก มอบงานให้ chat session ทำเบื้องหลัง ──
+        put("agent_task_start", FunctionDeclaration(
+            name = "agent_task_start",
+            description = "มอบงานที่ใช้เวลานานหรือหลายขั้นตอนให้ทำเบื้องหลัง (เช่น รวบรวมข้อมูลหลายแหล่ง วิเคราะห์หลายสินทรัพย์ สรุปเอกสารยาว) " +
+                "แล้วคุยกับผู้ใช้ต่อได้ทันทีโดยไม่ต้องรอ เมื่อเสร็จระบบจะส่งผลกลับมาให้รายงานเอง " +
+                "ห้ามใช้กับงานที่ตอบได้ทันทีในเทิร์นเดียว",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "title" to ParameterProperty("STRING", "ชื่อสั้นๆ ของงาน เช่น 'สรุปข่าวทองวันนี้'"),
+                    "instruction" to ParameterProperty("STRING", "คำสั่งเต็มที่ให้ผู้ช่วยเบื้องหลังทำ ระบุให้ชัดว่าต้องการผลลัพธ์อะไร")
+                ),
+                required = listOf("instruction")
+            )
+        ))
+        put("agent_task_list", FunctionDeclaration(
+            name = "agent_task_list",
+            description = "ดูรายการงานเบื้องหลังที่กำลังทำอยู่ทั้งหมด",
+            parameters = null
+        ))
+        put("agent_task_status", FunctionDeclaration(
+            name = "agent_task_status",
+            description = "เช็คสถานะงานเบื้องหลังตาม task_id",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf("task_id" to ParameterProperty("STRING", "id ของงานที่ได้จาก agent_task_start")),
+                required = listOf("task_id")
+            )
+        ))
+        put("agent_task_cancel", FunctionDeclaration(
+            name = "agent_task_cancel",
+            description = "ยกเลิกงานเบื้องหลังที่กำลังทำอยู่",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf("task_id" to ParameterProperty("STRING", "id ของงานที่ต้องการยกเลิก")),
+                required = listOf("task_id")
+            )
+        ))
         put("calculate", FunctionDeclaration(
             name = "calculate",
             description = "Calculates a mathematical expression.",
@@ -268,13 +306,13 @@ object ToolRegistry {
         put("analyze_and_display_report", FunctionDeclaration(
             name = "analyze_and_display_report",
             description = """Displays a detailed markdown report in the chat UI while you continue speaking a short voice summary.
-                |IMPORTANT for Live Voice mode: whenever the answer requires long details, tables, or many numbers, call this tool with the full markdown report, then speak ONLY a short conversational summary (2-4 sentences) of the key findings. Never read tables aloud.
+                |IMPORTANT for Live Voice mode: whenever the answer requires long details, tables, or many numbers, call this tool with the full markdown report, then SPEAK the voice_summary you wrote. Never read tables aloud, never read markdown aloud.
                 |Use after gathering data from other tools (trading analysis, SMC, news, etc.).""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "detailed_markdown" to ParameterProperty("STRING", "The full markdown report to display in the chat (tables, headers, bullet points allowed here)."),
-                    "voice_summary" to ParameterProperty("STRING", "A short 2-4 sentence conversational Thai summary of the key findings (this is what you speak).")
+                    "voice_summary" to ParameterProperty("STRING", "The spoken Thai answer, 6-10 conversational sentences (this is exactly what you say aloud, so make it complete): (1) the main conclusion/direction, (2) 3-5 key numbers explained in words, e.g. 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ', (3) what to watch out for. Do NOT compress it to 2-3 sentences and do NOT use markdown.")
                 ),
                 required = listOf("detailed_markdown", "voice_summary")
             )
@@ -435,16 +473,47 @@ object ToolRegistry {
                                _cameraTools.values.toList() +
                                _deviceTools.values.toList() +
                                _customTools.values.toList() +
-                               // skill ทุกตัวมี custom tool คู่กันอยู่แล้ว (register คู่กัน) —
-                               // ส่งเฉพาะ skill ที่ไม่มี custom tool ชื่อซ้ำ กัน Gemini 400 "Duplicate function declaration"
-                               _skills.values.filter { it.name !in _customTools }.map { skill ->
-                                   FunctionDeclaration(
-                                       name        = skill.name,
-                                       description = skill.description,
-                                       parameters  = null
-                                   )
-                               }
+                               skillDeclarations()
     )
+
+    // skill ทุกตัวมี custom tool คู่กันอยู่แล้ว (register คู่กัน) —
+    // ส่งเฉพาะ skill ที่ไม่มี custom tool ชื่อซ้ำ กัน Gemini 400 "Duplicate function declaration"
+    private fun skillDeclarations(): List<FunctionDeclaration> =
+        _skills.values.filter { it.name !in _customTools }.map { skill ->
+            FunctionDeclaration(
+                name        = skill.name,
+                description = skill.description,
+                parameters  = null
+            )
+        }
+
+    /**
+     * เครื่องมือที่ "ควบคุมเครื่องแบบเต็มรูปแบบ" (Accessibility: อ่านจอ/แตะ/พิมพ์/เลื่อน/ปุ่ม/เปิดแอป/ปลุก-พักจอ)
+     *
+     * อนุญาตเฉพาะโหมดขับรถ — โหมดอื่น (ผู้ช่วยส่วนตัว / สัตว์เลี้ยง) ทำงานเบื้องหลังได้ตามปกติ
+     * แต่ต้องไม่เข้าไปกดหน้าจอหรือปลุก/พักจอแทนผู้ใช้
+     */
+    val DEVICE_CONTROL_TOOLS = setOf(
+        "device_read_screen",
+        "device_tap",
+        "device_type_text",
+        "device_scroll",
+        "device_press_button",
+        "device_open_app",
+        "device_get_app_info"
+    )
+
+    /**
+     * ชุดเครื่องมือสำหรับ Live session ตามโหมด
+     *
+     * ทุกโหมดคือผู้ช่วยตัวเดียวกันและใช้เครื่องมือได้เหมือนกันหมด — ต่างกันแค่บทบาท/น้ำเสียง
+     * ยกเว้นกลุ่มควบคุมเครื่องเต็มรูปแบบที่เปิดเฉพาะโหมดขับรถ (2026-09-16)
+     */
+    fun getLiveGeminiTool(profile: com.skyliner2008.jarvis.pet.AlwaysLiveProfile): GeminiTool {
+        val all = getGeminiTool().functionDeclarations
+        if (profile == com.skyliner2008.jarvis.pet.AlwaysLiveProfile.DRIVE) return GeminiTool(all)
+        return GeminiTool(all.filter { it.name !in DEVICE_CONTROL_TOOLS })
+    }
 
     fun allToolNames(): Set<String> =
         _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _strategyTools.keys + _cameraTools.keys + _deviceTools.keys + _customTools.keys + _skills.keys

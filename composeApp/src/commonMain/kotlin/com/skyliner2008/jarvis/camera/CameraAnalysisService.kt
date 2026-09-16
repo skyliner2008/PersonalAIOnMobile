@@ -127,8 +127,9 @@ class CameraAnalysisService(
         val provider = providers[type] ?: return
 
         val (apiKey, model) = when (type) {
-            CameraProviderType.GEMINI_LIVE  -> geminiApiKey to "gemini-3.1-flash-live-preview"
-            CameraProviderType.GEMINI_FLASH -> geminiApiKey to "gemini-2.5-flash"
+            // ใช้ตัวที่ ModelConfig เลือกให้ (sync จาก ListModels) — ไม่ผูกกับชื่อรุ่นใดรุ่นหนึ่ง
+            CameraProviderType.GEMINI_LIVE  -> geminiApiKey to com.skyliner2008.jarvis.data.ModelConfig.getBestLiveModel()
+            CameraProviderType.GEMINI_FLASH -> geminiApiKey to com.skyliner2008.jarvis.data.ModelConfig.getBestActiveModel()
             CameraProviderType.OPENAI_GPT4O -> openAiApiKey to "gpt-4o"
             CameraProviderType.OPENAI_GPT41 -> openAiApiKey to "gpt-4.1"
             CameraProviderType.CLAUDE_SONNET -> claudeApiKey to "claude-sonnet-4-6"
