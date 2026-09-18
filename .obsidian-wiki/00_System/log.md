@@ -3255,3 +3255,24 @@ active context window"* คิดทั้ง context สะสมใหม่�
 
 แก้: `getRunnableJobs` รวม `trading_anticipation`, หน้า Automation แสดง "TRIGGERED · ปลุก AI แล้ว รอเหตุการณ์ใหม่"
 และไม่แสดงปุ่ม 🔁 สำหรับ job ประเภทนี้ (รีเซ็ตเองในรอบถัดไป)
+
+---
+
+## 2026-09-19 — Runbook ตรวจแจ้งเตือนระบบปลุก AI บนมือถือจริง
+
+- เพิ่ม `tools/device_wake_audit.py` — ดึงฐานข้อมูลแอปผ่าน `adb exec-out run-as` แสดง job/การตั้งค่า/การปลุกแต่ละครั้ง
+  แล้วคำนวณค่าหลักใหม่จากแท่งเทียนดิบ, `--logcat` สรุป log และระยะห่างการดึงแท่งเทียน, ลบสำเนาฐานข้อมูลตอนจบ
+- วิธีทำเองและการตีความ: [[../07_Trading_Intelligence/67_Device_Wake_Alert_Audit]]
+- ผลตรวจครั้งแรก: ค่าในแจ้งเตือน 23:21 และ 23:56 ถูกต้องทุกตัว; พบการดึงแท่งเทียน ~13–14 วิ/ครั้ง (ยังไม่แก้)
+
+---
+
+## 2026-09-19 — แก้: ดึงแท่งเทียนจาก TradingView ช้า 13–14 วิ/ครั้ง
+
+- สาเหตุ: `TvHistoryBridge.android.kt` ต่อ string เฟรมคำสั่งเอง — payload ของ `resolve_symbol` (JSON ซ้อนใน string)
+  มี `"` ที่ไม่ได้ escape → TradingView ตอบ `protocol_error` (ยืนยันจาก PC: เฟรมเดิม error ใน 0.3 วิ, เฟรมที่ escape ถูกได้แท่งใน 0.17 วิ)
+  bridge ไม่ฟัง error จึงรอ timeout 12 วิ แล้วค่อยไปเส้นสำรอง (Ktor) ทุกครั้ง
+- แก้: `TvProtocol` (commonMain) สร้างเฟรมด้วย JSON encoder + bridge เลิกรอทันทีเมื่อได้ `protocol_error/critical_error/symbol_error/series_error`
+- ผลบนมือถือจริง: 0.5–0.9 วิ/ครั้ง, สแกนระบบปลุก AI 1 รอบ 4–6 วิ (จาก 1.5–2.5 นาที) — แจ้งเตือนไม่ช้า ~2 นาทีอีกต่อไป
+- เทสต์ `TvProtocolTest` (เฟรมเป็น JSON ถูกต้อง, payload round-trip, จำนวนแท่งเป็นตัวเลข, ตรวจจับ error) — รวม 448/448
+

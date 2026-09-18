@@ -156,7 +156,6 @@ actual suspend fun fetchTvHistoryBars(
     timeoutSec: Int
 ): List<Candle> = suspendCancellableCoroutine { cont ->
     val seriesName = "s1"
-    val symbolAlias = "symbol_1"
     val chartSession = "cs_${System.currentTimeMillis().toString(16).takeLast(8)}"
     val fromParam = tvFrom(symbol)
     val url = "wss://data.tradingview.com/socket.io/websocket?from=$fromParam"
@@ -180,20 +179,12 @@ actual suspend fun fetchTvHistoryBars(
     val listener = object : WebSocketListener() {
         private var buffer = ""
 
-        private fun sendCmd(ws: WebSocket, method: String, paramsJson: String) {
-            ws.send(tvWrap("{\"m\":\"$method\",\"p\":$paramsJson}"))
-        }
-
         override fun onOpen(webSocket: WebSocket, response: Response) {
             wsRef = webSocket
             timeoutThread.start()
-            webSocket.send(tvWrap("{\"m\":\"set_data_quality\",\"p\":[\"low\"]}"))
-            webSocket.send(tvWrap("{\"m\":\"set_auth_token\",\"p\":[\"unauthorized_user_token\"]}"))
-            sendCmd(webSocket, "chart_create_session", "[\"$chartSession\",\"\"]")
-            val resolve = "={\"symbol\":\"$symbol\",\"adjustment\":\"splits\",\"session\":\"regular\"}"
-            sendCmd(webSocket, "resolve_symbol", "[\"$chartSession\",\"$symbolAlias\",\"$resolve\"]")
-            sendCmd(webSocket, "create_series", "[\"$chartSession\",\"$seriesName\",\"$seriesName\",\"$symbolAlias\",\"$resolution\",${bars.coerceIn(2, 5000)}]")
-            sendCmd(webSocket, "switch_timezone", "[\"$chartSession\",\"Etc/UTC\"]")
+            // สร้างเฟรมด้วย JSON encoder (TvProtocol) — เดิมต่อ string เองแล้ว resolve_symbol ผิดรูป
+            // TradingView ตอบ protocol_error ทุกครั้ง และ bridge รอจน timeout ก่อนไปเส้นสำรอง
+            TvProtocol.historyRequest(chartSession, symbol, resolution, bars).forEach { webSocket.send(it) }
         }
 
         private fun handleText(webSocket: WebSocket, text: String) {
@@ -204,6 +195,15 @@ actual suspend fun fetchTvHistoryBars(
                 if (packet.startsWith("~h~")) {
                     webSocket.send(tvWrap(packet))
                     continue
+                }
+                // TradingView แจ้ง error → เลิกรอทันที (ไม่ต้องรอ timeout) ให้ผู้เรียกไปเส้นสำรองได้เลย
+                TvProtocol.errorOf(packet)?.let { err ->
+                    com.skyliner2008.jarvis.logDebug("TvHistoryBridge", "$symbol/$resolution → $err: ${packet.take(200)}")
+                    if (cont.isActive) {
+                        webSocket.close(1000, err)
+                        cont.resume(emptyList())
+                    }
+                    return
                 }
                 val barsOut = extractBarsFromTimescale(packet, seriesName)
                 if (barsOut.isNotEmpty() && cont.isActive) {
