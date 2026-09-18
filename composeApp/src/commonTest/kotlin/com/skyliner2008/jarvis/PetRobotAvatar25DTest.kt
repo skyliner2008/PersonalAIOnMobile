@@ -130,10 +130,10 @@ class PetRobotAvatar25DTest {
 
         assertTrue(layout.isLandscape)
         assertEquals(400f, layout.cX)
-        assertEquals(240f, layout.cY)
+        assertEquals(480f * 0.42f, layout.cY, 0.01f) // Rule of thirds eye line at 42%
 
-        // In landscape: minOf(height * 0.52f, width * 0.28f) = minOf(249.6, 224) = 224f
-        val expectedEyeDiameter = minOf(height * 0.52f, width * 0.28f)
+        // In landscape: minOf(height * 0.50f, width * 0.28f) = minOf(240, 224) = 224f
+        val expectedEyeDiameter = minOf(height * 0.50f, width * 0.28f)
         assertEquals(expectedEyeDiameter, layout.eyeDiameter, 0.01f)
 
         // Geometry positioning
@@ -152,11 +152,16 @@ class PetRobotAvatar25DTest {
 
         assertFalse(layout.isLandscape)
         assertEquals(180f, layout.cX)
-        assertEquals(360f, layout.cY)
+        assertEquals(720f * 0.40f, layout.cY, 0.01f) // Rule of thirds eye line at 40%
 
-        // In portrait: minOf(width * 0.38f, height * 0.24f) = minOf(136.8, 172.8) = 136.8f
-        val expectedEyeDiameter = minOf(width * 0.38f, height * 0.24f)
+        // In portrait: minOf(width * 0.24f, height * 0.20f)
+        val expectedEyeDiameter = minOf(width * 0.24f, height * 0.20f)
         assertEquals(expectedEyeDiameter, layout.eyeDiameter, 0.01f)
+
+        // 1.2x Spacing: baseSpacing = width / 5f (distance between eye centers = 0.40f * width)
+        assertEquals(width / 5f, layout.baseSpacing, 0.01f)
+        assertEquals(width * 0.30f, layout.cX - layout.baseSpacing, 0.01f)
+        assertEquals(width * 0.70f, layout.cX + layout.baseSpacing, 0.01f)
     }
 
     @Test
@@ -165,6 +170,11 @@ class PetRobotAvatar25DTest {
         val height = 480f
         val layoutForcedPortrait = calculateAvatarLayout(width, height, isLandscapeOverride = false)
         assertFalse(layoutForcedPortrait.isLandscape)
+        assertEquals(width / 5f, layoutForcedPortrait.baseSpacing, 0.01f)
+
+        val layoutLandscape = calculateAvatarLayout(width, height, isLandscapeOverride = true)
+        assertTrue(layoutLandscape.isLandscape)
+        assertEquals(layoutLandscape.eyeDiameter * 0.72f, layoutLandscape.baseSpacing, 0.01f)
     }
 
     // ─── 3. PetRobotParametricEye Tests ──────────────────────────────────────
@@ -314,9 +324,9 @@ class PetRobotAvatar25DTest {
 
     @Test
     fun `getEyeDeepShadowColor computes authentic deep shadow hues`() {
-        // Cyan base LED -> deep indigo crescent shadow
+        // Cyan base LED -> deep teal lower rim (LOOI 40 Moodset sheet #0A5C6B)
         val cyanShadow = getEyeDeepShadowColor(androidx.compose.ui.graphics.Color(0xFF00F5FF))
-        assertEquals(androidx.compose.ui.graphics.Color(0xFF071952), cyanShadow)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF0A5C6B), cyanShadow)
 
         // Red base LED -> deep burgundy crescent shadow
         val redShadow = getEyeDeepShadowColor(androidx.compose.ui.graphics.Color(0xFFFF3B5C))
@@ -329,5 +339,133 @@ class PetRobotAvatar25DTest {
         // Gold base LED -> deep bronze crescent shadow
         val goldShadow = getEyeDeepShadowColor(androidx.compose.ui.graphics.Color(0xFFFFD700))
         assertEquals(androidx.compose.ui.graphics.Color(0xFF522800), goldShadow)
+    }
+
+    // ─── 4. VirtualHeadKinematics Tests ──────────────────────────────────────
+
+    @Test
+    fun `VirtualHeadKinematics produces equal circle sizes for front and back discs`() {
+        val eyeDiameter = 120f
+        val result = VirtualHeadKinematics.calculate(
+            headCenterX = 200f,
+            headCenterY = 300f,
+            baseSpacing = 60f,
+            eyeDiameter = eyeDiameter,
+            headYaw = 0.4f,
+            headPitch = -0.3f,
+            pupilGazeX = 0.8f,
+            pupilGazeY = -0.5f,
+            squashX = 1f,
+            squashY = 1f
+        )
+
+        // Both eyes have equal discSize matching eyeDiameter
+        assertEquals(eyeDiameter, result.leftEye.discSize.width)
+        assertEquals(eyeDiameter, result.leftEye.discSize.height)
+        assertEquals(eyeDiameter, result.rightEye.discSize.width)
+        assertEquals(eyeDiameter, result.rightEye.discSize.height)
+    }
+
+    @Test
+    fun `VirtualHeadKinematics back circle stays stationary when only pupil gaze moves`() {
+        val headX = 200f
+        val headY = 300f
+        val spacing = 60f
+        val eyeDiameter = 100f
+
+        // Initial resting position (head still, gaze center)
+        val rest = VirtualHeadKinematics.calculate(
+            headCenterX = headX,
+            headCenterY = headY,
+            baseSpacing = spacing,
+            eyeDiameter = eyeDiameter,
+            headYaw = 0f,
+            headPitch = 0f,
+            pupilGazeX = 0f,
+            pupilGazeY = 0f
+        )
+
+        // Pupil glances right and up, but head remains stationary
+        val gazeDart = VirtualHeadKinematics.calculate(
+            headCenterX = headX,
+            headCenterY = headY,
+            baseSpacing = spacing,
+            eyeDiameter = eyeDiameter,
+            headYaw = 0f,
+            headPitch = 0f,
+            pupilGazeX = 0.85f,
+            pupilGazeY = -0.70f
+        )
+
+        // Back Circle (เบ้าตาบนหัวหุ่นยนต์): MUST NOT MOVE when only pupil glances!
+        assertEquals(rest.leftEye.backCenter.x, gazeDart.leftEye.backCenter.x, 0.001f)
+        assertEquals(rest.leftEye.backCenter.y, gazeDart.leftEye.backCenter.y, 0.001f)
+        assertEquals(rest.rightEye.backCenter.x, gazeDart.rightEye.backCenter.x, 0.001f)
+        assertEquals(rest.rightEye.backCenter.y, gazeDart.rightEye.backCenter.y, 0.001f)
+
+        // Front Circle (ลูกตา): MUST MOVE towards gaze direction!
+        assertTrue(gazeDart.leftEye.frontCenter.x > rest.leftEye.frontCenter.x, "Pupil should move right")
+        assertTrue(gazeDart.leftEye.frontCenter.y < rest.leftEye.frontCenter.y, "Pupil should move up")
+    }
+
+    @Test
+    fun `VirtualHeadKinematics back circle moves and eye spacing compresses when head turns`() {
+        val headX = 200f
+        val headY = 300f
+        val spacing = 60f
+        val eyeDiameter = 100f
+
+        val rest = VirtualHeadKinematics.calculate(
+            headCenterX = headX,
+            headCenterY = headY,
+            baseSpacing = spacing,
+            eyeDiameter = eyeDiameter,
+            headYaw = 0f,
+            headPitch = 0f
+        )
+
+        // Head turns to the right (Yaw = 0.75f)
+        val headTurnRight = VirtualHeadKinematics.calculate(
+            headCenterX = headX,
+            headCenterY = headY,
+            baseSpacing = spacing,
+            eyeDiameter = eyeDiameter,
+            headYaw = 0.75f,
+            headPitch = 0f
+        )
+
+        // Back Circles MUST move right along with the head!
+        assertTrue(headTurnRight.leftEye.backCenter.x > rest.leftEye.backCenter.x, "Left socket should move right")
+        assertTrue(headTurnRight.rightEye.backCenter.x > rest.rightEye.backCenter.x, "Right socket should move right")
+
+        // Distance between eyes compresses due to 3D spherical curvature
+        val restDistance = rest.rightEye.backCenter.x - rest.leftEye.backCenter.x
+        val turnedDistance = headTurnRight.rightEye.backCenter.x - headTurnRight.leftEye.backCenter.x
+        assertTrue(turnedDistance < restDistance, "Eye spacing should compress when turning on 3D curved face")
+    }
+
+    @Test
+    fun `VirtualHeadKinematics resting offset exposes bottom-right crescent matching physical LOOI`() {
+        val result = VirtualHeadKinematics.calculate(
+            headCenterX = 200f,
+            headCenterY = 300f,
+            baseSpacing = 60f,
+            eyeDiameter = 100f,
+            headYaw = 0f,
+            headPitch = 0f,
+            pupilGazeX = 0f,
+            pupilGazeY = 0f
+        )
+
+        // In resting pose: frontCenter is shifted up-left relative to backCenter
+        // Therefore backCenter is down-right of frontCenter, exposing the blue crescent at bottom-right
+        assertTrue(
+            result.leftEye.backCenter.x > result.leftEye.frontCenter.x,
+            "Back socket X should be to the right of front pupil"
+        )
+        assertTrue(
+            result.leftEye.backCenter.y > result.leftEye.frontCenter.y,
+            "Back socket Y should be below front pupil"
+        )
     }
 }

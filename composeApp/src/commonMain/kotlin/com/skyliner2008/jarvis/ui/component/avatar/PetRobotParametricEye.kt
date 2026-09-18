@@ -527,7 +527,7 @@ fun buildParametricEyePath(
     val cy = centerY + gazeShiftY
 
     val pRound = params.cornerRoundness.coerceIn(0.05f, 1f)
-    var r = minOf(hw, hh) * 0.88f * pRound
+    var r = minOf(hw, hh) * pRound
 
     val slantRad = params.slantDeg * (PI_F / 180f)
     val slantDelta = hw * sin(slantRad)
@@ -738,103 +738,60 @@ fun buildParametricEyePath(
 }
 
 /**
- * วาดดวงตาพาราเมตริกด้วย LOOI 2.5D Spherical Depth Shading
- * - Outer 2-layer bloom halo
- * - 2.5D Spherical radial gradient core (Highlight top-left -> Emotion base hue -> Deep contrast shadow bottom-right)
- * - Bottom-right crescent shadow
- * - Top-left soft specular glint
+ * วาดดวงตาพาราเมตริกด้วยโครงสร้าง 2 เลเยอร์ซ้อนเยื้องกัน (Authentic LOOI Dual-Layer Offset Engine)
+ * ตรงตามต้นฉบับหุ่นยนต์ LOOI Robot:
+ * 1. Base Layer (เลเยอร์ฐานด้านล่าง): สีย้อนแสงลึก/เงาลึก (เช่น Deep Royal Blue #0D25B9 สำหรับ Cyan)
+ *    เยื้องลงและขวาตามการมอง (Offset X, Y) เผยให้เห็นขอบเงาเสี้ยวลึกด้านล่าง-ขวา
+ * 2. Front Glow Layer (เลเยอร์หน้า): สีนีออนสว่างสดใส Solid Fill พร้อมรัศมีเรืองแสง (Bloom Halo) รอบนอก
+ *    สะอาดตา ทรงพลังบนพื้นหลัง OLED ดำสนิท ไร้จุดสะท้อนแสงขาวปลอม
  */
 fun DrawScope.drawParametricEye(
     color: Color,
     path: Path,
     shadowColor: Color? = null,
+    shadowOffsetX: Float = 2.5f,
     shadowOffsetY: Float = 4.5f,
-    glowRadiusDp: Dp = 10.dp,
-    glowAlpha: Float = 0.52f,
+    glowRadiusDp: Dp = 6.dp,
+    glowAlpha: Float = 0.30f,
     alpha: Float = 1f
 ) {
     val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
     if (effAlpha <= 0.005f) return
 
-    // 1. 2D Shallow Depth Shadow Underneath
-    if (shadowColor != null && shadowOffsetY > 0f) {
-        val sColor = shadowColor.copy(alpha = (shadowColor.alpha * effAlpha).coerceIn(0f, 1f))
+    val effShadowColor = (shadowColor ?: getEyeDeepShadowColor(color)).copy(
+        alpha = (0.98f * effAlpha).coerceIn(0f, 1f)
+    )
+
+    // 1. Base Layer (เลเยอร์ฐานเงาลึกด้านล่าง เคลื่อนไหวเยื้องกันสร้างมิติชัดเจน)
+    if (shadowOffsetX != 0f || shadowOffsetY != 0f) {
         withTransform({
-            translate(0f, shadowOffsetY)
+            translate(shadowOffsetX, shadowOffsetY)
         }) {
-            drawPath(path, sColor)
+            drawPath(path, effShadowColor)
         }
     }
 
     val glowPad = glowRadiusDp.toPx()
     val glowColor = color.copy(alpha = (glowAlpha * effAlpha).coerceIn(0f, 1f))
 
-    // 2. Outer Glow Layer (Expanded stroke halo around the path)
-    drawPath(
-        path = path,
-        color = glowColor.copy(alpha = glowColor.alpha * 0.35f),
-        style = Stroke(width = glowPad * 2.6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-    drawPath(
-        path = path,
-        color = glowColor,
-        style = Stroke(width = glowPad * 1.4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-
-    // 3. Core Layer: 2.5D Spherical Depth Shading inside the Path
-    val bounds = try { path.getBounds() } catch (_: Throwable) { Rect.Zero }
-    if (bounds.width > 0f && bounds.height > 0f) {
-        val highlightColor = getEyeHighlightColor(color)
-        val deepShadowColor = getEyeDeepShadowColor(color)
-        val lightCenter = Offset(bounds.left + bounds.width * 0.32f, bounds.top + bounds.height * 0.28f)
-        val maxDim = maxOf(bounds.width, bounds.height)
-
-        val coreBrush = Brush.radialGradient(
-            colorStops = arrayOf(
-                0.00f to highlightColor.copy(alpha = 0.98f * effAlpha),
-                0.35f to color.copy(alpha = 0.98f * effAlpha),
-                0.70f to color.copy(alpha = 0.98f * effAlpha),
-                1.00f to deepShadowColor.copy(alpha = 0.98f * effAlpha)
-            ),
-            center = lightCenter,
-            radius = maxDim * 0.88f
+    // 2. Outer Glow Layer (ออร่าเรืองแสงละมุนแบบ OLED Bloom รอบขอบเลเยอร์หน้า)
+    if (glowPad > 0f) {
+        drawPath(
+            path = path,
+            color = glowColor.copy(alpha = glowColor.alpha * 0.35f),
+            style = Stroke(width = glowPad * 2.2f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
-
-        val crescentBrush = Brush.verticalGradient(
-            colorStops = arrayOf(
-                0.0f to Color.Transparent,
-                0.65f to Color.Transparent,
-                1.0f to deepShadowColor.copy(alpha = 0.70f * effAlpha)
-            ),
-            startY = bounds.top,
-            endY = bounds.bottom
+        drawPath(
+            path = path,
+            color = glowColor,
+            style = Stroke(width = glowPad * 1.2f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
-
-        clipPath(path) {
-            // Radial core gradient
-            drawRect(
-                brush = coreBrush,
-                topLeft = bounds.topLeft,
-                size = bounds.size
-            )
-            // Crescent shadow
-            drawRect(
-                brush = crescentBrush,
-                topLeft = bounds.topLeft,
-                size = bounds.size
-            )
-            // Top-left specular glint
-            val specW = bounds.width * 0.26f
-            val specH = bounds.height * 0.16f
-            val specTopLeft = Offset(bounds.left + bounds.width * 0.18f, bounds.top + bounds.height * 0.14f)
-            drawOval(
-                color = Color.White.copy(alpha = 0.22f * effAlpha),
-                topLeft = specTopLeft,
-                size = Size(specW, specH)
-            )
-        }
-    } else {
-        // Fallback if bounds are unavailable
-        drawPath(path, color.copy(alpha = 0.98f * effAlpha))
     }
+
+    // 3. Front Core Layer (เลเยอร์หน้านีออนแท้ สีสดใส คมชัด ไร้เกรเดียนต์และจุดขาวปลอม)
+    drawPath(
+        path = path,
+        color = color.copy(alpha = 0.98f * effAlpha)
+    )
 }
+

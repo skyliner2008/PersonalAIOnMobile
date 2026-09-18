@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.*
@@ -86,6 +87,43 @@ fun DrawScope.drawNeonRoundRect(
 }
 
 /**
+ * Soft OLED bloom halo (radial falloff) behind a glowing eye — matches the diffuse
+ * neon glow of the LOOI 40 Moodset sheet, instead of hard concentric stroke rings.
+ * @param spread how far the halo extends beyond the shape, as a fraction of its radius
+ */
+fun DrawScope.drawSoftBloom(
+    color: Color,
+    center: Offset,
+    size: Size,
+    spread: Float = 0.55f,
+    intensity: Float = 0.30f,
+    alpha: Float = 1f
+) {
+    val effAlpha = (color.alpha * alpha * intensity).coerceIn(0f, 1f)
+    if (effAlpha <= 0.005f || size.width <= 0f || size.height <= 0f) return
+    val baseR = maxOf(size.width, size.height) / 2f
+    val haloR = baseR * (1f + spread)
+    val coreStop = (baseR / haloR).coerceIn(0.05f, 0.95f)
+    val opaque = color.copy(alpha = 1f)
+    val brush = Brush.radialGradient(
+        colorStops = arrayOf(
+            0f to opaque.copy(alpha = effAlpha),
+            coreStop to opaque.copy(alpha = effAlpha * 0.55f),
+            (coreStop + (1f - coreStop) * 0.35f) to opaque.copy(alpha = effAlpha * 0.14f),
+            1f to Color.Transparent
+        ),
+        center = center,
+        radius = haloR
+    )
+    // squashed (blinking) eyes get a squashed halo so the glow hugs the shape
+    val sx = size.width / (baseR * 2f)
+    val sy = size.height / (baseR * 2f)
+    scale(scaleX = sx.coerceAtLeast(0.3f), scaleY = sy.coerceAtLeast(0.3f), pivot = center) {
+        drawCircle(brush = brush, radius = haloR, center = center)
+    }
+}
+
+/**
  * คำนวณสีเงาเข้ม (Deep Contrast Shadow Color) สำหรับมิติทรงกลม 2.5D ของดวงตา
  * อิงตามสีน้ำเงินครามเข้ม/Indigo ในภาพผลิตภัณฑ์จริง LOOI Robot (โหมด Normal / Idle)
  */
@@ -95,8 +133,8 @@ fun getEyeDeepShadowColor(baseColor: Color): Color {
     val b = baseColor.blue
 
     return when {
-        // Cyan / Sky Blue (Default / Happy / Reading) -> Deep Indigo / Navy Crescent
-        b > 0.7f && g > 0.6f && r < 0.4f -> Color(0xFF071952)
+        // Cyan / Sky Blue (Default / Happy / Reading) -> Deep Teal lower rim (LOOI 40 Moodset sheet #0A5C6B)
+        b > 0.7f && g > 0.6f && r < 0.4f -> Color(0xFF0A5C6B)
         // Red / Crimson (Angry / Enraged / Evil) -> Deep Burgundy / Dark Maroon
         r > 0.7f && g < 0.4f && b < 0.5f -> Color(0xFF42000E)
         // Pink (Love / Romantic / Shy) -> Deep Plum / Violet

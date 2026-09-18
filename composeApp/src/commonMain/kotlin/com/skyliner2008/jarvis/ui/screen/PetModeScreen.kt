@@ -501,8 +501,8 @@ internal fun PetModeContent(
                 // Layer 1: Ambient Aura
                 Box(
                     modifier = Modifier
-                        // the aura sits behind the eyes, which the Rive layout moves up
-                        .offset(y = if (useRive) areaHeight * ((if (isLandscape) RIVE_LANDSCAPE_EYE_LINE else RIVE_PORTRAIT_EYE_LINE) - 0.5f) else 0.dp)
+                        // the aura sits behind the eyes, matching Rule of Thirds eye line
+                        .offset(y = areaHeight * ((if (isLandscape) RIVE_LANDSCAPE_EYE_LINE else RIVE_PORTRAIT_EYE_LINE) - 0.5f))
                         .size(if (isLandscape) screenMaxHeight * 0.95f else screenMaxWidth * 0.95f)
                         .background(
                             Brush.radialGradient(
@@ -1249,7 +1249,7 @@ internal fun PetEyeScannerOverlay(
             minOf(widthDp * 0.38f, heightDp * 0.24f)
         }
 
-        val baseSpacing = eyeDiameter * 0.65f
+        val baseSpacing = if (isLandscape) eyeDiameter * 0.72f else widthDp / 5f
         val gazeDisplacementX = widthDp * (0.16f * gazeX.coerceIn(-1f, 1f))
         val gazeDisplacementY = heightDp * (0.12f * gazeY.coerceIn(-1f, 1f))
         val spacingFactor = 1f - 0.06f * kotlin.math.abs(gazeX)

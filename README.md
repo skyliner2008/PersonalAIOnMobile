@@ -37,6 +37,12 @@
 >
 > New testable helpers: `LiveProtocol`, `LiveIntentMatchers`, `LiveLocalCommandParser`, `LiveSessionBridge`, `WakeWordMatcher`. Details: `.obsidian-wiki/04_Tasks/Changelog_2026-09-16_Live_Voice_Review_Fixes.md`.
 
+> **Virtual 3D Robot Head Kinematics & Dual-Circle Pupil Separation (2026-09-17):** upgraded the Compose Canvas avatar engine to simulate the physical kinematics of a 3D LOOI Robot head without drawing the head — two equal-sized circles per eye with independent head socket vs pupil motion:
+> - **Equal-Diameter Discs (วงกลม 2 วงขนาดเท่ากัน 100%):** Front disc (pupil) and back disc (socket) have identical diameter (`discSize`), eliminating flat 2D canvas perspective shear distortion (no skewed egg shapes).
+> - **Separated Head vs Pupil Kinematics:** The front disc acts as the agile eyeball/pupil (glancing widely and rapidly with saccades), while the back disc acts as the eye socket fixed to the virtual robot head, moving only when the robot turns its head (Yaw), tilts up/down (Pitch), rolls, nods, or shakes.
+> - **3D Spherical Head Surface:** When turning sideways, eye spacing compresses following spherical curvature ($\cos(\text{yaw} \times 0.35f)$) with realistic 3D depth parallax.
+> - **Rule of Thirds Alignment (จุดตัด 9 ช่อง):** In portrait mode, eye line rests at 40% Y, with centers at 1/3 and 2/3 width, placing both eye centers squarely on the upper intersection points of the 9-grid; in landscape mode, eye line rests at 42% Y centered in the face bounding box. Ambient aura is aligned to the eye line in all engines.
+>
 > **Softer, Livelier Eyes (2026-09-15):** round eyes are now soft vertical ovals; each eye is a bright front layer over a darker back layer, and the front shifts toward where the pet looks (from camera gaze and from every story look), so the back's rim shows on the opposite side instead of always one side. The gleam dot is gone. Eye/head keyframes use a small-overshoot `jelly` ease, breathing is a squash-and-stretch, and gaze/gyro tilt follow an under-damped spring.
 
 > **Demo Button & Voice Scenes Play to the End (2026-09-15):** in Pet mode the Demo button (and saying/typing "เดโม่") now plays all 37 animated scenes — 18 pet scenes then 19 mood stories — one after another, each to its end, labelled "🎬 n/37". Voice/tool scene commands reach every scene (mood stories too), wait for the pet screen, and report the scene actually played. Fixed keyword bugs ("อาบน้ำ"/"ราชา" playing the drinking scene, `royal`/`soul_out` not found) and scenes are no longer interrupted by touches or the idle loop.

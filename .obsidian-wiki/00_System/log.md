@@ -1,3 +1,95 @@
+## 2026-09-18 — Compose Canvas Engine: ปรับโทนให้ตรงภาพ LOOI 40 Moodset (Neon Cyan & Sensor Style)
+- **User Request**: ปรับโหมดสัตว์เลี้ยง Compose Canvas Engine ให้สวยงามคล้ายภาพต้นฉบับ LOOI Robot 40 Moodset
+- **Changes**:
+  - `PetRobotNeonDraw.kt`: เพิ่ม `drawSoftBloom()` (radial falloff นุ่ม จางเร็วที่ขอบ — ไม่เป็นวงแข็งแบบ stroke ring เดิมที่ทำให้ดูเหมือนวงหลังใหญ่กว่า) และเปลี่ยนสีขอบเงาของ cyan จาก Royal Blue `#0D25B9` → Deep Teal `#0A5C6B` ตามภาพ
+  - `drawDualCircleEye` / `VirtualHeadKinematics`: เพิ่ม bloom; resting offset X 0.075→0.025, Y 0.080→0.065 ให้เงาเป็นขอบล่างบางๆ แทนเสี้ยวขวาล่าง
+  - `drawHappyEye`: จากโดมทึบ → เส้นโค้ง ⌒ หนาปลายมนตามช่อง Happy; ตัดปากยิ้มถาวรของ HAPPY/LAUGHING (ภาพต้นฉบับไม่มีปาก — ปากขึ้นเฉพาะตอนพูด)
+  - `drawSleepingEye`: bloom + ขอบเงา teal ด้านล่าง; `drawExcitedEye`/`drawCrossEye`/`drawAngryEye`: เพิ่ม soft bloom
+  - `drawParametricEye`: glow ค่าเริ่มต้น 0dp → 6dp (alpha 0.30); rim offset 2.5dp,4.5dp → 0.8dp,4dp
+  - Test `getEyeDeepShadowColor` อัปเดตเป็น `#0A5C6B`
+- **ยังไม่ทำ**: สถานะ 21–40 ในภาพ (Proud, Scanning, Processing, Charge, Weather, Alarm, Standby Clock, Face Recognized ฯลฯ) ยังไม่มีใน `AvatarEmotion`
+
+## 2026-09-17 — แก้ไขขนาดวงกลมหน้า-หลังให้เท่ากัน 100% (ตัด Outer Glow Halo ออก) และติดตั้งลงอุปกรณ์จริง SM-S908E
+- **User Request**: "มันยังเหมือนเดิมน่ะ วงกลม ดานหลังก้ยังใหญ่กว่าวงกลมด้านหน้า" (อ้างอิงภาพ `media_1789627409647.jpg`)
+- **สาเหตุที่พบอย่างละเอียด (Root Cause)**:
+  1. ใน `drawDualCircleEye`: เดิมมีโค้ดเลเยอร์ Front Glow Halo วาด `drawOval` ด้วยขนาด `effW + outerPad * 2f` (ขนาดขยายเพิ่มขึ้นถึง 24dp/px จากเส้นผ่านศูนย์กลางตา) อยู่ด้านหลังของวงกลมหน้า ส่งผลให้วงรัศมีแสงเรืองรองนี้กลายเป็น "วงกลมวงที่ 3 ขนาดใหญ่พิเศษ" ล้อมรอบตา 360 องศา และกลบเสี้ยวเงาสีน้ำเงินครามจนมองเห็นเป็นวงกลมด้านหลังใหญ่กว่าวงกลมด้านหน้า
+  2. ใน `AvatarLayout.kt`: ในแนวตั้ง (Portrait) กำหนด `eyeDiameter = width * 0.32f` ขณะที่ `baseSpacing = width / 6f` ทำให้ช่องว่างระหว่างตาทั้งสองข้างแคบเกินไป (เหลือเพียง 1.4% ของความกว้างจอ) เมื่อมีรัศมี Glow จึงเกิดการชนและกลืนกันตรงกลาง
+  3. ในอุปกรณ์ทดสอบจริง (`SM-S908E`): ตัวแอปพลิเคชันเดิมยังไม่ได้ถูก build และติดตั้งอัปเดตเวอร์ชันล่าสุดลงบนเครื่อง (`lastUpdateTime` เป็นของวันก่อนหน้า)
+- **Actions Taken**:
+  - **ตัด Glow Halo และ Stroke ขนาดใหญ่ออก 100%**:
+    - ใน [PetRobotHeadAvatar.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/PetRobotHeadAvatar.kt): ลบโค้ด `drawOval(size = effW + outerPad * 2f)` ออก ให้เหลือเพียง **2 เลเยอร์วงกลมขนาดเท่ากันทุกประการ 100% (`discSize = Size(effW, effH)`)**:
+      - Layer 1: Back Base Disc (เบ้าตาสีน้ำเงินคราม Royal Blue `#0D25B9`) ขนาด `discSize`
+      - Layer 2: Front Core Disc (ลูกตาสีนีออนไซแอน `#38D5FF`) ขนาด `discSize`
+    - ใน `drawHappyEye`: ตัด Stroke glow ออก ให้เหลือโดมคู่ขนาดเท่ากันเป๊ะ
+    - ใน [PetRobotParametricEye.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/PetRobotParametricEye.kt): ตั้งค่าเริ่มต้น `glowRadiusDp = 0.dp`
+  - **ปรับแต่งระยะเยื้องเสี้ยวพระจันทร์ (Resting Crescent Offset)**:
+    - ใน [VirtualHeadKinematics.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/VirtualHeadKinematics.kt): ปรับค่า Resting Offset เป็น `restingOffsetX = effW * 0.075f` และ `restingOffsetY = effH * 0.080f * blinkCompress` เผยขอบเสี้ยวพระจันทร์สีน้ำเงินครามที่ด้านล่าง-ขวาอย่างคมชัด สวยงาม ตรงตามภาพเครื่องจริง LOOI
+  - **ปรับขนาดและระยะห่างดวงตาในแนวตั้ง (Portrait Spacing)**:
+    - ใน [AvatarLayout.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/AvatarLayout.kt): ปรับ `eyeDiameter = minOf(width * 0.24f, height * 0.20f)` โดยที่ตำแหน่งตายังคงอยู่ที่ 1/3 และ 2/3 ของความกว้างจอตาม **จุดตัด 9 ช่อง (Rule of Thirds)** ส่งผลให้มีระยะห่างตรงกลางระหว่างตาทั้งสองข้างอย่างพอเหมาะ สบายตา ไม่เบียดชิดกัน
+  - **Verification & Deployment**:
+    - อัปเดต Unit Tests ใน `PetRobotAvatar25DTest.kt` และรันผ่าน 100%: `BUILD SUCCESSFUL`
+    - รัน `PetModeTest` ผ่าน 100%: `BUILD SUCCESSFUL`
+    - รัน `./gradlew.bat :composeApp:installDebug` และติดตั้งอัปเดตลงเครื่อง `SM-S908E` สำเร็จเรียบร้อย พร้อมเปิดแอปผ่าน ADB
+
+- **User Request**: "มันยัง ไม่ถูกต้อง ดวงตา วงนอก วงใน ต้องเคลื่อนไหวต่างกัน ถ้าจาก ตัวอย่าง วงกลม 2 วง จะมี ขนาดเท่ากัน แต่ตำแหน่ง จะเยื้องกัน อยู่ เหมือนเป็น วงด้านหน้า เปรียบเหมือนลูกตา ที่จะขยับ มากกว่า วงด้านหลัง วงด้านหลัง จะขยับต่อเมื่อ หันหน้า เงยหน้า ก้มหน้า ถ้าตามหลักการแล้ว จะมีการ จำลองการเคลื่อนไหวเหมือนมี หัวหุ่นยนต์ แต่ไม่วาดหัว คล้ายในรูป" (อ้างอิงภาพ `media_1789625785395.jpg`, `media_1789626142924.jpg`, `media_1789626142979.jpg`)
+- **สาเหตุที่พบจากภาพทดสอบบนเครื่อง**:
+  1. `PetRobotHeadAvatar.kt`: เดิมใช้ `Canvas(modifier.graphicsLayer { rotationY = animatedRotationY, rotationX = animatedRotationX, cameraDistance = 14f * density })` เพื่อหมุน 3D perspective ทั้งระนาบ Canvas 2D ส่งผลให้เมื่อหันข้าง วงกลมถูกบิดเบี้ยวเป็นทรงสี่เหลี่ยมคางหมู/ไข่เบี้ยว (`media_1789626142979.jpg`)
+  2. วงกลมหน้า (ลูกตา) และวงกลมหลัง (เบ้าตา) ยังถูกผูกติดกับการเคลื่อนที่ `gazeX, gazeY` ร่วมกัน ทำให้ทั้งสองวงขยับตามสายตาทั้งคู่ ไม่ได้แยกหน้าที่ทางชีวกลศาสตร์ (Eyeball vs Socket on Head)
+  3. `PetModeScreen.kt`: Ambient aura ในโหมด Compose Canvas ตั้ง offset แนวนอน-ดิ่งที่ 0.dp (กึ่งกลางจอ) ทำให้เกิดวงแสงเขียวหลุดลงไปอยู่ระหว่างตากับแถบสถานะด้านล่าง (`media_1789626142924.jpg`)
+- **Actions Taken**:
+  - **ตัดการบิดเบี้ยวของ Canvas 3D ออก 100%**: ลบ `graphicsLayer { rotationY, rotationX }` ออกจาก `Canvas` เพื่อให้วงกลมทั้ง 2 ชั้นมีรูปทรงกลมเรขาคณิตที่สมบูรณ์เสมอ ไม่มีการบิดเบี้ยวเป็นทรงไข่
+  - **สร้างโมเดลจลนศาสตร์จำลองหัวหุ่นยนต์ 3 มิติ ([VirtualHeadKinematics.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/VirtualHeadKinematics.kt))**:
+    - **วงกลม 2 วงขนาดเท่ากัน 100%**: ทั้ง Front Disc (ลูกตาไซแอน) และ Back Disc (เบ้าตาสีน้ำเงินคราม) มีขนาดเท่ากันทุกประการ (`discSize = Size(effW, effH)`)
+    - **วงหลัง (เบ้าตาบนหัวหุ่น)**: เคลื่อนที่เฉพาะเมื่อหันหน้า (`headYaw`), เงยหน้า/ก้มหน้า (`headPitch`), เอียงคอ (`headRoll`), พยักหน้า (`NOD`), หรือส่ายหน้า (`SHAKE`) โดยไม่ขยับตามการกลอกตาลูกตา
+    - **วงหน้า (ลูกตา)**: กลอกมองตามสายตา (`pupilGazeX, pupilGazeY`) รวดเร็ว ฉับไว พร้อม Saccades ขยับในระยะที่กว้างกว่า และมีมิติความลึกพารัลแลกซ์เมื่อหันหน้า
+    - **สัดส่วนใบหน้าทรงกลม 3 มิติ**: เมื่อหันข้าง ระยะห่างระหว่างดวงตาหดแคบลงตามฟังก์ชัน $\cos(\text{yaw} \times 0.35f)$ เสมือนอยู่บนทรงกลมของหัวหุ่นยนต์จริงโดยไม่ต้องวาดหัวหุ่นยนต์
+  - **ปรับปรุง [PetRobotHeadAvatar.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/PetRobotHeadAvatar.kt)**:
+    - เชื่อมต่อ `animatedHeadYaw`, `animatedHeadPitch` ด้วย Spring Damping แบบมีแรงเฉื่อย
+    - ส่งผลการคำนวณ `kinematics` เข้าสู่ `renderPetEmotion`, `drawDualCircleEye`, และ `drawHappyEye`
+  - **ปรับปรุง [PetModeScreen.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/screen/PetModeScreen.kt)**:
+    - ปรับระยะ Y ของ `Ambient Aura` ให้ตรงกับ Rule of Thirds eye line เสมอ ทั้งโหมด Compose Canvas และ Rive
+- **Verification**:
+  - เพิ่ม Unit Tests ใน `PetRobotAvatar25DTest.kt`: ตรวจสอบขนาดวงกลมเท่ากัน 100%, เบ้าตาอยู่นิ่งเมื่อกลอกสายตา, เบ้าตาขยับและระยะห่างย่นลงเมื่อหันหน้า, เสี้ยวเงาสีน้ำเงินอยู่ด้านล่าง-ขวาตามต้นฉบับ LOOI
+  - รัน `./gradlew.bat :composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.PetRobotAvatar25DTest"`: **BUILD SUCCESSFUL**
+  - รัน `./gradlew.bat :composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.PetModeTest"`: **BUILD SUCCESSFUL**
+
+## 2026-09-17 — จัดตำแหน่งเริ่มต้นของดวงตาตามหลักการจุดตัด 9 ช่อง (Rule of Thirds) ทั้งแนวตั้งและแนวนอน
+- **User Request**: ตรวจสอบตำแหน่งเริ่มต้นของดวงตา ใช้หลักการ **จุดตัด 9 ช่อง (Rule of Thirds)** ทั้งแนวตั้งและแนวนอน
+- **การวิเคราะห์ตำแหน่งเดิม**:
+  1. `PetRobotHeadAvatar.kt`: เดิมกำหนด `centerY = canvasH / 2f` (50% จากขอบบน กึ่งกลางจอพอดี) ทำให้ในแนวตั้งดวงตาอยู่ต่ำเกินไป เหลือพื้นที่หน้าผากดำว่างเปล่ามากเกินไป และบีบให้ปากกับคางไปอยู่ชิดขอบล่าง
+  2. `AvatarLayout.kt`: เดิมกำหนด `baseSpacing = eyeDiameter * 0.65f` ทำให้ในแนวตั้งดวงตาห่างกันเกินไป (ดวงตาอยู่ที่ 25% และ 75% ของความกว้างจอ หลุดออกไปชิดขอบข้าง)
+- **Actions Taken (ประยุกต์ใช้หลักการจุดตัด 9 ช่อง 100%)**:
+  - **ระดับสายตาแนวตั้ง (Y-Axis Eye Line)**:
+    - **แนวตั้ง (Portrait)**: วางเส้นระดับสายตาที่ **40% ของความสูงจอ** (`cY = height * 0.40f` ซึ่งขอบบนของดวงตาจะแตะเส้น 1/3 หรือ 33.3% พอดี) สอดคล้องกับมาตรฐานการถ่ายภาพพอร์ตเทรตและค่า `RIVE_PORTRAIT_EYE_LINE = 0.40f`
+    - **แนวนอน (Landscape)**: วางเส้นระดับสายตาที่ **42% ของความสูงจอ** (`cY = height * 0.42f` สอดคล้องกับ `RIVE_LANDSCAPE_EYE_LINE = 0.42f`)
+  - **ตำแหน่งแนวนอนของดวงตาซ้าย-ขวา (X-Axis Eye Columns)**:
+    - **แนวตั้ง (Portrait)**: กำหนด `baseSpacing = width / 6f` (16.67% จากกึ่งกลาง)
+      - ตาซ้าย: `cX - baseSpacing = width / 3f` (33.33% ของความกว้างจอ)
+      - ตาขวา: `cX + baseSpacing = 2f * width / 3f` (66.67% ของความกว้างจอ)
+      - **ผลลัพธ์**: จุดศูนย์กลางดวงตาทั้งสองข้างตรงกับ **จุดตัด 9 ช่อง ด้านบนทั้ง 2 จุด (Upper-Left & Upper-Right Intersection Points)** พอดีเป๊ะ 100%!
+    - **แนวนอน (Landscape)**: จัดดวงตาให้อยู่ในกรอบสัดส่วนทองคำของใบหน้ากลางจอ ด้วย `baseSpacing = eyeDiameter * 0.60f` ดวงตาทั้งคู่ครองพื้นที่ 1/3 กลางจออย่างสมดุล
+  - **การซิงค์เลเยอร์**: ย้ายการคำนวณ `calculateAvatarLayout` ขึ้นมาเป็นตัวตั้งต้นก่อนคำนวณ `centerX`, `centerY`, `breathingOffsetY`, และ `scale/rotate pivot` ใน [PetRobotHeadAvatar.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/PetRobotHeadAvatar.kt) ทำให้ดวงตา, ปาก, หน้าผาก, และพร็อพทั้งหมดใน [DynamicPropRenderer.kt](file:///c:/Users/JOJO/AndroidStudioProjects/PersonalAIBot/composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/DynamicPropRenderer.kt) ขยับตามจุดตัด 9 ช่องอย่างแม่นยำ
+- **Verification**: อัปเดต unit test ใน `PetRobotAvatar25DTest.kt` ยืนยันสมการคณิตศาสตร์ `width/3`, `2*width/3`, `height*0.40f`, `height*0.42f` ผ่าน 100% (BUILD SUCCESSFUL)
+
+## 2026-09-17 — Compose Canvas Engine: สถาปัตยกรรมดวงตา 2 วงกลมซ้อนเยื้องกัน (Authentic LOOI Dual-Circle Offset Engine)
+- **User Request**: มุ่งปรับปรุง Compose Canvas Engine ให้เหมือนต้นฉบับหุ่นยนต์ LOOI Robot แท้จริง โดยต้นฉบับใช้ **วงกลม 2 วงที่เคลื่อนไหวเยื้องกัน** ("วางกลม 2 วงที่เคลื่อนไหวเยื้องกัน")
+- **สาเหตุที่พบ**:
+  1. `PetRobotHeadAvatar.kt`: โหมด `IDLE` ถูก `isParametric` ดักไว้ แล้วเรียก `drawParametricEye` ซึ่งวาดรูปทรง squircle (ไม่ใช่ทรงกลมแท้ มีขอบตัดตรง 12%) พร้อม radial gradient และจุดสะท้อนแสงขาวปลอม (specular glint) ขัดกับภาพจริงของ LOOI
+  2. `drawDualCircleEye` เดิมเรียกต่อไปยัง `drawNeonEyeRoundRect` วาดเพียงสี่เหลี่ยมมนเดี่ยว ไม่ได้วาด 2 วงกลมแยกเลเยอร์จริง
+  3. ขาดการเคลื่อนไหวแบบ Differential Parallax Gaze ("เคลื่อนไหวเยื้องกัน") ระหว่างเลเยอร์หน้าและหลัง ทำให้มิติความลึกไม่เปลี่ยนรูปตามสายตา
+  4. `drawHappyEye` เดิมวาดเส้นโค้ง stroke เดี่ยว ขณะที่ภาพจริง (`media_1789619891154.jpg`) เป็นรูปทรงโดมทึบ ⌒ ซ้อน 2 ชั้นที่มีขอบเงาสีน้ำเงินครามลึกด้านล่าง
+- **Actions Taken**:
+  - `drawDualCircleEye`: ปรับปรุงเป็น Dual-Circle Parallax Renderer สมบูรณ์แบบ:
+    - **Disc 1 (Back Base Disc)**: วงกลมสีน้ำเงินครามเข้มรอยัลบลู (`#0D25B9`) เยื้องลงล่าง-ขวาเล็กน้อยที่จุดพัก
+    - **Disc 2 (Front Glow Disc)**: วงกลมสว่างสดใสนีออนไซแอน (`#38D5FF`) พร้อมรัศมีเรืองแสง (Bloom Halo) สะอาดตาบน OLED ดำสนิท
+    - **Differential Parallax Motion ("เคลื่อนไหวเยื้องกัน")**: เลเยอร์หน้าเคลื่อนที่ตาม Gaze เต็มระยะ (100%), เลเยอร์หลังเคลื่อนที่ด้วย Parallax Factor 40% ทำให้เสี้ยวเงาสีน้ำเงินล่างขยับขยายเมื่อมองขึ้น หดตัวเมื่อมองลง และสลับข้างเมื่อมองซ้าย-ขวา
+    - **Squash & Blink**: รองรับการบีบอัดเป็นวงรี (Oval) ตามสัดส่วน พร้อมย่อระยะเยื้องแนวดิ่ง ไม่ให้ขอบเงาหลุดลอย
+  - `renderPetEmotion`: บังคับให้ `IDLE`, `LISTENING`, `SPEAKING` เข้า `drawDualCircleEye` โดยตรง 100%
+  - `drawHappyEye`: ปรับปรุงเป็นโดม ⌒ ซ้อน 2 ชั้นเยื้องกัน (โดมล่างสีน้ำเงินคราม `#0D25B9` + โดมบนสีนีออนไซแอน) ตรงตามภาพถ่ายเครื่องจริง
+  - `PetRobotParametricEye.kt`: ตัดจุดสะท้อนแสงขาวปลอมและเกรเดียนต์ออก เปลี่ยน `drawParametricEye` เป็น 2-Layer Offset Path Engine และแก้รัศมีขอบให้กลมมนสมบูรณ์ 100%
+  - `PetRobotNeonDraw.kt`: ปรับ `getEyeDeepShadowColor` ให้คืนสี Deep Cobalt Royal Blue `#0D25B9` สดเข้มตามภาพจริง
+- **Verification**: `PetModeTest` และ `PetRobotAvatar25DTest` ผ่าน 100% BUILD SUCCESSFUL ใน 17s
+
 ## 2026-09-16 — Avatar (Live โหมดสัตว์เลี้ยง) บางครั้งไม่เรียก trade tool แล้วแต่งตัวเลขเอง
 - **User Request**: Live ปกติใช้ tool ได้ แต่ avatar บางครั้งไม่ยอมเรียก tool และมั่วค่าขึ้นมาเอง
 - **สาเหตุที่พบ**:
