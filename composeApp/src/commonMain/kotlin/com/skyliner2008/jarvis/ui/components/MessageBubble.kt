@@ -738,7 +738,8 @@ private fun AnticipationAlertCard3D(meta: AlertCardMeta.Anticipation) {
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
                 Text(
-                    "⚡ คาดการณ์ ${meta.side.uppercase()}",
+                    if (meta.side.equals("NEUTRAL", ignoreCase = true)) "⏰ เหตุการณ์"
+                    else "⚡ คาดการณ์ ${meta.side.uppercase()}",
                     color = Color.Black, fontWeight = FontWeight.Bold,
                     fontSize = 11.sp, letterSpacing = 0.5.sp,
                     softWrap = false

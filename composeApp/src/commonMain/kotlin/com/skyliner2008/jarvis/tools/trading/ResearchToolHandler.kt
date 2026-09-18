@@ -180,6 +180,21 @@ internal class ResearchToolHandler(
         }.trim()
     }
 
+    /**
+     * contract size มาตรฐานต่อ 1 lot สำหรับสัญลักษณ์ที่รู้จัก
+     * คืน null เมื่อไม่แน่ใจ — ให้ผู้ใช้/AI ระบุเอง ดีกว่าเดาแล้วได้ lot ผิดสเกล
+     */
+    internal fun defaultContractSize(symbol: String?): Double? {
+        val s = symbol?.uppercase()?.replace("/", "")?.replace("-", "") ?: return null
+        val fiat = setOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD")
+        return when {
+            s.contains("XAU") || s.contains("GOLD") -> 100.0    // 100 ทรอยออนซ์
+            s.contains("XAG") || s.contains("SILVER") -> 5_000.0 // 5,000 ทรอยออนซ์
+            s.length == 6 && s.take(3) in fiat && s.drop(3) in fiat -> 100_000.0 // FX standard lot
+            else -> null
+        }
+    }
+
     internal fun executePositionSizing(args: Map<String, String>): String {
         val balance = args["balance"]?.toDoubleOrNull() ?: 10_000.0
         val riskPct = args["risk_pct"]?.toDoubleOrNull() ?: 1.0
@@ -193,9 +208,17 @@ internal class ResearchToolHandler(
         val riskAmount   = balance * riskPct / 100.0
         val units        = riskAmount / riskPerUnit
         val positionValue = units * entry
-        val leverage     = positionValue / balance
+        val gearing      = positionValue / balance
         val stopPct      = riskPerUnit / entry * 100.0
         val direction    = if (stopLoss < entry) "LONG" else "SHORT"
+
+        // contract size = จำนวนหน่วยต่อ 1 lot (XAUUSD = 100 oz, FX = 100,000)
+        // ระบุมาเมื่อไหร่จึงจะแปลงเป็น lot ที่ใช้กับ MT5 ได้จริง
+        val contractSize = args["contract_size"]?.toDoubleOrNull()?.takeIf { it > 0 }
+            ?: defaultContractSize(args["symbol"])
+        val lots = contractSize?.let { units / it }
+        val lotStep = args["lot_step"]?.toDoubleOrNull()?.takeIf { it > 0 } ?: 0.01
+        val roundedLots = lots?.let { kotlin.math.floor(it / lotStep + 1e-9) * lotStep }
 
         return buildString {
             append("## 📐 Position Sizing Calculator\n\n")
@@ -204,12 +227,30 @@ internal class ResearchToolHandler(
             append("- **ความเสี่ยงต่อไม้**: ${"%.2f".format(riskPct)}% = ${"%,.2f".format(riskAmount)}\n")
             append("- **ระยะ Stop Loss**: ${"%.4f".format(riskPerUnit)} (${"%.2f".format(stopPct)}% จาก entry)\n\n")
             append("### ✅ ผลลัพธ์\n")
-            append("- **ขนาดที่ควรเปิด (Units)**: ${"%,.4f".format(units)}\n")
+            append("- **ขนาดที่ควรเปิด**: ${"%,.4f".format(units)} units")
+            if (contractSize != null) append(" (contract size ${"%,.0f".format(contractSize)}/lot)")
+            append("\n")
+            if (roundedLots != null) {
+                if (roundedLots >= lotStep) {
+                    val actualRisk = roundedLots * contractSize!! * riskPerUnit
+                    append("- **ขนาดสำหรับ MT5**: **${"%.2f".format(roundedLots)} lot** ")
+                    append("(ปัดลงตาม lot step $lotStep — เสี่ยงจริง ${"%,.2f".format(actualRisk)} = ")
+                    append("${"%.2f".format(actualRisk / balance * 100.0)}% ของพอร์ต)\n")
+                } else {
+                    append("- ⚠️ **ขนาดที่คำนวณได้เล็กกว่า lot ขั้นต่ำ ($lotStep)** — ")
+                    append("ต้องลดระยะ SL, เพิ่มเงินทุน หรือยอมรับความเสี่ยงสูงกว่า ${"%.2f".format(riskPct)}%\n")
+                }
+            } else {
+                append("- ℹ️ ระบุ `contract_size` เพื่อให้คำนวณเป็น lot สำหรับ MT5 ")
+                append("(เช่น XAUUSD = 100, คู่เงิน FX = 100000)\n")
+            }
             append("- **มูลค่าสัญญา (Notional)**: ${"%,.2f".format(positionValue)}\n")
-            append("- **Leverage ที่ต้องใช้**: ${"%.2f".format(leverage)}x\n\n")
-            if (leverage > 1.0) {
-                append("⚠️ ไม้นี้ต้องใช้ leverage ${"%.2f".format(leverage)}x — หากโบรกเกอร์จำกัด leverage ")
-                append("ให้ลดขนาดเหลือ ${"%,.4f".format(balance / riskPerUnit)} units (เสี่ยง ${"%,.2f".format(balance * stopPct / 100)})\n")
+            append("- **Gearing (notional ÷ เงินทุน)**: ${"%.2f".format(gearing)}x\n\n")
+            if (gearing > 1.0) {
+                append("⚠️ มูลค่าสัญญาสูงกว่าเงินทุน ${"%.2f".format(gearing)} เท่า — ")
+                append("ต้องมี margin/leverage รองรับ ถ้าโบรกเกอร์จำกัด leverage ไว้ต่ำกว่านี้ ")
+                append("จะเปิดไม้ขนาดนี้ไม่ได้ ต้องลดขนาดลง (ซึ่งจะทำให้เสี่ยงน้อยกว่า ${"%.2f".format(riskPct)}% ตามไปด้วย) ")
+                append("หรือย้าย stop ให้ใกล้ขึ้นเพื่อให้ได้ขนาดที่เล็กลงโดยคงความเสี่ยงเท่าเดิม\n")
             }
         }
     }

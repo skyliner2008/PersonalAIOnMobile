@@ -4,6 +4,7 @@ import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.automation.backtest.EntryParams
 import com.skyliner2008.jarvis.tools.trading.Candle
 import com.skyliner2008.jarvis.tools.trading.SmcApiService
+import com.skyliner2008.jarvis.tools.trading.TaIndicators
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -267,20 +268,40 @@ fun Snapshot.marketStateSummary(): MarketStateSummary {
 private fun Snapshot.closeAbove(level: Double): Boolean = level > 0.0 && ema20 > level
 private fun Snapshot.closeBelow(level: Double): Boolean = level > 0.0 && ema20 < level
 
+    /**
+     * สร้าง snapshot จากแท่งเทียน — **fail-closed ทั้งก้อน**
+     *
+     * คืน null เมื่ออินดิเคเตอร์ตัวใดตัวหนึ่งคำนวณไม่ได้ ดีกว่าส่ง snapshot ที่มีค่าปลอมปนอยู่
+     * เพราะ AI ไม่มีทางแยกออกว่าค่าไหนของจริงค่าไหนเป็น default
+     *
+     * เดิมฟังก์ชันนี้มีอิมพลีเมนต์อินดิเคเตอร์ของตัวเองครบชุด ซึ่งผิดจากมาตรฐานหลายจุด:
+     *  - `rsi(...) ?: 50.0` / `adx(...) = Triple(0,0,0)` → ป้อนค่าปลอมให้ AI ตรงๆ
+     *  - `adx()` คืน **DX ดิบ** ไม่ใช่ ADX ที่ smooth แล้ว และ DI ใช้ค่าเฉลี่ยธรรมดาแทน Wilder RMA
+     *    ทำให้เกณฑ์ `adx >= 25` ที่ใช้ตัดสินเทรนด์เทียบกับตัวเลขคนละสเกล
+     *  - `supertrend()` ไม่ใช่ Supertrend เลย (เป็นแค่ ATR band รอบ mid ของแท่งล่าสุด
+     *    ไม่มี band locking / trend persistence)
+     *  - `trueRangeAtr()` ใช้ simple average แทน Wilder RMA
+     *  - `macdSeries` เรียก `ema(c,12)`/`ema(c,26)` ใหม่ทุก index → O(n²)
+     *  - VWAP สะสมทั้งชุดข้อมูล ไม่รีเซ็ตรายเซสชัน
+     * ตอนนี้ delegate ไป TaIndicators ทั้งหมด — เหลืออิมพลีเมนต์เดียวทั้งโปรเจกต์
+     */
     fun calculate(candles: List<Candle>): Snapshot? {
-        if (candles.size < 220) return null
+        if (candles.size < TaIndicators.Warmup.FULL_SET) return null
         if (!TradingMarketDataGuard.validate(candles).valid) return null
-        val c = candles.map { it.close }
+
+        val closes = candles.map { it.close }
         val highs = candles.map { it.high }
         val lows = candles.map { it.low }
         val volumes = candles.map { it.volume.coerceAtLeast(0.0) }
-        val last = c.last()
+        val last = closes.last()
+        if (last <= 0.0) return null
 
-        fun lastFinite(values: List<Double>): Double = values.lastOrNull { it.isFinite() } ?: Double.NaN
-        fun sma(values: List<Double>, period: Int): Double = if (values.size < period) Double.NaN else values.takeLast(period).average()
         fun pct(v: Double) = if (last != 0.0) v / last * 100.0 else 0.0
 
-        val ema20 = lastFinite(ema(c, 20)); val ema50 = lastFinite(ema(c, 50)); val ema200 = lastFinite(ema(c, 200))
+        // ── trend ──────────────────────────────────────────────────────────
+        val ema20 = TaIndicators.ema(closes, 20) ?: return null
+        val ema50 = TaIndicators.ema(closes, 50) ?: return null
+        val ema200 = TaIndicators.ema(closes, 200) ?: return null
         val emaAlignment = when {
             last > ema20 && ema20 > ema50 && ema50 > ema200 -> "BULLISH_STACK"
             last < ema20 && ema20 < ema50 && ema50 < ema200 -> "BEARISH_STACK"
@@ -289,58 +310,90 @@ private fun Snapshot.closeBelow(level: Double): Boolean = level > 0.0 && ema20 <
             else -> "MIXED"
         }
 
-        val rsi7 = rsi(c, 7) ?: 50.0
-        val rsi14 = rsi(c, 14) ?: 50.0
-        val rsi21 = rsi(c, 21) ?: 50.0
-        val rsiState = when { rsi14 >= 70 -> "OVERBOUGHT"; rsi14 <= 30 -> "OVERSOLD"; rsi14 >= 55 -> "BULLISH"; rsi14 <= 45 -> "BEARISH"; else -> "NEUTRAL" }
-
-        val ema12 = lastFinite(ema(c, 12)); val ema26 = lastFinite(ema(c, 26)); val macd = ema12 - ema26
-        val macdSeries = ema(c, 12).indices.map { i ->
-            val a = ema(c, 12)[i]; val b = ema(c, 26)[i]; if (a.isFinite() && b.isFinite()) a - b else Double.NaN
+        // ── momentum ───────────────────────────────────────────────────────
+        val rsi7 = TaIndicators.rsi(closes, 7) ?: return null
+        val rsi14 = TaIndicators.rsi(closes, 14) ?: return null
+        val rsi21 = TaIndicators.rsi(closes, 21) ?: return null
+        val rsiState = when {
+            rsi14 >= 70 -> "OVERBOUGHT"; rsi14 <= 30 -> "OVERSOLD"
+            rsi14 >= 55 -> "BULLISH"; rsi14 <= 45 -> "BEARISH"; else -> "NEUTRAL"
         }
-        val macdSignal = lastFinite(ema(macdSeries.map { if (it.isFinite()) it else 0.0 }, 9)); val macdHist = macd - macdSignal
-        val macdState = when { macdHist > 0 && macd > 0 -> "BULLISH"; macdHist < 0 && macd < 0 -> "BEARISH"; macdHist > 0 -> "BULLISH_CROSS"; macdHist < 0 -> "BEARISH_CROSS"; else -> "NEUTRAL" }
 
-        val (bbUpper, bbBasis, bbLower) = bollinger(c, 20, 2.0)
-        val bbRange = (bbUpper - bbLower).coerceAtLeast(1e-9)
-        val bbPercentB = ((last - bbLower) / bbRange * 100.0).coerceIn(-100.0, 200.0)
-        val bbWidthPct = pct(bbUpper - bbLower)
+        val macdResult = TaIndicators.macd(closes) ?: return null
+        val macdState = when {
+            macdResult.hist > 0 && macdResult.macd > 0 -> "BULLISH"
+            macdResult.hist < 0 && macdResult.macd < 0 -> "BEARISH"
+            macdResult.hist > 0 -> "BULLISH_CROSS"
+            macdResult.hist < 0 -> "BEARISH_CROSS"
+            else -> "NEUTRAL"
+        }
 
-        val atrValues = trueRangeAtr(candles, 14); val atr14 = atrValues.lastOrNull() ?: 0.0; val atrPct = pct(atr14)
-        val (adx14, plusDi14, minusDi14) = adx(candles, 14)
-        val adxState = when { adx14 >= 25 && plusDi14 > minusDi14 -> "STRONG_UPTREND"; adx14 >= 25 && minusDi14 > plusDi14 -> "STRONG_DOWNTREND"; adx14 >= 20 -> "TRENDING_WEAK"; else -> "RANGING" }
+        val stoch = TaIndicators.stochastic(closes, highs, lows) ?: return null
+        val stochasticState = when {
+            stoch.k >= 80 && stoch.k < stoch.d -> "BEARISH_OVERBOUGHT"
+            stoch.k <= 20 && stoch.k > stoch.d -> "BULLISH_OVERSOLD"
+            stoch.k > stoch.d -> "BULLISH"
+            stoch.k < stoch.d -> "BEARISH"
+            else -> "NEUTRAL"
+        }
 
-        val (stochK, stochD) = stochastic(highs, lows, c, 14, 3)
-        val stochasticState = when { stochK >= 80 && stochK < stochD -> "BEARISH_OVERBOUGHT"; stochK <= 20 && stochK > stochD -> "BULLISH_OVERSOLD"; stochK > stochD -> "BULLISH"; stochK < stochD -> "BEARISH"; else -> "NEUTRAL" }
+        val cci20 = TaIndicators.cci(highs, lows, closes, 20) ?: return null
+        val cciState = when {
+            cci20 >= 100 -> "BULLISH_MOMENTUM"; cci20 <= -100 -> "BEARISH_MOMENTUM"
+            cci20 > 0 -> "BULLISH"; cci20 < 0 -> "BEARISH"; else -> "NEUTRAL"
+        }
 
-        val cci20 = cci(candles, 20); val cciState = when { cci20 >= 100 -> "BULLISH_MOMENTUM"; cci20 <= -100 -> "BEARISH_MOMENTUM"; cci20 > 0 -> "BULLISH"; cci20 < 0 -> "BEARISH"; else -> "NEUTRAL" }
-        val mfi14 = mfi(candles, 14); val mfiState = when { mfi14 >= 80 -> "OVERBOUGHT"; mfi14 <= 20 -> "OVERSOLD"; mfi14 >= 50 -> "BULLISH"; else -> "BEARISH" }
+        val mfi14 = TaIndicators.mfi(highs, lows, closes, volumes, 14) ?: return null
+        val mfiState = when {
+            mfi14 >= 80 -> "OVERBOUGHT"; mfi14 <= 20 -> "OVERSOLD"
+            mfi14 >= 50 -> "BULLISH"; else -> "BEARISH"
+        }
 
-        val typical = candles.map { (it.high + it.low + it.close) / 3.0 }
-        val vwapDen = volumes.sum().coerceAtLeast(1e-9); val vwap = typical.zip(volumes).sumOf { it.first * it.second } / vwapDen
+        // ── volatility ─────────────────────────────────────────────────────
+        val bb = TaIndicators.bollingerBands(closes, 20, 2.0) ?: return null
+        val atr14 = TaIndicators.atr(highs, lows, closes, 14) ?: return null
+        val adxResult = TaIndicators.adx(highs, lows, closes, 14) ?: return null
+        val adxState = when {
+            adxResult.adx >= 25 && adxResult.diPlus > adxResult.diMinus -> "STRONG_UPTREND"
+            adxResult.adx >= 25 && adxResult.diMinus > adxResult.diPlus -> "STRONG_DOWNTREND"
+            adxResult.adx >= 20 -> "TRENDING_WEAK"
+            else -> "RANGING"
+        }
+
+        // ── flow ───────────────────────────────────────────────────────────
+        // VWAP ผูก anchor รายเซสชันตามนิยาม (เดิมสะสมทั้งชุดข้อมูล)
+        val vwap = TaIndicators.vwapSession(candles) ?: return null
         val vwapDistancePct = pct(last - vwap)
-        val volumeAvg20 = sma(volumes, 20).coerceAtLeast(1e-9); val volumeRatio20 = volumes.last() / volumeAvg20
-        val volumeState = when { volumeRatio20 >= 2.0 -> "VERY_HIGH"; volumeRatio20 >= 1.3 -> "HIGH"; volumeRatio20 <= 0.7 -> "LOW"; else -> "NORMAL" }
+        val volumeAvg20 = TaIndicators.sma(volumes, 20)?.takeIf { it > 0.0 } ?: return null
+        val volumeRatio20 = volumes.last() / volumeAvg20
+        val volumeState = when {
+            volumeRatio20 >= 2.0 -> "VERY_HIGH"; volumeRatio20 >= 1.3 -> "HIGH"
+            volumeRatio20 <= 0.7 -> "LOW"; else -> "NORMAL"
+        }
+        val obvSlope20 = TaIndicators.obvSlope(closes, volumes, 20) ?: return null
+        val obvState = when {
+            obvSlope20 > 0 -> "ACCUMULATION"; obvSlope20 < 0 -> "DISTRIBUTION"; else -> "FLAT"
+        }
 
-        val obv = obv(candles); val obvSlope20 = obv.takeLast(20).let { if (it.size < 2) 0.0 else it.last() - it.first() }
-        val obvState = when { obvSlope20 > 0 -> "ACCUMULATION"; obvSlope20 < 0 -> "DISTRIBUTION"; else -> "FLAT" }
-
-        val (tenkan, kijun, cloudTop, cloudBottom) = ichimoku(highs, lows, 9, 26, 52)
+        // ── structure ──────────────────────────────────────────────────────
+        val ichi = TaIndicators.ichimoku(highs, lows, closes) ?: return null
         val ichimokuState = when {
-            last > cloudTop && tenkan > kijun -> "BULLISH_ABOVE_CLOUD"
-            last < cloudBottom && tenkan < kijun -> "BEARISH_BELOW_CLOUD"
-            tenkan > kijun -> "BULLISH_IN_CLOUD"
-            tenkan < kijun -> "BEARISH_IN_CLOUD"
+            last > ichi.cloudTop && ichi.tenkan > ichi.kijun -> "BULLISH_ABOVE_CLOUD"
+            last < ichi.cloudBottom && ichi.tenkan < ichi.kijun -> "BEARISH_BELOW_CLOUD"
+            ichi.tenkan > ichi.kijun -> "BULLISH_IN_CLOUD"
+            ichi.tenkan < ichi.kijun -> "BEARISH_IN_CLOUD"
             else -> "NEUTRAL"
         }
 
         val prior = candles[candles.size - 2]
-        val pivot = (prior.high + prior.low + prior.close) / 3.0
-        val resistance1 = 2 * pivot - prior.low; val support1 = 2 * pivot - prior.high
-        val resistance2 = pivot + (prior.high - prior.low); val support2 = pivot - (prior.high - prior.low)
-        val pivotState = when { last > resistance1 -> "ABOVE_R1"; last > pivot -> "ABOVE_PIVOT"; last < support1 -> "BELOW_S1"; else -> "BELOW_PIVOT" }
+        val pivots = TaIndicators.pivotPoints(prior.high, prior.low, prior.close)
+        val pivotState = when {
+            last > pivots.r1 -> "ABOVE_R1"; last > pivots.pivot -> "ABOVE_PIVOT"
+            last < pivots.s1 -> "BELOW_S1"; else -> "BELOW_PIVOT"
+        }
 
-        val (supertrend, supertrendState) = supertrend(candles, 10, 3.0)
+        val st = TaIndicators.supertrend(highs, lows, closes, 10, 3.0) ?: return null
+        val supertrendState = if (st.isBullish) "BULLISH" else "BEARISH"
 
         val states = listOf(
             emaAlignment, rsiState, macdState, adxState, stochasticState, cciState, mfiState,
@@ -349,103 +402,29 @@ private fun Snapshot.closeBelow(level: Double): Boolean = level > 0.0 && ema20 <
         )
         val indicatorScore = states.fold(0) { total: Int, state: String ->
             total + when {
-                state.contains("BULLISH") || state.contains("UPTREND") || state == "ABOVE_R1" || state == "ABOVE_PIVOT" || state == "ACCUMULATION" -> 1
-                state.contains("BEARISH") || state.contains("DOWNTREND") || state == "BELOW_S1" || state == "BELOW_PIVOT" || state == "DISTRIBUTION" -> -1
+                state.contains("BULLISH") || state.contains("UPTREND") || state == "ABOVE_R1" ||
+                    state == "ABOVE_PIVOT" || state == "ACCUMULATION" -> 1
+                state.contains("BEARISH") || state.contains("DOWNTREND") || state == "BELOW_S1" ||
+                    state == "BELOW_PIVOT" || state == "DISTRIBUTION" -> -1
                 else -> 0
             }
         }
 
-        return Snapshot(ema20, ema50, ema200, emaAlignment, rsi7, rsi14, rsi21, rsiState, macd, macdSignal, macdHist, macdState,
-            bbUpper, bbBasis, bbLower, bbPercentB, bbWidthPct, atr14, atrPct, adx14, plusDi14, minusDi14, adxState,
-            stochK, stochD, stochasticState, cci20, cciState, mfi14, mfiState, vwap, vwapDistancePct,
-            volumeRatio20, volumeState, obvSlope20, obvState, tenkan, kijun, cloudTop, cloudBottom, ichimokuState,
-            pivot, resistance1, resistance2, support1, support2, pivotState, supertrend, supertrendState, indicatorScore)
-    }
-
-    private fun ema(values: List<Double>, period: Int): List<Double> {
-        if (values.size < period) return List(values.size) { Double.NaN }
-        val k = 2.0 / (period + 1); val out = ArrayList<Double>(values.size)
-        var prev = values.take(period).average(); repeat(period - 1) { out += Double.NaN }; out += prev
-        for (i in period until values.size) { prev = values[i] * k + prev * (1.0 - k); out += prev }
-        return out
-    }
-
-    private fun rsi(values: List<Double>, period: Int): Double? {
-        if (values.size <= period) return null
-        var gain = 0.0; var loss = 0.0
-        for (i in 1..period) { val d = values[i] - values[i - 1]; if (d >= 0) gain += d else loss -= d }
-        var avgGain = gain / period; var avgLoss = loss / period
-        for (i in period + 1 until values.size) {
-            val d = values[i] - values[i - 1]; val g = maxOf(0.0, d); val l = maxOf(0.0, -d)
-            avgGain = (avgGain * (period - 1) + g) / period; avgLoss = (avgLoss * (period - 1) + l) / period
-        }
-        if (avgLoss == 0.0) return 100.0
-        return 100.0 - 100.0 / (1.0 + avgGain / avgLoss)
-    }
-
-    private fun bollinger(values: List<Double>, period: Int, mult: Double): Triple<Double, Double, Double> {
-        if (values.size < period) return Triple(Double.NaN, Double.NaN, Double.NaN)
-        val w = values.takeLast(period); val mean = w.average(); val sd = sqrt(w.map { (it - mean).pow(2) }.average())
-        return Triple(mean + mult * sd, mean, mean - mult * sd)
-    }
-
-    private fun trueRangeAtr(candles: List<Candle>, period: Int): List<Double> {
-        val tr = candles.indices.map { i -> if (i == 0) candles[i].high - candles[i].low else maxOf(candles[i].high - candles[i].low, abs(candles[i].high - candles[i - 1].close), abs(candles[i].low - candles[i - 1].close)) }
-        return tr.mapIndexed { i, _ -> if (i + 1 < period) Double.NaN else tr.subList(i + 1 - period, i + 1).average() }
-    }
-
-    private fun adx(candles: List<Candle>, period: Int): Triple<Double, Double, Double> {
-        if (candles.size <= period + 1) return Triple(0.0, 0.0, 0.0)
-        val tr = mutableListOf<Double>(); val plus = mutableListOf<Double>(); val minus = mutableListOf<Double>()
-        for (i in 1 until candles.size) {
-            val cur = candles[i]; val prev = candles[i - 1]
-            tr += maxOf(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
-            val up = cur.high - prev.high; val down = prev.low - cur.low
-            plus += if (up > down && up > 0) up else 0.0; minus += if (down > up && down > 0) down else 0.0
-        }
-        val atr = tr.takeLast(period).average().coerceAtLeast(1e-9)
-        val pdi = plus.takeLast(period).sum() / atr * 100.0; val mdi = minus.takeLast(period).sum() / atr * 100.0
-        val dx = if (pdi + mdi == 0.0) 0.0 else abs(pdi - mdi) / (pdi + mdi) * 100.0
-        return Triple(dx, pdi, mdi)
-    }
-
-    private fun stochastic(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int, smooth: Int): Pair<Double, Double> {
-        val ks = mutableListOf<Double>()
-        for (i in period - 1 until closes.size) {
-            val hi = highs.subList(i + 1 - period, i + 1).max(); val lo = lows.subList(i + 1 - period, i + 1).min()
-            ks += if (hi == lo) 50.0 else (closes[i] - lo) / (hi - lo) * 100.0
-        }
-        val k = ks.lastOrNull() ?: 50.0; val d = ks.takeLast(smooth).average(); return k to d
-    }
-
-    private fun cci(candles: List<Candle>, period: Int): Double {
-        val tp = candles.map { (it.high + it.low + it.close) / 3.0 }; val window = tp.takeLast(period); val mean = window.average()
-        val dev = window.map { abs(it - mean) }.average().coerceAtLeast(1e-9); return (tp.last() - mean) / (0.015 * dev)
-    }
-
-    private fun mfi(candles: List<Candle>, period: Int): Double {
-        val tp = candles.map { (it.high + it.low + it.close) / 3.0 }; var pos = 0.0; var neg = 0.0
-        val start = maxOf(1, candles.size - period)
-        for (i in start until candles.size) { val flow = tp[i] * candles[i].volume.coerceAtLeast(0.0); if (tp[i] > tp[i - 1]) pos += flow else if (tp[i] < tp[i - 1]) neg += flow }
-        return if (neg == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + pos / neg)
-    }
-
-    private fun obv(candles: List<Candle>): List<Double> {
-        var value = 0.0; val out = mutableListOf(0.0)
-        for (i in 1 until candles.size) { value += when { candles[i].close > candles[i - 1].close -> candles[i].volume; candles[i].close < candles[i - 1].close -> -candles[i].volume; else -> 0.0 }; out += value }
-        return out
-    }
-
-    private fun ichimoku(highs: List<Double>, lows: List<Double>, tenkanP: Int, kijunP: Int, spanBP: Int): List<Double> {
-        fun mid(p: Int): Double { val hi = highs.takeLast(p).max(); val lo = lows.takeLast(p).min(); return (hi + lo) / 2.0 }
-        val tenkan = mid(tenkanP); val kijun = mid(kijunP); val spanB = mid(spanBP); val spanA = (tenkan + kijun) / 2.0
-        return listOf(tenkan, kijun, maxOf(spanA, spanB), minOf(spanA, spanB))
-    }
-
-    private fun supertrend(candles: List<Candle>, period: Int, multiplier: Double): Pair<Double, String> {
-        val atr = trueRangeAtr(candles, period).lastOrNull()?.takeIf { it.isFinite() } ?: 0.0
-        val mid = (candles.last().high + candles.last().low) / 2.0; val upper = mid + multiplier * atr; val lower = mid - multiplier * atr
-        return if (candles.last().close >= mid) lower to "BULLISH" else upper to "BEARISH"
+        return Snapshot(
+            ema20, ema50, ema200, emaAlignment,
+            rsi7, rsi14, rsi21, rsiState,
+            macdResult.macd, macdResult.signal, macdResult.hist, macdState,
+            bb.upper, bb.basis, bb.lower, bb.percentB, bb.width,
+            atr14, pct(atr14),
+            adxResult.adx, adxResult.diPlus, adxResult.diMinus, adxState,
+            stoch.k, stoch.d, stochasticState,
+            cci20, cciState, mfi14, mfiState,
+            vwap, vwapDistancePct,
+            volumeRatio20, volumeState, obvSlope20, obvState,
+            ichi.tenkan, ichi.kijun, ichi.cloudTop, ichi.cloudBottom, ichimokuState,
+            pivots.pivot, pivots.r1, pivots.r2, pivots.s1, pivots.s2, pivotState,
+            st.value, supertrendState, indicatorScore
+        )
     }
 }
 
@@ -501,7 +480,8 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
 
     suspend fun fetch(rawSymbol: String): Map<String, String> {
         val (symbol, tf) = IndicatorAlertProvider.splitSymbolAndTf(rawSymbol)
-        val result = smcApi.fetchTradingViewCandlesOnly(symbol, tf, 300)
+        // ดึงลึกพอสำหรับ warm-up ของ EMA200 ผ่านเส้นทาง DB-backed (เดิมยิงตรง TV แค่ 300 แท่ง)
+        val result = smcApi.fetchCandlesWithSource(symbol, tf, TaIndicators.Warmup.FULL_SET)
         val candles = result.candles
         if (candles.size < 60) {
             return mapOf("error" to "candles ${candles.size} < 60 (${result.source})")
@@ -708,7 +688,10 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
         var latestClose = "N/A"
         var source = "TV"
         for (tf in frames) {
-            val result = smcApi.fetchTradingViewCandlesOnly(normalized, tf, 300)
+            // ใช้เส้นทาง DB-backed และขอให้ลึกพอสำหรับ warm-up ของ EMA200
+            // (เดิมดึงตรงจาก TV แค่ 300 แท่ง — ไม่พอให้ indicator snapshot คำนวณได้
+            //  หลังปรับเกณฑ์เป็น FULL_SET แล้ว snapshot จะเป็น null ตลอด)
+            val result = smcApi.fetchCandlesWithSource(normalized, tf, TaIndicators.Warmup.FULL_SET)
             if (result.candles.size < 60) continue
             source = result.source
             latestClose = fmt(result.candles.last().close)
@@ -730,7 +713,7 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
         val normalizedSmcScore = if (smcContributors > 0) smcScore / smcContributors else 0.0
         val normalizedIndicatorScore = if (indicatorScoreContributors > 0) indicatorScoreSum / indicatorScoreContributors else 0.0
         val fusion = TradingViewSignalIntelligence.fuse(signals, normalizedSmcScore, normalizedIndicatorScore)
-        val primaryResult = smcApi.fetchTradingViewCandlesOnly(normalized, frames.firstOrNull() ?: "1h", 300)
+        val primaryResult = smcApi.fetchCandlesWithSource(normalized, frames.firstOrNull() ?: "1h", 300)
         if (primaryResult.candles.size >= 60) {
             val key = "$normalized:${frames.joinToString(",")}"
             TradingViewSignalHistory.resolve(key, primaryResult.candles)

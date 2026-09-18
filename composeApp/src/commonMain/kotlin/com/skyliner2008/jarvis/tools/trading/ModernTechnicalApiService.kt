@@ -62,7 +62,7 @@ class ModernTechnicalApiService(private val smcApi: SmcApiService) {
     /**
      * 1. Modern Harmonic Detection (เน้น PRZ ที่ซ้อนทับกับ OB)
      */
-    private fun detectHarmonics(candles: List<Candle>, smc: SmcAnalysisResult?): List<HarmonicPattern> {
+    internal fun detectHarmonics(candles: List<Candle>, smc: SmcAnalysisResult?): List<HarmonicPattern> {
         val (highs, lows) = smcApi.detectSwings(candles, 5)
         val patterns = mutableListOf<HarmonicPattern>()
 
@@ -136,7 +136,7 @@ class ModernTechnicalApiService(private val smcApi: SmcApiService) {
      * ปรับปรุงจาก V1: เพิ่ม swing-based wave counting, guard division-by-zero,
      * multi-segment directional analysis, และ graduated confidence
      */
-    private fun analyzeElliotModern(candles: List<Candle>): ElliotWaveModern {
+    internal fun analyzeElliotModern(candles: List<Candle>): ElliotWaveModern {
         if (candles.size < 20) return ElliotWaveModern(
             stage = "ACCUMULATION", confidence = 0.30, impulseScore = 0,
             momentumBias = "NEUTRAL", reasoning = "ข้อมูลไม่เพียงพอสำหรับวิเคราะห์ Elliott Wave (min 20 bars)"

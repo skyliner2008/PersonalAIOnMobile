@@ -954,7 +954,9 @@ class JarvisOrchestrator(
                     ?: return "❌ ต้องระบุ condition_value (ค่าเปรียบเทียบ เช่น 4800)"
                 val interval = args["interval_minutes"]?.toLongOrNull()?.coerceIn(1L, 1440L) ?: 1L
                 val rawTimeframe = args["timeframe"]?.trim()?.lowercase()
-                val isAnticipationAlert = fieldRaw.startsWith("signal_anticipation") || toolNameRaw == "trading_signal_anticipation"
+                val wakeTool = com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME
+                val isAnticipationAlert = fieldRaw.startsWith("signal_anticipation") || fieldRaw.startsWith("wake") ||
+                    toolNameRaw == "trading_signal_anticipation" || toolNameRaw == wakeTool
                 val supportedTimeframes = if (isAnticipationAlert) {
                     listOf("5m", "15m", "30m", "1h", "4h")
                 } else {
@@ -995,7 +997,12 @@ class JarvisOrchestrator(
                 val toolName: String
                 val field: String
                 val operator: com.skyliner2008.jarvis.automation.ConditionOperator
-                if (isTaTradeSignal) {
+                if (isAnticipationAlert) {
+                    // ระบบปลุก AI แยกจาก signal alert — field เดิม signal_anticipation → wake
+                    toolName = wakeTool
+                    field = if (fieldRaw.startsWith("wake")) fieldRaw else "wake"
+                    operator = if (fieldRaw.startsWith("wake")) operatorRaw else com.skyliner2008.jarvis.automation.ConditionOperator.GTE
+                } else if (isTaTradeSignal) {
                     toolName = "trading_signal_alert"
                     field = if (value.uppercase().contains("BUY")) "signal_buy" else "signal_sell"
                     operator = com.skyliner2008.jarvis.automation.ConditionOperator.GTE
@@ -1025,18 +1032,20 @@ class JarvisOrchestrator(
                     (field == "signal_buy" || field == "signal_sell")
                 val effField = if (isSignalSide) "${field}_id" else field
                 val effOperator = if (isSignalSide) com.skyliner2008.jarvis.automation.ConditionOperator.GT else operator
-                val effValue = if (isSignalSide) {
-                    kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
-                } else value
+                val effValue = when {
+                    isSignalSide -> kotlinx.datetime.Clock.System.now().toEpochMilliseconds().toString()
+                    isAnticipationAlert && field == "wake" -> "1"
+                    else -> value
+                }
 
                 val (symbolBase, _) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(symbol)
                 val effectiveTargets = timeframeTargets
                 val created = mutableListOf<String>()
                 val skipped = mutableListOf<String>()
                 effectiveTargets.forEach { tf ->
-                    val targetSymbol = if (toolName == "trading_signal_alert") {
-                        if (effField.startsWith("signal_anticipation")) "$symbolBase@$tf"
-                        else if (tf == "1h") symbolBase else "$symbolBase@$tf"
+                    val targetSymbol = if (isAnticipationAlert) "$symbolBase@$tf"
+                    else if (toolName == "trading_signal_alert") {
+                        if (tf == "1h") symbolBase else "$symbolBase@$tf"
                     } else {
                         if (effectiveTargets.size == 1 && rawTimeframe.isNullOrBlank() && !symbol.contains("@")) symbol else "$symbolBase@$tf"
                     }

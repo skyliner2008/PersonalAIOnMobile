@@ -1,0 +1,48 @@
+-- P12: OHLCV Store integrity (Phase 1)
+--
+-- แก้ 2 ปัญหาของ TvCandle เดิม:
+--
+-- 1) UNIQUE(symbol, interval, ts) ไม่รวม source และ query ไม่ filter source
+--    → ราคาจาก OANDA / FX_IDC / TVC (ที่ต่างกัน 2-3 จุด) เขียนทับกันรายแท่ง
+--    ได้ซีรีส์ที่เป็น "โมเสก" ของหลาย feed แล้วนำไปคำนวณอินดิเคเตอร์
+--
+-- 2) ไม่มีทางแยกแท่งที่ยังก่อตัวอยู่ออกจากแท่งที่ปิดแล้ว
+--    → แท่งครึ่งใบถูกบันทึกแล้วอ่านกลับมาเป็นแท่งสมบูรณ์ในรอบถัดไป (repainting)
+
+CREATE TABLE IF NOT EXISTS TvCandle_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    open REAL NOT NULL,
+    high REAL NOT NULL,
+    low REAL NOT NULL,
+    close REAL NOT NULL,
+    volume REAL NOT NULL DEFAULT 0,
+    -- 1 = แท่งปิดแล้ว (ใช้คำนวณอินดิเคเตอร์ได้), 0 = ยังก่อตัวอยู่
+    is_closed INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, source, ts)
+);
+
+-- ย้ายข้อมูลเดิม: แท่งเก่าทุกแท่งถือว่าปิดแล้ว ยกเว้นแท่งล่าสุดของแต่ละซีรีส์
+-- ที่ไม่มีทางรู้ย้อนหลังว่าปิดหรือยัง จึงทำเครื่องหมาย 0 ไว้เพื่อให้รอบถัดไปดึงทับ
+INSERT OR IGNORE INTO TvCandle_v2(
+    symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+)
+SELECT
+    c.symbol, c.interval, c.source, c.ts, c.open, c.high, c.low, c.close, c.volume,
+    CASE WHEN c.ts = (
+        SELECT MAX(m.ts) FROM TvCandle m
+        WHERE m.symbol = c.symbol AND m.interval = c.interval AND m.source = c.source
+    ) THEN 0 ELSE 1 END,
+    c.updated_at
+FROM TvCandle c;
+
+DROP TABLE TvCandle;
+
+ALTER TABLE TvCandle_v2 RENAME TO TvCandle;
+
+CREATE INDEX IF NOT EXISTS idx_tv_candle_series_ts
+ON TvCandle(symbol, interval, source, ts);

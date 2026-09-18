@@ -26,7 +26,17 @@ data class Candle(
     val low: Double,
     val close: Double,
     val volume: Double,
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    /**
+     * แท่งนี้ปิดแล้วหรือยัง
+     *
+     * แท่งที่ยังก่อตัวอยู่ (แท่งล่าสุดที่ TV stream มา) มี high/low/close ที่ยังเปลี่ยนได้
+     * ถ้านำไปคำนวณอินดิเคเตอร์จะได้ค่าที่ "ขยับ" ทุกครั้งที่เรียก (repainting)
+     * และถ้าบันทึกลง DB แล้วอ่านกลับมารอบหน้าจะกลายเป็นแท่งสมบูรณ์ทั้งที่ไม่ใช่
+     *
+     * default = true เพื่อความเข้ากันได้กับ source ที่คืนเฉพาะแท่งปิด (เช่น Binance REST)
+     */
+    val isClosed: Boolean = true
 )
 
 data class SmcOrderBlock(
@@ -135,6 +145,42 @@ class StrictSourceMismatchException(message: String) : IllegalStateException(mes
 class SmcApiService(private val client: HttpClient) {
 
     companion object {
+        /** คีย์ symbol ที่ใช้เก็บใน OHLCV store (TvCandle.symbol) — ใช้ร่วมกับงานดูแลฐานข้อมูล */
+        fun normalizeSymbolKey(symbol: String): String {
+            var s = symbol.uppercase().replace("-", "").replace("/", "")
+            // If it looks like a Yahoo symbol (contains = or ^), don't touch it
+            if (s.contains("=") || s.contains("^")) return s
+            // มี exchange prefix แล้ว (เช่น TVC:DXY, TVC:US10Y) — ผู้เรียกระบุ instrument ชัดเจน ห้ามแก้
+            // เดิมหลุดไปถึงบรรทัดท้ายที่ต่อ "USDT" ให้ทุกตัว → "TVC:DXY" กลายเป็น "TVC:DXYUSDT"
+            if (s.contains(":")) return s
+
+            // Normalize Gold
+            if (s.contains("XAU") || s.contains("GOLD") || s == "GCF" || s == "PAXG") s = "XAUUSD"
+
+            // Forex pairs (exactly 6 letters, both halves are known currencies) — don't append USDT
+            val forexCurrencies = setOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "CNY", "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "INR", "THB")
+            if (s.length == 6 && s.all { it.isLetter() }) {
+                val base = s.substring(0, 3)
+                val quote = s.substring(3, 6)
+                if (base in forexCurrencies && quote in forexCurrencies) return s
+            }
+
+            // Handle Yahoo-style crypto: BTCUSD → BTCUSDT (replace trailing USD with USDT)
+            // Must NOT be a commodity and must end with exactly "USD" (not "USDT")
+            val commodities = setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "CLF", "GCF")
+            if (commodities.contains(s)) return s
+
+            if (s.endsWith("USDT") || s.endsWith("BTC") || s.endsWith("ETH") || s.endsWith("BNB")) return s
+
+            // If ends with "USD" but not "USDT" → replace "USD" with "USDT" (e.g. BTCUSD → BTCUSDT)
+            if (s.endsWith("USD") && s.length > 3) {
+                return s.removeSuffix("USD") + "USDT"
+            }
+
+            // Auto-append USDT for remaining crypto-like symbols
+            return "${s}USDT"
+        }
+
         // กันดึงซ้ำตอนตลาดปิด (เสาร์-อาทิตย์/วันหยุด): estimateMissingBars เทียบกับ "เวลาปัจจุบัน" เสมอ
         // ทำให้ช่วงตลาดปิดดูเหมือน "ขาดแท่ง" ตลอด — ถ้ารีเฟรชแล้วไม่ได้แท่งใหม่กว่า DB เลย
         // จำไว้แล้วข้ามการดึงตาม streak (1→4 buckets) จนกว่าจะมีแท่งใหม่จริง
@@ -149,27 +195,34 @@ class SmcApiService(private val client: HttpClient) {
         // ชุดข้อมูล 5,000 แท่งต้องคง snapshot เดิมระหว่าง backtest → evolve → backtest
         // เพื่อไม่ให้ ranking เปลี่ยนเพราะ rolling window เลื่อนระหว่างงาน evolution ที่ใช้เวลานาน
         // 2 ชั่วโมงยังสดพอสำหรับงาน backtest แต่ยาวพอให้ long-task workflow ใช้ dataset เดียวกัน
-        const val BACKTEST_BARS = 5000
+        const val BACKTEST_BARS = TaIndicators.Warmup.BACKTEST_SET
         private const val BACKTEST_CACHE_TTL_MS = 2 * 60 * 60 * 1000L
         private val backtestCandleCache = mutableMapOf<String, Pair<Long, CandleFetchResult>>()
 
-        fun intervalToMillis(interval: String): Long {
-            return when (interval.lowercase()) {
-                "1m" -> 60_000L
-                "3m" -> 180_000L
-                "5m" -> 300_000L
-                "15m" -> 900_000L
-                "30m" -> 1_800_000L
-                "1h" -> 3_600_000L
-                "2h" -> 7_200_000L
-                "4h" -> 14_400_000L
-                "6h" -> 21_600_000L
-                "12h" -> 43_200_000L
-                "1d", "d" -> 86_400_000L
-                "1w", "w", "1wk" -> 604_800_000L
-                else -> 3_600_000L
-            }
-        }
+        /**
+         * ความลึกของประวัติที่เก็บใน DB ต่อหนึ่งซีรีส์ (symbol × interval × source)
+         *
+         * ตั้งให้ครอบคลุม backtest (5,000 แท่ง) เผื่อช่วงตลาดปิดที่ทำให้ "แท่งต่อเวลาจริง" น้อยลง
+         * ประเมินขนาด: 6,000 แท่ง × 8 TF × 20 symbol × ~60 bytes ≈ 58 MB — รับได้บนมือถือ
+         *
+         * เดิมตั้งไว้ 10,000 แต่ไม่เคยมีผล เพราะ trimTvCandlesByWindow ลบเหลือ 300 แท่งทุกรอบ
+         */
+        private const val RETENTION_BARS = 6_000L
+
+        /** กัน backfill ชุดใหญ่ยิงซ้ำถี่ๆ ต่อซีรีส์เดียวกัน */
+        private const val BACKFILL_RETRY_MS = 30 * 60 * 1000L
+        private val backfillAttemptAt = mutableMapOf<String, Long>()
+
+        /**
+         * ความยาวหนึ่งแท่งเป็น ms — delegate ไป TaIndicators.TIMEFRAMES (single source of truth)
+         *
+         * เดิมเป็น map แยกที่ **ไม่มี 8h** → intervalToMillis("8h") คืน 1 ชม.
+         * ทำให้ estimateMissingBars คิดจำนวนแท่งที่ขาดผิดไป 8 เท่า
+         */
+        fun intervalToMillis(interval: String): Long =
+            TaIndicators.timeframeSpecOrNull(interval)?.millis
+                ?: TaIndicators.timeframeSpecOrNull(interval.removeSuffix("k"))?.millis // "1wk" (Yahoo)
+                ?: TaIndicators.timeframeMillis(null)
     }
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
@@ -182,30 +235,22 @@ class SmcApiService(private val client: HttpClient) {
         "6h" to "6h", "12h" to "12h", "1d" to "1d", "1w" to "1w"
     )
 
-    private val yahooIntervalMap = mapOf(
-        "1m" to "1m", "5m" to "5m", "15m" to "15m", "30m" to "30m",
-        "1h" to "1h", "4h" to "1h", "1d" to "1d", "1w" to "1wk"
-    )
-
-    private data class YahooRequestPlan(
-        val baseInterval: String,
-        val range: String,
-        val aggregateToMillis: Long?
-    )
-
+    /**
+     * source ที่คาดว่าจะได้สำหรับ symbol นี้
+     *
+     * Yahoo ถูกถอดออกจากเส้นทาง OHLCV แล้ว (ยังใช้กับราคา/fundamental ที่ TradingApiService)
+     * — TradingView เป็นแหล่งหลักเสมอ มี Binance เป็น fallback เฉพาะคู่คริปโตแท้
+     */
     fun expectedPrimarySource(symbol: String): String {
         val normalized = normalizeSymbol(symbol)
-        return if (isPossibleBinanceSymbol(normalized)) "BINANCE" else "YAHOO"
+        return tvSymbolsFor(normalized).firstOrNull()?.second
+            ?: if (isPossibleBinanceSymbol(normalized)) "BINANCE" else "TV:OANDA"
     }
 
     private fun expectedSourceSet(symbol: String): Set<String> {
         val normalized = normalizeSymbol(symbol)
-        return when {
-            isPossibleBinanceSymbol(normalized) -> setOf("BINANCE")
-            normalized.contains("XAU") || normalized.contains("GOLD") || normalized == "GCF" ->
-                setOf("YAHOO", "BINANCE_PAXG")
-            else -> setOf("YAHOO")
-        }
+        val tvSources = tvSymbolsFor(normalized).map { it.second }.toSet()
+        return if (isPossibleBinanceSymbol(normalized)) tvSources + "BINANCE" else tvSources
     }
 
     private fun isTvSource(source: String): Boolean = source.startsWith("TV:")
@@ -216,152 +261,213 @@ class SmcApiService(private val client: HttpClient) {
         return fetchCandlesWithSource(symbol, interval, limit).candles
     }
 
+    /**
+     * ดึงแท่งเทียนสำหรับการวิเคราะห์ — **TradingView เป็นแหล่งเดียว** สำหรับ non-crypto
+     *
+     * ลำดับ:
+     *  0) อ่านจาก DB (ซีรีส์ของ source เดียวตามลำดับความน่าเชื่อถือ) — ไม่แตะเน็ตถ้าข้อมูลสดพอ
+     *  1) เติมส่วนที่ขาดจาก TV แบบ incremental
+     *  2) ถ้าประวัติยังไม่ลึกพอ → backfill ย้อนหลังจาก TV แล้ว persist
+     *  3) Binance เป็น fallback เฉพาะคู่คริปโตแท้เท่านั้น (TV มี rate limit)
+     *
+     * Yahoo ถูกถอดออกจากเส้นทาง OHLCV โดยเจตนา (ยังใช้กับราคา/fundamental ที่อื่นอยู่):
+     * interval map ของ Yahoo ต้อง aggregate 4h จาก 1h เอง และ timestamp/สเกลไม่ตรงกับ TV widget
+     * ที่ผู้ใช้เห็นบนจอ ทำให้อินดิเคเตอร์ที่คำนวณได้ไม่ตรงกับกราฟ
+     */
     suspend fun fetchCandlesWithSource(symbol: String, interval: String, limit: Int = 300): CandleFetchResult {
-        val minBars = recommendedMinBars(interval)
-        val targetBars = max(limit, minBars)
+        val targetBars = max(limit, recommendedMinBars(interval))
+        val usableBars = usableMinBars(interval)
         val sym = normalizeSymbol(symbol)
+        val noNewKey = "$sym|$interval"
 
-        // 0) Persistent cache from DB (TV candles) before any network call
-        val dbCandles = loadTvCandlesFromDb(sym, interval, targetBars)
-        if (dbCandles.size >= minBars) {
+        // ── 0) ประวัติที่สะสมไว้ใน DB (source เดียว ไม่ปนกัน) ──────────────────
+        val dbSeries = preferredDbSeries(sym, interval, targetBars)
+        val dbCandles = dbSeries?.second.orEmpty()
+        val dbSource = dbSeries?.first
+
+        if (dbCandles.size >= usableBars) {
             val missingBars = estimateMissingBars(dbCandles, interval)
-            if (missingBars <= 0) {
-                val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
-                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-                return result
+            if (missingBars <= 0 && dbCandles.size >= targetBars) {
+                return publish(sym, interval, dbSource ?: "TV:DB", dbCandles.takeLast(targetBars))
             }
 
-            // ถ้ารีเฟรชรอบก่อนไม่ได้แท่งใหม่เลย (ตลาดปิด) หรือเน็ตเวิร์ก timeout → ข้ามการดึงตาม backoff ที่ตั้งไว้
-            val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
-            val bucketStart = (Clock.System.now().toEpochMilliseconds() / tfMs) * tfMs
-            val noNewKey = "$sym|$interval"
-            val skipUntilBucket = tvNoNewDataSkipUntil[noNewKey]
-            val netFailUntil = tvNetworkFailureSkipUntil[noNewKey]
             val nowMs = Clock.System.now().toEpochMilliseconds()
-            if ((skipUntilBucket != null && bucketStart < skipUntilBucket) ||
+            val netFailUntil = tvNetworkFailureSkipUntil[noNewKey]
+            val skipUntilMs = tvNoNewDataSkipUntil[noNewKey]
+            val backoffActive = (skipUntilMs != null && nowMs < skipUntilMs) ||
                 (netFailUntil != null && nowMs < netFailUntil) ||
-                (nowMs < tvHostFailureSkipUntil)) {
-                val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
-                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-                return result
+                (nowMs < tvHostFailureSkipUntil)
+
+            if (backoffActive) {
+                return publish(sym, interval, dbSource ?: "TV:DB", dbCandles.takeLast(targetBars))
             }
 
-            // Incremental refresh: fetch only missing buckets with TF-specific baseline.
-            val deltaBars = computeDeltaFetchBars(interval, missingBars, targetBars)
-            val tvDelta = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = deltaBars)
-            if (tvDelta.candles.isNotEmpty()) {
-                tvHostFailureSkipUntil = 0L
-                tvNetworkFailureSkipUntil.remove(noNewKey)
-                val latestBefore = dbCandles.maxOf { it.timestamp }
-                val merged = mergeCandlesByTimestamp(dbCandles, tvDelta.candles).takeLast(targetBars)
-                if (merged.maxOf { it.timestamp } <= latestBefore) {
-                    // TV ตอบกลับแต่ไม่มีแท่งใหม่กว่าที่มีใน DB — ตลาดน่าจะปิด: backoff ตาม streak (เพดาน 4 buckets) และไม่เขียน DB ซ้ำ
-                    val streak = (tvNoNewDataStreak[noNewKey] ?: 0) + 1
-                    tvNoNewDataStreak[noNewKey] = streak
-                    val waitBuckets = streak.coerceAtMost(4)
-                    tvNoNewDataSkipUntil[noNewKey] = bucketStart + tfMs * waitBuckets
+            // ── 1) เติมแท่งใหม่แบบ incremental ─────────────────────────────────
+            if (missingBars > 0) {
+                val deltaBars = computeDeltaFetchBars(interval, missingBars, targetBars)
+                val tvDelta = fetchCandlesFromTradingView(sym, interval, deltaBars)
+                if (tvDelta.candles.isNotEmpty()) {
+                    tvHostFailureSkipUntil = 0L
+                    tvNetworkFailureSkipUntil.remove(noNewKey)
+                    val latestBefore = dbCandles.maxOf { it.timestamp }
+                    if (tvDelta.candles.maxOf { it.timestamp } <= latestBefore) {
+                        // TV ตอบแต่ไม่มีแท่งใหม่กว่าที่มี — ตลาดน่าจะปิด: ถอยตาม streak (เพดาน 4 แท่ง)
+                        val streak = (tvNoNewDataStreak[noNewKey] ?: 0) + 1
+                        tvNoNewDataStreak[noNewKey] = streak
+                        val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
+                        tvNoNewDataSkipUntil[noNewKey] = nowMs + tfMs * streak.coerceAtMost(4)
+                    } else {
+                        tvNoNewDataStreak.remove(noNewKey)
+                        tvNoNewDataSkipUntil.remove(noNewKey)
+                        // เขียนเฉพาะแท่งที่ดึงมาใหม่ — ไม่ rewrite ทั้งหน้าต่างทุกรอบ
+                        // และ **ไม่ trim ตามหน้าต่างที่คืนให้ผู้เรียก** (เดิม trimTvCandlesByWindow
+                        // ลบทุกแท่งที่เก่ากว่า 300 แท่งล่าสุด ทับ retention ในทรานแซกชันเดียวกัน
+                        // → DB ไม่เคยสะสมประวัติเลย)
+                        saveTvCandlesToDb(sym, interval, tvDelta.source, tvDelta.candles)
+                        logDebug(
+                            "SmcApiService",
+                            "TV delta $sym/$interval: +${tvDelta.candles.count { it.timestamp > latestBefore }} bar(s)"
+                        )
+                    }
                 } else {
-                    tvNoNewDataStreak.remove(noNewKey)
-                    tvNoNewDataSkipUntil.remove(noNewKey)
-                    saveTvCandlesToDb(sym, interval, tvDelta.source, merged)
-                    trimTvCandlesByWindow(sym, interval, merged)
-                    val newBars = tvDelta.candles.count { it.timestamp > latestBefore }
-                    logDebug("SmcApiService", "TV new candles $sym/$interval: +$newBars bar(s) → DB ${merged.size} แท่ง")
+                    // TV ล่ม แต่ DB ยังใช้ได้ — ถอย 60 วิ กัน background loop ค้างที่ timeout
+                    tvNetworkFailureSkipUntil[noNewKey] = nowMs + 60_000L
                 }
-                val result = CandleFetchResult(merged, "TV:DB")
-                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-                return result
             }
 
-            // TV refresh failed but DB is still usable — backoff network fetch for 60s so background loop doesn't freeze on timeouts
-            tvNetworkFailureSkipUntil[noNewKey] = Clock.System.now().toEpochMilliseconds() + 60_000L
-            val result = CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
-            OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-            return result
+            // ── 2) ประวัติยังไม่ลึกพอ → backfill ย้อนหลัง ─────────────────────
+            val afterDelta = preferredDbSeries(sym, interval, targetBars)?.second.orEmpty()
+            if (afterDelta.size < targetBars) {
+                backfillHistory(sym, interval, targetBars, afterDelta.size)
+            }
+
+            val finalSeries = preferredDbSeries(sym, interval, targetBars)
+            if (finalSeries != null && finalSeries.second.isNotEmpty()) {
+                return publish(sym, interval, finalSeries.first, finalSeries.second.takeLast(targetBars))
+            }
+            return publish(sym, interval, dbSource ?: "TV:DB", dbCandles.takeLast(targetBars))
         }
 
-        val cached = OhlcvCentralStore.getAny(sym, interval, targetBars)
-        var bestFallback = when {
-            dbCandles.isNotEmpty() -> CandleFetchResult(dbCandles.takeLast(targetBars), "TV:DB")
-            cached != null -> CandleFetchResult(cached.second, cached.first)
-            else -> CandleFetchResult(emptyList(), "NONE")
-        }
-
-        // 1) TV historical bars via websocket (primary source for consistency with widgets)
-        val tvResult = fetchCandlesFromTradingView(symbol = sym, interval = interval, limit = targetBars)
-        if (tvResult.candles.size >= minBars) {
+        // ── ยังไม่มีประวัติพอใน DB: ดึงชุดเต็มจาก TV ─────────────────────────
+        val tvResult = fetchCandlesFromTradingView(sym, interval, targetBars)
+        if (tvResult.candles.isNotEmpty()) {
             saveTvCandlesToDb(sym, interval, tvResult.source, tvResult.candles)
-            logDebug("SmcApiService", "TV new candles $sym/$interval: +${tvResult.candles.size} bar(s) → DB ${tvResult.candles.size} แท่ง")
-            val result = CandleFetchResult(tvResult.candles.takeLast(targetBars), tvResult.source)
-            OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-            return result
-        }
-        if (tvResult.candles.isNotEmpty() && tvResult.candles.size > bestFallback.candles.size) {
-            saveTvCandlesToDb(sym, interval, tvResult.source, tvResult.candles)
-            bestFallback = CandleFetchResult(tvResult.candles.takeLast(targetBars), tvResult.source)
+            logDebug("SmcApiService", "TV cold fetch $sym/$interval: ${tvResult.candles.size} แท่ง (${tvResult.source})")
+            if (tvResult.candles.size >= usableBars) {
+                return publish(sym, interval, tvResult.source, tvResult.candles.takeLast(targetBars))
+            }
         }
 
-        // 2. Try Binance first if it looks like a crypto pair (standard Binance format or ends with USDT/BTC/ETH)
+        // ── 3) Binance fallback — เฉพาะคู่คริปโตแท้ ──────────────────────────
         if (isPossibleBinanceSymbol(sym)) {
             val candles = fetchCandlesFromBinance(sym, interval, targetBars)
-            if (candles.size >= minBars) {
-                val result = CandleFetchResult(candles.takeLast(targetBars), "BINANCE")
-                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-                return result
+            if (candles.size >= usableBars) {
+                return publish(sym, interval, "BINANCE", candles.takeLast(targetBars))
             }
-            if (candles.isNotEmpty()) bestFallback = CandleFetchResult(candles, "BINANCE")
         }
 
-        // 3. Fallback to Yahoo Finance (Good for Gold, Forex, Stocks)
-        val candles = fetchCandlesFromYahoo(symbol, interval, targetBars)
-        if (candles.size >= minBars) {
-            val result = CandleFetchResult(candles.takeLast(targetBars), "YAHOO")
-            OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-            return result
-        }
-        if (candles.isNotEmpty() && candles.size > bestFallback.candles.size) {
-            bestFallback = CandleFetchResult(candles, "YAHOO")
-        }
+        // ไม่มี source ไหนให้ข้อมูลพอ — คืนชุดที่ดีที่สุดเท่าที่มี พร้อม source ตามจริง
+        // (ผู้เรียกดู candles.size เทียบ warm-up เองได้ และอินดิเคเตอร์จะคืน null เมื่อไม่พอ)
+        val best = listOf(
+            dbSource?.let { it to dbCandles } ,
+            tvResult.source.takeIf { tvResult.candles.isNotEmpty() }?.let { it to tvResult.candles }
+        ).filterNotNull().maxByOrNull { it.second.size }
+            ?: return CandleFetchResult(emptyList(), "NONE")
 
-        // 4. Last Resort for Gold: Fallback to Binance (PAXGUSDT) if Yahoo is insufficient
-        if (sym.contains("XAU") || sym.contains("GOLD") || sym == "GCF") {
-            val paxgCandles = fetchCandlesFromBinance("PAXGUSDT", interval, targetBars)
-            if (paxgCandles.size >= minBars) {
-                val result = CandleFetchResult(paxgCandles.takeLast(targetBars), "BINANCE_PAXG")
-                OhlcvCentralStore.put(sym, interval, result.source, result.candles)
-                return result
-            }
-            if (paxgCandles.isNotEmpty() && paxgCandles.size > bestFallback.candles.size) {
-                bestFallback = CandleFetchResult(paxgCandles, "BINANCE_PAXG")
-            }
-        }
-        val fallbackResult = CandleFetchResult(bestFallback.candles.takeLast(targetBars), bestFallback.source)
-        if (fallbackResult.candles.isNotEmpty() && fallbackResult.source != "NONE") {
-            OhlcvCentralStore.put(sym, interval, fallbackResult.source, fallbackResult.candles)
-        }
-        return fallbackResult
+        return publish(sym, interval, best.first, best.second.takeLast(targetBars))
     }
 
-    private fun loadTvCandlesFromDb(symbol: String, interval: String, limit: Int): List<Candle> {
+    /** บันทึกลง in-memory store แล้วคืนผล — รวมไว้จุดเดียวกัน source/หน้าต่างจะได้ไม่หลุด */
+    private fun publish(symbol: String, interval: String, source: String, candles: List<Candle>): CandleFetchResult {
+        if (candles.isNotEmpty()) OhlcvCentralStore.put(symbol, interval, source, candles)
+        return CandleFetchResult(candles, source)
+    }
+
+    /**
+     * เติมประวัติย้อนหลังให้ลึกถึง [targetBars]
+     *
+     * TV ส่งแท่งย้อนหลังตามจำนวนที่ขอจากแท่งล่าสุด จึงขอชุดใหญ่ทีเดียวแล้ว upsert
+     * ทับซ้อนกับที่มีอยู่ — แท่งที่ซ้ำจะถูก REPLACE ด้วยค่าเดิม ไม่เสียหาย
+     * ทำครั้งเดียวต่อซีรีส์ (มี guard) เพราะเป็น request ที่หนักที่สุด
+     */
+    private suspend fun backfillHistory(symbol: String, interval: String, targetBars: Int, currentBars: Int) {
+        val key = "$symbol|$interval|$targetBars"
+        val now = Clock.System.now().toEpochMilliseconds()
+        val lastAttempt = backfillAttemptAt[key]
+        if (lastAttempt != null && now - lastAttempt < BACKFILL_RETRY_MS) return
+        backfillAttemptAt[key] = now
+
+        val deep = fetchCandlesFromTradingView(symbol, interval, targetBars)
+        if (deep.candles.size > currentBars) {
+            saveTvCandlesToDb(symbol, interval, deep.source, deep.candles)
+            logDebug(
+                "SmcApiService",
+                "Backfill $symbol/$interval: $currentBars → ${deep.candles.size} แท่ง (เป้า $targetBars, ${deep.source})"
+            )
+        }
+    }
+
+    /**
+     * โหลดซีรีส์ของ **source เดียว** จาก DB
+     *
+     * ก่อนหน้านี้ query ไม่ filter source ทำให้แท่งจาก OANDA / FX_IDC / TVC
+     * (ที่ราคาต่างกัน 2-3 จุด) ปนกันอยู่ในซีรีส์เดียวแล้วถูกนำไปคำนวณอินดิเคเตอร์
+     *
+     * @param closedOnly true = คืนเฉพาะแท่งที่ปิดแล้ว (input มาตรฐานของการคำนวณ)
+     */
+    private fun loadTvCandlesFromDb(
+        symbol: String,
+        interval: String,
+        source: String,
+        limit: Int,
+        closedOnly: Boolean = true
+    ): List<Candle> {
         val db = JarvisDatabaseHolder.database ?: return emptyList()
+        if (limit <= 0) return emptyList()
         return try {
-            db.jarvisDatabaseQueries
-                .getRecentTvCandles(symbol, interval, limit.toLong())
-                .executeAsList()
-                .asReversed()
-                .map {
-                    Candle(
-                        open = it.open_,
-                        high = it.high,
-                        low = it.low,
-                        close = it.close,
-                        volume = it.volume,
-                        timestamp = it.ts
-                    )
-                }
+            val q = db.jarvisDatabaseQueries
+            val rows = if (closedOnly) {
+                q.getRecentClosedTvCandles(symbol, interval, source, limit.toLong()).executeAsList()
+                    .map { Candle(it.open_, it.high, it.low, it.close, it.volume, it.ts, it.is_closed != 0L) }
+            } else {
+                q.getRecentTvCandles(symbol, interval, source, limit.toLong()).executeAsList()
+                    .map { Candle(it.open_, it.high, it.low, it.close, it.volume, it.ts, it.is_closed != 0L) }
+            }
+            rows.asReversed()
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * เลือกซีรีส์ที่ดีที่สุดใน DB สำหรับ symbol/interval นี้
+     *
+     * ไล่ตามลำดับความน่าเชื่อถือของ source ที่ [tvSymbolsFor] กำหนดไว้ (OANDA → FX_IDC → TVC)
+     * แล้วจึงค่อยพิจารณา source อื่นที่เคยเก็บไว้ — ไม่เลือกจาก "ซีรีส์ไหนยาวสุด"
+     * เพราะจะทำให้ข้อมูล PAXG (คนละ instrument) ชนะข้อมูลทองจริงได้
+     */
+    private fun preferredDbSeries(symbol: String, interval: String, limit: Int): Pair<String, List<Candle>>? {
+        val db = JarvisDatabaseHolder.database ?: return null
+        val available = runCatching {
+            db.jarvisDatabaseQueries.summarizeTvCandleSources(symbol, interval).executeAsList()
+        }.getOrNull().orEmpty()
+        if (available.isEmpty()) return null
+
+        val priority = tvSymbolsFor(symbol).map { it.second }
+        val ordered = available
+            .map { row ->
+                val idx = priority.indexOf(row.source)
+                Triple(if (idx >= 0) idx else priority.size, -(row.bars), row.source)
+            }
+            .sortedWith(compareBy({ it.first }, { it.second }))
+        for ((_, _, source) in ordered) {
+            val candles = loadTvCandlesFromDb(symbol, interval, source, limit)
+            if (candles.isNotEmpty()) {
+                OhlcvMaintenance.touch(symbol, interval, source)
+                return source to candles
+            }
+        }
+        return null
     }
 
     private fun saveTvCandlesToDb(symbol: String, interval: String, source: String, candles: List<Candle>) {
@@ -381,34 +487,42 @@ class SmcApiService(private val client: HttpClient) {
                         low = c.low,
                         close = c.close,
                         volume = c.volume,
+                        is_closed = if (c.isClosed) 1L else 0L,
                         updated_at = now
                     )
                 }
-                val retentionMs = intervalToMillis(interval) * 10_000L
-                val cutoffTs = now - retentionMs
-                db.jarvisDatabaseQueries.deleteTvCandlesBefore(symbol, interval, cutoffTs)
+                // Retention เป็น "จำนวนแท่ง" ของ TF นั้น ไม่ใช่หน้าต่างที่คืนให้ผู้เรียก
+                // ลึกพอสำหรับ backtest (BACKTEST_BARS) และ warm-up ของ EMA200
+                val retentionMs = intervalToMillis(interval) * RETENTION_BARS
+                db.jarvisDatabaseQueries.deleteTvCandlesBefore(symbol, interval, source, now - retentionMs)
             }
         } catch (_: Exception) {
             // Non-fatal: SMC can continue using network/in-memory data.
         }
     }
 
-    private fun trimTvCandlesByWindow(symbol: String, interval: String, keptCandles: List<Candle>) {
-        val db = JarvisDatabaseHolder.database ?: return
-        if (keptCandles.isEmpty()) return
-        val oldestKeptTs = keptCandles.minOfOrNull { it.timestamp } ?: return
-        runCatching {
-            db.jarvisDatabaseQueries.deleteTvCandlesBefore(symbol, interval, oldestKeptTs)
-        }
-    }
-
-    private fun estimateMissingBars(existing: List<Candle>, interval: String): Int {
+    /**
+     * ประเมินว่าขาดแท่งไปกี่แท่งนับจากแท่งล่าสุดที่มี
+     *
+     * คำนวณจาก **ระยะห่างจากแท่งล่าสุดที่มีจริง** ไม่ใช่ bucket ที่ align กับ epoch
+     *
+     * เดิมใช้ `(now / tfMs) * tfMs` ซึ่งถือว่ากริดของแท่งเริ่มนับจาก epoch พอดี — ไม่จริงเลย:
+     * แท่ง D1 ของทองเปิด 21:00 UTC ไม่ใช่ 00:00 UTC ส่วน epoch week เริ่ม "วันพฤหัส"
+     * (1 ม.ค. 1970 เป็นวันพฤหัส) แต่แท่ง W ของ TV เริ่มวันอาทิตย์/จันทร์
+     * → 1D/1W จึงดู "ขาดแท่ง" ตลอดเวลา ยิง network ทุกรอบแล้วติด backoff streak ถาวร
+     *
+     * วิธีใหม่ไม่ผูกกับกริด จึงถูกต้องกับทุก instrument และทุก session
+     */
+    internal fun estimateMissingBars(
+        existing: List<Candle>,
+        interval: String,
+        nowMs: Long = Clock.System.now().toEpochMilliseconds()
+    ): Int {
         val latestTs = existing.maxOfOrNull { it.timestamp } ?: return Int.MAX_VALUE
         val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
-        val now = Clock.System.now().toEpochMilliseconds()
-        val currentBucketStart = (now / tfMs) * tfMs
-        if (latestTs >= currentBucketStart) return 0
-        return ((currentBucketStart - latestTs) / tfMs).toInt().coerceAtLeast(0)
+        val elapsed = nowMs - latestTs
+        if (elapsed < tfMs) return 0
+        return (elapsed / tfMs).toInt().coerceAtLeast(0)
     }
 
     private fun computeDeltaFetchBars(interval: String, missingBars: Int, targetBars: Int): Int {
@@ -440,9 +554,16 @@ class SmcApiService(private val client: HttpClient) {
     }
 
     /**
-     * ดึงแท่งเทียนย้อนหลังชุดใหญ่สำหรับ Backtest (คงที่ BACKTEST_BARS = 5,000 แท่ง — เพียงพอต่อการจำลอง)
-     * แยกจาก fetchCandlesWithSource โดยเด็ดขาด: ไม่แตะ TvCandle DB (กันโดน trim 300 แท่ง) ไม่มี backoff —
-     * ใช้ in-memory cache ระดับ process 10 นาทีแทน
+     * ดึงแท่งเทียนย้อนหลังชุดใหญ่สำหรับ Backtest (BACKTEST_BARS = 5,000 แท่ง)
+     *
+     * ตอนนี้ **อ่านจาก TvCandle DB ก่อน** แล้วค่อยเติมจากเน็ตเฉพาะส่วนที่ขาด
+     * (เดิมเลี่ยง DB เพราะ trimTvCandlesByWindow ลบเหลือ 300 แท่งทุกรอบ — แก้แล้วใน Phase 1
+     *  retention ตอนนี้คือ RETENTION_BARS = 6,000 แท่งต่อซีรีส์ ครอบคลุม backtest ได้เต็ม)
+     *
+     * ผลคือ backtest ไม่ต้องโหลด 5,000 แท่งใหม่ทุกครั้งที่รีสตาร์ทแอปอีก
+     * in-memory cache ยังอยู่เพื่อคง snapshot เดิมระหว่าง backtest → evolve → backtest
+     * ที่ต้องการ dataset นิ่งตลอดงาน (reproducibility)
+     *
      * ความลึกโดยประมาณ: 15m ≈ 52 วัน, 1h ≈ 7 เดือน, 4h ≈ 2.3 ปี, 1D ≈ 13 ปี
      */
     suspend fun fetchBacktestCandles(symbol: String, interval: String): CandleFetchResult {
@@ -455,28 +576,51 @@ class SmcApiService(private val client: HttpClient) {
             }
         }
 
+        fun snapshot(candles: List<Candle>, source: String): CandleFetchResult {
+            val result = CandleFetchResult(candles.sortedBy { it.timestamp }, source)
+            backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
+            return result
+        }
+
+        // 1) ประวัติที่สะสมไว้ใน DB — ใช้ได้ทันทีถ้าลึกพอและไม่ค้างเกิน 1 แท่ง
+        preferredDbSeries(sym, interval, BACKTEST_BARS)?.let { (dbSource, dbCandles) ->
+            if (dbCandles.size >= BACKTEST_BARS && estimateMissingBars(dbCandles, interval) <= 0) {
+                logDebug("SmcApiService", "Backtest จาก DB $key: ${dbCandles.size} แท่ง ($dbSource)")
+                return snapshot(dbCandles, dbSource)
+            }
+        }
+
+        // 2) ดึงจาก TV แล้ว persist ลง DB (รอบหน้าจะได้ไม่ต้องโหลดซ้ำ)
         val resolution = tvResolution(interval)
         for ((tvSymbol, source) in tvSymbolsFor(sym)) {
-            val (candles, isConnError) = fetchTvCandlesViaWebSocket(tvSymbol, resolution, BACKTEST_BARS)
-            if (candles.size >= 300) {
-                val result = CandleFetchResult(candles.sortedBy { it.timestamp }, source)
-                backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
-                val first = candles.first().timestamp
-                val last = candles.last().timestamp
-                logDebug("SmcApiService", "Backtest candles $key: ${candles.size} แท่ง ($first → $last) จาก $source")
-                return result
+            val (raw, isConnError) = fetchTvCandlesViaWebSocket(tvSymbol, resolution, BACKTEST_BARS)
+            if (raw.size >= TaIndicators.Warmup.YEARLY_SET) {
+                val candles = markClosedState(raw, interval)
+                saveTvCandlesToDb(sym, interval, source, candles)
+                logDebug(
+                    "SmcApiService",
+                    "Backtest candles $key: ${candles.size} แท่ง (${candles.first().timestamp} → ${candles.last().timestamp}) จาก $source → persisted"
+                )
+                return snapshot(candles, source)
             }
             if (isConnError) break
         }
 
-        // fallback: Binance (crypto เท่านั้น — สูงสุด 1,000 แท่ง)
+        // 3) fallback: Binance — เฉพาะคู่คริปโตแท้ (สูงสุด 1,000 แท่ง)
         if (isPossibleBinanceSymbol(sym)) {
             val candles = runCatching { fetchCandlesFromBinance(sym, interval.lowercase(), 1000) }.getOrElse { emptyList() }
             if (candles.isNotEmpty()) {
-                val result = CandleFetchResult(candles.sortedBy { it.timestamp }, "BINANCE")
-                backtestCandleCache[key] = Clock.System.now().toEpochMilliseconds() to result
+                saveTvCandlesToDb(sym, interval, "BINANCE", candles)
                 logDebug("SmcApiService", "Backtest candles $key: ${candles.size} แท่ง (fallback BINANCE)")
-                return result
+                return snapshot(candles, "BINANCE")
+            }
+        }
+
+        // 4) ดึงไม่ได้ — ใช้ประวัติเท่าที่มีใน DB ดีกว่าคืนค่าว่าง
+        preferredDbSeries(sym, interval, BACKTEST_BARS)?.let { (dbSource, dbCandles) ->
+            if (dbCandles.size >= TaIndicators.Warmup.YEARLY_SET) {
+                logDebug("SmcApiService", "Backtest fallback DB $key: ${dbCandles.size} แท่ง ($dbSource)")
+                return snapshot(dbCandles, dbSource)
             }
         }
 
@@ -499,7 +643,7 @@ class SmcApiService(private val client: HttpClient) {
             val (candles, isConnError) = fetchTvCandlesViaWebSocket(tvSymbol, resolution, limit)
             if (candles.isNotEmpty()) {
                 tvHostFailureSkipUntil = 0L
-                return CandleFetchResult(candles.takeLast(limit), source)
+                return CandleFetchResult(markClosedState(candles.takeLast(limit), interval), source)
             }
             if (isConnError) {
                 // Host data.tradingview.com มีปัญหาการเชื่อมต่อ — พัก 60 วินาทีทั่วทั้ง host
@@ -509,6 +653,23 @@ class SmcApiService(private val client: HttpClient) {
             }
         }
         return CandleFetchResult(emptyList(), "NONE")
+    }
+
+    /**
+     * ติดธงว่าแท่งไหน "ปิดแล้ว" — จุดเดียวที่ตัดสินเรื่องนี้สำหรับข้อมูลจาก TV
+     *
+     * TV stream แท่งล่าสุดแบบ real-time: high/low/close ยังขยับได้จนกว่าจะหมดช่วงเวลา
+     * ถือว่าแท่งปิดเมื่อ `now >= ts + tfMs` เท่านั้น — วัดจาก timestamp ของแท่งเอง
+     * ไม่ต้องรู้ session boundary ของ instrument จึงถูกต้องกับทุกตลาด
+     */
+    internal fun markClosedState(
+        candles: List<Candle>,
+        interval: String,
+        nowMs: Long = Clock.System.now().toEpochMilliseconds()
+    ): List<Candle> {
+        if (candles.isEmpty()) return candles
+        val tfMs = intervalToMillis(interval).coerceAtLeast(60_000L)
+        return candles.map { c -> c.copy(isClosed = nowMs >= c.timestamp + tfMs) }
     }
 
     private fun tvSymbolsFor(symbol: String): List<Pair<String, String>> {
@@ -541,21 +702,12 @@ class SmcApiService(private val client: HttpClient) {
         }
     }
 
-    private fun tvResolution(interval: String): String {
-        return when (interval.trim().lowercase()) {
-            "1m", "m1", "1" -> "1"
-            "3m", "m3", "3" -> "3"
-            "5m", "m5", "5" -> "5"
-            "15m", "m15", "15" -> "15"
-            "30m", "m30", "30" -> "30"
-            "1h", "h1", "60" -> "60"
-            "2h", "h2", "120" -> "120"
-            "4h", "h4", "240" -> "240"
-            "1d", "d1", "d" -> "D"
-            "1w", "w1", "w" -> "W"
-            else -> "60"
-        }
-    }
+    /**
+     * TradingView resolution — delegate ไป TaIndicators (single source of truth)
+     *
+     * เดิมเป็น map แยกที่ **ไม่มี 6h/8h/12h** → ขอ 6h ได้ resolution "60" (1 ชม.) เงียบๆ
+     */
+    private fun tvResolution(interval: String): String = TaIndicators.toTvResolution(interval)
 
     private fun tvFromParam(tvSymbol: String): String {
         // Example: OANDA:XAUUSD -> symbols/OANDA-XAUUSD/
@@ -838,122 +990,26 @@ class SmcApiService(private val client: HttpClient) {
         } catch (e: Exception) { emptyList() }
     }
 
-    private suspend fun fetchCandlesFromYahoo(symbol: String, interval: String, targetBars: Int): List<Candle> {
-        return try {
-            val ySym = normalizeYahooSymbol(symbol)
-            val plan = buildYahooRequestPlan(interval, targetBars)
-            val tf = plan.baseInterval
 
-            val url = "https://query1.finance.yahoo.com/v8/finance/chart/$ySym"
-            val response = client.get(url) {
-                parameter("interval", tf)
-                parameter("range", plan.range)
-                header("User-Agent", "Mozilla/5.0")
-                timeout { requestTimeoutMillis = 15_000 }
-            }
-            if (!response.status.isSuccess()) return emptyList()
+    /**
+     * แท่งขั้นต่ำที่ต้องมีก่อนจะถือว่าซีรีส์ "พร้อมวิเคราะห์"
+     *
+     * เดิมใช้ 150 (TF ≤ 1h) / 300 (4h+) ซึ่งต่ำกว่าที่ EMA200 กับ SMA200 ต้องการมาก
+     * ผลคือบน 15m ระบบดึงมา 150 แท่งแล้ว EMA200 คำนวณไม่ได้ —
+     * และเพราะ TaIndicators.ema เดิม fallback เป็นราคาปิด จึงได้ "EMA200 = close" ทุกครั้ง
+     *
+     * ตอนนี้อิงตาราง warm-up กลาง: ชุดเต็มที่มี EMA200 ต้องการ 200 × 4 = 800 แท่ง
+     */
+    private fun recommendedMinBars(interval: String): Int = TaIndicators.Warmup.FULL_SET
 
-            val root = json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val result = root["chart"]?.jsonObject?.get("result")?.jsonArray?.get(0)?.jsonObject ?: return emptyList()
-            val timestamp = result["timestamp"]?.jsonArray ?: return emptyList()
-            val indicators = result["indicators"]?.jsonObject?.get("quote")?.jsonArray?.get(0)?.jsonObject ?: return emptyList()
-            
-            val o = indicators["open"]?.jsonArray ?: return emptyList()
-            val h = indicators["high"]?.jsonArray ?: return emptyList()
-            val l = indicators["low"]?.jsonArray ?: return emptyList()
-            val c = indicators["close"]?.jsonArray ?: return emptyList()
-            val v = indicators["volume"]?.jsonArray ?: return emptyList()
-
-            val rawCandles = mutableListOf<Candle>()
-            for (i in 0 until timestamp.size) {
-                val closeVal = c[i].jsonPrimitive.doubleOrNull ?: continue
-                rawCandles.add(Candle(
-                    open  = o[i].jsonPrimitive.doubleOrNull ?: closeVal,
-                    high  = h[i].jsonPrimitive.doubleOrNull ?: closeVal,
-                    low   = l[i].jsonPrimitive.doubleOrNull ?: closeVal,
-                    close = closeVal,
-                    volume = v[i].jsonPrimitive.doubleOrNull ?: 0.0,
-                    timestamp = timestamp[i].jsonPrimitive.long * 1000
-                ))
-            }
-            val candles = if (plan.aggregateToMillis != null) {
-                aggregateCandlesByBucket(rawCandles, plan.aggregateToMillis)
-            } else {
-                rawCandles
-            }
-            candles.takeLast(targetBars)
-        } catch (e: Exception) { emptyList() }
-    }
-
-    private fun buildYahooRequestPlan(interval: String, targetBars: Int): YahooRequestPlan {
-        val normalized = interval.lowercase()
-        val baseTf = yahooIntervalMap[normalized] ?: "1h"
-        val targetMillis = intervalToMillis(normalized)
-        val baseMillis = intervalToMillis(baseTf)
-        val aggregateToMillis = if (targetMillis > baseMillis) targetMillis else null
-        val requiredBaseBars = if (aggregateToMillis != null) {
-            val factor = max(1L, aggregateToMillis / baseMillis)
-            (targetBars.toLong() * factor).toInt()
-        } else {
-            targetBars
-        }
-        val range = chooseYahooRange(baseTf, requiredBaseBars)
-        return YahooRequestPlan(baseTf, range, aggregateToMillis)
-    }
-
-    private fun chooseYahooRange(baseTf: String, requiredBars: Int): String {
-        val minutesPerBar = when (baseTf) {
-            "1m" -> 1
-            "5m" -> 5
-            "15m" -> 15
-            "30m" -> 30
-            "1h" -> 60
-            "1d" -> 1440
-            "1wk" -> 10080
-            else -> 60
-        }
-        val requiredDays = ceil((requiredBars * minutesPerBar) / 1440.0).toInt()
-        return when {
-            requiredDays <= 5 -> "5d"
-            requiredDays <= 30 -> "1mo"
-            requiredDays <= 90 -> "3mo"
-            requiredDays <= 180 -> "6mo"
-            requiredDays <= 365 -> "1y"
-            requiredDays <= 730 -> "2y"
-            requiredDays <= 1825 -> "5y"
-            else -> "max"
-        }
-    }
-
-    private fun aggregateCandlesByBucket(candles: List<Candle>, bucketMillis: Long): List<Candle> {
-        if (candles.isEmpty()) return emptyList()
-        val grouped = candles.sortedBy { it.timestamp }
-            .groupBy { it.timestamp / bucketMillis }
-            .toSortedMap()
-
-        val aggregated = mutableListOf<Candle>()
-        for (group in grouped.values) {
-            if (group.isEmpty()) continue
-            aggregated.add(
-                Candle(
-                    open = group.first().open,
-                    high = group.maxOf { it.high },
-                    low = group.minOf { it.low },
-                    close = group.last().close,
-                    volume = group.sumOf { it.volume },
-                    timestamp = group.first().timestamp
-                )
-            )
-        }
-        return aggregated
-    }
-
-
-    private fun recommendedMinBars(interval: String): Int {
-        return when (interval.lowercase()) {
-            "4h", "1d", "1w" -> 300
-            else -> 150
-        }
+    /**
+     * แท่งขั้นต่ำที่ยัง "ใช้งานได้" แม้ยังไม่ครบ warm-up เต็ม
+     * — ใช้ตัดสินว่าจะยอมคืนผลบางส่วนหรือถือว่าดึงไม่สำเร็จ
+     * อินดิเคเตอร์ที่ warm-up ไม่ถึงจะคืน null เองอยู่แล้ว (fail-closed)
+     */
+    private fun usableMinBars(interval: String): Int = when (TaIndicators.normalizeTimeframe(interval)) {
+        "1D", "1W", "1M" -> TaIndicators.Warmup.YEARLY_SET
+        else -> TaIndicators.Warmup.MACD_SET
     }
 
     private fun isPossibleBinanceSymbol(s: String): Boolean {
@@ -985,37 +1041,7 @@ class SmcApiService(private val client: HttpClient) {
         }
     }
 
-    private fun normalizeSymbol(symbol: String): String {
-        var s = symbol.uppercase().replace("-", "").replace("/", "")
-        // If it looks like a Yahoo symbol (contains = or ^), don't touch it
-        if (s.contains("=") || s.contains("^")) return s
-
-        // Normalize Gold
-        if (s.contains("XAU") || s.contains("GOLD") || s == "GCF" || s == "PAXG") s = "XAUUSD"
-
-        // Forex pairs (exactly 6 letters, both halves are known currencies) — don't append USDT
-        val forexCurrencies = setOf("USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "CNY", "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "INR", "THB")
-        if (s.length == 6 && s.all { it.isLetter() }) {
-            val base = s.substring(0, 3)
-            val quote = s.substring(3, 6)
-            if (base in forexCurrencies && quote in forexCurrencies) return s
-        }
-
-        // Handle Yahoo-style crypto: BTCUSD → BTCUSDT (replace trailing USD with USDT)
-        // Must NOT be a commodity and must end with exactly "USD" (not "USDT")
-        val commodities = setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "CLF", "GCF")
-        if (commodities.contains(s)) return s
-
-        if (s.endsWith("USDT") || s.endsWith("BTC") || s.endsWith("ETH") || s.endsWith("BNB")) return s
-
-        // If ends with "USD" but not "USDT" → replace "USD" with "USDT" (e.g. BTCUSD → BTCUSDT)
-        if (s.endsWith("USD") && s.length > 3) {
-            return s.removeSuffix("USD") + "USDT"
-        }
-
-        // Auto-append USDT for remaining crypto-like symbols
-        return "${s}USDT"
-    }
+    private fun normalizeSymbol(symbol: String): String = normalizeSymbolKey(symbol)
 
     // ─── Core SMC Algorithms ──────────────────────────────────────────────────
 

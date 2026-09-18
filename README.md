@@ -6,6 +6,14 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **AI Wake Engine Goes Live, OHLCV Pruning & Backup/Restore (2026-09-18):**
+> - **ระบบปลุก AI (คาดการณ์ล่วงหน้า) ทำงานจริงแล้ว และแยกจาก Signal Alert** — alert job `trading_anticipation` (field `wake`) เฝ้า 5TF ด้วยปัจจัย ~115 ตัว 15 หมวด; เมื่อเกิดเหตุการณ์ AI ดู snapshot 5TF แล้วตัดสินเอง **NOTIFY / SKIP** (ไม่มี Entry/SL/TP สำเร็จรูปจากปัจจัย) และคำตัดสินถูกบันทึกลงการเรียนรู้เพื่อวัดว่า AI ถูกแค่ไหน. job คาดการณ์เดิมถูกย้ายให้อัตโนมัติ
+> - **ประหยัดโทเคน Live** — การวิเคราะห์ใช้ Flash Lite แบบ stateless; Live แค่พูดสรุปสั้นที่ AI เขียนแล้ว
+> - **OHLCV store ไม่บวมอีก** — ≈1 MB/ซีรีส์, ≈6–8 MB/สินทรัพย์ที่เฝ้า; ลบซีรีส์ที่ไม่ได้ใช้เกิน 30 วัน (ยกเว้นสินทรัพย์ที่มี alert และตลาดที่เกี่ยวข้อง) วันละครั้ง + ลบการเรียนรู้เก่ากว่า 1 ปี
+> - **สำรอง / กู้คืน (Settings)** — ส่งออก/นำเข้า **การเรียนรู้** เป็น JSON (ย้ายเครื่อง A → B, นำเข้าแบบรวม) และสำรอง/กู้คืน **ฐานข้อมูลทั้งหมด** เป็น zip (ตรวจไฟล์ก่อนกู้คืน, เก็บของเดิม 1 ชุด). เลือกเก็บในเครื่องหรือ **Google Drive** ผ่านหน้าต่างเลือกไฟล์ของระบบ
+> - **Review รอบ 2**: แก้บัคที่ทำให้ alert เงียบหลังสแกนจากแชท, เรียก AI เกินงบ, งบรีเซ็ตเมื่อรีสตาร์ท, สถิติการเรียนรู้/ความแม่นของ AI วัดผิด, แนวรับ-ต้าน FX ถูกรวมเป็นก้อนเดียว, เวลา session ไม่รองรับ DST — และตัด system prompt แชทออกจากการวิเคราะห์ (จากประมาณ 14,000 ตัวอักษร เหลือไม่ถึง 600)
+> - รายละเอียด: [.obsidian-wiki/07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29.md](.obsidian-wiki/07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29.md)
+
 > **Free Tier Model Policy, Live Modes & Agent Multi-Session (2026-09-16):** the app now matches what the project's free tier actually offers.
 > - **Chat runs on flash-lite only** (`gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`, 500 requests a day each). The 20-a-day flash models are out of the chat path, a saved flash model is migrated automatically, and a per-day 429 pushes that model to the back of the chain until the Pacific-midnight reset.
 > - **Live picks its own model**: seeds are `gemini-3.8-live`, `gemini-3.1-flash-live-preview`, `gemini-3.8-live-extended-thinking` and native audio dialog as the last resort, but after the model list syncs the newest bidirectional model wins — so new Live models are used without a code change. Transcribe and translate models are kept out of the assistant path.
@@ -915,7 +923,8 @@
 - **🔌 Multi-Provider + Fallback หลายชั้น** — Gemini (Multi API Key + Model Fallback Chain) → Groq → OpenRouter → MiniMax สลับอัตโนมัติเมื่อติด limit พร้อม Auto-Test คัดเฉพาะโมเดลที่ใช้ tool ได้จริง
 - **🎙️ Live Voice + Vision** — คุยสดกับ Gemini Live (`gemini-3.1-flash-live-preview`), เลือกเสียงได้ 30 โปรไฟล์ (ผูกตัวตน/คำลงท้ายอัตโนมัติ), เปิด "ตา" ให้ AI มองผ่านกล้องพร้อม AR Overlay
 - **📱 Always AI Live & Device Control** — โหมดควบคุมเครื่องเต็มรูปแบบ สั่งเปิดแอพ, นำทาง Google Maps, ปรับเสียง/ความสว่าง, พักหน้าจอ/ปลุกหน้าจอ, อ่านหน้าจอ และแตะปุ่มอัตโนมัติผ่าน Accessibility Service
-- **🔔 Alert System V2 & Signal Anticipation** — แจ้งเตือนสัญญาณเทรดล่วงหน้า (Anticipation) และสัญญาณยืนยัน (Confirmed) ด้วยการ์ด 3D พร้อมระบบเสียงพูดแจ้งเตือน (Voice Alert Delivery)
+- **🔔 Alert System V2 & ระบบปลุก AI** — Signal Alert (สัญญาณยืนยันจากกลยุทธ์) และระบบปลุก AI (คาดการณ์ล่วงหน้า ~115 ปัจจัย → AI วิเคราะห์ 5TF เอง) ด้วยการ์ด 3D พร้อมเสียงพูดแจ้งเตือน
+- **💾 Backup & Restore** — สำรอง/กู้คืนการเรียนรู้และฐานข้อมูลทั้งหมด เก็บในเครื่องหรือ Google Drive
 - **📲 Mobile Android App (Compose Multiplatform)** — ดีไซน์พรีเมียม, แนบไฟล์/รูป/PDF ในแชทให้ AI วิเคราะห์, สร้างไฟล์ Excel จริง, Symbol Catalogue, Decision Feed และ Auto Trading Controls
 
 ---
@@ -944,7 +953,7 @@
 - **Layer 6: LLM-Wiki (Obsidian)** — ระบบ "สมองส่วนนอก" ที่ AI และมนุษย์จัดการร่วมกันผ่าน Markdown
 
 ### 📊 4. Trading Intelligence บนมือถือ (TV-Powered & Unified SMC)
-- **Dual-Stage Signal Engine (Anticipation → Confirmed)** — ตรวจจับการตั้งเค้าของราคาล่วงหน้า (Anticipation) ด้วย 10 ปัจจัยเทคนิคอล และส่งสัญญาณยืนยัน (Confirmed) เมื่อแท่งเทียนปิด
+- **ระบบปลุก AI (คาดการณ์ล่วงหน้า)** — ปัจจัย ~115 ตัว 15 หมวดเป็น "นาฬิกาปลุก" เมื่อเกิดเหตุการณ์ AI ดูภาพ 5TF (M1/M5/M15/H1/H4 + DXY/US10Y หรือ BTC/BTC.D + ข่าว) แล้วตัดสินเองว่าควรแจ้งไหม; ระบบเรียนรู้ผลของทุกปัจจัยตามสภาพแวดล้อมและลดชั้นตัวที่ไร้ประโยชน์เอง — แยกจาก Signal Alert (สัญญาณยืนยันเมื่อแท่งปิด)
 - **Indicator Alert Provider** — คำนวณ EMA20/50/200, EMA 14/60 Near-Cross & Golden/Death Cross, RSI14, MACD, Stoch, CCI, Bollinger Bands, ATR เองจากแท่งเทียน cache แม่นกว่า TradingView scanner
 - **SMC Alert Provider** — ตรวจสอบโครงสร้างตลาด 5 มิติ: Premium/Discount zones, BOS/CHoCH, Order Blocks, FVG และ Liquidity Sweeps
 - **Deep Analysis Suite ครบ 5 มิติ** — LSD state + confluence, Orderflow Delta, Fibo Score, Momentum, Squeeze (9 fields) พร้อม TV local fallback
@@ -956,6 +965,7 @@
 - **Voice Alert Delivery** — เปิดระบบเสียงพูดแจ้งเตือนเป็นค่าเริ่มต้น พร้อมปลุกหน้าจอขึ้นมาแจ้งเตือนอัตโนมัติแม้ปิดหน้าจออยู่
 - **Adaptive Interval** — tick หลัก 30 วินาที + เร่งเช็คอัตโนมัติเมื่อราคาใกล้เป้า (<0.1% → 30 วิ, <0.5% → 1 นาที)
 - **AlertFieldCatalog** — dropdown ตอนสร้าง alert เลือกได้เฉพาะ tool/field ที่ดึงค่าได้จริง ป้องกันการตั้งเงื่อนไขผิดพลาด
+- **สำรอง/กู้คืน & ดูแลพื้นที่** — Settings → สำรอง / กู้คืนข้อมูล (การเรียนรู้ .json, ฐานข้อมูล .zip, Google Drive) และลบ OHLCV ที่ไม่ได้ใช้เกิน 30 วันอัตโนมัติ
 - **14+ Preset ลัด** — ราคาถึงเป้า, RSI Overbought/Oversold, Golden/Death Cross, Discount/Premium Zone, Bollinger Squeeze, EMA 14/60 Convergence ฯลฯ
 
 ### 🔌 6. Provider System — Multi-Key, Fallback & Auto-Test
@@ -1084,7 +1094,7 @@
 - `mt5_place_order` / `mt5_close_position`: alias ส่ง/ปิดออเดอร์ MT5
 
 ### 📊 TRADING TOOLS (29 tools)
-- `trading_signal_anticipation`: ⚡ คาดการณ์สัญญาณเทรดล่วงหน้าด้วย 10 ปัจจัยคอนฟลูเอนซ์ (Keyzone Proximity, Wick Sweep, RSI Extreme, EMA Near-Cross ฯลฯ)
+- `trading_signal_anticipation`: ⏰ ระบบปลุก AI (คาดการณ์ล่วงหน้า) — create / scan / list_factors / config (เปิด-ปิดปัจจัย, งบการปลุก) / learning / inspect / recommend / status
 - `trading_price`: ราคา Real-time (Stocks/Crypto/Forex/Gold — TV primary + fallback)
 - `trading_market_snapshot`: ภาพรวมตลาดตามกลุ่มอุตสาหกรรม
 - `trading_top_gainers` / `trading_top_losers`: หุ้น/สินทรัพย์ที่พุ่ง/ดิ่งแรงสุด

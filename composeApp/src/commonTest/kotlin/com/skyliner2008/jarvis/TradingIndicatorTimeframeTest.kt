@@ -1,10 +1,12 @@
 package com.skyliner2008.jarvis
 
 import com.skyliner2008.jarvis.automation.IndicatorAlertProvider
+import com.skyliner2008.jarvis.tools.trading.SmcApiService
 import com.skyliner2008.jarvis.tools.trading.TaIndicators
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class TradingIndicatorTimeframeTest {
@@ -34,6 +36,82 @@ class TradingIndicatorTimeframeTest {
             assertEquals(expectedMt5[i],  TaIndicators.toMt5Timeframe(aliasTf),      "toMt5Timeframe for $aliasTf")
             assertEquals(expectedTv[i],   TaIndicators.toTvResolution(aliasTf),      "toTvResolution for $aliasTf")
         }
+    }
+
+    /**
+     * P0: ทุก TF ในทะเบียนต้องแปลงได้ครบทั้ง 4 รูปแบบ และไม่มีตัวไหน "ตกเงียบ" ไป 1h
+     *
+     * บัคเดิม: 6h/8h/12h ไม่มีใน toTvResolution → คืน "60" (1 ชม.),
+     * และ 8h ไม่มีใน SmcApiService.intervalToMillis → คืน 3,600,000 ms
+     * ผู้ใช้ขอ 8h แล้วได้ข้อมูล 1h โดยไม่มี error
+     */
+    @Test
+    fun everyRegisteredTimeframeRoundTripsWithoutSilentFallback() {
+        for (spec in TaIndicators.TIMEFRAMES) {
+            // canonical / MT5 ต้องชี้กลับมาที่ spec เดิมเสมอ (idempotent round-trip)
+            // หมายเหตุ: ไม่ทดสอบ canonical.uppercase() เพราะ "1m".uppercase() = "1M" = รายเดือน
+            // — สองตัวนี้ต่างกันที่ตัวพิมพ์โดยเจตนา
+            for (input in listOf(spec.canonical, spec.mt5, spec.mt5.lowercase())) {
+                assertEquals(spec.canonical, TaIndicators.normalizeTimeframe(input), "normalize($input)")
+                assertEquals(spec.mt5, TaIndicators.toMt5Timeframe(input), "mt5($input)")
+                assertEquals(spec.tvResolution, TaIndicators.toTvResolution(input), "tv($input)")
+                assertEquals(spec.millis, TaIndicators.timeframeMillis(input), "millis($input)")
+            }
+            // millis ต้องตรงกับ SmcApiService ที่ delegate มาใช้ทะเบียนเดียวกัน
+            assertEquals(
+                spec.millis,
+                SmcApiService.intervalToMillis(spec.canonical),
+                "SmcApiService.intervalToMillis(${spec.canonical})"
+            )
+        }
+    }
+
+    /** TF ที่เคยตกหล่น — ยืนยันเฉพาะเจาะจงว่าไม่กลายเป็น 1h อีก */
+    @Test
+    fun previouslyMissingTimeframesResolveCorrectly() {
+        assertEquals("360", TaIndicators.toTvResolution("6h"))
+        assertEquals("480", TaIndicators.toTvResolution("8h"))
+        assertEquals("720", TaIndicators.toTvResolution("12h"))
+        assertEquals(6 * 3_600_000L, SmcApiService.intervalToMillis("6h"))
+        assertEquals(8 * 3_600_000L, SmcApiService.intervalToMillis("8h"))
+        assertEquals(12 * 3_600_000L, SmcApiService.intervalToMillis("12h"))
+        // "1m" ต้องเป็น 1 นาที ไม่ใช่รายเดือน (canonical รายเดือน "1M" lowercase ชนกันพอดี)
+        assertEquals("1m", TaIndicators.normalizeTimeframe("1m"))
+        assertEquals(60_000L, TaIndicators.timeframeMillis("1m"))
+    }
+
+    /**
+     * P0: อินดิเคเตอร์ต้อง fail-closed — ข้อมูลไม่พอต้องคืน null ไม่ใช่ค่าประมาณ
+     *
+     * บัคเดิม: ema() คืน `data.last()` เมื่อแท่งไม่ครบ period
+     * → EMA200 บน 15m (ระบบดึงมา 150 แท่ง) เท่ากับราคาปิดพอดีทุกครั้ง
+     * แล้ว AI นำไปสรุปว่า "ราคาแตะ EMA200" ทั้งที่ไม่เคยคำนวณเลย
+     */
+    @Test
+    fun movingAveragesReturnNullInsteadOfFabricatingValues() {
+        val closes = (0 until 150).map { 2000.0 + it * 0.5 }
+        val lastClose = closes.last()
+
+        // ข้อมูลไม่พอ → ต้องเป็น null และต้องไม่เท่ากับราคาปิด
+        assertNull(TaIndicators.ema(closes, 200), "EMA200 จาก 150 แท่งต้องเป็น null")
+        assertNull(TaIndicators.sma(closes, 200), "SMA200 จาก 150 แท่งต้องเป็น null")
+        assertNull(TaIndicators.ema(closes, 151))
+        assertNull(TaIndicators.sma(closes, 151))
+        assertNull(TaIndicators.ema(emptyList(), 20))
+        assertNull(TaIndicators.sma(emptyList(), 20))
+        assertNull(TaIndicators.ema(closes, 0))
+        assertNull(TaIndicators.sma(closes, 0))
+
+        // ข้อมูลพอดี/เกิน → ต้องคำนวณได้จริง
+        val ema150 = TaIndicators.ema(closes, 150)
+        assertNotNull(ema150)
+        assertTrue(ema150.isFinite())
+        assertTrue(ema150 != lastClose, "EMA ต้องไม่บังเอิญเท่าราคาปิด (บ่งชี้ว่ายัง fallback อยู่)")
+
+        val sma20 = TaIndicators.sma(closes, 20)
+        assertNotNull(sma20)
+        // SMA20 ของ arithmetic series = ค่ากลางของ 20 ค่าสุดท้าย
+        assertEquals(closes.takeLast(20).average(), sma20, 1e-9)
     }
 
     @Test

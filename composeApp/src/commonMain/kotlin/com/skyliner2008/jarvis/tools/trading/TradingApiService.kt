@@ -138,20 +138,30 @@ class TradingApiService(private val client: HttpClient) {
             val ta = getTechnicalAnalysis(tvSymbol, ex, "1m")
             val close = ta["close"]?.toDoubleOrNull()
             if (close != null && close > 0.0) {
-                val change = ta["change"]?.toDoubleOrNull() ?: 0.0
-                val prevClose = close - change
+                // [สำคัญ] column "change" ของ TradingView scanner เป็น **เปอร์เซ็นต์** ไม่ใช่ราคา
+                // ยืนยันได้จากการใช้งานในไฟล์นี้เอง: getTopGainers เรียงด้วย "change"
+                // และ getVolumeBreakout กรอง change > 3.0 ซึ่งหมายถึง +3%
+                //
+                // เดิมโค้ดนี้ตีความเป็นราคา จึงได้
+                //   change     = เปอร์เซ็นต์ แต่ติดป้ายว่าเป็นจุดราคา
+                //   prev_close = close − เปอร์เซ็นต์ (ทองปิด 4085.20 ลบ 0.31 = 4084.89
+                //                ทั้งที่ค่าจริง ≈ 4072.5 — คลาดเคลื่อนเกือบทั้งวัน)
+                // และหน่วยไม่ตรงกับสาขา Yahoo/SMC ที่คำนวณถูกอยู่แล้ว
+                val changePct = ta["change"]?.toDoubleOrNull() ?: 0.0
+                val prevClose = if (changePct != -100.0) close / (1.0 + changePct / 100.0) else close
+                val changeAbs = close - prevClose
                 return mapOf(
                     "symbol" to symbol.uppercase(),
                     "canonical_symbol" to canonical,
                     "price" to "%.4f".format(close),
-                    "change" to "%.4f".format(change),
-                    "change_pct" to "%.2f%%".format(change),
+                    "change" to "%.4f".format(changeAbs),
+                    "change_pct" to "%.2f%%".format(changePct),
                     "prev_close" to "%.4f".format(prevClose),
                     "high_52w" to "N/A",
                     "low_52w" to "N/A",
                     "currency" to "USD",
                     "market_state" to "LIVE | TV:$ex",
-                    "direction" to if (change >= 0.0) "UP" else "DOWN",
+                    "direction" to if (changePct >= 0.0) "UP" else "DOWN",
                     "source" to "TV:$ex"
                 )
             }
@@ -991,6 +1001,27 @@ class TradingApiService(private val client: HttpClient) {
      * ดึง Crypto Fear & Greed Index ตัวจริงจาก alternative.me
      * คืน map: value (0-100), classification, trend (ค่าย้อนหลัง N วัน "newest,…,oldest")
      */
+    /** เหตุการณ์เศรษฐกิจพร้อมเวลาแบบ epoch — ใช้กับระบบปลุก AI ที่ต้องเทียบเวลาได้แม่น */
+    data class MacroEvent(
+        val title: String,
+        val country: String,
+        val impact: String,
+        val epochSeconds: Long,
+        val forecast: String,
+        val previous: String
+    ) {
+        val isHighImpact: Boolean get() = impact.equals("High", ignoreCase = true)
+    }
+
+    /**
+     * ปฏิทินเศรษฐกิจแบบดิบ (ไม่กรอง) พร้อม epoch seconds
+     * `getEconomicCalendar` คืนเวลาเป็นข้อความที่จัดรูปแบบแล้ว ซึ่งเอาไปคำนวณต่อไม่ได้
+     */
+    suspend fun getMacroEvents(): List<MacroEvent> {
+        val raw = fetchCalendarEventsJson() ?: fetchCalendarEventsXml()
+        return raw.map { MacroEvent(it.title, it.country, it.impact, it.epochSeconds, it.forecast, it.previous) }
+    }
+
     suspend fun getFearGreedIndex(limit: Int = 7): Map<String, String> {
         return try {
             val resp = client.get("https://api.alternative.me/fng/?limit=$limit&format=json") {

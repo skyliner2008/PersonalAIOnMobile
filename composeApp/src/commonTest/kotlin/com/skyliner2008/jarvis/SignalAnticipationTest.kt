@@ -1,134 +1,81 @@
 package com.skyliner2008.jarvis
 
-import com.skyliner2008.jarvis.automation.SignalAlertProvider
-import com.skyliner2008.jarvis.automation.smc.MarketContextDigest
-import com.skyliner2008.jarvis.tools.trading.Candle
-import com.skyliner2008.jarvis.tools.trading.SmcApiService
-import io.ktor.client.HttpClient
+import com.skyliner2008.jarvis.automation.AlertFieldCatalog
+import com.skyliner2008.jarvis.automation.wake.AnticipationEngine
+import com.skyliner2008.jarvis.automation.wake.AnticipationToolActions
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/**
+ * ระบบปลุก AI (คาดการณ์ล่วงหน้า) — สัญญาระหว่าง tool / alert catalog / การ์ดแชท
+ * (ตรรกะการตรวจจับอยู่ใน WakeTriggerRegistryTest, การเรียนรู้/งบอยู่ใน WakeSystemTest)
+ */
 class SignalAnticipationTest {
 
-    private val provider = SignalAlertProvider(SmcApiService(HttpClient()))
-
-    private fun createCandle(
-        open: Double,
-        high: Double,
-        low: Double,
-        close: Double,
-        ts: Long = 1700000000000L
-    ) = Candle(open = open, high = high, low = low, close = close, volume = 100.0, timestamp = ts)
-
     @Test
-    fun testDetectAnticipation_keyzoneDemandProducesBuyAnticipation() {
-        val candles = List(20) { i ->
-            createCandle(2000.0, 2005.0, 1995.0, 2000.0, 1700000000000L + i * 60000L)
-        }
-        val digest = MarketContextDigest.Digest(
-            symbol = "XAUUSD",
-            price = 2000.0,
-            tfLines = listOf(
-                MarketContextDigest.TfLine("H4", 1, "BOS", 2000.0, 55.0, 1990.0, 10.0, 2020.0, 1980.0)
-            ),
-            levelsAbove = emptyList(),
-            levelsBelow = listOf(MarketContextDigest.Level(1995.0, "BULLISH_OB")),
-            premiumDiscount = "DISCOUNT",
-            poc = 1998.0,
-            vah = 2010.0,
-            val_ = 1990.0,
-            keyZoneHit = "Bullish Order Block Support (1995.00 - 2000.00)",
-            text = "HTF Bullish Context"
-        )
-
-        val anticipation = provider.detectAnticipation(candles, candles.size - 2, 10.0, digest)
-        assertNotNull(anticipation, "Anticipation should be detected when Keyzone Demand is hit")
-        assertEquals("BUY", anticipation.side)
-        assertEquals("KEYZONE_PROXIMITY", anticipation.setupType)
-        assertTrue(anticipation.reason.contains("Bullish Zone"))
-        assertTrue(anticipation.confidence >= 70)
+    fun anticipationIsSeparateToolFromSignalAlert() {
+        // field เก่าต้องไม่อยู่ใน signal alert แล้ว — ระบบคาดการณ์แยกเป็น tool ของตัวเอง
+        assertFalse(AlertFieldCatalog.isFieldSupported("trading_signal_alert", "signal_anticipation"))
+        assertFalse(AlertFieldCatalog.isFieldSupported("trading_signal_alert", "signal_anticipation_side"))
+        assertTrue(AlertFieldCatalog.isFieldSupported(AnticipationEngine.TOOL_NAME, AnticipationEngine.K_WAKE))
+        assertTrue(AlertFieldCatalog.isFieldSupported(AnticipationEngine.TOOL_NAME, AnticipationEngine.K_EVENT_COUNT))
+        assertTrue(AlertFieldCatalog.isNumericField(AnticipationEngine.TOOL_NAME, AnticipationEngine.K_WAKE))
+        assertTrue(com.skyliner2008.jarvis.tools.ToolRegistry.tvOnlyTradingFunctionNames.contains("trading_signal_anticipation"))
+        assertTrue(com.skyliner2008.jarvis.ui.screen.ALERT_PRESETS.none { it.field == "signal_anticipation" })
     }
 
     @Test
-    fun testDetectAnticipation_keyzoneSupplyProducesSellAnticipation() {
-        val candles = List(20) { i ->
-            createCandle(2050.0, 2055.0, 2045.0, 2050.0, 1700000000000L + i * 60000L)
-        }
-        val digest = MarketContextDigest.Digest(
-            symbol = "XAUUSD",
-            price = 2050.0,
-            tfLines = listOf(
-                MarketContextDigest.TfLine("H4", -1, "BOS", 2050.0, 45.0, 2060.0, 10.0, 2070.0, 2030.0)
-            ),
-            levelsAbove = listOf(MarketContextDigest.Level(2055.0, "BEARISH_OB")),
-            levelsBelow = emptyList(),
-            premiumDiscount = "PREMIUM",
-            poc = 2052.0,
-            vah = 2060.0,
-            val_ = 2040.0,
-            keyZoneHit = "Bearish Order Block Resistance (2050.00 - 2055.00)",
-            text = "HTF Bearish Context"
-        )
+    fun createActionBuildsWakeAlertJobs() = kotlinx.coroutines.runBlocking {
+        val captured = mutableListOf<Map<String, String>>()
+        val actions = AnticipationToolActions(createAlert = { captured += it; "OK" }, scanner = null)
 
-        val anticipation = provider.detectAnticipation(candles, candles.size - 2, 10.0, digest)
-        assertNotNull(anticipation, "Anticipation should be detected when Keyzone Supply is hit")
-        assertEquals("SELL", anticipation.side)
-        assertEquals("KEYZONE_PROXIMITY", anticipation.setupType)
-        assertTrue(anticipation.reason.contains("Bearish Zone"))
+        actions.execute(mapOf("action" to "create", "symbol" to "xauusd"))
+        assertEquals(1, captured.size)
+        assertEquals("XAUUSD@15m", captured[0]["symbol"], "ไม่ระบุ TF ต้องใช้ 15m")
+        assertEquals(AnticipationEngine.TOOL_NAME, captured[0]["tool_name"])
+        assertEquals(AnticipationEngine.K_WAKE, captured[0]["condition_field"])
+        assertEquals(">=", captured[0]["condition_operator"])
+
+        captured.clear()
+        actions.execute(mapOf("action" to "create", "symbol" to "BTCUSDT", "timeframe" to "all"))
+        assertEquals(AnticipationToolActions.ALL_TF.map { "BTCUSDT@$it" }, captured.map { it["symbol"] })
+
+        captured.clear()
+        actions.execute(mapOf("action" to "create", "symbol" to "ETHUSDT@1h", "timeframe" to "M5,1H"))
+        assertEquals(listOf("ETHUSDT@5m", "ETHUSDT@1h"), captured.map { it["symbol"] })
     }
 
     @Test
-    fun testDetectAnticipation_intraBarWickSweepRejectionProducesAnticipation() {
-        // Build 19 normal candles between 2000 and 2010
-        val baseCandles = (0 until 19).map { i ->
-            createCandle(2005.0, 2010.0, 2000.0, 2005.0, 1700000000000L + i * 60000L)
-        }.toMutableList()
-
-        // 20th candle: sweeps low to 1990 (below prior low 2000) and closes at 2007 with huge bottom wick
-        val sweepCandle = createCandle(2002.0, 2008.0, 1990.0, 2007.0, 1700000000000L + 19 * 60000L)
-        baseCandles.add(sweepCandle)
-
-        val anticipation = provider.detectAnticipation(baseCandles, baseCandles.size - 2, 10.0, null)
-        assertNotNull(anticipation, "Wick sweep rejection should trigger anticipation")
-        assertEquals("BUY", anticipation.side)
-        assertTrue(anticipation.setupType == "WICK_SWEEP_REJECTION" || anticipation.setupType.startsWith("CONFLUENCE"))
-        assertTrue(anticipation.reason.contains("Wick Rejection"))
-
-        // When isolated to WICK_SWEEP_REJECTION factor only
-        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("SWEEP_ONLY", listOf("WICK_SWEEP_REJECTION"))
-        val isolated = provider.detectAnticipation(baseCandles, baseCandles.size - 2, 10.0, null, symbol = "SWEEP_ONLY")
-        assertNotNull(isolated)
-        assertEquals("WICK_SWEEP_REJECTION", isolated.setupType)
-        assertEquals("BUY", isolated.side)
+    fun configRejectsUnknownFactorIds() = kotlinx.coroutines.runBlocking {
+        val actions = AnticipationToolActions(createAlert = { "OK" }, scanner = null)
+        val res = actions.execute(mapOf("action" to "config", "add_factors" to "NOT_A_REAL_FACTOR"))
+        assertTrue(res.startsWith("❌"), res)
+        assertTrue(res.contains("NOT_A_REAL_FACTOR"))
     }
 
     @Test
-    fun testDetectAnticipation_normalCandleReturnsNull() {
-        val candles = List(20) { i ->
-            val offset = if (i % 2 == 0) 0.5 else -0.5
-            createCandle(2000.0 + offset, 2002.0, 1998.0, 2000.0 - offset, 1700000000000L + i * 60000L)
-        }
-        val anticipation = provider.detectAnticipation(candles, candles.size - 2, 10.0, null)
-        assertNull(anticipation, "Calm candle without keyzone or wick sweep should return null")
+    fun scanWithoutScannerFailsGracefully() = kotlinx.coroutines.runBlocking {
+        val actions = AnticipationToolActions(createAlert = { "OK" }, scanner = null)
+        val res = actions.execute(mapOf("action" to "scan", "symbol" to "XAUUSD"))
+        assertTrue(res.contains("ยังไม่พร้อม"), res)
     }
 
     @Test
-    fun testAlertCatalogAndPresets_supportAnticipation() {
-        val catalog = com.skyliner2008.jarvis.automation.AlertFieldCatalog
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "signal_anticipation"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "signal_stage"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "signal_anticipation_side"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "signal_anticipation_zone"))
-
-        val presets = com.skyliner2008.jarvis.ui.screen.ALERT_PRESETS
-        val anticipationPreset = presets.firstOrNull { it.field == "signal_anticipation" }
-        kotlin.test.assertNull(anticipationPreset, "ALERT_PRESETS should NOT include manual anticipation preset (managed exclusively by AI tool)")
-
-        val tradingTools = com.skyliner2008.jarvis.tools.ToolRegistry.tvOnlyTradingFunctionNames
-        assertTrue(tradingTools.contains("trading_signal_anticipation"), "ToolRegistry must register trading_signal_anticipation for AI")
+    fun scanRendersEngineOutput() = kotlinx.coroutines.runBlocking {
+        val actions = AnticipationToolActions(createAlert = { "OK" }, scanner = { sym ->
+            assertEquals("XAUUSD@15m", sym)
+            mapOf(
+                AnticipationEngine.K_CLOSE to "4012.50",
+                AnticipationEngine.K_EVENTS to "• [M15] EMA ตัดขึ้น → ชี้ BUY",
+                AnticipationEngine.K_STATES to "• [H1] อยู่ในกรอบ",
+                AnticipationEngine.K_MTF to "H4: UP"
+            )
+        })
+        val res = actions.execute(mapOf("action" to "scan", "symbol" to "XAUUSD"))
+        assertTrue(res.contains("4012.50") && res.contains("EMA ตัดขึ้น") && res.contains("H4: UP"), res)
     }
 
     @Test
@@ -183,82 +130,6 @@ class SignalAnticipationTest {
     }
 
     @Test
-    fun testDetectAnticipation_emaNearGoldenCrossProducesBuyAnticipation() {
-        // 75 แท่ง: 60 แท่งแรกอยู่ระดับ 2000.0
-        // แท่ง 60..72 ปรับลงมาแถว 1985.0 ทำให้ EMA14 อยู่ต่ำกว่า EMA60
-        // แท่ง 73..74 ดีดตัวขึ้นมาที่ 1998.0 ทำให้ EMA14 วิ่งพุ่งเข้าหา EMA60 (บีบตัวเข้าหาในระยะกระชั้นชิด)
-        val list = mutableListOf<Candle>()
-        for (i in 0 until 60) {
-            list.add(createCandle(2000.0, 2002.0, 1998.0, 2000.0, 1700000000000L + i * 60000L))
-        }
-        for (i in 60 until 72) {
-            list.add(createCandle(1985.0, 1987.0, 1983.0, 1985.0, 1700000000000L + i * 60000L))
-        }
-        // แท่ง 72: ปิด 1992.0
-        list.add(createCandle(1986.0, 1994.0, 1985.0, 1992.0, 1700000000000L + 72 * 60000L))
-        // แท่ง 73: ปิด 1995.0
-        list.add(createCandle(1992.0, 1997.0, 1991.0, 1995.0, 1700000000000L + 73 * 60000L))
-        // แท่ง 74 (Live): ปิด 1997.0 อยู่ในช่วง High/Low ของแท่ง 73 เพื่อไม่ให้เกิด Wick Sweep
-        list.add(createCandle(1995.0, 1997.0, 1994.0, 1997.0, 1700000000000L + 74 * 60000L))
-
-        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("EMA_BUY_TEST", listOf("EMA_NEAR_CROSS"))
-        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null, symbol = "EMA_BUY_TEST")
-        assertNotNull(anticipation, "EMA near cross should trigger anticipation")
-        assertEquals("BUY", anticipation.side)
-        assertEquals("EMA_NEAR_CROSS", anticipation.setupType)
-        assertTrue(anticipation.reason.contains("Golden Cross"))
-        assertEquals(76, anticipation.confidence)
-    }
-
-    @Test
-    fun testDetectAnticipation_emaNearDeathCrossProducesSellAnticipation() {
-        // 75 แท่ง: 60 แท่งแรกอยู่ระดับ 2000.0
-        // แท่ง 60..72 ปรับขึ้นไปแถว 2015.0 ทำให้ EMA14 อยู่สูงกว่า EMA60
-        // แท่ง 73..74 ทิ้งตัวลงมาแถว 2003.0 ทำให้ EMA14 วิ่งปักหัวลงเข้าหา EMA60
-        val list = mutableListOf<Candle>()
-        for (i in 0 until 60) {
-            list.add(createCandle(2000.0, 2002.0, 1998.0, 2000.0, 1700000000000L + i * 60000L))
-        }
-        for (i in 60 until 72) {
-            list.add(createCandle(2015.0, 2017.0, 2013.0, 2015.0, 1700000000000L + i * 60000L))
-        }
-        // แท่ง 72: ปิด 2008.0
-        list.add(createCandle(2014.0, 2015.0, 2006.0, 2008.0, 1700000000000L + 72 * 60000L))
-        // แท่ง 73: ปิด 2005.0
-        list.add(createCandle(2008.0, 2009.0, 2003.0, 2005.0, 1700000000000L + 73 * 60000L))
-        // แท่ง 74 (Live): ปิด 2003.0
-        list.add(createCandle(2005.0, 2006.0, 2003.0, 2003.0, 1700000000000L + 74 * 60000L))
-
-        com.skyliner2008.jarvis.automation.AnticipationConfigManager.setFactors("EMA_SELL_TEST", listOf("EMA_NEAR_CROSS"))
-        val anticipation = provider.detectAnticipation(list, list.size - 2, 20.0, null, symbol = "EMA_SELL_TEST")
-        assertNotNull(anticipation, "EMA near death cross should trigger anticipation")
-        assertEquals("SELL", anticipation.side)
-        assertEquals("EMA_NEAR_CROSS", anticipation.setupType)
-        assertTrue(anticipation.reason.contains("Death Cross"))
-        assertEquals(76, anticipation.confidence)
-    }
-
-    @Test
-    fun testAlertCatalogAndPresets_supportEma14_60FieldsAndPresets() {
-        val catalog = com.skyliner2008.jarvis.automation.AlertFieldCatalog
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14_60_cross"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14_60_near_cross"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14_60_near_cross_side"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14_60_state"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14_60_spread"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema14"))
-        assertTrue(catalog.isFieldSupported("trading_signal_alert", "ema60"))
-
-        assertTrue(catalog.isFieldSupported("trading_smc_flow", "ema14_60_near_cross"))
-        assertTrue(catalog.isFieldSupported("trading_smc_flow", "ema14_60_near_cross_side"))
-
-        val presets = com.skyliner2008.jarvis.ui.screen.ALERT_PRESETS
-        assertNotNull(presets.firstOrNull { it.field == "ema14_60_near_cross" }, "Should have ema14_60_near_cross preset")
-        assertNotNull(presets.firstOrNull { it.field == "ema14_60_cross" && it.value == "GOLDEN_CROSS" }, "Should have Golden Cross preset")
-        assertNotNull(presets.firstOrNull { it.field == "ema14_60_cross" && it.value == "DEATH_CROSS" }, "Should have Death Cross preset")
-    }
-
-    @Test
     fun testAnticipationTimeframeDisplayAndParsing() {
         // 1. Verify splitSymbolAndTf correctly resolves default 1h when no suffix
         val (sym1, tf1) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf("XAUUSD")
@@ -285,143 +156,5 @@ class SignalAnticipationTest {
         val (cardSym, cardTf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(parsed.symbol)
         assertEquals("XAUUSD", cardSym)
         assertEquals("1h", cardTf)
-    }
-
-    @Test
-    fun testAnticipationDefaultTimeframeIs15mAndSupportsMultiTf() = kotlinx.coroutines.runBlocking {
-        var capturedAlertArgs: Map<String, String>? = null
-        val mockDelegate = object : com.skyliner2008.jarvis.tools.SideEffectDelegate {
-            override suspend fun onRememberFact(key: String, value: String, importance: String) {}
-            override suspend fun onSetReminder(title: String, detail: String, whenStr: String, timestamp: Long) {}
-            override suspend fun onDisplayReport(markdown: String, voiceSummary: String) {}
-            override suspend fun onVisionToggle(active: Boolean) {}
-            override suspend fun onVoiceChange(newVoice: String) {}
-            override suspend fun onRecallMemory(query: String): String = ""
-            override suspend fun onSaveDiagnosticReport(filename: String, content: String) {}
-            override suspend fun onSaveAgentTool(filename: String, jsonContent: String) {}
-            override suspend fun onReadAgentTool(filename: String): String = ""
-            override suspend fun onDeleteAgentTool(filename: String): String = "OK"
-            override suspend fun onUpdateIdentity(target: String, field: String, value: String): String = "OK"
-            override suspend fun onManageAlerts(args: Map<String, String>): String {
-                capturedAlertArgs = args
-                return "OK"
-            }
-            override suspend fun onManageSchedule(args: Map<String, String>): String = "OK"
-            override suspend fun onChartControl(args: Map<String, String>): String = "OK"
-        }
-        com.skyliner2008.jarvis.tools.ToolExecutor.setSideEffectDelegate(mockDelegate)
-
-        // 1. When no timeframe is provided, default MUST be 15m
-        val callDefault = com.skyliner2008.jarvis.tools.ToolCall(
-            name = "trading_signal_anticipation",
-            args = mapOf("action" to "create", "symbol" to "XAUUSD")
-        )
-        val resDefault = com.skyliner2008.jarvis.tools.ToolExecutor.execute(callDefault)
-        assertNotNull(capturedAlertArgs)
-        assertEquals("15m", capturedAlertArgs!!["timeframe"], "Default timeframe for anticipation MUST be 15m")
-        assertEquals("XAUUSD", capturedAlertArgs!!["symbol"])
-        assertTrue(resDefault.result.contains("TF: 15M"))
-
-        // 2. When timeframe is explicitly specified (e.g. 5m, 1h, 4h)
-        val call5m = com.skyliner2008.jarvis.tools.ToolCall(
-            name = "trading_signal_anticipation",
-            args = mapOf("action" to "create", "symbol" to "BTCUSDT", "timeframe" to "5m")
-        )
-        val res5m = com.skyliner2008.jarvis.tools.ToolExecutor.execute(call5m)
-        assertEquals("5m", capturedAlertArgs!!["timeframe"])
-        assertEquals("BTCUSDT", capturedAlertArgs!!["symbol"])
-        assertTrue(res5m.result.contains("TF: 5M"))
-
-        // 3. When timeframe is "all"
-        val callAll = com.skyliner2008.jarvis.tools.ToolCall(
-            name = "trading_signal_anticipation",
-            args = mapOf("action" to "create", "symbol" to "ETHUSDT", "timeframe" to "all")
-        )
-        val resAll = com.skyliner2008.jarvis.tools.ToolExecutor.execute(callAll)
-        assertEquals("all", capturedAlertArgs!!["timeframe"])
-        assertTrue(resAll.result.contains("TF: ALL"))
-    }
-
-    @Test
-    fun testVeyraShiftEngine_detectsShiftAndBuildsExecutionRails() {
-        // สร้าง 80 แท่งไต่ระดับขาขึ้นแข็งแกร่ง (Trend + Momentum + Auction Value Field + Volume Impulse)
-        val candles = (0 until 80).map { i ->
-            val base = 2000.0 + i * 2.0
-            val vol = if (i >= 75) 250.0 else 100.0
-            createCandle(base, base + 3.0, base - 1.0, base + 2.5, 1700000000000L + i * 60000L).copy(volume = vol)
-        }
-        val result = com.skyliner2008.jarvis.automation.strategy.VeyraShiftEngine.evaluate(candles)
-        assertNotNull(result, "VeyraShiftEngine should evaluate 80 candles")
-        assertTrue(result.dominantScore >= 40.0, "Score should reflect institutional trend")
-        assertTrue(result.entry > 0.0, "Execution Rail: Entry should be positive")
-        assertTrue(result.stopLoss > 0.0, "Execution Rail: Stop Loss should be positive")
-        assertTrue(result.tp1 > 0.0 && result.tp2 > 0.0 && result.tp3 > 0.0, "Execution Rails: TP1, TP2, TP3 should be defined")
-    }
-
-    @Test
-    fun testBBSqueezeTrendEngine_detectsSqueezeAndBreakout() {
-        // สร้าง 40 แท่งสลับแคบๆ เพื่อเกิด Bollinger Squeeze ใน Keltner
-        val candles = (0 until 40).map { i ->
-            val p = 2000.0 + (if (i % 2 == 0) 0.3 else -0.3)
-            createCandle(p, p + 0.5, p - 0.5, p, 1700000000000L + i * 60000L)
-        }
-        val result = com.skyliner2008.jarvis.automation.strategy.BBSqueezeTrendEngine.evaluate(candles)
-        assertNotNull(result, "BBSqueezeTrendEngine should evaluate 40 candles")
-        assertTrue(result.bbUpper > result.bbLower, "Bollinger bands should be valid")
-        assertTrue(result.entryPrice > 0.0, "Entry price should be calculated")
-    }
-
-    @Test
-    fun testFastRsiEngine_reversalTriggers() {
-        // สร้าง 20 แท่ง: ร่วงแรงให้ RSI5 ต่ำกว่า 35 แล้วดีดตัวขึ้น
-        val candles = mutableListOf<Candle>()
-        for (i in 0 until 15) {
-            val p = 2000.0 - i * 5.0
-            candles.add(createCandle(p, p + 1.0, p - 5.0, p - 4.5, 1700000000000L + i * 60000L))
-        }
-        // แท่งดีดตัวกลับ
-        candles.add(createCandle(1925.0, 1945.0, 1924.0, 1942.0, 1700000000000L + 15 * 60000L))
-
-        val result = com.skyliner2008.jarvis.automation.strategy.FastRsiEngine.evaluate(candles)
-        assertNotNull(result, "FastRsiEngine should evaluate candles")
-        assertTrue(result.rsi5 in 0.0..100.0, "RSI5 should be between 0 and 100")
-        assertTrue(result.stopLoss > 0.0, "SL should be defined")
-    }
-
-    @Test
-    fun testAnticipationReinforcementLearningWeights() {
-        val baseConf = com.skyliner2008.jarvis.automation.AnticipationConfigManager.FACTOR_VEYRA_SHIFT.defaultConfidence
-        assertEquals(84, baseConf)
-
-        com.skyliner2008.jarvis.automation.AnticipationConfigManager.applyFactorWeightAdjustment("VEYRA_SHIFT", 4)
-        val boosted = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getEffectiveConfidence("VEYRA_SHIFT")
-        assertEquals(88, boosted)
-
-        com.skyliner2008.jarvis.automation.AnticipationConfigManager.applyFactorWeightAdjustment("VEYRA_SHIFT", -6)
-        val penalized = com.skyliner2008.jarvis.automation.AnticipationConfigManager.getEffectiveConfidence("VEYRA_SHIFT")
-        assertEquals(82, penalized)
-    }
-
-    @Test
-    fun testToolExecutor_learningActionReturnsClosedLoopStats() = kotlinx.coroutines.runBlocking {
-        val call = com.skyliner2008.jarvis.tools.ToolCall(
-            name = "trading_signal_anticipation",
-            args = mapOf("action" to "learning")
-        )
-        val res = com.skyliner2008.jarvis.tools.ToolExecutor.execute(call)
-        assertTrue(res.result.contains("รายงานสถิติและการเรียนรู้ของระบบ Anticipation"), "Should return reinforcement learning report")
-        assertTrue(res.result.contains("Reinforcement Learning"))
-        assertTrue(res.result.contains("Total Anticipations"))
-        assertTrue(res.result.contains("Veyra Institutional Shift Ledger"))
-    }
-
-    @Test
-    fun testToolExecutor_inspectActionHandlesEmptyAndFormattedRecords() = kotlinx.coroutines.runBlocking {
-        val callEmpty = com.skyliner2008.jarvis.tools.ToolCall(
-            name = "trading_signal_anticipation",
-            args = mapOf("action" to "inspect", "symbol" to "UNKNOWN_SYM")
-        )
-        val resEmpty = com.skyliner2008.jarvis.tools.ToolExecutor.execute(callEmpty)
-        assertTrue(resEmpty.result.contains("ยังไม่มีประวัติการคาดการณ์"), "Should indicate empty history")
     }
 }

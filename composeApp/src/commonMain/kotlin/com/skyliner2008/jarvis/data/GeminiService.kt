@@ -246,6 +246,13 @@ class GeminiService(
     var apiKeysOverride: List<String>? = null
 
     /**
+     * แทนที่ system prompt ของ JARVIS ทั้งชุด (เฉพาะ [generateResponse])
+     * ใช้กับงานเฉพาะทางที่ไม่ต้องการบุคลิก/กฎ tool ของแชท เช่น การวิเคราะห์ของระบบปลุก AI
+     * — system prompt แชทยาวหลายหมื่นตัวอักษร ส่งทุกครั้งเปลืองโทเคนและขัดกับรูปแบบคำตอบเฉพาะ
+     */
+    var systemPromptOverride: String? = null
+
+    /**
      * เซ็ตเมื่อ Gemini ตายทั้ง chain (ทุก key + ทุกโมเดล) ในรอบล่าสุด
      * Orchestrator ใช้ flag นี้ตัดสินใจสลับไป cross-provider fallback (Groq/NIM/OpenRouter)
      * null = รอบล่าสุดสำเร็จหรือยังไม่เคยล้ม
@@ -1077,7 +1084,9 @@ class GeminiService(
                         put("contents", buildJsonArray { contents.forEach { add(it) } })
                         put("systemInstruction", buildJsonObject {
                             put("role", "system")
-                            put("parts", buildJsonArray { add(buildJsonObject { put("text", JARVIS_SYSTEM_PROMPT + "\n\n" + coreContext + "\n\n" + intentAddon) }) })
+                            put("parts", buildJsonArray { add(buildJsonObject {
+                                put("text", systemPromptOverride ?: (JARVIS_SYSTEM_PROMPT + "\n\n" + coreContext + "\n\n" + intentAddon))
+                            }) })
                         })
                     })
                 }

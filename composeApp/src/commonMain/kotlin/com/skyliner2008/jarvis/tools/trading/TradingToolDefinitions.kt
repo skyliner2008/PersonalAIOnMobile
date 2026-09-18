@@ -324,15 +324,20 @@ object TradingToolDefinitions {
         FunctionDeclaration(
             name = "trading_position_sizing",
             description = """คำนวณขนาดไม้ (Position Sizing) ตามความเสี่ยงที่กำหนด
-                |ช่วยคำนวณว่าควรเปิดกี่ Units, มูลค่าสัญญาเท่าไหร่ และใช้ Leverage เท่าไหร่
-                |ใช้เมื่อผู้ใช้ถาม: "คำนวณไม้ให้หน่อย", "ถ้าเสี่ยง 2% ต้องเข้ากี่ BTC" """.trimMargin(),
+                |คืนทั้งจำนวน units, ขนาดเป็น lot สำหรับ MT5, มูลค่าสัญญา และ gearing
+                |ส่ง symbol มาด้วยเสมอเพื่อให้ระบบแปลงเป็น lot ได้ (XAUUSD=100/lot, คู่เงิน FX=100000/lot)
+                |ถ้าเป็นสินทรัพย์ที่ระบบไม่รู้จัก contract size ให้ส่ง contract_size มาเอง
+                |ใช้เมื่อผู้ใช้ถาม: "คำนวณไม้ให้หน่อย", "ถ้าเสี่ยง 2% ต้องเข้ากี่ lot" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "balance"   to ParameterProperty("NUMBER", "เงินทุนในพอร์ต (Default 10000)"),
                     "risk_pct"  to ParameterProperty("NUMBER", "ความเสี่ยงที่รับได้เป็น % (Default 1)"),
                     "entry"     to ParameterProperty("NUMBER", "ราคาจุดเข้าซื้อ"),
-                    "stop_loss" to ParameterProperty("NUMBER", "ราคาจุดตัดขาดทุน")
+                    "stop_loss" to ParameterProperty("NUMBER", "ราคาจุดตัดขาดทุน"),
+                    "symbol"    to ParameterProperty("STRING", "สัญลักษณ์ เช่น XAUUSD, EURUSD — ใช้หา contract size อัตโนมัติ"),
+                    "contract_size" to ParameterProperty("NUMBER", "จำนวนหน่วยต่อ 1 lot (ระบุเมื่อระบบไม่รู้จัก symbol นั้น)"),
+                    "lot_step"  to ParameterProperty("NUMBER", "ขั้นต่ำของ lot ที่โบรกเกอร์รองรับ (Default 0.01)")
                 ),
                 required = listOf("entry", "stop_loss")
             )
@@ -347,8 +352,9 @@ object TradingToolDefinitions {
                 |Action: 'create' สร้างใหม่, 'update' แก้ค่าเปรียบเทียบ (ระบุ alert_id + condition_value ใหม่), 'rename' เปลี่ยนชื่อ (ระบุ alert_id + name ใหม่ — ชื่อนี้ใช้ในหัว notification และเสียงพูด), 'delete' ลบ (ระบุ alert_id), 'list' ดูรายการ
                 |
                 |[สำคัญ] ตั้งเงื่อนไขได้เฉพาะ tool_name/field ที่ background ดึงค่าได้จริงต่อไปนี้เท่านั้น (ห้ามตั้งมั่ว เช่น EMA cross ที่ไม่มีในรายการ):
-                |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction (ใช้กับ ==)
-                |- trading_indicators ⭐ USER QUERY / ALERT DATA (TradingView — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): รองรับค่ารายละเอียดสำหรับตอบคำถามผู้ใช้และสร้าง Alert เช่น close, open, high, low, ema7, ema9, ema20, ema21, ema50, ema100, ema200, sma20, sma50, sma100, sma200, ema_cross_state, ema50_200_spread, ema20_50_spread, rsi7, rsi9, rsi14, rsi21, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, mfi14, bb_upper, bb_basis, bb_lower, bb_percent_b, bb_width, atr7, atr14, atr21, atr_pct, adx14, di_plus, di_minus, vwap, vwap_distance_pct, volume, volume_sma20, volume_ratio20, obv, obv_slope20, ichimoku_tenkan, ichimoku_kijun, ichimoku_cloud_top, ichimoku_cloud_bottom, pivot, resistance1, resistance2, support1, support2, supertrend, donchian_upper, donchian_mid, donchian_lower, roc, williams_r, fibonacci_levels
+                |- trading_price: price, change (จุดราคา), change_pct (%), prev_close, direction (ใช้กับ ==) — high_52w/low_52w มีเฉพาะเมื่อ source เป็น Yahoo
+                |- trading_indicators ⭐ USER QUERY / ALERT DATA (TradingView — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): คำนวณจากแท่งที่ปิดแล้วในเครื่อง — close, open, high, low, volume, ema7, ema9, ema14, ema20, ema21, ema50, ema100, ema200, sma20, sma50, sma100, sma200, ema_cross_state, ema50_200_spread, ema20_50_spread, rsi7, rsi14, rsi21, rsi14_prev, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, ao, mfi14, roc, williams_r, bb_upper, bb_basis, bb_lower, bb_percent_b, bb_width, atr7, atr14, atr21, atr_pct, adx14, di_plus, di_minus, supertrend, supertrend_direction, vwap, vwap_distance_pct, volume_sma20, volume_ratio20, obv, obv_slope20, ichimoku_tenkan, ichimoku_kijun, ichimoku_cloud_top, ichimoku_cloud_bottom, ichimoku_chikou, pivot, resistance1, resistance2, resistance3, support1, support2, support3, donchian_upper, donchian_mid, donchian_lower, swing_high, swing_low, fib_236, fib_382, fib_500, fib_618, fib_786, bars_used
+                |  [หมายเหตุ] ค่าที่แท่งเทียนไม่พอจะคำนวณ (เช่น ema200 เมื่อมีข้อมูลน้อยกว่า 800 แท่ง) จะ **ไม่ถูกส่งออกมาเลย** ไม่ใช่ส่งค่าประมาณ — ถ้าไม่เห็น field ที่ต้องการให้ดู bars_used ประกอบ
                 |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM ใช้กับ ==), smc_zone_pct (>=80 พรีเมียม, <=20 ดิสเคาน์), smc_trend, smc_last_event (BOS_UP/BOS_DOWN/CHOCH_UP/CHOCH_DOWN), smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
                 |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal (BUY/SELL/NONE ใช้กับ == — confluence ครบ: trigger+structure+zone), smc_recipes (A=OB, B=FVG+OB, C=Fib golden ใช้กับ contains), ema14_60_signal (BUY/SELL/NONE ใช้กับ ==), ema14_60_cross (GOLDEN_CROSS/DEATH_CROSS/NONE ใช้กับ ==), ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal (BUY/SELL/NONE), utbot_trend (BULL/BEAR), utbot_stop, structure_bias, in_fib_golden (0/1), fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
                 |- trading_strategy_signal ⭐ (กลยุทธ์เชิงวิชาการจาก Strategy Library — เลือก TF ด้วย symbol@TF): decision (BUY/SELL/WAIT), gate (PASS/NO_CONFLUENCE/MTF_MISALIGNMENT/DATA_QUALITY), confidence_pct, data_quality_pct, mtf_alignment, consensus_signal (STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL ใช้กับ ==), consensus_score (ตัวเลข -5 ถึง 5), tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal (BUY/SELL/NONE ใช้กับ ==), trend_state (UPTREND/DOWNTREND/RANGE), tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
@@ -384,27 +390,21 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_signal_anticipation",
-            description = """จัดการและสแกนระบบคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ตรวจจับ-วิเคราะห์-แจ้งเตือน-เรียนรู้ (Closed-Loop Flow)
-                |ใช้เมื่อผู้ใช้สั่ง: "สแกนหาคาดการณ์สัญญาณ [symbol]", "ใช้ tool คาดการณ์ล่วงหน้า [symbol]", "ตั้งแจ้งเตือนคาดการณ์ทองคำ", "ดูผลการเรียนรู้ของ anticipation", "สถิติความแม่นยำคาดการณ์", "ตรวจสอบประวัติคาดการณ์", "ดูสภาพแวดล้อมที่คาดการณ์ทองคำ", "ปรับปัจจัยคาดการณ์"
+            description = """ระบบปลุก AI (คาดการณ์ล่วงหน้า) — แยกจาก Signal Alert (strategies/backtest)
+                |ระบบเฝ้ากราฟ 5TF (M1 ราคา · M5 ยืนยัน/กรองหลอก · M15/H1/H4 ระยะสั้น/กลาง/ยาว) ด้วยปัจจัย ~115 ตัว 15 หมวด
+                |ปัจจัยเป็นแค่ "นาฬิกาปลุก" ไม่ใช่ข้อสรุป — เมื่อเกิดเหตุการณ์ AI จะถูกปลุกให้ดู snapshot 5TF (ค่าจริงที่ระบบคำนวณ) แล้วตัดสินเองว่าควรแจ้งผู้ใช้ไหม
+                |ทุกปัจจัยถูกบันทึกผลพร้อมสภาพแวดล้อม (MTF/ADX/ความผันผวน/session) → ระบบเรียนรู้และลดชั้นปัจจัยที่ไม่มีประโยชน์เอง
+                |ใช้เมื่อผู้ใช้สั่ง: "ตั้งคาดการณ์ล่วงหน้า [symbol]", "เตือนก่อนเกิดสัญญาณ", "สแกนตอนนี้", "ดูผลการเรียนรู้", "ปัจจัยปลุกมีอะไรบ้าง", "ปิดปัจจัย X", "ปรับงบการปลุก"
                 |
                 |Action:
-                |- 'scan' / 'analyze': สแกนแท่งเทียนปัจจุบันทันทีเพื่อตรวจจับการฟอร์มตัวของสัญญาณล่วงหน้า พร้อมคำนวณ Execution Rails (Entry, SL, TP1, TP2, TP3) และ Veyra Shift Score
-                |- 'create': ตั้งแจ้งเตือนคาดการณ์ล่วงหน้าสำหรับ symbol ที่ระบุ (สร้าง Alert Job ในระบบ background เฝ้าดู signal_anticipation >= 1 ตลอด 24 ชม. พร้อมเปิดใช้ 13 ปัจจัยมาตรฐานเริ่มต้น)
-                |- 'inspect' / 'history' / 'records': ตรวจสอบประวัติการคาดการณ์ย้อนหลัง ดูรายละเอียด Entry, SL, TP, ผลลัพธ์ R, และ Snapshot สภาพแวดล้อมตลาด (H4/H1 Trend, Squeeze, Veyra Score, RSI, Fast RSI, ADX) เพื่อตรวจความถูกต้องและสมเหตุสมผล
-                |- 'learning' / 'performance': ดูรายงานผลการเรียนรู้แบบ Closed-Loop Reinforcement Learning สถิติการเปลี่ยนเป็นออเดอร์จริง Win Rate และการปรับค่าน้ำหนักความเชื่อมั่นของแต่ละปัจจัย
-                |- 'config': ปรับเปลี่ยน/เพิ่ม/ลบ ปัจจัยที่ใช้ในการคาดการณ์ของ symbol นั้น (บังคับเลือกจากคลัง 13 ปัจจัยมาตรฐานเพื่อกันความผิดพลาด)
-                |- 'list_factors': ดูรายการ 13 ปัจจัยมาตรฐานที่ระบบรองรับ (Curated Factor Whitelist รวมทั้ง Veyra Shift, BB KC Squeeze, Fast RSI) พร้อมสถานะเปิด/ปิด
-                |- 'recommend': ให้ AI แนะนำชุดปัจจัยที่เหมาะสมกับพฤติกรรมตลาดของสินทรัพย์นั้น
-                |- 'status': ตรวจสอบการตั้งค่าและสถานะการเฝ้าระวังคาดการณ์ของ symbol นั้น
-                |
-                |Parameters:
-                |- symbol: เช่น XAUUSD, BTCUSDT
-                |- timeframe: ไทม์เฟรมที่ต้องการเฝ้าระวังหรือสแกน เช่น 5m, 15m, 30m, 1h, 4h หรือ all (default คือ 15m หากไม่ระบุ)
-                |- limit: จำนวนรายการประวัติที่ต้องการตรวจสอบ (เฉพาะ action=inspect/history เช่น 5, 10, 20)
-                |- factors: รายการปัจจัยที่ต้องการกำหนด (comma-separated เช่น "KEYZONE_PROXIMITY,VEYRA_SHIFT,BB_KC_SQUEEZE,FAST_RSI_REVERSAL")
-                |- add_factors: ปัจจัยที่ต้องการเพิ่มเข้าไป (เช่น "VEYRA_SHIFT" หรือ "BB_KC_SQUEEZE")
-                |- remove_factors: ปัจจัยที่ต้องการเอาออก
-                |- delivery: 'ai' (default) หรือ 'direct'""".trimMargin(),
+                |- 'create': สร้าง alert เฝ้าระวัง (default TF 15m, 'all' = 5m/15m/1h/4h)
+                |- 'scan' / 'analyze': สแกนทันที แสดงเหตุการณ์/สภาวะที่ตรวจพบ + ภาพ 5TF
+                |- 'list_factors': รายการปัจจัยทั้งหมดพร้อมสถานะ (✅ เปิด · ⛔ ปิด · ⬇️ ลดชั้นโดยการเรียนรู้) และสถิติ
+                |- 'config': เปิด/ปิดปัจจัย (factors / add_factors / remove_factors — ใช้ id จาก list_factors เท่านั้น) และงบการปลุก (hourly_budget / daily_budget / cooldown_bars)
+                |- 'learning' / 'performance': รายงานการเรียนรู้ — ปัจจัยไหนมีประโยชน์ ในสภาพแวดล้อมใด และ AI ตัดสินถูกแค่ไหน
+                |- 'inspect' / 'history': ประวัติเหตุการณ์ล่าสุดของ symbol พร้อมผลที่วัดได้ (R ต่อ ATR)
+                |- 'recommend': ปัจจัยที่สถิติดี/แย่ ที่ควรพิจารณา
+                |- 'status' / 'budget': งบการปลุกที่ใช้ไปและการตั้งค่า""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
@@ -412,7 +412,10 @@ object TradingToolDefinitions {
                     "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT"),
                     "timeframe" to ParameterProperty("STRING", "Timeframe เช่น 5m, 15m, 30m, 1h, 4h, all หรือระบุหลาย TF เช่น '15m,1h' (default 15m)"),
                     "limit" to ParameterProperty("NUMBER", "จำนวนรายการประวัติที่ต้องการดึงมาตรวจสอบ (เฉพาะ action=inspect/history/records, default 10)"),
-                    "factors" to ParameterProperty("STRING", "รายการปัจจัยที่ต้องการเปิดใช้ (คั่นด้วยจุลภาค)"),
+                    "factors" to ParameterProperty("STRING", "รายการปัจจัยที่ต้องการเปิดใช้ (คั่นด้วยจุลภาค) — ตัวที่ไม่อยู่ในรายการจะถูกปิด"),
+                    "hourly_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อชั่วโมงต่อสินทรัพย์ (default 6)"),
+                    "daily_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อวัน รวมทุกสินทรัพย์ (default 900)"),
+                    "cooldown_bars" to ParameterProperty("NUMBER", "จำนวนแท่งที่ปัจจัยเดิม/ทิศเดิมจะไม่ปลุกซ้ำ (default 3)"),
                     "add_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเพิ่มเข้าไป"),
                     "remove_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเอาออก"),
                     "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai (default) หรือ direct", enum = listOf("ai", "direct")),
@@ -1174,65 +1177,5 @@ object TradingToolDefinitions {
                 required = emptyList()
             )
         ),
-        FunctionDeclaration(
-            name = "automation_manage_alerts",
-            description = """จัดการการแจ้งเตือนอัตโนมัติ (Price Alerts / Condition Alerts)
-                |สร้าง แก้ไขค่า เปลี่ยนชื่อ ลบ หรือดูรายการการแจ้งเตือนที่กำลังทำงาน
-                |ใช้เมื่อผู้ใช้ต้องการ: "เฝ้าทองถ้าถึง 4100 บอกฉัน", "แจ้งเตือนเมื่อ RSI ต่ำกว่า 30", "แก้ alert ID 5 เป็นราคา 4200", "เปลี่ยนชื่อ alert ID 5 เป็น ทองทะลุเป้า", "ลบ alert หมายเลข 5"
-                |[สำคัญ] ตั้งได้เฉพาะ tool_name/field ที่ background ดึงค่าได้จริง:
-                |- trading_price: price, change, change_pct, prev_close, high_52w, low_52w, direction
-                |- trading_indicators ⭐ (คำนวณจากแท่งเทียนเอง — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): close, ema20, ema50, ema200, ema_cross_state (GOLDEN_CROSS/DEATH_CROSS/BULLISH/BEARISH), ema50_200_spread, ema20_50_spread, rsi14, macd, macd_signal, macd_hist, stoch_k, stoch_d, cci20, bb_upper, bb_basis, bb_lower, bb_width, atr14
-                |- trading_smc ⭐ (Smart Money Concepts — เลือก TF ด้วย symbol@TF): close, smc_zone (PREMIUM/DISCOUNT/EQUILIBRIUM), smc_zone_pct, smc_trend, smc_last_event, smc_structure_high/low, smc_equilibrium, smc_premium_bot, smc_discount_top, bull_ob_dist, bear_ob_dist, fvg_dist, liq_above_dist, liq_below_dist, liq_above_stars, liq_below_stars, attack_force, atr
-                |- trading_smc_flow ⭐ (สัญญาณ SMC Flow System — เลือก TF ด้วย symbol@TF): smc_signal, smc_recipes, ema14_60_signal, ema14_60_cross, ema14_60_state, ema14, ema60, ema14_60_spread, utbot_signal, utbot_trend, utbot_stop, structure_bias, in_fib_golden, fib_golden_top, fib_golden_bottom, fib_swing_high, fib_swing_low, close
-                |- trading_strategy_signal ⭐ (กลยุทธ์จาก Strategy Library — เลือก TF ด้วย symbol@TF): consensus_signal, consensus_score, tsmom_signal, trend_signal, reversal_signal, donchian_signal, w52_signal, trend_state, tsmom_roc_pct, reversal_rsi, donchian_upper, donchian_mid, donchian_lower, w52_high, w52_proximity_pct, close
-                |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" จาก Unified SMC Multi-TF (15m) + Momentum/Reversal + SMC Engine — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 (แจ้งเมื่อมีสัญญาณ BUY ใหม่) หรือ signal_sell >= 1 — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผล, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
-                |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal, volume
-                |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore, lsdState, lsdConfluenceTF, deltaLabel, deltaValue, fiboScore, momentum, isSqueeze, close
-                |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
-                |- trading_fear_greed: value, classification
-                |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
-                |เมื่อเข้าเงื่อนไข ระบบจะปลุก AI มาสรุปบริบทก่อนแจ้งเตือนผู้ใช้ (notification มีปุ่ม หยุดแจ้งเตือน/แจ้งเตือนซ้ำ)
-                |[โหมดส่งแจ้งเตือน — delivery] "ai" (default) = alert → AI วิเคราะห์/quick-check → ผู้ใช้ | "direct" = alert → notification + ส่งเข้าแชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)""".trimMargin(),
-            parameters = FunctionParameters(
-                type = "OBJECT",
-                properties = mapOf(
-                    "action" to ParameterProperty("STRING", "create | update | rename | delete | list", enum = listOf("create", "update", "rename", "delete", "list")),
-                    "name" to ParameterProperty("STRING", "ชื่อ alert (สำหรับ create) — rename ใช้เป็นชื่อใหม่"),
-                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTC-USD (สำหรับ create) — รองรับ suffix @TF เช่น XAUUSD@15m"),
-                    "timeframe" to ParameterProperty("STRING", "Timeframe ที่ต้องการเฝ้า: m1 | m5 | m15 | 30m | h1 | h4 | D1 | W1 | all (หรือ 1m, 5m, 15m, 1h, 4h, 1D, 1W)"),
-                    "tool_name" to ParameterProperty("STRING", "trading_price | trading_indicators | trading_smc | trading_smc_flow | trading_strategy_signal | trading_signal_alert | trading_technical_analysis | trading_sentiment | trading_fear_greed | trading_crypto_overview | trading_deep_analysis_suite (default: trading_price)"),
-                    "condition_field" to ParameterProperty("STRING", "ฟิลด์ที่ตรวจสอบ — ต้องอยู่ในรายการของ tool_name นั้น (default: price)"),
-                    "condition_operator" to ParameterProperty("STRING", "> | < | >= | <= | == | contains (default: >=)"),
-                    "condition_value" to ParameterProperty("STRING", "ค่าเปรียบเทียบ เช่น 4100, 30, 85 (สำหรับ update ใช้เป็นค่าใหม่)"),
-                    "delivery" to ParameterProperty("STRING", "โหมดส่งแจ้งเตือน: ai = AI วิเคราะห์ก่อนแจ้ง (default) | direct = ส่ง notification+แชทโดยตรง ไม่เรียก AI (ประหยัดโทเคน)", enum = listOf("ai", "direct")),
-                    "voice" to ParameterProperty("STRING", "เปิดแจ้งเตือนด้วยเสียงพูด: true (default) หรือ false"),
-                    "interval_minutes" to ParameterProperty("NUMBER", "ความถี่ตรวจสอบเป็นนาที (default: 15, min: 1, max: 1440)"),
-                    "alert_id" to ParameterProperty("NUMBER", "ID ของ alert ที่ต้องการลบ/แก้ไข (สำหรับ delete/update)")
-                ),
-                required = listOf("action")
-            )
-        ),
-
-        // ── AUTOMATION-2. Manage Schedule ──────────────────────────────────────
-        FunctionDeclaration(
-            name = "automation_manage_schedule",
-            description = """จัดการงานตามเวลา (Scheduled Tasks) — ปลุก AI ทำตาม prompt เมื่อถึงเวลา
-                |สร้าง ลบ หรือดูรายการงานตามเวลา
-                |ใช้เมื่อผู้ใช้ต้องการ: "ทุกเช้า 8 โมงสรุปข่าวให้หน่อย", "อีก 30 นาทีเตือนฉัน", "ลบงานหมายเลข 3"""".trimMargin(),
-            parameters = FunctionParameters(
-                type = "OBJECT",
-                properties = mapOf(
-                    "action" to ParameterProperty("STRING", "create | delete | list", enum = listOf("create", "delete", "list")),
-                    "name" to ParameterProperty("STRING", "ชื่องาน (สำหรับ create)"),
-                    "prompt" to ParameterProperty("STRING", "คำสั่งที่จะให้ AI ทำเมื่อถึงเวลา (สำหรับ create)"),
-                    "schedule_type" to ParameterProperty("STRING", "one_time | daily (default: one_time)"),
-                    "time_hhmm" to ParameterProperty("STRING", "เวลาในรูปแบบ HH:mm เช่น 08:00 (สำหรับ daily)"),
-                    "run_at" to ParameterProperty("STRING", "วันเวลาในรูปแบบ ISO เช่น 2026-08-03 20:00 (สำหรับ one_time)"),
-                    "in_minutes" to ParameterProperty("NUMBER", "จำนวนนาทีจากตอนนี้ (สำหรับ one_time, ทางเลือกแทน run_at)"),
-                    "task_id" to ParameterProperty("NUMBER", "ID ของงานที่ต้องการลบ (สำหรับ delete)")
-                ),
-                required = listOf("action")
-            )
-        )
     )
 }

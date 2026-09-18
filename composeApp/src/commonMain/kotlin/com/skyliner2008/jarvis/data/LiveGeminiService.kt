@@ -68,12 +68,41 @@ data class LiveSessionResumptionConfig(
 
 @Serializable
 data class LiveContextWindowCompressionConfig(
+    /**
+     * เริ่มบีบอัดเมื่อ context โตถึงจำนวนนี้
+     *
+     * [สำคัญ] Live API คิดโทเคนแบบทบต้น — **คิดทั้ง context ที่สะสมอยู่ใหม่ทุก turn**
+     * (ดู Live API best practices: "Past tokens are re-processed and accounted for in each new turn")
+     * และเก็บประวัติเสียงเป็น audio token ซึ่งหนักกว่าข้อความมาก
+     *
+     * ด้วย TPM 65K ถ้าไม่จำกัด context จะโตจนกินโควตาหมดเอง:
+     *   context 20K → 1 turn ≈ 21K tokens → เหลือแค่ ~3 turn/นาที
+     *   context 50K → 1 turn ≈ 51K tokens → เหลือ ~1 turn/นาที
+     */
+    @SerialName("triggerTokens") val triggerTokens: Long? = null,
     // ต้องไม่มี default — encodeDefaults=false จะตัด field ทิ้ง แล้วเหลือ {} ซึ่งไม่ใช่ config ที่ถูกต้อง
     @SerialName("slidingWindow") val slidingWindow: JsonObject
 ) {
     companion object {
-        /** sliding window แบบค่าเริ่มต้นของ Live API — ยืดอายุ session และกันการตัดกลางบทสนทนา */
-        fun default() = LiveContextWindowCompressionConfig(JsonObject(emptyMap()))
+        /** จำนวนโทเคนที่คงไว้หลังบีบอัด */
+        const val TARGET_TOKENS = 8_000L
+
+        /** เริ่มบีบอัดเมื่อถึงจำนวนนี้ */
+        const val TRIGGER_TOKENS = 25_000L
+
+        /**
+         * sliding window พร้อมเพดานที่ชัดเจน — ยืดอายุ session และคุมต้นทุนต่อ turn
+         *
+         * เดิมส่ง `slidingWindow: {}` เปล่าๆ ไม่มี trigger/target
+         * → context โตไปเรื่อยจนชนเพดานโมเดล และค่าใช้จ่ายต่อ turn สูงขึ้นตลอดการสนทนา
+         */
+        fun default() = LiveContextWindowCompressionConfig(
+            triggerTokens = TRIGGER_TOKENS,
+            slidingWindow = JsonObject(mapOf("targetTokens" to JsonPrimitive(TARGET_TOKENS)))
+        )
+
+        /** config เดิม (sliding window ล้วน) — ใช้เป็น fallback เมื่อ server ปฏิเสธ config แบบมีพารามิเตอร์ */
+        fun bare() = LiveContextWindowCompressionConfig(slidingWindow = JsonObject(emptyMap()))
     }
 }
 
@@ -555,6 +584,12 @@ class LiveGeminiService(
     private var sessionResumptionEnabled = true
     /** context window compression (sliding window) — ยืดอายุ session; ปิดตัวเองถ้า server ปฏิเสธ setup */
     private var contextCompressionEnabled = true
+
+    /**
+     * ส่ง triggerTokens/targetTokens ไปด้วยหรือไม่
+     * ถ้า server ปฏิเสธจะลดเหลือ sliding window ล้วน ก่อนจะปิด compression ทั้งหมด
+     */
+    private var compressionTuningEnabled = true
     private var goAwayReceived = false
     private var connectionStartedAtMs: Long = 0L
 
@@ -818,9 +853,13 @@ class LiveGeminiService(
                             sessionResumption = if (sentResumptionConfig) {
                                 LiveSessionResumptionConfig(handle = resumeHandle)
                             } else null,
-                            // sliding window ทำให้ session ยาวขึ้นและไม่ถูกตัดกลางบทสนทนา (ปิดเองถ้า server ปฏิเสธ)
+                            // sliding window + เพดาน context — ยืดอายุ session และ **คุมต้นทุนต่อ turn**
+                            // (Live คิดโทเคนทั้ง context ใหม่ทุก turn — ดู LiveContextWindowCompressionConfig)
+                            // ถ้า server ปฏิเสธ config แบบมีพารามิเตอร์ จะลดเหลือ sliding window ล้วนก่อน
+                            // แล้วจึงค่อยปิดทั้งหมด — ไม่เสียฟีเจอร์ทิ้งทั้งก้อนตั้งแต่ครั้งแรก
                             contextWindowCompression = if (sentCompressionConfig) {
-                                LiveContextWindowCompressionConfig.default()
+                                if (compressionTuningEnabled) LiveContextWindowCompressionConfig.default()
+                                else LiveContextWindowCompressionConfig.bare()
                             } else null,
                             systemInstruction = LiveSystemInstruction(
                                 parts = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
@@ -920,6 +959,14 @@ class LiveGeminiService(
                     if (!quotaError && sentThinkingConfig && normalizedTerminal.contains("thinking")) {
                         thinkingUnsupportedModels.add(liveModelName.removePrefix("models/"))
                         logDebug("LiveGemini", "🧯 $liveModelName ไม่รองรับ thinking_level — ปิดสำหรับโมเดลนี้แล้วลองใหม่")
+                        attempt = 0
+                        continue
+                    }
+                    // ลดระดับ compression ทีละขั้นก่อนปิดทิ้ง — เพดาน context มีค่ากับ TPM มาก
+                    // (ถ้าปิดหมด context จะโตอิสระ แล้วต้นทุนต่อ turn พุ่งจนกิน TPM 65K หมด)
+                    if (!quotaError && sentCompressionConfig && compressionTuningEnabled) {
+                        compressionTuningEnabled = false
+                        logDebug("LiveGemini", "🧯 contextWindowCompression แบบมีพารามิเตอร์ถูกปฏิเสธ ($terminalCloseReason) — ลดเหลือ sliding window ล้วนแล้วลองใหม่")
                         attempt = 0
                         continue
                     }

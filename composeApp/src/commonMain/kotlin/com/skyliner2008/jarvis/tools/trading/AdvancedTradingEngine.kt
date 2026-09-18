@@ -8,6 +8,21 @@ import kotlin.math.*
  */
 class AdvancedTradingEngine(private val smcApi: SmcApiService) {
 
+    companion object {
+        /** LSD baseline ใช้ HMA 55 */
+        private const val LSD_HMA_LENGTH = 55
+
+        /**
+         * แท่งขั้นต่ำสำหรับ analyze()
+         *
+         * HMA(n) ต้องการ WMA(n) ก่อน แล้วจึง WMA(√n) บน raw series ที่ยาว (size - n + 1)
+         * ดังนั้นต้องมีอย่างน้อย n + √n - 1 = 55 + 7 - 1 = 61 แท่ง
+         * เดิมใช้ 60 ซึ่งต่ำกว่าเกณฑ์ 1 แท่งพอดี → HMA ตกไป fallback `data.last()` เสมอ
+         * เผื่อ buffer เป็น 80 เพื่อให้ ATR(55) ลู่เข้าด้วย
+         */
+        private const val MIN_BARS = 80
+    }
+
     // ─── Data Models ─────────────────────────────────────────────────────────
 
     data class AdvancedAnalysisResult(
@@ -64,13 +79,14 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         overridePrice: Double? = null
     ): AdvancedAnalysisResult? {
         val candles = smcApi.fetchCandles(symbol, interval, 300)
-        if (candles.size < 60) return null
+        if (candles.size < MIN_BARS) return null
 
         val currentPrice = overridePrice ?: candles.last().close
         val atr = smcApi.calcATR(candles, 14)
 
         // 1. LSD Trend Architecture (HMA 55 + ATR 1.5)
-        val lsdTrend = calculateLsdTrend(candles)
+        // แท่งไม่พอสำหรับ HMA55 → คืน null ทั้งชุด ดีกว่าส่ง baseline ปลอมให้ AI
+        val lsdTrend = calculateLsdTrend(candles) ?: return null
 
         // 2. Orderflow Delta Approximation & POC
         val orderflow = calculateOrderflow(candles)
@@ -96,17 +112,15 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         )
     }
 
-    private fun calculateLsdTrend(candles: List<Candle>): LsdTrendResult {
-        val length = 55
+    private fun calculateLsdTrend(candles: List<Candle>): LsdTrendResult? {
+        val length = LSD_HMA_LENGTH
         val mult = 1.5
         val closes = candles.map { it.close }
-        
-        // Simple HMA Approximation (or SMA/EMA if HMA is complex to implement raw)
-        // เพื่อความแม่นยำ ผมจะใช้ EMA 55 เป็นฐานสำรองหากสูตร HMA ยุ่งยากเกินไปในรอบนี้
-        // แต่ตามหลักการ LSD ใช้ HMA ดังนั้นฉันจะใช้ HMA
-        val hma = calculateHMA(closes, length)
+
+        // LSD ใช้ HMA เป็น baseline — คำนวณไม่ได้เมื่อแท่งไม่พอ จึงคืน null ไม่ใช่ราคาปิด
+        val hma = calculateHMA(closes, length) ?: return null
         val atr = smcApi.calcATR(candles, length)
-        
+
         val upper = hma + (atr * mult)
         val lower = hma - (atr * mult)
         val currentClose = closes.last()
@@ -261,8 +275,8 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         return result.toList()
     }
 
-    private fun calculateWMAforLast(data: List<Double>, period: Int): Double {
-        if (data.size < period) return data.last()
+    private fun calculateWMAforLast(data: List<Double>, period: Int): Double? {
+        if (period <= 0 || data.size < period) return null
         val weightSum = period * (period + 1) / 2.0
         val start = data.size - period
         var sum = 0.0
@@ -273,8 +287,9 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
         return sum / weightSum
     }
 
-    private fun calculateHMA(data: List<Double>, period: Int): Double {
-        if (data.size < period) return data.last()
+    /** Hull Moving Average — คืน null เมื่อแท่งไม่พอ (ห้ามคืนราคาปิดแทน) */
+    private fun calculateHMA(data: List<Double>, period: Int): Double? {
+        if (period <= 0 || data.size < period) return null
         val n = period
         val halfPeriod = n / 2
         val sqrtPeriod = max(1, sqrt(n.toDouble()).toInt())
@@ -293,14 +308,9 @@ class AdvancedTradingEngine(private val smcApi: SmcApiService) {
             }
         }
 
-        if (rawValues.size < sqrtPeriod) return data.last()
+        if (rawValues.size < sqrtPeriod) return null
 
         // Calculate WMA on rawValues with sqrtPeriod to get final HMA
-        val hma = calculateWMAforLast(rawValues, sqrtPeriod)
-        return hma
+        return calculateWMAforLast(rawValues, sqrtPeriod)
     }
-
-    /** ใช้ TA library กลาง (TaIndicators) แทน local implementation */
-    private fun calculateEMA(data: List<Double>, period: Int): Double =
-        TaIndicators.ema(data, period)
 }

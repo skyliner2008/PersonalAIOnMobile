@@ -762,6 +762,9 @@ fun SettingsDialog(
             }
         }
 
+        // ─── Backup / Restore section ───────────────────────────────────────
+        BackupSection()
+
         // ─── Setup Checklist section ────────────────────────────────────────
         SectionCard(
             title = "Setup Checklist",
@@ -1262,4 +1265,123 @@ private fun GeminiKeysDialog(
             }
         },
     )
+}
+
+// ─── Backup / Restore ────────────────────────────────────────────────────────
+
+/**
+ * สำรอง/กู้คืน: การเรียนรู้ของระบบปลุก AI (.json) และฐานข้อมูลทั้งหมด (.zip)
+ * ปลายทาง/ต้นทางเลือกผ่านหน้าต่างไฟล์ของระบบ → เลือก Google Drive ได้
+ */
+@Composable
+private fun BackupSection() {
+    var expanded by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<com.skyliner2008.jarvis.ui.BackupStatus?>(null) }
+    var confirmRestore by remember { mutableStateOf(false) }
+    val controller = com.skyliner2008.jarvis.ui.rememberBackupController { status = it }
+    if (!controller.supported) return
+    var summary by remember { mutableStateOf("") }
+    LaunchedEffect(expanded, status) {
+        if (expanded) summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { controller.storageSummary() }.getOrDefault("")
+        }
+    }
+
+    SectionCard(
+        title = "สำรอง / กู้คืนข้อมูล",
+        icon = Icons.Default.Memory,
+        expanded = expanded,
+        onToggle = { expanded = !expanded },
+    ) {
+        Text(
+            "เลือกปลายทางเป็น Google Drive ได้ในหน้าต่างเลือกไฟล์ (ต้องติดตั้งแอป Google Drive) — " +
+                "ข้อมูลในแอปจะหายเมื่อถอนการติดตั้ง ควรสำรองเก็บไว้",
+            color = Color.White.copy(alpha = 0.6f), fontSize = HelperSize,
+        )
+        if (summary.isNotBlank()) {
+            Text(summary, color = JarvisTheme.Cyan.copy(alpha = 0.85f), fontSize = HelperSize)
+        }
+
+        Text("🧠 การเรียนรู้ของระบบปลุก AI", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = BodySize)
+        Text(
+            "ย้ายสิ่งที่ระบบเรียนรู้ไปเครื่องอื่น — นำเข้าแบบรวมกับของเดิม (ไม่ลบของเดิม นำเข้าซ้ำได้)",
+            color = Color.White.copy(alpha = 0.6f), fontSize = HelperSize,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            BackupButton("ส่งออก", Modifier.weight(1f), controller.exportLearning)
+            BackupButton("นำเข้า", Modifier.weight(1f), controller.importLearning)
+        }
+
+        Text("💾 ฐานข้อมูลทั้งหมด", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = BodySize)
+        Text(
+            "แชท ความจำ alert สถิติสัญญาณ การเรียนรู้ การตั้งค่า และแท่งเทียน — การกู้คืนจะแทนที่ข้อมูลปัจจุบันทั้งหมด",
+            color = Color.White.copy(alpha = 0.6f), fontSize = HelperSize,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            BackupButton("สำรอง", Modifier.weight(1f), controller.backupDatabase)
+            BackupButton("กู้คืน", Modifier.weight(1f)) { confirmRestore = true }
+        }
+
+        Text("🧹 OHLCV store", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = BodySize)
+        Text(
+            "ระบบลบซีรีส์แท่งเทียนที่ไม่ได้ใช้เกิน 30 วันอัตโนมัติวันละครั้ง (ยกเว้นสินทรัพย์ที่มี alert เปิดอยู่)",
+            color = Color.White.copy(alpha = 0.6f), fontSize = HelperSize,
+        )
+        BackupButton("ลบซีรีส์ที่ไม่ได้ใช้ตอนนี้", Modifier.fillMaxWidth()) {
+            status = com.skyliner2008.jarvis.ui.BackupStatus.Done(runCatching { controller.pruneNow() }.getOrElse { "ผิดพลาด: ${it.message}" })
+        }
+
+        when (val st = status) {
+            is com.skyliner2008.jarvis.ui.BackupStatus.Busy ->
+                Text("⏳ ${st.message}", color = JarvisTheme.Cyan, fontSize = BodySize)
+            is com.skyliner2008.jarvis.ui.BackupStatus.Done ->
+                Text("✓ ${st.message}", color = JarvisTheme.Green, fontSize = BodySize)
+            is com.skyliner2008.jarvis.ui.BackupStatus.Failed ->
+                Text("✗ ${st.message}", color = JarvisTheme.Red, fontSize = BodySize)
+            is com.skyliner2008.jarvis.ui.BackupStatus.RestoreReady -> Surface(
+                color = JarvisTheme.Amber.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(st.message, color = JarvisTheme.Amber, fontSize = BodySize)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        BackupButton("รีสตาร์ทและกู้คืน", Modifier.weight(1f), controller.restartNow)
+                        BackupButton("ยกเลิก", Modifier.weight(1f), controller.cancelRestore)
+                    }
+                }
+            }
+            null -> Unit
+        }
+    }
+
+    if (confirmRestore) {
+        AlertDialog(
+            onDismissRequest = { confirmRestore = false },
+            title = { Text("กู้คืนฐานข้อมูล?") },
+            text = {
+                Text("ข้อมูลปัจจุบันทั้งหมด (แชท ความจำ alert การเรียนรู้ การตั้งค่า) จะถูกแทนที่ด้วยไฟล์สำรอง " +
+                    "ระบบจะตรวจไฟล์ก่อน แล้วให้ยืนยันรีสตาร์ทอีกครั้ง — ฐานข้อมูลเดิมถูกเก็บไว้ 1 ชุดเผื่อย้อนกลับ")
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmRestore = false; controller.restoreDatabase() }) {
+                    Text("เลือกไฟล์สำรอง", color = JarvisTheme.Amber)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRestore = false }) { Text("ยกเลิก") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BackupButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(containerColor = JarvisTheme.Purple.copy(alpha = 0.35f)),
+        modifier = modifier.heightIn(min = FieldHeight),
+    ) {
+        Text(label, color = Color.White, fontSize = BodySize)
+    }
 }

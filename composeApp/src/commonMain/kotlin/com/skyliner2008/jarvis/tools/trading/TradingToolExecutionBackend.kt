@@ -72,10 +72,17 @@ class TradingToolExecutionBackend(
             .getOrElse { "❌ SMC Flow error: ${it.message}" }
     }
 
-    /** trading_signal_anticipation scan — สแกนหาการคาดการณ์สัญญาณล่วงหน้าทันที */
-    internal suspend fun executeSignalAnticipationScan(symbol: String, timeframe: String): Map<String, String> {
-        return signalAlertProvider.fetch("$symbol@$timeframe")
+    /** ระบบปลุก AI — แยกจากระบบ signal ใช้ร่วมกันเฉพาะชั้นข้อมูล (OHLCV store) */
+    private val anticipationEngine by lazy {
+        com.skyliner2008.jarvis.automation.wake.AnticipationEngine(SmcApiService(client), api)
     }
+
+    /**
+     * สแกนระบบปลุก AI ทันที สำหรับ "SYMBOL@TF" — แบบดูอย่างเดียว (preview)
+     * ไม่ใช้งบ/cooldown/การเรียนรู้ของ alert เบื้องหลัง
+     */
+    internal suspend fun anticipationScan(rawSymbol: String): Map<String, String> =
+        anticipationEngine.scan(rawSymbol, preview = true)
 
     // ─── Internal Compatibility Delegators ──────────────────────────────────────
     internal fun executeBacktest(args: Map<String, String>): String = backtestHandler.executeBacktest(args)

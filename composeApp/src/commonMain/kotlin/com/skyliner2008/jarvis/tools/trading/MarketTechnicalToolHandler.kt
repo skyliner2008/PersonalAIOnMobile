@@ -34,7 +34,10 @@ internal class MarketTechnicalToolHandler(
         "trading_news" -> executeNews(args)
         "trading_macro_calendar" -> executeMacroCalendar(args)
         "trading_harmonic_scan" -> executeHarmonicScan(args)
-        "trading_elliot_wave" -> executeElliotWave(args)
+        // ชื่อ tool ที่ประกาศ/route จริงคือ trading_elliot_modern_analysis
+        // เดิม branch ชื่อ "trading_elliot_wave" ซึ่งไม่มีใครเรียก → tool นี้ตกไป else
+        // แล้วคืน "Unknown market/technical tool" ทุกครั้ง ทั้งที่ implementation พร้อมใช้
+        "trading_elliot_modern_analysis" -> executeElliotWave(args)
         else -> "Unknown market/technical tool: $toolName"
     }
 
@@ -133,7 +136,7 @@ internal class MarketTechnicalToolHandler(
         fill("EMA20", "ema20"); fill("EMA50", "ema50"); fill("EMA200", "ema200")
         fill("BB.upper", "bb_upper"); fill("BB.basis", "bb_basis"); fill("BB.lower", "bb_lower")
         fill("BB.width", "bb_width"); fill("ATR", "atr14")
-        fill("ADX", "adx"); fill("ADX+DI", "di_plus"); fill("ADX-DI", "di_minus")
+        fill("ADX", "adx14"); fill("ADX+DI", "di_plus"); fill("ADX-DI", "di_minus")
         return out
     }
 

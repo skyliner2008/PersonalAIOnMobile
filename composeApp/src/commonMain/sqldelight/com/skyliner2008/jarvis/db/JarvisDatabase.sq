@@ -276,6 +276,10 @@ UPDATE AlertJob SET interval_minutes = ? WHERE id = ?;
 updateAlertJobCheckResult:
 UPDATE AlertJob SET last_value = ?, last_run_at = ? WHERE id = ?;
 
+-- บันทึกเวลาที่เช็ก job โดยไม่แตะ last_value (job แบบ edge-trigger ใช้ last_value เก็บ id ของเหตุการณ์)
+touchAlertJobRun:
+UPDATE AlertJob SET last_run_at = ? WHERE id = ?;
+
 
 
 
@@ -290,7 +294,8 @@ UPDATE AlertJob SET name = ? WHERE id = ?;
 deleteAlertJob:
 DELETE FROM AlertJob WHERE id = ?;
 
--- TV OHLCV candles (persistent cache for SMC)
+-- TV OHLCV candles — persistent store (ไม่ใช่ cache ชั่วคราว)
+-- ซีรีส์หนึ่ง = (symbol, interval, source) ห้ามให้หลาย source ปนกันในซีรีส์เดียว
 CREATE TABLE IF NOT EXISTS TvCandle (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL,
@@ -302,33 +307,59 @@ CREATE TABLE IF NOT EXISTS TvCandle (
     low REAL NOT NULL,
     close REAL NOT NULL,
     volume REAL NOT NULL DEFAULT 0,
+    -- 1 = แท่งปิดแล้ว (ใช้คำนวณอินดิเคเตอร์ได้), 0 = ยังก่อตัวอยู่
+    is_closed INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL,
-    UNIQUE(symbol, interval, ts)
+    UNIQUE(symbol, interval, source, ts)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tv_candle_symbol_interval_ts
-ON TvCandle(symbol, interval, ts);
+CREATE INDEX IF NOT EXISTS idx_tv_candle_series_ts
+ON TvCandle(symbol, interval, source, ts);
 
 upsertTvCandle:
 INSERT OR REPLACE INTO TvCandle(
-    symbol, interval, source, ts, open, high, low, close, volume, updated_at
+    symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+-- แท่งล่าสุดของซีรีส์เดียว (ทั้งปิดและยังก่อตัว) — ใช้กับ path ที่ต้องการราคาสด
 getRecentTvCandles:
-SELECT symbol, interval, source, ts, open, high, low, close, volume, updated_at
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
 FROM TvCandle
-WHERE symbol = ? AND interval = ?
+WHERE symbol = ? AND interval = ? AND source = ?
 ORDER BY ts DESC
 LIMIT ?;
 
+-- แท่งที่ปิดแล้วเท่านั้น — เป็น input มาตรฐานของการคำนวณอินดิเคเตอร์ (กัน repainting)
+getRecentClosedTvCandles:
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ? AND is_closed = 1
+ORDER BY ts DESC
+LIMIT ?;
+
+-- แท่งที่ปิดแล้วซึ่งเก่ากว่า ts ที่ระบุ — ใช้ไล่ backfill ย้อนหลังทีละ chunk
+getClosedTvCandlesBefore:
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ? AND is_closed = 1 AND ts < ?
+ORDER BY ts DESC
+LIMIT ?;
+
+-- สรุปว่าแต่ละ source มีกี่แท่งและสดแค่ไหน — ใช้เลือกซีรีส์ที่ดีที่สุดเมื่อ source หลักดึงไม่ได้
+summarizeTvCandleSources:
+SELECT source, COUNT(*) AS bars, MIN(ts) AS oldest_ts, MAX(ts) AS latest_ts
+FROM TvCandle
+WHERE symbol = ? AND interval = ?
+GROUP BY source;
+
 countTvCandles:
 SELECT COUNT(*) FROM TvCandle
-WHERE symbol = ? AND interval = ?;
+WHERE symbol = ? AND interval = ? AND source = ?;
 
 deleteTvCandlesBefore:
 DELETE FROM TvCandle
-WHERE symbol = ? AND interval = ? AND ts < ?;
+WHERE symbol = ? AND interval = ? AND source = ? AND ts < ?;
 
 -- MT5 account snapshots
 CREATE TABLE IF NOT EXISTS Mt5AccountSnapshot (
@@ -900,3 +931,162 @@ ORDER BY created_at DESC
 LIMIT :limit;
 
 
+
+-- ═══════════════════════════════════════════════════════════════════
+-- ระบบปลุก AI — การเรียนรู้แบบมีเงื่อนไข (P13)
+-- 1 รอบสแกน → N แถว (แถวละ trigger) พร้อม context bucket + ผลการตัดสินใจของ AI
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AnticipationFactorOutcome (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id TEXT NOT NULL,
+    factor_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    side TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref_price REAL NOT NULL,
+    ref_atr REAL NOT NULL,
+    woke INTEGER NOT NULL DEFAULT 0,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    vol_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    ai_decision TEXT,
+    ai_bias TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    forward_r REAL,
+    mfe_r REAL,
+    mae_r REAL,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    UNIQUE(signal_id, factor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_lookup
+ON AnticipationFactorOutcome(factor_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_context
+ON AnticipationFactorOutcome(factor_id, mtf_align, adx_bucket, session);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_pending
+ON AnticipationFactorOutcome(status, symbol, interval, created_at);
+
+insertFactorOutcome:
+INSERT OR IGNORE INTO AnticipationFactorOutcome(
+    signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
+    mtf_align, adx_bucket, vol_bucket, session,
+    ai_decision, ai_bias, status, forward_r, mfe_r, mae_r, created_at, resolved_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+markFactorOutcomesWoke:
+UPDATE AnticipationFactorOutcome SET woke = 1 WHERE signal_id = ? AND factor_id IN ?;
+
+setFactorOutcomeAiDecision:
+UPDATE AnticipationFactorOutcome SET ai_decision = ?, ai_bias = ? WHERE signal_id = ?;
+
+getPendingFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+WHERE status = 'PENDING' AND symbol = ? AND interval = ?
+ORDER BY created_at ASC
+LIMIT 500;
+
+resolveFactorOutcomeById:
+UPDATE AnticipationFactorOutcome
+SET status = 'RESOLVED', forward_r = ?, mfe_r = ?, mae_r = ?, resolved_at = ?
+WHERE id = ?;
+
+-- สรุปรวมรายปัจจัย×สภาพแวดล้อม — ดึงครั้งเดียวแล้วแคช (ไม่ query ทุกรอบสแกน)
+getFactorAggregates:
+SELECT factor_id, side, mtf_align, adx_bucket, session,
+       COUNT(*) AS n,
+       SUM(forward_r) AS sum_r,
+       SUM(ABS(forward_r)) AS sum_abs,
+       SUM(CASE WHEN forward_r > 0 THEN 1 ELSE 0 END) AS wins
+FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED'
+GROUP BY factor_id, side, mtf_align, adx_bucket, session;
+
+-- ความแม่นของ AI หลังถูกปลุก — วัด "ตามทิศที่ AI มอง" ต่อ 1 การปลุก (signal_id)
+-- up_r = การเคลื่อนที่ขึ้นหน่วย ATR: แถว BUY เก็บตามทิศขึ้น, SELL กลับเครื่องหมาย, NEUTRAL เก็บแบบมีเครื่องหมาย
+-- ทุกแถวของ signal เดียวกันมี ref/หน้าต่างเดียวกัน จึงเฉลี่ยรวมได้
+-- (เดิม AVG(forward_r) วัดตามทิศของ "ปัจจัย" ไม่ใช่ของ AI และนับซ้ำทุกแถวของการปลุกเดียวกัน)
+getAiDecisionAccuracy:
+SELECT ai_decision, ai_bias,
+       COUNT(*) AS n,
+       COUNT(ai_r) AS measured,
+       AVG(ai_r) AS avg_r,
+       SUM(CASE WHEN ai_r > 0 THEN 1 ELSE 0 END) AS wins,
+       AVG(ABS(up_r)) AS avg_move
+FROM (
+    SELECT signal_id,
+           MAX(ai_decision) AS ai_decision,
+           MAX(ai_bias) AS ai_bias,
+           AVG(CASE side WHEN 'SELL' THEN -forward_r ELSE forward_r END) AS up_r,
+           AVG(CASE side WHEN 'SELL' THEN -forward_r ELSE forward_r END) *
+               (CASE MAX(ai_bias) WHEN 'BUY' THEN 1.0 WHEN 'SELL' THEN -1.0 ELSE NULL END) AS ai_r
+    FROM AnticipationFactorOutcome
+    WHERE status = 'RESOLVED' AND ai_decision IS NOT NULL
+    GROUP BY signal_id
+)
+GROUP BY ai_decision, ai_bias;
+
+expireFactorOutcomeById:
+UPDATE AnticipationFactorOutcome SET status = 'EXPIRED', resolved_at = ? WHERE id = ?;
+
+-- แถวที่รอผลนานเกินไป (job ถูกลบ / ไม่มีใครสแกน symbol นั้นแล้ว) — ปิดเป็น EXPIRED
+expireStalePendingFactorOutcomes:
+UPDATE AnticipationFactorOutcome SET status = 'EXPIRED', resolved_at = ? WHERE status = 'PENDING' AND created_at < ?;
+
+getRecentFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+WHERE symbol = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAllFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+ORDER BY created_at ASC;
+
+countFactorOutcomes:
+SELECT COUNT(*) FROM AnticipationFactorOutcome;
+
+deleteFactorOutcomesBefore:
+DELETE FROM AnticipationFactorOutcome WHERE created_at < ?;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- OHLCV series access — ลบซีรีส์ที่ไม่ได้ใช้นาน คุมขนาดฐานข้อมูล (P13)
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS TvSeriesAccess (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    source TEXT NOT NULL,
+    last_read_at INTEGER NOT NULL,
+    PRIMARY KEY(symbol, interval, source)
+);
+
+touchTvSeries:
+INSERT OR REPLACE INTO TvSeriesAccess(symbol, interval, source, last_read_at) VALUES (?, ?, ?, ?);
+
+-- ทุกซีรีส์ที่มีใน TvCandle พร้อมจำนวนแท่งและเวลาอ่านล่าสุด (ซีรีส์ที่ไม่เคยถูก track ใช้ updated_at แทน)
+getTvSeriesUsage:
+SELECT c.symbol, c.interval, c.source,
+       COUNT(*) AS bars,
+       COALESCE(a.last_read_at, MAX(c.updated_at)) AS last_used
+FROM TvCandle c
+LEFT JOIN TvSeriesAccess a
+  ON a.symbol = c.symbol AND a.interval = c.interval AND a.source = c.source
+GROUP BY c.symbol, c.interval, c.source;
+
+deleteTvSeries:
+DELETE FROM TvCandle WHERE symbol = ? AND interval = ? AND source = ?;
+
+deleteTvSeriesAccess:
+DELETE FROM TvSeriesAccess WHERE symbol = ? AND interval = ? AND source = ?;
+
+countAllTvCandles:
+SELECT COUNT(*) FROM TvCandle;
+
+-- งานคาดการณ์ที่ยังอยู่ในสถานะเฝ้า — ใช้กันลบซีรีส์ที่ยังถูกใช้
+getActiveAlertSymbols:
+SELECT DISTINCT symbol FROM AlertJob WHERE is_active = 1;

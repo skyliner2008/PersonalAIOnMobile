@@ -90,55 +90,6 @@ object SignalOutcomeTracker {
         }
     }
 
-    /** บันทึกการคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ลงฐานข้อมูล (สำหรับวิเคราะห์แยกส่วน) */
-    fun recordAnticipation(
-        anticipationId: String,
-        symbol: String,
-        interval: String,
-        factorId: String,
-        side: String,
-        entryPrice: Double,
-        stopLoss: Double,
-        takeProfit: Double,
-        rr: Double,
-        featuresJson: String? = null,
-        createdAt: Long = Clock.System.now().toEpochMilliseconds()
-    ) {
-        val db = getDb() ?: return
-        val risk = abs(entryPrice - stopLoss)
-        if (risk <= 0.0 || entryPrice <= 0.0) return
-
-        val existing = runCatching {
-            db.jarvisDatabaseQueries.getSignalTrackingRecordById(anticipationId).executeAsOneOrNull()
-        }.getOrNull()
-        if (existing != null) return
-
-        runCatching {
-            db.jarvisDatabaseQueries.insertSignalTrackingRecord(
-                signal_id = anticipationId,
-                symbol = symbol.uppercase(),
-                interval = interval.lowercase(),
-                strategy = "ANTICIPATION_$factorId",
-                side = side.uppercase(),
-                entry_price = entryPrice,
-                stop_loss = stopLoss,
-                take_profit = takeProfit,
-                rr = rr,
-                status = "ANTICIPATING",
-                mfe = 0.0,
-                mae = 0.0,
-                exit_price = null,
-                pnl_r = null,
-                bars_held = 0L,
-                features_json = featuresJson,
-                created_at = createdAt,
-                closed_at = null
-            )
-            logDebug("SignalTracker", "Recorded anticipation $anticipationId: $symbol $interval $side $factorId @ $entryPrice (SL: $stopLoss, TP: $takeProfit)")
-        }.onFailure {
-            logDebug("SignalTracker", "Failed to record anticipation $anticipationId: ${it.message}")
-        }
-    }
 
     data class OutcomeEvaluation(
         val status: String,
@@ -306,7 +257,16 @@ object SignalOutcomeTracker {
         var resolvedCount = 0
 
         for (sig in openSignals) {
-            val forwardCandles = candles.filter { it.timestamp >= sig.created_at }
+            // ต้องเป็น "แท่งหลังจากสัญญาณเกิด" เท่านั้น — ใช้ > ไม่ใช่ >=
+            //
+            // created_at คือ timestamp "เปิดแท่ง" ของแท่งที่สัญญาณเกิด (ทั้ง path ยืนยันและคาดการณ์)
+            // ถ้าใช้ >= จะรวมแท่งนั้นทั้งแท่ง รวมถึง high/low ที่เกิด "ก่อน" สัญญาณจะมีอยู่จริง
+            // → สัญญาณถูกตัดสินเป็น INVALIDATED/LOSS จากราคาที่เกิดก่อนหน้าตัวมันเอง
+            //
+            // ลำเอียงเป็นระบบด้วย: ปัจจัยอย่าง WICK_SWEEP_REJECTION / SESSION_OPEN_SWEEP
+            // มีเงื่อนไขว่าต้องมีการ sweep เกิดในแท่งนั้นแล้วจึงยิง — จึงโดนลงโทษหนักที่สุด
+            // ทั้งที่การ sweep คือ "เหตุผลที่มันยิง" ไม่ใช่ "ผลลัพธ์ของมัน"
+            val forwardCandles = candles.filter { it.timestamp > sig.created_at }
             if (forwardCandles.isEmpty()) continue
 
             val result = evaluateSingleSignal(
@@ -334,21 +294,12 @@ object SignalOutcomeTracker {
                 resolvedCount++
                 logDebug("SignalTracker", "Signal ${sig.signal_id} (${sig.strategy}) resolved as ${result.status}: pnlR=${"%.2f".format(result.pnlR ?: 0.0)}R, MFE=${"%.2f".format(result.mfeR)}R, MAE=${"%.2f".format(result.maeR)}R")
 
-                // ── Reinforcement Learning Feedback ──
-                if (sig.strategy.startsWith("ANTICIPATION_")) {
-                    val factorId = sig.strategy.removePrefix("ANTICIPATION_")
-                    if (result.status == "WIN") {
-                        AnticipationConfigManager.applyFactorWeightAdjustment(factorId, +2)
-                        logDebug("SignalTracker", "🧠 Reinforcement Learning: Factor $factorId +2 confidence on WIN")
-                    } else if (result.status == "LOSS" || result.status == "INVALIDATED") {
-                        AnticipationConfigManager.applyFactorWeightAdjustment(factorId, -2)
-                        logDebug("SignalTracker", "🧠 Reinforcement Learning: Factor $factorId -2 confidence on ${result.status}")
-                    }
-                }
             }
+
         }
         return resolvedCount
     }
+
 
     /** ดึงสถิติผลการดำเนินงานย้อนหลังของแต่ละกลยุทธ์ */
     fun getStrategyPerformance(strategy: String): StrategyPerformance? {
@@ -407,68 +358,6 @@ object SignalOutcomeTracker {
         }.getOrElse { emptyList() }
     }
 
-    data class AnticipationPerformance(
-        val totalAnticipations: Long,
-        val convertedCount: Long,
-        val conversionRatePct: Double,
-        val wins: Long,
-        val losses: Long,
-        val invalidated: Long,
-        val winRatePct: Double,
-        val avgR: Double,
-        val factorBreakdown: Map<String, Pair<Long, Double>>
-    )
 
-    /** ดึงสถิติผลการดำเนินงานย้อนหลังและการเรียนรู้ของระบบ Anticipation ทั้งหมด */
-    fun getAnticipationPerformance(): AnticipationPerformance {
-        val db = getDb() ?: return AnticipationPerformance(0, 0, 0.0, 0, 0, 0, 0.0, 0.0, emptyMap())
-        val records = runCatching {
-            db.jarvisDatabaseQueries.getAllAnticipationTrackingRecords(500).executeAsList()
-        }.getOrElse { emptyList() }
 
-        if (records.isEmpty()) return AnticipationPerformance(0, 0, 0.0, 0, 0, 0, 0.0, 0.0, emptyMap())
-
-        val total = records.size.toLong()
-        val converted = records.count { it.status in listOf("WIN", "LOSS", "BE", "OPEN") }.toLong()
-        val wins = records.count { it.status == "WIN" }.toLong()
-        val losses = records.count { it.status == "LOSS" }.toLong()
-        val invalidated = records.count { it.status == "INVALIDATED" }.toLong()
-        val decided = wins + losses
-        val winRate = if (decided > 0) (wins * 100.0 / decided) else 0.0
-        val conversionRate = if (total > 0) (converted * 100.0 / total) else 0.0
-        val avgR = records.filter { it.pnl_r != null }.mapNotNull { it.pnl_r }.average().takeIf { !it.isNaN() } ?: 0.0
-
-        val factorMap = records.groupBy { it.strategy.removePrefix("ANTICIPATION_") }.mapValues { (_, list) ->
-            val fWins = list.count { it.status == "WIN" }
-            val fLosses = list.count { it.status == "LOSS" }
-            val fDecided = fWins + fLosses
-            val fWr = if (fDecided > 0) (fWins * 100.0 / fDecided) else 0.0
-            list.size.toLong() to fWr
-        }
-
-        return AnticipationPerformance(
-            totalAnticipations = total,
-            convertedCount = converted,
-            conversionRatePct = conversionRate,
-            wins = wins,
-            losses = losses,
-            invalidated = invalidated,
-            winRatePct = winRate,
-            avgR = avgR,
-            factorBreakdown = factorMap
-        )
-    }
-
-    /** ดึงรายการ Anticipation ล่าสุดจากฐานข้อมูลเพื่อใช้ตรวจสอบย้อนหลัง (Audit & Inspect) */
-    fun getRecentAnticipationRecords(symbol: String? = null, limit: Long = 10): List<SignalTrackingRecord> {
-        val db = getDb() ?: return emptyList()
-        val all = runCatching {
-            db.jarvisDatabaseQueries.getAllAnticipationTrackingRecords(limit = 100).executeAsList()
-        }.getOrElse { emptyList() }
-        val filtered = if (!symbol.isNullOrBlank()) {
-            val s = symbol.trim().uppercase().substringBefore("@")
-            all.filter { it.symbol.equals(s, ignoreCase = true) }
-        } else all
-        return filtered.take(limit.toInt())
-    }
 }

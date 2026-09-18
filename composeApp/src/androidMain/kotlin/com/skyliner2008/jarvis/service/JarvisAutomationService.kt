@@ -89,6 +89,7 @@ class JarvisAutomationService : Service() {
         super.onCreate()
         createNotificationChannel()
 
+        com.skyliner2008.jarvis.backup.DatabaseBackupManager.applyPendingRestore(applicationContext)
         val driver = AndroidSqliteDriver(JarvisDatabase.Schema, applicationContext, "jarvis.db")
         database = JarvisDatabase(driver)
         JarvisDatabaseHolder.install(database)
@@ -197,6 +198,9 @@ class JarvisAutomationService : Service() {
 
         processDueTasks(tasks, now)
         evaluator.trackSignalOutcomes()
+        // ดูแลขนาด OHLCV store + ประวัติการเรียนรู้ (วันละครั้ง)
+        runCatching { com.skyliner2008.jarvis.tools.trading.OhlcvMaintenance.runIfDue(now) }
+            .onFailure { logError("AutomationService", "OHLCV maintenance failed: ${it.message}", it) }
 
         if (anyNetworkErr) {
             evaluator.consecutiveNetworkFailures++
@@ -276,6 +280,10 @@ class JarvisAutomationService : Service() {
     }
 
     private suspend fun fireJobAlert(job: AlertJob, value: String, data: Map<String, String>, delivery: String = "ai") {
+        if (job.tool_name == com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME) {
+            handleWakeAlert(job, data, delivery)
+            return
+        }
         val isSignalAlert = job.tool_name == "trading_signal_alert"
         // ── Pipeline trace: ต้นรหัสการแจ้งเตือน — ค่าที่ trigger + config ที่จะใช้ทั้ง chain ──
         logDebug("AutomationService",
@@ -291,9 +299,8 @@ class JarvisAutomationService : Service() {
         // ADJUST = ปรับ SL/TP ตามโครงสร้าง (ผ่าน validation เท่านั้น ไม่งั้น fallback ค่าเดิม)
         var effData: Map<String, String> = data
         var supervisorNote: String? = null
-        val isAnticipationAlert = isSignalAlert && (effData["signal_anticipation"] == "1" || effData["signal_stage"] == "ANTICIPATION" || job.condition_json.contains("signal_anticipation"))
-        val isKeyzoneOnly = isSignalAlert && !isAnticipationAlert && effData["signal_side"] == null
-        if (isSignalAlert && !isKeyzoneOnly && !isAnticipationAlert && delivery != "direct" &&
+        val isKeyzoneOnly = isSignalAlert && effData["signal_side"] == null
+        if (isSignalAlert && !isKeyzoneOnly && delivery != "direct" &&
             (data["signal_strategy"] ?: "").contains("Unified SMC")
         ) {
             val sup = runCatching { evaluator.runStrategySupervisor(job, data) }
@@ -345,35 +352,6 @@ class JarvisAutomationService : Service() {
                     }
                 }
             }
-        } else if (isSignalAlert && isAnticipationAlert && delivery != "direct") {
-            val sup = runCatching { evaluator.runAnticipationSupervisor(job, effData) }
-                .onFailure { logError("AutomationService", "🧑‍✈️ Anticipation Supervisor error: ${it.message}", it) }
-                .getOrNull()
-            if (sup != null) {
-                when (sup.decision) {
-                    "VETO" -> {
-                        logDebug("AutomationService",
-                            "🧑‍✈️ Supervisor VETO Anticipation ${effData["signal_anticipation_side"]} ${job.symbol} conf=${sup.confidence}% — ${sup.reasonTh} (ไม่แจ้งผู้ใช้)")
-                        return
-                    }
-                    "ADJUST" -> {
-                        logDebug("AutomationService",
-                            "🧑‍✈️ Supervisor ADJUST Anticipation ${job.symbol}: SL ${sup.adjSl ?: effData["signal_anticipation_sl"]} TP1 ${sup.adjTp ?: effData["signal_anticipation_tp1"]} (conf=${sup.confidence}%)")
-                        val adjMap = mutableMapOf<String, String>()
-                        if (sup.adjSl != null) adjMap["signal_anticipation_sl"] = "%.2f".format(sup.adjSl)
-                        if (sup.adjTp != null) adjMap["signal_anticipation_tp1"] = "%.2f".format(sup.adjTp)
-                        adjMap["signal_anticipation_desc"] = "${effData["signal_anticipation_desc"]} | Supervisor ปรับ SL/TP ตามโครงสร้าง"
-                        adjMap["signal_supervisor"] = "ADJUST ${sup.confidence}%"
-                        effData = effData + adjMap
-                        supervisorNote = "Supervisor (${sup.confidence}%): ${sup.reasonTh}"
-                    }
-                    else -> {
-                        logDebug("AutomationService", "🧑‍✈️ Supervisor APPROVE Anticipation ${effData["signal_anticipation_side"]} ${job.symbol} conf=${sup.confidence}%")
-                        effData = effData + mapOf("signal_supervisor" to "APPROVE ${sup.confidence}%")
-                        supervisorNote = "Supervisor (${sup.confidence}%): ${sup.reasonTh}"
-                    }
-                }
-            }
         }
         // ── บันทึก signal ลงสถิติ (ทั้ง 2 โหมด) — tracker จะตามเช็ก TP/SL ทุก cycle ──
         if (isSignalAlert) {
@@ -395,11 +373,6 @@ class JarvisAutomationService : Service() {
         // ── โหมดส่งตรง: ไม่เรียก AI (ประหยัดโทเคน) — notification + ส่งเข้าแชทโดยตรง ──
         if (delivery == "direct") {
             val body = when {
-                isAnticipationAlert -> {
-                    val side = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
-                    val zone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
-                    "⚡ คาดการณ์ $side ${job.symbol} ที่โซน $zone — ${effData["signal_anticipation_desc"] ?: "เฝ้าระวังการกลับตัว"}"
-                }
                 isSignalAlert -> {
                     "📡 Signal ${effData["signal_side"]} ${job.symbol} (${effData["signal_strategy"]})\n" +
                         "เหตุผล: ${effData["signal_reason"]}\n" +
@@ -413,21 +386,18 @@ class JarvisAutomationService : Service() {
             // การ์ดแชท + เสียง — การ์ดจะมี footer บอก engine เสียงที่พูดจริง (push ตอนเสียงเริ่ม)
             deliverChatAndVoice(
                 cardBody = when {
-                    isAnticipationAlert -> AlertPresentationFormatter.buildAnticipationChatCard(job, effData, null)
                     isKeyzoneOnly -> AlertPresentationFormatter.buildKeyzoneChatCard(job, effData, null)
                     isSignalAlert -> AlertPresentationFormatter.buildSignalChatCard(job, effData, null)
                     else -> AlertPresentationFormatter.buildAlertChatCard(job, value, effData, null)
                 },
                 metaFor = { v, s ->
                     when {
-                        isAnticipationAlert -> AlertPresentationFormatter.anticipationChatMeta(job, effData, s, "signal_alert_direct", v)
                         isKeyzoneOnly -> AlertPresentationFormatter.keyzoneChatMeta(job, effData, s, "signal_alert_direct", v)
                         isSignalAlert -> AlertPresentationFormatter.signalChatMeta(job, effData, s, "signal_alert_direct", v)
                         else -> AlertPresentationFormatter.alertChatMeta(job, value, s, "signal_alert_direct", v)
                     }
                 },
                 shortSpeech = when {
-                    isAnticipationAlert -> AlertPresentationFormatter.buildAnticipationSpeech(job, effData)
                     isSignalAlert -> AlertPresentationFormatter.buildSignalSpeech(job, effData)
                     else -> AlertPresentationFormatter.buildAlertSpeech(job, value)
                 },
@@ -444,26 +414,6 @@ class JarvisAutomationService : Service() {
             isLiveEngine(setting("alert_voice_engine").ifBlank { "device" })
 
         val contextPrompt = when {
-            isAnticipationAlert -> buildString {
-                val antSide = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
-                val antZone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
-                val antDesc = effData["signal_anticipation_desc"] ?: ""
-                val antConf = effData["signal_anticipation_confidence"] ?: "75"
-                val closePrice = effData["close"] ?: "-"
-                appendLine("เหตุการณ์: ระบบ AI คาดการณ์สัญญาณล่วงหน้า (Anticipation / Pre-Signal) ของ ${job.symbol}")
-                appendLine("ทิศทาง: $antSide (ความเชื่อมั่น: $antConf%) | โซนสำคัญ: $antZone (@ $closePrice)")
-                appendLine("ปัจจัยที่เกิด: $antDesc")
-                appendLine()
-                if (useLiveSummary) {
-                    appendLine("[LIVE ANTICIPATION SUMMARY]")
-                    appendLine("กฎการพูดเสียงสด (Live Voice):")
-                    appendLine("1. ไม่ต้องบอกค่าทางเทคนิค ตัวเลขทศนิยม หรือค่าอินดิเคเตอร์ยิบย่อย (เช่น ค่า RSI ละเอียด, สเปรด, ตัวเลข Fibonacci)")
-                    appendLine("2. เน้นสรุปแนวโน้มทิศทาง ($antSide) และสิ่งที่ต้องจับตามอง (เช่น รอแท่งเทียนปิดยืนยัน หรือเฝ้าระวังการหลุดแนวรับต้าน) ให้เข้าใจทันที")
-                    appendLine("3. พูดเป็นภาษาไทยธรรมชาติกระชับ 1-2 ประโยค จบสมบูรณ์ และลงท้ายด้วย ค่ะ เสมอ")
-                } else {
-                    appendLine("ช่วยแจ้งผู้ใช้ภาษาไทยสั้นๆ 1-2 ประโยค: สรุปแนวโน้มทิศทาง $antSide และสิ่งที่ต้องจับตามอง (ไม่ต้องบอกค่าเทคนิคยิบย่อย)")
-                }
-            }
             isKeyzoneOnly -> buildString {
                 appendLine("เหตุการณ์: ราคา ${job.symbol} เคลื่อนไปแตะจุดสำคัญของโครงสร้างตลาด (ยังไม่มีสัญญาณเข้าเทรด)")
                 appendLine("จุดที่แตะ: ${effData["signal_keyzone_desc"]}")
@@ -522,11 +472,6 @@ class JarvisAutomationService : Service() {
         }
 
         val body = aiText ?: when {
-            isAnticipationAlert -> {
-                val antSide = effData["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
-                val antZone = effData["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone"
-                "⚡ คาดการณ์ $antSide ${job.symbol} ที่โซน $antZone — ${effData["signal_anticipation_desc"] ?: "เฝ้าระวังการกลับตัว"}"
-            }
             isKeyzoneOnly -> {
                 "📍 ${job.symbol} แตะจุดสำคัญ: ${effData["signal_keyzone_desc"]?.ifBlank { "โครงสร้างตลาด" }}"
             }
@@ -541,7 +486,6 @@ class JarvisAutomationService : Service() {
         sendJobAlertNotification(job, body)
         deliverChatAndVoice(
             cardBody = when {
-                isAnticipationAlert -> AlertPresentationFormatter.buildAnticipationChatCard(job, effData, aiText)
                 isKeyzoneOnly -> AlertPresentationFormatter.buildKeyzoneChatCard(job, effData, aiText)
                 isSignalAlert -> AlertPresentationFormatter.buildSignalChatCard(job, effData, aiText)
                 else -> AlertPresentationFormatter.buildAlertChatCard(job, value, effData, aiText)
@@ -549,19 +493,71 @@ class JarvisAutomationService : Service() {
             metaFor = { v, s ->
                 val finalSummary = s ?: aiText
                 when {
-                    isAnticipationAlert -> AlertPresentationFormatter.anticipationChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
                     isKeyzoneOnly -> AlertPresentationFormatter.keyzoneChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
                     isSignalAlert -> AlertPresentationFormatter.signalChatMeta(job, effData, finalSummary, "signal_alert_ai", v)
                     else -> AlertPresentationFormatter.alertChatMeta(job, value, finalSummary, "signal_alert_ai", v)
                 }
             },
             shortSpeech = when {
-                isAnticipationAlert -> AlertPresentationFormatter.buildAnticipationSpeech(job, effData)
                 isSignalAlert -> AlertPresentationFormatter.buildSignalSpeech(job, effData)
                 else -> AlertPresentationFormatter.buildAlertSpeech(job, value)
             },
             fullSpeech = if (useLiveSummary) contextPrompt else body,
             liveSummary = useLiveSummary,
+            timeframeMin = evaluator.symbolTimeframeMin(job.symbol))
+    }
+
+    /**
+     * ระบบปลุก AI (คาดการณ์ล่วงหน้า) — แยกจาก signal alert โดยสิ้นเชิง
+     *
+     * direct : แจ้งรายการเหตุการณ์ที่เกิดตรงๆ (ไม่ใช้โทเคน)
+     * ai     : AI ดูภาพ 5TF แล้วตัดสินเอง NOTIFY/SKIP — SKIP = ไม่รบกวนผู้ใช้
+     *          (คำตัดสินถูกบันทึกลงการเรียนรู้ เพื่อวัดว่า AI วิเคราะห์ถูกไหม)
+     * เสียง   : พูดสรุปที่ AI เขียนไว้แล้ว — ไม่ส่ง payload ให้ Live สรุปซ้ำ (ประหยัด TPM ของ Live)
+     */
+    private suspend fun handleWakeAlert(job: AlertJob, data: Map<String, String>, delivery: String) {
+        val E = com.skyliner2008.jarvis.automation.wake.AnticipationEngine
+        // ปลุกได้เฉพาะรอบที่ engine อนุมัติแล้ว (ผ่านงบ/cooldown) — กันเงื่อนไข alert แบบอื่นเรียก AI เกินงบ
+        if (data[E.K_WAKE] != "1") {
+            logDebug("AutomationService", "⏰ ${job.name}: เข้าเงื่อนไขแต่ engine ไม่ได้ปลุก (wake=${data[E.K_WAKE]}) — ข้าม")
+            return
+        }
+        logDebug("AutomationService",
+            "⏰ WAKE '${job.name}' ${job.symbol} events=${data[E.K_EVENT_COUNT]} triggers=${data[E.K_TRIGGERS]} mode=$delivery")
+        val signalId = data[E.K_SIGNAL_ID].orEmpty()
+        var verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict? = null
+        // สวิตช์ "AI สรุปการแจ้งเตือน" ปิดอยู่ = ผู้ใช้ไม่ต้องการใช้โทเคน → แจ้งแบบรายการเหตุการณ์
+        val useAi = delivery != "direct" && settingEnabled("alert_ai_summary", true)
+        if (useAi) {
+            val price = data[E.K_CLOSE]?.replace(",", "")?.toDoubleOrNull()
+            verdict = runCatching { evaluator.runWakeAnalysis(job, data) }
+                .onFailure { logError("AutomationService", "⏰ Wake analysis error: ${it.message}", it) }
+                .getOrNull()
+                ?.let { com.skyliner2008.jarvis.automation.wake.WakePrompt.sanitize(it, price) }
+            if (verdict != null) {
+                if (signalId.isNotBlank()) {
+                    com.skyliner2008.jarvis.automation.wake.WakeLearningStore
+                        .setAiDecision(signalId, verdict.decision, verdict.bias)
+                }
+                if (!verdict.notify) {
+                    logDebug("AutomationService",
+                        "⏰ AI SKIP ${job.symbol} (${verdict.bias} ${verdict.confidence ?: "-"}%) — ${verdict.reasonTh}")
+                    return
+                }
+            } else {
+                // AI ไม่ตอบ/รูปแบบผิด → แจ้งแบบ direct แทน (ไม่ทิ้งเหตุการณ์เงียบๆ)
+                logDebug("AutomationService", "⏰ Wake analysis ไม่มีคำตอบ → แจ้งแบบรายการเหตุการณ์")
+            }
+        }
+        val body = AlertPresentationFormatter.buildWakeNotification(job, data, verdict)
+        sendJobAlertNotification(job, body)
+        val type = if (verdict != null) "wake_ai" else "wake_direct"
+        deliverChatAndVoice(
+            cardBody = AlertPresentationFormatter.buildWakeChatCard(job, data, verdict),
+            metaFor = { v, s -> AlertPresentationFormatter.wakeChatMeta(job, data, verdict, s, type, v) },
+            shortSpeech = AlertPresentationFormatter.buildWakeSpeech(job, data, verdict),
+            fullSpeech = verdict?.summaryTh?.ifBlank { null } ?: body,
+            liveSummary = false,
             timeframeMin = evaluator.symbolTimeframeMin(job.symbol))
     }
 

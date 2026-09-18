@@ -30,6 +30,14 @@ object ToolRegistry {
         "trading_correlation_matrix",
         "trading_position_sizing",
         "automation_manage_alerts",
+        // 3 ตัวนี้เคยตกหล่นจาก allowlist ทั้ง tvOnly และ mt5Only
+        // → TradingToolPolicy.isToolAllowed คืน false ทุกกรณี (trading context ก็ไม่ผ่าน
+        //   non-trading context ก็ไม่ผ่านเพราะ allowedTradingToolNames เป็น null)
+        // ผลคือถาม "ภาพรวมคริปโต" (เข้าเงื่อนไข trading prompt เพราะมีคำว่า คริปโต)
+        // แล้ว AI ไม่มี tool ให้เรียกเลย ทั้งที่ handler พร้อมใช้งาน
+        "trading_crypto_overview",
+        "trading_economic_data",
+        "automation_manage_schedule",
         "trading_deep_analysis_suite",
         "trading_harmonic_scan",
         "trading_elliot_modern_analysis",

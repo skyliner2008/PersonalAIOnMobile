@@ -104,27 +104,73 @@ object AlertFieldCatalog {
     val INDICATORS = AlertToolOption(
         toolName = "trading_indicators",
         label = "อินดิเคเตอร์จากแท่งเทียน (คำนวณเอง ⭐)",
-        description = "คำนวณจากแท่งเทียน 300 แท่งในเครื่อง (แม่นกว่า scanner — มี EMA/Stoch/CCI/BB ครบ) — เปลี่ยน TF ได้ด้วย suffix เช่น XAUUSD@15m (default 1h)",
+        description = "คำนวณจากแท่งเทียนที่ปิดแล้วในเครื่อง (ดึง 800 แท่งเพื่อให้ EMA200 ลู่เข้าค่าจริง) — เปลี่ยน TF ได้ด้วย suffix เช่น XAUUSD@15m (default 1h)",
         fields = listOf(
             AlertFieldOption("close", "Close — ราคาปิดแท่งล่าสุด", ""),
+            AlertFieldOption("volume", "Volume แท่งล่าสุด", ""),
+            // ── Moving averages ──
             AlertFieldOption("ema20", "EMA 20", "เช่น close ทะลุ EMA20 → ตั้ง 2 alert เปรียบ close กับค่า ema20"),
             AlertFieldOption("ema50", "EMA 50", ""),
-            AlertFieldOption("ema200", "EMA 200", ""),
-            AlertFieldOption("ema_cross_state", "EMA Cross (50/200)", "GOLDEN_CROSS / DEATH_CROSS = เพิ่งตัดแท่งนี้ | BULLISH / BEARISH = โซนปัจจุบัน — ใช้กับ ==", isNumeric = false),
-            AlertFieldOption("ema50_200_spread", "EMA50-200 Spread", "ตัวเลข: >= 0 = โซน Golden, < 0 = โซน Death"),
-            AlertFieldOption("ema20_50_spread", "EMA20-50 Spread", "ตัวเลข: >= 0 = แนวโน้มสั้นขาขึ้น"),
+            AlertFieldOption("ema200", "EMA 200", "ต้องมีแท่งพอ (800) ไม่งั้นระบบจะไม่ส่งค่านี้ออกมาเลย"),
+            AlertFieldOption("sma20", "SMA 20", ""),
+            AlertFieldOption("sma50", "SMA 50", ""),
+            AlertFieldOption("sma200", "SMA 200", ""),
+            AlertFieldOption("ema_cross_state", "EMA Cross (50/200)", "GOLDEN_CROSS / DEATH_CROSS = เพิ่งตัดแท่งนี้ | BULLISH / BEARISH = โซนปัจจุบัน | N/A = แท่งไม่พอ — ใช้กับ ==", isNumeric = false),
+            AlertFieldOption("ema50_200_spread", "EMA50-200 Spread (%)", "เป็น % ของราคา: >= 0 = โซน Golden, < 0 = โซน Death"),
+            AlertFieldOption("ema20_50_spread", "EMA20-50 Spread (%)", "เป็น % ของราคา: >= 0 = แนวโน้มสั้นขาขึ้น"),
+            // ── Momentum ──
             AlertFieldOption("rsi14", "RSI (14)", "Overbought: >= 70 | Oversold: <= 30"),
+            AlertFieldOption("rsi7", "RSI (7) — ไวกว่า", "ใช้จับ reversal สั้น"),
             AlertFieldOption("macd", "MACD Line (12,26)", ""),
             AlertFieldOption("macd_signal", "MACD Signal (9)", ""),
             AlertFieldOption("macd_hist", "MACD Histogram", ">= 0 = โมเมนตัมบวก"),
             AlertFieldOption("stoch_k", "Stochastic %K (14)", ">= 80 = Overbought | <= 20 = Oversold"),
             AlertFieldOption("stoch_d", "Stochastic %D (3)", ""),
             AlertFieldOption("cci20", "CCI (20)", ">= 100 = แรงซื้อ | <= -100 = แรงขาย"),
+            AlertFieldOption("roc", "Rate of Change (9) %", "โมเมนตัมเทียบ 9 แท่งก่อน"),
+            AlertFieldOption("williams_r", "Williams %R (14)", "<= -80 = Oversold | >= -20 = Overbought"),
+            AlertFieldOption("mfi14", "Money Flow Index (14)", "RSI ถ่วงด้วยปริมาณ: >= 80 = Overbought | <= 20 = Oversold"),
+            AlertFieldOption("ao", "Awesome Oscillator (5,34)", ">= 0 = โมเมนตัมบวก"),
+            // ── Trend / Volatility ──
+            AlertFieldOption("adx14", "ADX (14)", ">= 25 = เทรนด์ชัด | <= 20 = ไซด์เวย์"),
+            AlertFieldOption("di_plus", "+DI (14)", "แรงฝั่งขาขึ้น"),
+            AlertFieldOption("di_minus", "-DI (14)", "แรงฝั่งขาลง"),
+            AlertFieldOption("atr14", "ATR (14)", "วัดความผันผวน เช่น atr14 >= 25"),
+            AlertFieldOption("atr_pct", "ATR เป็น % ของราคา", "เทียบข้าม symbol ได้ เช่น atr_pct >= 1.5"),
+            AlertFieldOption("supertrend", "Supertrend (10,3)", "ค่าเส้น stop ปัจจุบัน"),
+            AlertFieldOption("supertrend_direction", "Supertrend ทิศทาง", "BULLISH / BEARISH — ใช้กับ ==", isNumeric = false),
             AlertFieldOption("bb_upper", "Bollinger Upper (20,2)", "ราคาแตะ upper → ระวังแรงขาย"),
             AlertFieldOption("bb_basis", "Bollinger Basis (20)", ""),
             AlertFieldOption("bb_lower", "Bollinger Lower (20,2)", "ราคาแตะ lower → ระวังแรงซื้อกลับ"),
             AlertFieldOption("bb_width", "Bollinger Width (%)", "ค่าต่ำ = squeeze รอ breakout | ค่าสูง = ผันผวนแรง"),
-            AlertFieldOption("atr14", "ATR (14)", "วัดความผันผวน เช่น atr14 >= 25")
+            AlertFieldOption("bb_percent_b", "Bollinger %B (0-100)", ">= 100 = ทะลุ upper | <= 0 = ทะลุ lower"),
+            // ── Volume ──
+            AlertFieldOption("vwap", "VWAP (รายเซสชัน)", "รีเซ็ตทุกวันตามนิยาม ไม่ใช่ค่าสะสมข้ามวัน"),
+            AlertFieldOption("vwap_distance_pct", "ระยะราคาจาก VWAP (%)", ">= 0 = ราคาอยู่เหนือ VWAP"),
+            AlertFieldOption("volume_sma20", "Volume เฉลี่ย 20 แท่ง", ""),
+            AlertFieldOption("volume_ratio20", "Volume / ค่าเฉลี่ย 20", ">= 2 = ปริมาณผิดปกติ"),
+            AlertFieldOption("obv", "On-Balance Volume (สะสม)", "ดูทิศทางคู่กับ obv_slope20 — ค่าดิบไม่มีความหมายเดี่ยวๆ"),
+            AlertFieldOption("obv_slope20", "OBV Slope 20 แท่ง (%)", ">= 0 = แรงซื้อสะสม"),
+            // ── Levels ──
+            AlertFieldOption("pivot", "Pivot Point (classic)", "คำนวณจากแท่งก่อนหน้า"),
+            AlertFieldOption("resistance1", "Resistance 1", ""),
+            AlertFieldOption("resistance2", "Resistance 2", ""),
+            AlertFieldOption("support1", "Support 1", ""),
+            AlertFieldOption("support2", "Support 2", ""),
+            AlertFieldOption("donchian_upper", "Donchian Upper (20)", "ทะลุ = breakout ขาขึ้น"),
+            AlertFieldOption("donchian_mid", "Donchian Mid (20)", ""),
+            AlertFieldOption("donchian_lower", "Donchian Lower (20)", "ทะลุ = breakout ขาลง"),
+            // ── Ichimoku ──
+            AlertFieldOption("ichimoku_tenkan", "Ichimoku Tenkan (9)", ""),
+            AlertFieldOption("ichimoku_kijun", "Ichimoku Kijun (26)", ""),
+            AlertFieldOption("ichimoku_cloud_top", "Ichimoku Cloud ขอบบน", "ราคาเหนือเมฆ = ขาขึ้น"),
+            AlertFieldOption("ichimoku_cloud_bottom", "Ichimoku Cloud ขอบล่าง", "ราคาใต้เมฆ = ขาลง"),
+            // ── Fibonacci ──
+            AlertFieldOption("fib_382", "Fibonacci 38.2%", "จาก swing high/low 100 แท่งล่าสุด"),
+            AlertFieldOption("fib_500", "Fibonacci 50%", ""),
+            AlertFieldOption("fib_618", "Fibonacci 61.8%", "โซน golden pocket"),
+            AlertFieldOption("swing_high", "Swing High (100 แท่ง)", ""),
+            AlertFieldOption("swing_low", "Swing Low (100 แท่ง)", "")
         )
     )
 
@@ -254,10 +300,7 @@ object AlertFieldCatalog {
         fields = listOf(
             AlertFieldOption("signal_buy", "สัญญาณ BUY ใหม่ (1=เกิด)", "ตั้ง signal_buy >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ BUY ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),
             AlertFieldOption("signal_sell", "สัญญาณ SELL ใหม่ (1=เกิด)", "ตั้ง signal_sell >= 1 → ระบบแปลงเป็นเฝ้าเฉพาะสัญญาณ SELL ที่เกิด 'หลัง' สร้าง alert อัตโนมัติ (ไม่เด้งจากสัญญาณเก่า)"),
-            AlertFieldOption("signal_anticipation", "⚡ คาดการณ์สัญญาณล่วงหน้า (1=เกิด)", "ตั้ง signal_anticipation >= 1 → แจ้งเตือนล่วงหน้าเมื่อราคาเข้าใกล้ Keyzone, Wick Rejection หรือ EMA บีบตัวเข้าหากัน"),
-            AlertFieldOption("signal_stage", "ระดับสัญญาณ (ANTICIPATION / CONFIRMED)", "ANTICIPATION = เตรียมตัว | CONFIRMED = แท่งปิดยืนยัน — ใช้กับ ==", isNumeric = false),
-            AlertFieldOption("signal_anticipation_side", "ทิศทางที่คาดการณ์", "BUY / SELL — ใช้กับ ==", isNumeric = false),
-            AlertFieldOption("signal_anticipation_zone", "โซนราคาที่คาดการณ์", "เช่น Demand / Bullish Zone หรือ EMA Convergence — ใช้กับ contains", isNumeric = false),
+            AlertFieldOption("signal_stage", "ระดับสัญญาณ (CONFIRMED / NONE)", "CONFIRMED = แท่งปิดยืนยันสัญญาณ | NONE = ไม่มีสัญญาณ — ใช้กับ == (การคาดการณ์ล่วงหน้าย้ายไป tool 'ระบบปลุก AI' แล้ว)", isNumeric = false),
             AlertFieldOption("ema14_60_cross", "EMA 14/60 Cross Event", "GOLDEN_CROSS / DEATH_CROSS / NONE — ใช้กับ ==", isNumeric = false),
             AlertFieldOption("ema14_60_near_cross", "EMA 14/60 Near-Cross (1=เกือบตัดกัน)", "1 = EMA14 และ EMA60 กำลังบีบตัวเข้าหากันในระยะกระชั้นชิด"),
             AlertFieldOption("ema14_60_near_cross_side", "ทิศทาง Near-Cross (BUY/SELL)", "BUY = กำลังจะตัดขึ้น (Golden Cross) | SELL = กำลังจะตัดลง (Death Cross) — ใช้กับ ==", isNumeric = false),
@@ -274,7 +317,25 @@ object AlertFieldCatalog {
         )
     )
 
-    val tools: List<AlertToolOption> = listOf(INDICATORS, SMC, SMC_FLOW, STRATEGY, SIGNAL_ALERT, PRICE, TA, DEEP_SUITE, SENTIMENT, FEAR_GREED, CRYPTO_GLOBAL)
+    /**
+     * ระบบปลุก AI (คาดการณ์ล่วงหน้า) — แยกจาก Signal Alert
+     * ปัจจัย ~115 ตัวเป็นแค่ "นาฬิกาปลุก" ไม่ใช่ข้อสรุป — AI ดูภาพ 5TF แล้วตัดสินเองว่าจะแจ้งหรือไม่
+     */
+    val ANTICIPATION = AlertToolOption(
+        toolName = com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME,
+        label = "⏰ ระบบปลุก AI (คาดการณ์ล่วงหน้า)",
+        description = "เฝ้ากราฟ 5TF (M1/M5/M15/H1/H4) ด้วยปัจจัย ~115 ตัว 15 หมวด — เมื่อเกิดเหตุการณ์สำคัญจะปลุก AI ให้วิเคราะห์ภาพรวม แล้วตัดสินเองว่าควรแจ้งไหม ระบบเรียนรู้ผลของทุกปัจจัยและลดชั้นตัวที่ไม่มีประโยชน์เอง — เลือก TF หลักด้วย suffix เช่น XAUUSD@15m",
+        fields = listOf(
+            AlertFieldOption("wake", "มีเหตุการณ์ปลุก AI (1=เกิด)", "ตั้ง wake >= 1 → เฝ้าเฉพาะเหตุการณ์ใหม่ (ไม่เด้งซ้ำจากแท่งเดิม)"),
+            AlertFieldOption("wake_id", "รหัสเหตุการณ์ (เวลาแท่ง)", "ใช้ภายใน — เปลี่ยนเมื่อมีการปลุกครั้งใหม่"),
+            AlertFieldOption("wake_event_count", "จำนวนเหตุการณ์ที่ปลุก", "เช่น wake_event_count >= 2 = ปลุกเมื่อมีหลายเหตุการณ์พร้อมกัน"),
+            AlertFieldOption("wake_buy", "จำนวนเหตุการณ์ที่ชี้ BUY", ""),
+            AlertFieldOption("wake_sell", "จำนวนเหตุการณ์ที่ชี้ SELL", ""),
+            AlertFieldOption("close", "Close — ราคาปัจจุบัน", "")
+        )
+    )
+
+    val tools: List<AlertToolOption> = listOf(INDICATORS, SMC, SMC_FLOW, STRATEGY, SIGNAL_ALERT, ANTICIPATION, PRICE, TA, DEEP_SUITE, SENTIMENT, FEAR_GREED, CRYPTO_GLOBAL)
 
     fun toolFor(toolName: String): AlertToolOption? = tools.firstOrNull { it.toolName == toolName }
 

@@ -37,6 +37,7 @@ class AlertActionReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         thread {
             try {
+                com.skyliner2008.jarvis.backup.DatabaseBackupManager.applyPendingRestore(context.applicationContext)
                 val driver = AndroidSqliteDriver(JarvisDatabase.Schema, context, "jarvis.db")
                 try {
                     val db = JarvisDatabase(driver)

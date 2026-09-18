@@ -50,6 +50,13 @@ internal class TradingAlertEvaluator(
     val signalCycleHits = AtomicInteger(0)
 
     private val alertAiMutex = Mutex()
+
+    /** ระบบปลุก AI — แยกจากระบบ signal (ใช้ร่วมกันเฉพาะ OHLCV store) */
+    private val anticipationEngine = com.skyliner2008.jarvis.automation.wake.AnticipationEngine(smcApi, tradingApi)
+
+    /** tool ที่ยิงตาม "id ของเหตุการณ์" ไม่ใช่ boolean is_triggered — เหตุการณ์ใหม่ยิงได้ แม้ job เคยยิงแล้ว */
+    private fun isEdgeTriggered(tool: String) =
+        tool == "trading_signal_alert" || tool == com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME
     private val signalAlertLastHandledAt = ConcurrentHashMap<String, Long>()
     private val signalAlertLastHandledId = ConcurrentHashMap<String, Long>()
     private val signalAlertCooldownMs = 90_000L
@@ -185,12 +192,16 @@ internal class TradingAlertEvaluator(
         fill("EMA20", "ema20"); fill("EMA50", "ema50"); fill("EMA200", "ema200")
         fill("BB.upper", "bb_upper"); fill("BB.basis", "bb_basis"); fill("BB.lower", "bb_lower")
         fill("BB.width", "bb_width"); fill("ATR", "atr14")
-        fill("ADX", "adx"); fill("ADX+DI", "di_plus"); fill("ADX-DI", "di_minus")
+        fill("ADX", "adx14"); fill("ADX+DI", "di_plus"); fill("ADX-DI", "di_minus")
         return out
     }
 
 
-    suspend fun generateAiText(prompt: String): String? {
+    /**
+     * @param systemPrompt แทน system prompt แชทของ JARVIS (งานเฉพาะทาง ประหยัดโทเคน)
+     * @param timeoutMs เวลารอต่อโมเดล — สรุปเสียงต้องเร็ว (8 วิ) แต่งานวิเคราะห์รอได้นานกว่า
+     */
+    suspend fun generateAiText(prompt: String, systemPrompt: String? = null, timeoutMs: Long = 8_000): String? {
         val apiKey = setting("api_key")
         if (apiKey.isBlank()) {
             logDebug("AutomationService", "🧠 AI summary skipped — no api_key in settings")
@@ -208,12 +219,13 @@ internal class TradingAlertEvaluator(
                 // and disable GeminiService's 45s long-retry. The outer chain owns fallback.
                 val service = GeminiService(geminiClient, apiKey, m).apply {
                     fallbackModelsOverride = emptyList()
+                    systemPromptOverride = systemPrompt
                 }
                 service.generateResponse(
                     prompt = prompt,
                     intentAddon = "คุณคือ JARVIS ผู้ช่วยส่วนตัว พูดสั้น กระชับ สุภาพ เป็นมิตร ใช้ภาษาไทยเป็นหลัก " +
                             "ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้ markdown ห้ามใส่หัวข้อหรือตาราง ห้ามใส่ code block หรือ chart",
-                    timeoutMs = 8_000,
+                    timeoutMs = timeoutMs,
                     retryLongerOnTimeout = false
                 ).trim().takeIf { it.isNotBlank() && !it.startsWith("⚠️") }
                     ?.let { AlertPresentationFormatter.stripCodeFences(it) }
@@ -303,67 +315,32 @@ internal class TradingAlertEvaluator(
         return SupervisorResult(decision, priceField("ADJUST_SL"), priceField("ADJUST_TP"), conf, reason)
     }
 
-    suspend fun runAnticipationSupervisor(job: AlertJob, data: Map<String, String>): SupervisorResult? {
-        val side = data["signal_anticipation_side"] ?: data["signal_side"] ?: "BUY"
-        val factor = data["signal_anticipation_factor"] ?: "ANTICIPATION"
-        val stage = data["signal_anticipation_stage"] ?: "PRE_SETUP"
-        val entry = data["signal_anticipation_entry"] ?: data["close"] ?: "-"
-        val sl = data["signal_anticipation_sl"] ?: "-"
-        val tp1 = data["signal_anticipation_tp1"] ?: "-"
-        val tp2 = data["signal_anticipation_tp2"] ?: "-"
-        val desc = data["signal_anticipation_desc"] ?: "-"
-        val zone = data["signal_anticipation_zone"] ?: "-"
-        val mtf = data["signal_mtf_context"]?.takeIf { it.isNotBlank() } ?: (data["signal_context"] ?: "-")
-
-        val prompt = buildString {
-            appendLine("บทบาท: คุณคือ AI Strategy Supervisor — วิเคราะห์และคัดกรองการคาดการณ์สัญญาณล่วงหน้า (Signal Anticipation) ก่อนแจ้งเตือนผู้ใช้")
-            appendLine()
-            appendLine("══ สัญญาณคาดการณ์ล่วงหน้า ══")
-            appendLine("สินทรัพย์: ${job.symbol} | ทิศทางคาดการณ์: $side | ขั้นตอน: $stage")
-            appendLine("ปัจจัยกระตุ้น: $factor | โซน/ระดับ: $zone")
-            appendLine("Execution Rails คาดหมาย: Entry $entry | SL $sl | TP1 $tp1 | TP2 $tp2")
-            appendLine("รายละเอียดเหตุผล: $desc")
-            appendLine()
-            appendLine("══ โครงสร้างตลาด MTF Context (คำนวณจากแท่งเทียนจริง) ══")
-            appendLine(mtf)
-            appendLine()
-            appendLine("แนวทางตัดสิน:")
-            appendLine("- VETO เมื่อการคาดการณ์นี้เสี่ยงสูงเกินไป เช่น สัญญาณขัดแย้งเทรนด์ใหญ่ H1/H4 ชัดเจน, ตลาดผันผวนผิดปกติ, หรือแนวต้าน/รับขวางทาง")
-            appendLine("- ADJUST เมื่อการคาดการณ์ถูกต้อง แต่วางระดับ SL หรือ TP กว้าง/แคบเกินไปเทียบกับโซนโครงสร้าง")
-            appendLine("- APPROVE เมื่อการคาดการณ์สอดคล้องกับพฤติกรรมราคาและ MTF Context สมควรแจ้งเตือนล่วงหน้า")
-            appendLine("ใช้เฉพาะข้อมูลด้านบน ห้ามสมมติข่าว/ตัวเลขอื่น")
-            appendLine()
-            appendLine("ตอบตามรูปแบบนี้เท่านั้น 5 บรรทัด ห้ามมีข้อความอื่น:")
-            appendLine("DECISION: APPROVE หรือ VETO หรือ ADJUST")
-            appendLine("ADJUST_SL: ราคาใหม่ หรือ -")
-            appendLine("ADJUST_TP: ราคาใหม่ หรือ -")
-            appendLine("CONFIDENCE: ตัวเลข 0-100")
-            appendLine("REASON_TH: เหตุผลภาษาไทยสั้นๆ 1-2 ประโยค")
-        }
+    /**
+     * ระบบปลุก AI — ให้ AI ดูภาพ 5TF แล้วตัดสินเองว่าควรแจ้งผู้ใช้ไหม
+     *
+     * ใช้ generateContent แบบ stateless (Flash Lite) — ไม่ใช้ Live session เพราะ
+     * Live คิดโทเคนทั้ง context ที่สะสมใหม่ทุก turn แต่การปลุกแต่ละครั้งไม่ต้องจำครั้งก่อน
+     * (Live ใช้แค่ "พูดผล" ขั้นตอนสุดท้าย)
+     */
+    suspend fun runWakeAnalysis(job: AlertJob, data: Map<String, String>): com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict? {
+        val (sym, _) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+        val prompt = com.skyliner2008.jarvis.automation.wake.WakePrompt.build(sym, data)
         val waitStart = System.currentTimeMillis()
         alertAiMutex.lock()
         val raw = try {
             val waitedMs = System.currentTimeMillis() - waitStart
-            if (waitedMs > 0L) logDebug("AutomationService", "🧑‍✈️ Anticipation Supervisor queued — waited ${waitedMs}ms")
-            generateAiText(prompt)
+            if (waitedMs > 0L) logDebug("AutomationService", "⏰ Wake analysis queued — waited ${waitedMs}ms")
+            generateAiText(
+                prompt,
+                systemPrompt = com.skyliner2008.jarvis.automation.wake.WakePrompt.SYSTEM_PROMPT,
+                timeoutMs = 20_000
+            )
         } finally {
             alertAiMutex.unlock()
         } ?: return null
-
-        val decisionRaw = Regex("DECISION:\\s*(\\w+)", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)?.uppercase() ?: return null
-        val decision = when {
-            decisionRaw.contains("VETO") -> "VETO"
-            decisionRaw.contains("ADJUST") -> "ADJUST"
-            else -> "APPROVE"
+        return com.skyliner2008.jarvis.automation.wake.WakePrompt.parse(raw).also {
+            if (it == null) logDebug("AutomationService", "⏰ Wake analysis: รูปแบบคำตอบไม่ตรง — ${raw.take(200)}")
         }
-        fun priceField(name: String): Double? =
-            Regex("$name:\\s*([0-9][0-9,]*\\.?[0-9]*)", RegexOption.IGNORE_CASE).find(raw)
-                ?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
-        val conf = Regex("CONFIDENCE:\\s*(\\d{1,3})", RegexOption.IGNORE_CASE).find(raw)
-            ?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100) ?: 50
-        val reason = Regex("REASON_TH:\\s*(.+)$", RegexOption.IGNORE_CASE).find(raw)
-            ?.groupValues?.get(1)?.trim()?.take(300)?.takeIf { it.isNotBlank() } ?: "ผ่านเกณฑ์ Anticipation Supervisor"
-        return SupervisorResult(decision, priceField("ADJUST_SL"), priceField("ADJUST_TP"), conf, reason)
     }
 
 
@@ -400,17 +377,30 @@ internal class TradingAlertEvaluator(
         // (🛑 หยุดแจ้งเตือน = ปิด job / 🔁 แจ้งเตือนซ้ำ = รีเซ็ตให้เฝ้าดูใหม่ ผ่าน AlertActionReceiver)
         // trading_signal_alert ใช้ signal_id เป็น dedup key: signal ใหม่ยิงได้ 1 ครั้ง,
         // signal_id เดิมจะถูก suppress แม้ is_triggered ของ job จะยังเป็น 1
-        if (job.is_triggered == 1L && job.tool_name != "trading_signal_alert") {
+        if (job.is_triggered == 1L && !isEdgeTriggered(job.tool_name)) {
             logDebug("AutomationService", "⏸ พัก '${job.name}' — TRIGGERED แล้ว รอผู้ใช้เลือก หยุด/ซ้ำ จาก notification")
             return
         }
 
         // Decode condition first (need field name for logging regardless of fetch result)
-        val condition = try {
+        val decoded = try {
             automationJson.decodeFromString(AutomationCondition.serializer(), job.condition_json)
         } catch (e: Exception) {
             logError("AutomationService", "Job ${job.name}: invalid condition_json: ${job.condition_json}")
             return
+        }
+        val wakeTool = com.skyliner2008.jarvis.automation.wake.AnticipationEngine
+        val isWakeJob = job.tool_name == wakeTool.TOOL_NAME
+        // job คาดการณ์รุ่นเก่าที่ถูกย้ายมา (เช่น signal_anticipation_side == BUY) ใช้ field ที่ระบบใหม่ไม่มี
+        // → ถ้าปล่อยไว้ data[field] เป็น null ตลอด job เงียบถาวรโดยไม่มีใครรู้ — แปลงเป็น wake >= 1
+        val condition = if (isWakeJob && decoded.field !in wakeTool.SUPPORTED_FIELDS) {
+            logDebug("AutomationService", "⏰ ${job.name}: field '${decoded.field}' ไม่รองรับในระบบปลุก → ใช้ wake >= 1")
+            decoded.copy(field = wakeTool.K_WAKE, operator = ConditionOperator.GTE, value = "1")
+        } else decoded
+        if (isWakeJob) {
+            // job แบบ edge-trigger ไม่ได้บันทึกผลการเช็กทุกรอบ last_run_at จึงไม่ขยับ
+            // → เดิมถูกสแกนทุก tick (30 วิ) แทนตามรอบที่ตั้งไว้ เปลืองเน็ต/CPU เป็นเท่าตัว
+            runCatching { database.jarvisDatabaseQueries.touchAlertJobRun(System.currentTimeMillis(), job.id) }
         }
 
         // 1. Fetch data based on tool_name
@@ -428,6 +418,7 @@ internal class TradingAlertEvaluator(
                     signalCycleFetched.add(job.symbol)
                 }
             }
+            com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME -> anticipationEngine.scan(job.symbol)
             "trading_technical_analysis" -> fetchTechnicalAnalysisWithFallback(job)
             "trading_sentiment" -> tradingApi.getRedditSentiment(job.symbol).mapValues { it.value.toString() }
             "trading_fear_greed" -> tradingApi.getFearGreedIndex(1)
@@ -460,7 +451,7 @@ internal class TradingAlertEvaluator(
         if (data.isEmpty() || data.containsKey("error")) {
             val errMsg = data["error"] ?: "empty"
             logDebug("AutomationService", "Job ${job.name} → ${condition.field}=ERR ($errMsg) | fetch failed")
-            if (job.tool_name != "trading_signal_alert") {
+            if (!isEdgeTriggered(job.tool_name)) {
                 automationManager.recordJobCheckResult(job.id, "ERR($errMsg)")
             }
             return
@@ -475,15 +466,15 @@ internal class TradingAlertEvaluator(
         // job's boolean is_triggered alone. This prevents a new candle/signal from
         // being suppressed by the previous candle while still deduplicating the
         // exact same signal_id.
-        val signalId = if (job.tool_name == "trading_signal_alert") {
+        val signalId = if (isEdgeTriggered(job.tool_name)) {
             when (condition.field) {
                 "signal_buy", "signal_buy_id" -> data["signal_buy_id"]?.toLongOrNull() ?: 0L
                 "signal_sell", "signal_sell_id" -> data["signal_sell_id"]?.toLongOrNull() ?: 0L
-                "signal_anticipation", "signal_anticipation_id" -> data["signal_anticipation_id"]?.toLongOrNull() ?: 0L
+                "wake", "wake_id", "wake_event_count", "wake_buy", "wake_sell" -> data["wake_id"]?.toLongOrNull() ?: 0L
                 else -> 0L
             }
         } else 0L
-        val triggered = if (job.tool_name == "trading_signal_alert" && signalId > 0L) {
+        val triggered = if (isEdgeTriggered(job.tool_name) && signalId > 0L) {
             job.is_triggered == 1L && job.last_value?.toLongOrNull() == signalId
         } else {
             job.is_triggered == 1L
@@ -492,8 +483,8 @@ internal class TradingAlertEvaluator(
         // Job-level dedup only knows about the exact last signal_id. A new candle/strategy
         // can therefore bypass it even when the previous alert was only seconds ago.
         // Apply a short market-event throttle at symbol+TF+side level before FIRE.
-        val signalSide = data["signal_side"] ?: data["signal_anticipation_side"] ?: "UNKNOWN"
-        val signalThrottleKey = if (job.tool_name == "trading_signal_alert" && signalId > 0L) {
+        val signalSide = data["signal_side"] ?: (if (data.containsKey("wake")) "WAKE" else "UNKNOWN")
+        val signalThrottleKey = if (isEdgeTriggered(job.tool_name) && signalId > 0L) {
             job.symbol + "|" + condition.field + "|" + signalSide
         } else null
         var throttledSignal = false
@@ -519,10 +510,10 @@ internal class TradingAlertEvaluator(
             else -> "WAIT"
         }
         // WAIT is routine polling noise; signal actions are deduplicated below.
-        val signalLogKey = if (job.tool_name == "trading_signal_alert") "${job.symbol}|${condition.field}|$signalId" else null
+        val signalLogKey = if (isEdgeTriggered(job.tool_name)) "${job.symbol}|${condition.field}|$signalId" else null
         val previousSignalAction = if (signalLogKey != null && action != "WAIT") signalLastLoggedAction.put(signalLogKey, action) else null
         if (action != "WAIT" && (signalLogKey == null || previousSignalAction != action)) {
-            val signalPart = if (job.tool_name == "trading_signal_alert") {
+            val signalPart = if (isEdgeTriggered(job.tool_name)) {
                 " | signal_id=$signalId | job_triggered=${job.is_triggered}"
             } else ""
             logDebug(
@@ -533,7 +524,7 @@ internal class TradingAlertEvaluator(
         // For trading_signal_alert, last_value is reserved for the last triggered signal_id.
         // Do not overwrite it with the boolean/sample value, otherwise a later cycle could
         // lose the signal-id dedup key due to the asynchronous recordJobCheckResult().
-        if (job.tool_name != "trading_signal_alert") {
+        if (!isEdgeTriggered(job.tool_name)) {
             automationManager.recordJobCheckResult(job.id, sampleStr)
         }
 
@@ -554,7 +545,7 @@ internal class TradingAlertEvaluator(
             if (!triggered && !throttledSignal) {
                 // Signal alerts are keyed by signal_id; ordinary alerts keep the
                 // existing boolean trigger semantics.
-                val triggerValue = if (job.tool_name == "trading_signal_alert" && signalId > 0L) {
+                val triggerValue = if (isEdgeTriggered(job.tool_name) && signalId > 0L) {
                     signalId.toString()
                 } else {
                     sampleStr

@@ -1,0 +1,65 @@
+-- P13: ระบบปลุก AI (Anticipation Wake Engine) — แยกจากระบบแจ้งเตือน Signal
+--
+-- 1) AnticipationFactorOutcome — การเรียนรู้แบบมีเงื่อนไข
+--    1 รอบสแกน → N แถว (แถวละ trigger ที่ยิง) พร้อม context bucket
+--    วัดผลด้วย forward return หน่วย ATR ไม่ใช่ SL/TP ที่ trigger แต่งเอง
+--    เก็บการตัดสินใจของ AI ด้วย เพื่อเรียนรู้ว่า "AI วิเคราะห์ถูกไหมเมื่อถูกปลุกด้วยปัจจัยนี้"
+--
+-- 2) TvSeriesAccess — เวลาที่ซีรีส์ OHLCV ถูกอ่านล่าสุด
+--    ใช้ลบซีรีส์ที่ไม่ได้ใช้นานออก คุมขนาดฐานข้อมูลเมื่อเฝ้าหลายสินทรัพย์
+--
+-- 3) ย้าย alert job คาดการณ์เดิม (ที่ฝากอยู่ใน trading_signal_alert) ไปยัง engine ใหม่
+
+CREATE TABLE IF NOT EXISTS AnticipationFactorOutcome (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- รหัสรอบสแกน: SYMBOL|TF|bar_ts
+    signal_id TEXT NOT NULL,
+    factor_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    -- BUY | SELL | NEUTRAL (ทิศที่ trigger สังเกต ไม่ใช่คำแนะนำ)
+    side TEXT NOT NULL,
+    -- EVENT | STATE
+    kind TEXT NOT NULL,
+    ref_price REAL NOT NULL,
+    ref_atr REAL NOT NULL,
+    -- 1 = trigger นี้เป็นส่วนหนึ่งของการปลุก AI จริง (ไม่ติดงบ/ไม่ถูกลดชั้น)
+    woke INTEGER NOT NULL DEFAULT 0,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    vol_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    -- ผลการวิเคราะห์ของ AI หลังถูกปลุก (NOTIFY / SKIP) และทิศที่ AI มอง
+    ai_decision TEXT,
+    ai_bias TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    -- directional: forward return แบบมีเครื่องหมายตามทิศ / NEUTRAL: ขนาดการเคลื่อนที่ (ไม่มีเครื่องหมาย)
+    forward_r REAL,
+    mfe_r REAL,
+    mae_r REAL,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    UNIQUE(signal_id, factor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_lookup
+ON AnticipationFactorOutcome(factor_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_context
+ON AnticipationFactorOutcome(factor_id, mtf_align, adx_bucket, session);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_pending
+ON AnticipationFactorOutcome(status, symbol, interval, created_at);
+
+CREATE TABLE IF NOT EXISTS TvSeriesAccess (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    source TEXT NOT NULL,
+    last_read_at INTEGER NOT NULL,
+    PRIMARY KEY(symbol, interval, source)
+);
+
+UPDATE AlertJob
+SET tool_name = 'trading_anticipation',
+    condition_json = REPLACE(REPLACE(condition_json, '"signal_anticipation_id"', '"wake_id"'), '"signal_anticipation"', '"wake"')
+WHERE tool_name = 'trading_signal_alert' AND condition_json LIKE '%"signal_anticipation%';

@@ -283,12 +283,32 @@ class LiveSessionReviewFixesTest {
         assertTrue(config.isConversationalLiveModel("gemini-3.8-live"))
     }
 
+    /**
+     * Live API คิดโทเคนทั้ง context ที่สะสมอยู่ใหม่ทุก turn
+     * config จึงต้องมี "เพดาน" ชัดเจน ไม่ใช่ sliding window เปล่าๆ
+     * ไม่งั้น context โตอิสระจนต้นทุนต่อ turn กิน TPM หมด
+     */
     @Test
-    fun `context window compression serializes a sliding window`() {
+    fun `context window compression carries explicit trigger and target`() {
         val setup = LiveSetupMessage(
             LiveSetup(
                 model = "models/x",
                 contextWindowCompression = com.skyliner2008.jarvis.data.LiveContextWindowCompressionConfig.default()
+            )
+        )
+        val encoded = json.encodeToString(setup)
+        assertTrue(encoded.contains("\"triggerTokens\":25000"), "ต้องมี triggerTokens, got: $encoded")
+        assertTrue(encoded.contains("\"targetTokens\":8000"), "ต้องมี targetTokens, got: $encoded")
+        assertTrue(encoded.contains("\"slidingWindow\""), "ต้องมี slidingWindow, got: $encoded")
+    }
+
+    /** fallback เมื่อ server ปฏิเสธ config แบบมีพารามิเตอร์ — ต้องยังคง sliding window ไว้ */
+    @Test
+    fun `bare compression config still serializes a sliding window`() {
+        val setup = LiveSetupMessage(
+            LiveSetup(
+                model = "models/x",
+                contextWindowCompression = com.skyliner2008.jarvis.data.LiveContextWindowCompressionConfig.bare()
             )
         )
         val encoded = json.encodeToString(setup)

@@ -51,26 +51,48 @@ object AlertPresentationFormatter {
             voice?.let { put("voice", it) }
         }.toString()
 
-    /** metadata โครงสร้างของ anticipation alert (Pre-signal) — MessageBubble render เป็นการ์ด 3D คาดการณ์ */
-    fun anticipationChatMeta(job: AlertJob, data: Map<String, String>, aiSummary: String?, type: String, voice: String? = null): String =
-        kotlinx.serialization.json.buildJsonObject {
-            put("type", type)
-            put("kind", "anticipation")
-            put("job_id", job.id)
-            put("name", job.name)
-            val (baseSym, tf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
-            put("symbol", "$baseSym@$tf")
-            put("side", data["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY")
-            put("zone", data["signal_anticipation_zone"]?.ifBlank { "Keyzone" } ?: "Keyzone")
-            put("desc", data["signal_anticipation_desc"]?.ifBlank { "เฝ้าระวังการกลับตัวในโซนสำคัญ" } ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ")
-            put("confidence", data["signal_anticipation_confidence"]?.ifBlank { "75" } ?: "75")
-            put("price", data["close"] ?: "-")
-            data["signal_mtf_context"]?.takeIf { it.isNotBlank() }?.let { put("mtf", it) }
-            aiSummary?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
-            voice?.let { put("voice", it) }
-        }.toString()
+    // ─── ระบบปลุก AI (คาดการณ์ล่วงหน้า) ─────────────────────────────────────
 
-    /** metadata โครงสร้างของ keyzone hit — MessageBubble render เป็นการ์ด 3D แจ้งเตือนโซนสำคัญ */
+    private val WAKE = com.skyliner2008.jarvis.automation.wake.AnticipationEngine
+
+    /** บรรทัดเหตุการณ์สำหรับผู้ใช้ — ตัดรหัสปัจจัย/สถิติ (ส่วนนั้นมีไว้ให้ AI อ่าน) */
+    internal fun wakeEventLinesForUser(data: Map<String, String>): List<String> =
+        (data[WAKE.K_EVENTS] ?: "").lines()
+            .map { it.trim().removePrefix("•").trim().replace(Regex("\\s*\\([A-Z0-9_]+ · สถิติ:.*\\)\\s*$"), "") }
+            .filter { it.isNotBlank() }
+
+    private fun wakeSide(data: Map<String, String>, verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?): String {
+        verdict?.let { return it.bias }
+        val buy = data[WAKE.K_BUY]?.toIntOrNull() ?: 0
+        val sell = data[WAKE.K_SELL]?.toIntOrNull() ?: 0
+        return when { buy > sell -> "BUY"; sell > buy -> "SELL"; else -> "NEUTRAL" }
+    }
+
+    private fun fmtLevel(v: Double?): String? = v?.let { if (it >= 100) "%.2f".format(it) else "%.5f".format(it).trimEnd('0').trimEnd('.') }
+
+    /** metadata การ์ดปลุก AI — MessageBubble render ด้วย kind "anticipation" */
+    fun wakeChatMeta(
+        job: AlertJob, data: Map<String, String>,
+        verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?,
+        liveSummary: String?, type: String, voice: String? = null
+    ): String = kotlinx.serialization.json.buildJsonObject {
+        put("type", type)
+        put("kind", "anticipation")
+        put("job_id", job.id)
+        put("name", job.name)
+        val (baseSym, tf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
+        put("symbol", "$baseSym@$tf")
+        put("side", wakeSide(data, verdict))
+        put("zone", data[WAKE.K_TRIGGERS] ?: "-")
+        put("desc", wakeEventLinesForUser(data).joinToString("\n").ifBlank { "-" })
+        put("confidence", verdict?.confidence?.toString() ?: "-")
+        put("price", data[WAKE.K_CLOSE] ?: "-")
+        data[WAKE.K_MTF]?.takeIf { it.isNotBlank() }?.let { put("mtf", it) }
+        (liveSummary ?: verdict?.summaryTh)?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
+        voice?.let { put("voice", it) }
+    }.toString()
+
+        /** metadata โครงสร้างของ keyzone hit — MessageBubble render เป็นการ์ด 3D แจ้งเตือนโซนสำคัญ */
     fun keyzoneChatMeta(job: AlertJob, data: Map<String, String>, aiSummary: String?, type: String, voice: String? = null): String =
         kotlinx.serialization.json.buildJsonObject {
             put("type", type)
@@ -100,56 +122,61 @@ object AlertPresentationFormatter {
         }.toString()
 
 
-    /**
-     * การ์ดคาดการณ์สัญญาณล่วงหน้าสำหรับแชท — กะทัดรัด แสดงขั้นตอนความพร้อม (Stage) และ Execution Rails (Entry/SL/TP)
-     */
-    fun buildAnticipationChatCard(job: AlertJob, data: Map<String, String>, aiSummary: String?): String {
-        val side = data["signal_anticipation_side"]?.ifBlank { "BUY" } ?: "BUY"
-        val badge = if (side.equals("BUY", ignoreCase = true)) "⚡🟢" else "⚡🔴"
-        val conf = data["signal_anticipation_confidence"]?.ifBlank { "75" } ?: "75"
-        val close = data["close"] ?: "-"
-        val stage = data["signal_anticipation_stage"]?.ifBlank { "PRE_SETUP" } ?: "PRE_SETUP"
-        val stageBadge = when (stage) {
-            "CONFIRMING" -> "🔥 [CONFIRMING - ยืนยันสัญญาณ]"
-            "TRIGGER_READY" -> "⚡ [TRIGGER READY - จุดพร้อมเข้า]"
-            else -> "⏳ [PRE SETUP - ตั้งโครงสร้าง]"
+    /** ข้อความ notification ของการปลุก AI */
+    fun buildWakeNotification(
+        job: AlertJob, data: Map<String, String>,
+        verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?
+    ): String {
+        val events = wakeEventLinesForUser(data)
+        return if (verdict != null) {
+            "⏰ ${job.symbol} · ${verdict.bias}${verdict.confidence?.let { " $it%" } ?: ""} — ${verdict.summaryTh.ifBlank { verdict.reasonTh }}"
+        } else {
+            "⏰ ${job.symbol} @ ${data[WAKE.K_CLOSE] ?: "-"} — " + events.take(3).joinToString(" | ").ifBlank { "มีเหตุการณ์ใหม่บนกราฟ" }
         }
-        val factor = data["signal_anticipation_factor"]?.ifBlank { "ANTICIPATION" } ?: "ANTICIPATION"
-        val desc = data["signal_anticipation_desc"]?.ifBlank { "เฝ้าระวังการกลับตัวในโซนสำคัญ" } ?: "เฝ้าระวังการกลับตัวในโซนสำคัญ"
-        val zone = data["signal_anticipation_zone"]
+    }
+
+    /** การ์ดแชท: เหตุการณ์ที่ปลุก + (โหมด ai) คำวิเคราะห์ของ AI และระดับราคาที่ AI กำหนดเอง */
+    fun buildWakeChatCard(
+        job: AlertJob, data: Map<String, String>,
+        verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?
+    ): String {
         val (sym, tf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
-
-        val entry = data["signal_anticipation_entry"]?.takeIf { it.isNotBlank() }
-        val sl = data["signal_anticipation_sl"]?.takeIf { it.isNotBlank() }
-        val tp1 = data["signal_anticipation_tp1"]?.takeIf { it.isNotBlank() }
-        val tp2 = data["signal_anticipation_tp2"]?.takeIf { it.isNotBlank() }
-        val tp3 = data["signal_anticipation_tp3"]?.takeIf { it.isNotBlank() }
-
+        val side = wakeSide(data, verdict)
+        val badge = when (side) { "BUY" -> "⏰🟢"; "SELL" -> "⏰🔴"; else -> "⏰" }
         return buildString {
-            appendLine("$badge **คาดการณ์ $side — $sym (${tf.uppercase()})**")
-            appendLine("$stageBadge • ความเชื่อมั่น: $conf% • ราคา: $close")
-            if (!zone.isNullOrBlank()) {
-                appendLine("• โซน/ปัจจัย: $zone ($factor)")
-            }
+            appendLine("$badge **${job.name} — $sym (${tf.uppercase()})** · ราคา ${data[WAKE.K_CLOSE] ?: "-"}")
             appendLine()
-            appendLine("**ปัจจัยที่เกิด:** $desc")
-
-            if (entry != null && sl != null) {
+            appendLine("**เหตุการณ์ที่ปลุก AI:**")
+            wakeEventLinesForUser(data).forEach { appendLine("• $it") }
+            if (verdict != null) {
                 appendLine()
-                appendLine("| Execution Rail | ระดับราคา |")
-                appendLine("|---|---|")
-                appendLine("| แผนเข้า (Entry) | $entry |")
-                appendLine("| Stop Loss (SL) | $sl |")
-                if (tp1 != null) appendLine("| Take Profit 1 | $tp1 |")
-                if (tp2 != null) appendLine("| Take Profit 2 | $tp2 |")
-                if (tp3 != null) appendLine("| Take Profit 3 | $tp3 |")
-            }
-
-            if (!aiSummary.isNullOrBlank()) {
-                appendLine()
-                appendLine("**JARVIS Supervisor / สรุป:** $aiSummary")
+                appendLine("**มุมมอง AI:** ${verdict.bias}${verdict.confidence?.let { " ($it%)" } ?: ""}")
+                val sl = fmtLevel(verdict.levelSl); val tp = fmtLevel(verdict.levelTp)
+                if (sl != null || tp != null) {
+                    appendLine("ระดับที่ AI จับตา: " + listOfNotNull(sl?.let { "ผิดทาง $it" }, tp?.let { "เป้า $it" }).joinToString(" · "))
+                }
+                if (verdict.summaryTh.isNotBlank()) {
+                    appendLine()
+                    appendLine("**JARVIS:** ${verdict.summaryTh}")
+                }
             }
         }.trim()
+    }
+
+    /** เสียง: ใช้สรุปที่ AI เขียนแล้ว (สั้น) — ถ้าไม่มี AI พูดเหตุการณ์แรก */
+    fun buildWakeSpeech(
+        job: AlertJob, data: Map<String, String>,
+        verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?
+    ): String {
+        val sym = job.symbol.substringBefore("@")
+        val symTh = when (sym.uppercase()) {
+            "XAUUSD" -> "ทองคำ"; "XAGUSD" -> "เงินแท่ง"
+            "BTCUSDT", "BTCUSD" -> "บิทคอยน์"; "ETHUSDT", "ETHUSD" -> "อีเทอเรียม"
+            else -> sym
+        }
+        verdict?.summaryTh?.takeIf { it.isNotBlank() }?.let { return sanitizeForSpeech("$symTh: $it") }
+        val first = wakeEventLinesForUser(data).firstOrNull() ?: "มีเหตุการณ์ใหม่บนกราฟ"
+        return sanitizeForSpeech("แจ้งเตือน $symTh $first")
     }
 
     /**
@@ -202,32 +229,6 @@ object AlertPresentationFormatter {
         }.trim()
     }
 
-
-    fun buildAnticipationSpeech(job: AlertJob, data: Map<String, String>): String {
-        val isBuy = (data["signal_anticipation_side"] ?: "BUY").equals("BUY", ignoreCase = true)
-        val dirTh = if (isBuy) "ฝั่งซื้อเริ่มได้เปรียบ ลุ้นกลับตัวขึ้น" else "ฝั่งขายเริ่มได้เปรียบ ลุ้นทิ้งตัวลง"
-        val (sym, tf) = com.skyliner2008.jarvis.automation.IndicatorAlertProvider.splitSymbolAndTf(job.symbol)
-        val symTh = when (sym.uppercase()) {
-            "XAUUSD" -> "ทองคำ"; "XAGUSD" -> "เงินแท่ง"
-            "BTCUSDT", "BTCUSD" -> "บิทคอยน์"; "ETHUSDT", "ETHUSD" -> "อีเทอเรียม"
-            else -> sym
-        }
-        val tfTh = when (tf.lowercase()) {
-            "1m" -> "1 นาที"; "5m" -> "5 นาที"; "15m" -> "15 นาที"; "30m" -> "30 นาที"
-            "1h" -> "1 ชั่วโมง"; "4h" -> "4 ชั่วโมง"; "1d" -> "รายวัน"; "1w" -> "รายสัปดาห์"
-            else -> tf
-        }
-        val stage = data["signal_anticipation_stage"] ?: "PRE_SETUP"
-        val stageTh = when (stage) {
-            "CONFIRMING" -> "ยืนยันแท่งเทียนแล้ว"
-            "TRIGGER_READY" -> "เข้าจุดทริกเกอร์พร้อมเปิดออเดอร์"
-            else -> "กำลังเริ่มฟอร์มตัว"
-        }
-        val entry = data["signal_anticipation_entry"]?.takeIf { it.isNotBlank() }
-        val entryMsg = if (entry != null) " ที่ระดับราคา $entry" else ""
-        val zone = data["signal_anticipation_zone"]?.ifBlank { "โซนสำคัญ" } ?: "โซนสำคัญ"
-        return "แจ้งเตือนคาดการณ์ $symTh ไทม์เฟรม $tfTh $stageTh$entryMsg ที่$zone $dirTh ให้จับตาดูนะคะ"
-    }
 
     /** ข้อความพูดสั้นๆ สำหรับ signal alert — ลดเวลา synthesize/ฟังของ Gemini TTS (ข้อความยาว = ดีเลย์สูง) */
     fun buildSignalSpeech(job: AlertJob, data: Map<String, String>): String {

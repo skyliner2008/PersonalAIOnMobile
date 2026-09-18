@@ -124,3 +124,33 @@
 - Auto-trading รุ่นล่าสุดพึ่งพาทั้ง `trading_*`, `trading_smc_*` และ `trading_mt5_*` ร่วมกัน
 
 **Links**: [[index]] | [[Trading_Intelligence_MOC]] | [[00_Tool_to_Strategy_Map]] | [[11_MT5_Full_Agent_Control_V17]]
+
+## อัปเดต 2026-09-18 — Wake Engine Live + Backup V29
+
+ดู [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29]]
+- **`trading_signal_anticipation`** = ระบบปลุก AI (แยกจาก signal alert) — action: create / scan / list_factors / config
+  (factors, add_factors, remove_factors, hourly_budget, daily_budget, cooldown_bars) / learning / inspect / recommend / status
+- alert job ของระบบนี้ใช้ `tool_name = trading_anticipation`, field `wake >= 1` (ไม่ใช่ `trading_signal_alert` / `signal_anticipation` อีกแล้ว)
+- `automation_manage_alerts` ที่ขอ anticipation ด้วยชื่อเก่าจะถูกแปลงเป็น `trading_anticipation`/`wake` อัตโนมัติ
+- สำรอง/กู้คืน (การเรียนรู้ + ฐานข้อมูล) อยู่ใน Settings — ไม่ใช่ tool ของ AI (กันการกู้คืนทับข้อมูลโดยไม่ตั้งใจ)
+
+## อัปเดต 2026-09-18 — Foundation V27
+
+**เปลี่ยนแปลงที่กระทบ catalogue โดยตรง** (ดู [[../07_Trading_Intelligence/57_OHLCV_Indicator_Foundation_V27]]):
+
+- **จำนวน declaration ลดลง 2 รายการ** — `automation_manage_alerts` และ `automation_manage_schedule`
+  เคยประกาศซ้ำอย่างละ 2 ครั้ง (`associateBy` เก็บแค่ตัวหลัง) ตอนนี้เหลืออย่างละ 1
+- **`trading_elliot_modern_analysis` ใช้งานได้จริงแล้ว** — เดิม handler ผูกกับชื่อ branch `trading_elliot_wave`
+  ที่ไม่มีใครเรียก ทำให้ tool คืน `"Unknown market/technical tool"` ทุกครั้งแม้ implementation จะพร้อม
+- **`trading_crypto_overview` / `trading_economic_data` / `automation_manage_schedule` กลับมาเรียกได้**
+  — 3 ตัวนี้ไม่อยู่ใน `tvOnlyTradingFunctionNames` และ `mt5OnlyTradingFunctionNames`
+  ทำให้ `TradingToolPolicy.isToolAllowed` คืน false ทุกบริบท
+- **`trading_position_sizing` รับ param เพิ่ม**: `symbol`, `contract_size`, `lot_step`
+  → คืนขนาดเป็น **lot** ที่ใช้กับ MT5 ได้จริง ไม่ใช่แค่ units ลอยๆ
+- **`trading_indicators` (ผ่าน `automation_manage_alerts`) รองรับ field เพิ่มมาก**:
+  OBV, MFI14, Ichimoku 5 ค่า, ROC, Williams %R, Donchian (มี mid), Pivot R1-R3/S1-S3,
+  Fibonacci levels, atr_pct, volume_sma20, ema spreads — และแก้ชื่อที่เคยไม่ตรงกับที่ระบบส่งออกจริง
+  (`adx` → `adx14`, `r1/s1` → `resistance1/support1`, `donchian20_high` → `donchian_upper`)
+
+**กติกาใหม่ของทุก tool result**: ค่าที่คำนวณไม่ได้เพราะแท่งเทียนไม่พอจะ **ไม่ถูกส่งออกมาเลย**
+ไม่ใช่ส่งค่า default ปลอม — ทุก payload ติด `source` / `timeframe` / `bars_used` ให้ AI ประเมินความน่าเชื่อถือเองได้
