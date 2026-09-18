@@ -962,6 +962,9 @@ CREATE TABLE IF NOT EXISTS AnticipationFactorOutcome (
     mae_r REAL,
     created_at INTEGER NOT NULL,
     resolved_at INTEGER,
+    -- เหตุผลและความมั่นใจของ AI (ทั้ง NOTIFY และ SKIP) — เพิ่มใน 14.sqm จึงอยู่ท้ายตาราง
+    ai_confidence INTEGER,
+    ai_reason TEXT,
     UNIQUE(signal_id, factor_id)
 );
 
@@ -978,15 +981,18 @@ insertFactorOutcome:
 INSERT OR IGNORE INTO AnticipationFactorOutcome(
     signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
     mtf_align, adx_bucket, vol_bucket, session,
-    ai_decision, ai_bias, status, forward_r, mfe_r, mae_r, created_at, resolved_at
+    ai_decision, ai_bias, status, forward_r, mfe_r, mae_r, created_at, resolved_at,
+    ai_confidence, ai_reason
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 markFactorOutcomesWoke:
 UPDATE AnticipationFactorOutcome SET woke = 1 WHERE signal_id = ? AND factor_id IN ?;
 
 setFactorOutcomeAiDecision:
-UPDATE AnticipationFactorOutcome SET ai_decision = ?, ai_bias = ? WHERE signal_id = ?;
+UPDATE AnticipationFactorOutcome
+SET ai_decision = ?, ai_bias = ?, ai_confidence = ?, ai_reason = ?
+WHERE signal_id = ?;
 
 getPendingFactorOutcomes:
 SELECT * FROM AnticipationFactorOutcome

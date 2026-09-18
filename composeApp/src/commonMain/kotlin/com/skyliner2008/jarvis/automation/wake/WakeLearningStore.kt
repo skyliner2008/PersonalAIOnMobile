@@ -124,7 +124,8 @@ object WakeLearningStore {
                         vol_bucket = r.context.volBucket, session = r.context.session,
                         ai_decision = null, ai_bias = null, status = "PENDING",
                         forward_r = null, mfe_r = null, mae_r = null,
-                        created_at = r.createdAt, resolved_at = null
+                        created_at = r.createdAt, resolved_at = null,
+                        ai_confidence = null, ai_reason = null
                     )
                 }
             }
@@ -137,10 +138,17 @@ object WakeLearningStore {
         runCatching { db.jarvisDatabaseQueries.markFactorOutcomesWoke(signalId, factorIds.map { it.uppercase() }) }
     }
 
-    /** บันทึกสิ่งที่ AI ตัดสินหลังถูกปลุก — ใช้วัดว่า "AI วิเคราะห์ถูกไหม" */
-    fun setAiDecision(signalId: String, decision: String, bias: String?) {
+    /**
+     * บันทึกสิ่งที่ AI ตัดสินหลังถูกปลุก (ทั้ง NOTIFY และ SKIP) — ใช้วัดว่า "AI วิเคราะห์ถูกไหม"
+     * และเก็บเหตุผล/ความมั่นใจไว้ตรวจย้อนหลัง (เดิมเหตุผลของ SKIP อยู่แค่ใน logcat แล้วหายไป)
+     */
+    fun setAiDecision(signalId: String, decision: String, bias: String?, confidence: Int? = null, reason: String? = null) {
         val db = JarvisDatabaseHolder.database ?: return
-        runCatching { db.jarvisDatabaseQueries.setFactorOutcomeAiDecision(decision, bias, signalId) }
+        runCatching {
+            db.jarvisDatabaseQueries.setFactorOutcomeAiDecision(
+                decision, bias, confidence?.toLong(), reason?.trim()?.take(1000)?.ifBlank { null }, signalId
+            )
+        }
     }
 
     /**

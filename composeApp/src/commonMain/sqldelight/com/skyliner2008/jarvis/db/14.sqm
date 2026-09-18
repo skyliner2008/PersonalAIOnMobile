@@ -1,0 +1,7 @@
+-- P14: เก็บเหตุผลและความมั่นใจของ AI ทุกการปลุก (ทั้ง NOTIFY และ SKIP)
+--
+-- เดิมเก็บแค่ ai_decision / ai_bias — เหตุผลของการ SKIP อยู่แค่ใน logcat ซึ่งถูกเขียนทับภายในไม่กี่ชั่วโมง
+-- จึงตรวจย้อนหลังไม่ได้ว่า AI ตัดสินใจไม่แจ้งเพราะอะไร
+-- คอลัมน์ต่อท้ายตาราง (ALTER TABLE) — ลำดับตรงกับนิยามใน JarvisDatabase.sq
+ALTER TABLE AnticipationFactorOutcome ADD COLUMN ai_confidence INTEGER;
+ALTER TABLE AnticipationFactorOutcome ADD COLUMN ai_reason TEXT;

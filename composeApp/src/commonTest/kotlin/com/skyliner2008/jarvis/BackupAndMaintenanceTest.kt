@@ -60,6 +60,26 @@ class BackupAndMaintenanceTest {
         assertEquals(1, LearningTransfer.parse(text).outcomes.size)
     }
 
+    /** ไฟล์ที่ส่งออกก่อนมีคอลัมน์เหตุผล/ความมั่นใจของ AI (migration 14) ต้องนำเข้าได้ — ค่าใหม่เป็น null */
+    @Test
+    fun learningFileWithoutAiReasonStillParses() {
+        val text = Json { encodeDefaults = true }.encodeToString(LearningTransfer.Bundle.serializer(), sampleBundle())
+            .replace(Regex(",\\\"aiConfidence\\\":null,\\\"aiReason\\\":null"), "")
+        assertTrue(!text.contains("aiReason"), "ต้องจำลองไฟล์รุ่นเก่าได้จริง")
+        val o = LearningTransfer.parse(text).outcomes.single()
+        assertEquals(null, o.aiConfidence)
+        assertEquals(null, o.aiReason)
+    }
+
+    @Test
+    fun learningFileKeepsAiReason() {
+        val withReason = sampleBundle().copy(outcomes = sampleBundle().outcomes.map { it.copy(aiConfidence = 40, aiReason = "หลักฐานขัดกัน") })
+        val text = Json { encodeDefaults = true }.encodeToString(LearningTransfer.Bundle.serializer(), withReason)
+        val o = LearningTransfer.parse(text).outcomes.single()
+        assertEquals(40L, o.aiConfidence)
+        assertEquals("หลักฐานขัดกัน", o.aiReason)
+    }
+
     // ─── OHLCV pruning ───────────────────────────────────────────────────────
 
     private fun series(sym: String, tf: String, idleDays: Int) =

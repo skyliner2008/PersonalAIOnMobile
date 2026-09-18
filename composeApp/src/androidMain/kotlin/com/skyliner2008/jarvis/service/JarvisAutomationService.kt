@@ -537,7 +537,7 @@ class JarvisAutomationService : Service() {
             if (verdict != null) {
                 if (signalId.isNotBlank()) {
                     com.skyliner2008.jarvis.automation.wake.WakeLearningStore
-                        .setAiDecision(signalId, verdict.decision, verdict.bias)
+                        .setAiDecision(signalId, verdict.decision, verdict.bias, verdict.confidence, verdict.reasonTh)
                 }
                 if (!verdict.notify) {
                     logDebug("AutomationService",

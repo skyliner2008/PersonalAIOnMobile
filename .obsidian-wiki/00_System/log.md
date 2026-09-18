@@ -3276,3 +3276,16 @@ active context window"* คิดทั้ง context สะสมใหม่�
 - ผลบนมือถือจริง: 0.5–0.9 วิ/ครั้ง, สแกนระบบปลุก AI 1 รอบ 4–6 วิ (จาก 1.5–2.5 นาที) — แจ้งเตือนไม่ช้า ~2 นาทีอีกต่อไป
 - เทสต์ `TvProtocolTest` (เฟรมเป็น JSON ถูกต้อง, payload round-trip, จำนวนแท่งเป็นตัวเลข, ตรวจจับ error) — รวม 448/448
 
+---
+
+## 2026-09-19 — เก็บเหตุผลและความมั่นใจของ AI ทุกการปลุก (NOTIFY และ SKIP)
+
+- ที่มา: ตรวจการ SKIP 5 ครั้ง (00:01–01:00 ไทย) แล้วพบว่าเหตุผลของ AI ไม่ได้เก็บไว้ที่ไหนเลยนอกจาก logcat ซึ่งถูกเขียนทับไปแล้ว
+  (ประเมินจากหลักฐานแทน: 3 ครั้งถูกต้อง 2 ครั้งก้ำกึ่ง — ราคาไปต่อแค่ ~1.2–1.3 ATR)
+- `14.sqm`: `AnticipationFactorOutcome` เพิ่ม `ai_confidence INTEGER`, `ai_reason TEXT` (ต่อท้ายตาราง ตรงกับ `JarvisDatabase.sq`)
+- `setFactorOutcomeAiDecision` / `WakeLearningStore.setAiDecision` รับ confidence + reason; `handleWakeAlert` ส่ง `verdict.confidence`, `verdict.reasonTh`
+- ไฟล์ส่งออกการเรียนรู้ (`LearningTransfer`) พกค่าใหม่ไปด้วย — ไฟล์รุ่นเก่ายังนำเข้าได้ (ค่าเป็น null)
+- tool action `inspect` แสดงความมั่นใจ, สคริปต์ `tools/device_wake_audit.py` แสดงความมั่นใจ + เหตุผล
+- ติดตั้งบนมือถือจริงแล้ว: migration ผ่าน (schema 15, quick_check ok, ข้อมูลเดิม 61 แถวครบ)
+- เทสต์ 450/450 (เพิ่มเทสต์ไฟล์การเรียนรู้รุ่นเก่า/ใหม่)
+

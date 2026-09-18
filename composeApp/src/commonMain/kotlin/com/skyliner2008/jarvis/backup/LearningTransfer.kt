@@ -43,7 +43,10 @@ object LearningTransfer {
         val mfeR: Double? = null,
         val maeR: Double? = null,
         val createdAt: Long,
-        val resolvedAt: Long? = null
+        val resolvedAt: Long? = null,
+        /** เพิ่มภายหลัง (P14) — ไฟล์รุ่นเก่าไม่มี จึงเป็น null */
+        val aiConfidence: Long? = null,
+        val aiReason: String? = null
     )
 
     @Serializable
@@ -81,7 +84,7 @@ object LearningTransfer {
                     it.signal_id, it.factor_id, it.symbol, it.interval, it.side, it.kind,
                     it.ref_price, it.ref_atr, it.woke, it.mtf_align, it.adx_bucket, it.vol_bucket, it.session,
                     it.ai_decision, it.ai_bias, it.status, it.forward_r, it.mfe_r, it.mae_r,
-                    it.created_at, it.resolved_at
+                    it.created_at, it.resolved_at, it.ai_confidence, it.ai_reason
                 )
             }
         )
@@ -116,7 +119,8 @@ object LearningTransfer {
                 q.insertFactorOutcome(
                     o.signalId, o.factorId.uppercase(), o.symbol, o.interval, o.side, o.kind,
                     o.refPrice, o.refAtr, o.woke, o.mtfAlign, o.adxBucket, o.volBucket, o.session,
-                    o.aiDecision, o.aiBias, o.status, o.forwardR, o.mfeR, o.maeR, o.createdAt, o.resolvedAt
+                    o.aiDecision, o.aiBias, o.status, o.forwardR, o.mfeR, o.maeR, o.createdAt, o.resolvedAt,
+                    o.aiConfidence, o.aiReason
                 )
             }
         }

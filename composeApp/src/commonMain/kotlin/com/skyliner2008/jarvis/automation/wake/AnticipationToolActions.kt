@@ -151,7 +151,7 @@ class AnticipationToolActions(
                     r.side == "NEUTRAL" -> "ขยับ ${"%.1f".format(kotlin.math.abs(r.forward_r ?: 0.0))}×ATR"
                     else -> "${"%+.2f".format(r.forward_r ?: 0.0)}R"
                 }
-                appendLine("| ${r.factor_id} | ${r.interval} | ${r.side} | ${r.mtf_align}/${r.adx_bucket}/${r.session} | ${if (r.woke == 1L) "✅" else "—"} | ${r.ai_decision ?: "—"}${r.ai_bias?.let { "/$it" } ?: ""} | $res |")
+                appendLine("| ${r.factor_id} | ${r.interval} | ${r.side} | ${r.mtf_align}/${r.adx_bucket}/${r.session} | ${if (r.woke == 1L) "✅" else "—"} | ${r.ai_decision ?: "—"}${r.ai_bias?.let { "/$it" } ?: ""}${r.ai_confidence?.let { " $it%" } ?: ""} | $res |")
             }
         }.trim()
     }

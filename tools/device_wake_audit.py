@@ -36,7 +36,8 @@ from collections import defaultdict
 
 PKG = "com.skyliner2008.jarvis"
 UTC = dt.timezone.utc
-TF_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}
+# ลำดับความน่าเชื่อถือของแหล่งแท่งเทียน — ตรงกับ OhlcvCentralStore.SOURCE_PRIORITY ในแอป
+SOURCE_PRIORITY = ["TV:OANDA", "TV:FX_IDC", "TV:TVC", "TV:BINANCE", "TV:NASDAQ", "TV:NYSE", "TV:", "BINANCE"]
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -76,9 +77,13 @@ def pull_db(adb):
     fd, path = tempfile.mkstemp(prefix="jarvis_", suffix=".db")
     with os.fdopen(fd, "wb") as f:
         r = subprocess.run([adb, "exec-out", "run-as", PKG, "cat", "databases/jarvis.db"], stdout=f, stderr=subprocess.PIPE)
-    if r.returncode != 0 or os.path.getsize(path) < 1024:
+    with open(path, "rb") as f:
+        head = f.read(512)
+    # run-as ส่ง error ออกทาง stdout และ exit code 0 (เช่น "package not debuggable") → ตรวจ header ของ SQLite แทน
+    if not head.startswith(b"SQLite format 3\x00"):
         os.remove(path)
-        sys.exit("❌ ดึงฐานข้อมูลไม่ได้ (ต้องเป็น debug build): " + r.stderr.decode(errors="replace"))
+        reason = (head.decode(errors="replace") + r.stderr.decode(errors="replace")).strip() or "ไฟล์ว่าง"
+        sys.exit(f"❌ ดึงฐานข้อมูลไม่ได้: {reason}\n   (run-as ใช้ได้เฉพาะ debug build ที่ลงผ่าน Android Studio / gradle installDebug)")
     return path
 
 
@@ -90,19 +95,26 @@ def ts(ms):
 
 
 def day_shift_ms(symbol):
-    s = symbol.upper()
-    fx = len(s) == 6 and s.isalpha() and not s.endswith("USDT")
-    return 2 * 3_600_000 if ("XAU" in s or "XAG" in s or fx) else 0
+    """ขอบวันเทรด — ตรงกับ TaIndicators.sessionOffsetHoursFor: ทอง/เงิน/FX เริ่ม 22:00 UTC, อื่นๆ วัน UTC"""
+    s = symbol.upper().replace("/", "").replace("-", "")
+    fiat = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"}
+    metal = any(k in s for k in ("XAU", "XAG", "GOLD", "SILVER"))
+    fx = len(s) == 6 and s[:3] in fiat and s[3:] in fiat
+    return 2 * 3_600_000 if (metal or fx) else 0
 
 
 def load_bars(c, symbol, interval):
-    src = c.execute("select source from TvCandle where symbol=? and interval=? group by source order by count(*) desc limit 1",
-                    (symbol, interval)).fetchone()
-    if not src:
+    """แท่งของแหล่งที่แอปเลือกใช้: ตามลำดับความน่าเชื่อถือก่อน แล้วจึงดูจำนวนแท่ง"""
+    sources = c.execute("select source, count(*) from TvCandle where symbol=? and interval=? group by source",
+                        (symbol, interval)).fetchall()
+    if not sources:
         return [], None
+    def rank(src):
+        return next((i for i, p in enumerate(SOURCE_PRIORITY) if src.upper().startswith(p)), len(SOURCE_PRIORITY))
+    src = min(sources, key=lambda x: (rank(x[0]), -x[1]))[0]
     rows = c.execute("select ts,open,high,low,close,volume from TvCandle where symbol=? and interval=? and source=? order by ts",
-                     (symbol, interval, src[0])).fetchall()
-    return rows, src[0]
+                     (symbol, interval, src)).fetchall()
+    return rows, src
 
 
 def atr14(b):
@@ -189,6 +201,7 @@ def main():
 
     adb = None if (args.db and not args.logcat) else find_adb()
     path = args.db or pull_db(adb)
+    c = None
     try:
         c = sqlite3.connect(path)
         print(f"ฐานข้อมูล: {path} | quick_check={c.execute('pragma quick_check').fetchone()[0]} | schema={c.execute('pragma user_version').fetchone()[0]}")
@@ -205,21 +218,41 @@ def main():
         print(" (alert_voice_engine: device = Android TTS · live = Gemini Live · ถ้ากำลังคุย Live อยู่ session นั้นพูดแทน)")
 
         print(f"\n══ การปลุก {args.last} ครั้งล่าสุด ══")
-        wakes = c.execute("""
+        # ai_confidence / ai_reason เพิ่มใน migration 14 — มือถือที่ยังใช้แอปรุ่นเก่าจะไม่มีคอลัมน์นี้
+        cols = {r[1] for r in c.execute("pragma table_info(AnticipationFactorOutcome)")}
+        has_reason = {"ai_confidence", "ai_reason"} <= cols
+        reason_sql = "max(ai_confidence), max(ai_reason)" if has_reason else "null, null"
+        wakes = c.execute(f"""
             select signal_id, min(created_at), max(ai_decision), max(ai_bias),
                    group_concat(case when woke=1 then factor_id||'('||side||')' end, ', '),
                    group_concat(case when woke=0 then factor_id end, ', '),
-                   max(ref_price), max(ref_atr), group_concat(distinct status)
+                   max(ref_price), max(ref_atr), group_concat(distinct status), {reason_sql}
             from AnticipationFactorOutcome group by signal_id
             having sum(woke) > 0 order by min(created_at) desc limit ?""", (args.last,)).fetchall()
+        if not has_reason:
+            print(" (ฐานข้อมูลยังไม่มีคอลัมน์เหตุผล/ความมั่นใจของ AI — แอปรุ่นก่อน migration 14)")
         cards = c.execute("select timestamp, content, metadata from ChatMessage where metadata like '%\"wake_%' order by timestamp").fetchall()
-        for sig, created, dec, bias, woke, states, ref, atr, status in reversed(wakes):
+        for sig, created, dec, bias, woke, states, ref, atr, status, conf, reason in reversed(wakes):
             sym, tf, bar = sig.split("|"); bar = int(bar)
-            print(f"\n▶ {sig}  แท่ง {ts(bar)} | ตรวจพบ {ts(created)} | AI: {dec or '-'} {bias or ''} | ราคาอ้างอิง {ref} ATR {atr:.3f} | สถานะวัดผล {status}")
+            conf_txt = f" {conf}%" if conf is not None else ""
+            print(f"\n▶ {sig}  แท่ง {ts(bar)} | ตรวจพบ {ts(created)} | AI: {dec or '-'} {bias or ''}{conf_txt} | ราคาอ้างอิง {ref} ATR {atr:.3f} | สถานะวัดผล {status}")
+            if reason:
+                print(f"   เหตุผล AI: {reason}")
+            elif dec and has_reason:
+                print("   เหตุผล AI: (ไม่มี — การปลุกก่อนติดตั้งเวอร์ชันที่เก็บเหตุผล)")
             print(f"   ปัจจัยที่ปลุก: {woke}")
             if states:
                 print(f"   สภาวะใหม่ (บริบท): {states}")
-            card = next((x for x in cards if 0 <= x[0] - created <= 15 * 60_000), None)
+            woke_ids = {w.split("(")[0] for w in (woke or "").split(", ") if w}
+            card = None
+            if dec != "SKIP":
+                for x in cards:
+                    if not (0 <= x[0] - created <= 15 * 60_000):
+                        continue
+                    zone = set((json.loads(x[2]).get("zone") or "").split(","))
+                    if woke_ids <= zone:   # การ์ดของการปลุกนี้ต้องมีปัจจัยที่ปลุกครบ
+                        card = x
+                        break
             if card:
                 meta = json.loads(card[2])
                 print(f"   การ์ดแชท {ts(card[0])} · side={meta.get('side')} conf={meta.get('confidence')} ราคา={meta.get('price')} เสียง={meta.get('voice')}")
@@ -230,6 +263,8 @@ def main():
                     print(f"   สรุป AI: {meta['summary'][:220]}")
             elif dec == "SKIP":
                 print("   (AI ตอบ SKIP — ไม่แจ้งผู้ใช้ ไม่มีการ์ด)")
+            else:
+                print("   ⚠️ ไม่พบการ์ดในแชทของการปลุกนี้ (AI ไม่ตอบ/ถูกลบแชท/แจ้งแบบ direct ไม่สำเร็จ)")
             recompute(c, sym, tf, bar, created)
 
         if args.logcat:
@@ -239,7 +274,7 @@ def main():
                 print(" แอปไม่ได้ทำงานอยู่")
             else:
                 out = subprocess.run([adb, "logcat", "-d", f"--pid={pid}"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
-                lines = [l for l in out.splitlines() if re.search(r"SmcApiService|AutomationService|WakeEngine|WakeLearning|OhlcvMaintenance", l)]
+                lines = [l for l in out.splitlines() if re.search(r"SmcApiService|TvHistoryBridge|AutomationService|WakeEngine|WakeLearning|OhlcvMaintenance", l)]
                 for l in lines[-30:]:
                     print(" " + l[:230])
                 fetch_t = []
@@ -251,8 +286,13 @@ def main():
                 gaps = [(b - a).total_seconds() for a, b in zip(fetch_t, fetch_t[1:]) if (b - a).total_seconds() < 30]
                 if gaps:
                     print(f" ระยะห่างการดึงแท่งเทียนต่อเนื่อง: เฉลี่ย {sum(gaps) / len(gaps):.1f} วิ (n={len(gaps)}) — ปกติควร ≤ 2 วิ")
-        c.close()
+                errs = [l for l in lines if re.search(r"protocol_error|critical_error|symbol_error|series_error", l)]
+                if errs:
+                    print(f" ⚠️ TradingView ตอบ error {len(errs)} ครั้ง — ล่าสุด: {errs[-1][:200]}")
     finally:
+        # ปิด connection ก่อนลบ — บน Windows ไฟล์ที่ยังเปิดอยู่ลบไม่ได้ (สำเนาที่มีข้อมูลส่วนตัวจะค้างในเครื่อง)
+        if c is not None:
+            c.close()
         if not args.db and not args.keep:
             os.remove(path)
             print("\n(ลบสำเนาฐานข้อมูลแล้ว)")
