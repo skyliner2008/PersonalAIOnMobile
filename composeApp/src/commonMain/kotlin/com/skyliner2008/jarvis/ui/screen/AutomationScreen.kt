@@ -466,6 +466,7 @@ private fun CronJobCard(
                 Text(
                     if (job.is_triggered == 1L) {
                         if (job.tool_name == "trading_signal_alert") "TRIGGERED · รอสัญญาณใหม่"
+                        else if (job.tool_name == com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME) "TRIGGERED · ปลุก AI แล้ว รอเหตุการณ์ใหม่"
                         else "TRIGGERED · รอเลือก ลบ/ซ้ำ"
                     } else "ACTIVE · เฝ้าดูอยู่",
                     color = if (job.is_triggered == 1L) Color(0xFFFF5252) else Color(0xFF00C853),
@@ -493,7 +494,9 @@ private fun CronJobCard(
                 Spacer(modifier = Modifier.weight(1f))
                 // ปุ่ม 🔁 แจ้งเตือนซ้ำ — โชว์เฉพาะ alert ทั่วไปที่ TRIGGERED ค้าง (เผื่อผู้ใช้ปัด notification ทิ้ง)
                 // signal alert ไม่ต้องมี เพราะ re-arm อัตโนมัติเมื่อแท่งสัญญาณผ่านไป
-                if (job.is_triggered == 1L && job.tool_name != "trading_signal_alert") {
+                if (job.is_triggered == 1L && job.tool_name != "trading_signal_alert" &&
+                    job.tool_name != com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME
+                ) {
                     IconButton(onClick = onRepeat) {
                         Icon(Icons.Default.Refresh, contentDescription = "แจ้งเตือนซ้ำ", tint = Color(0xFF00C853))
                     }

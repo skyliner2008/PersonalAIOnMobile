@@ -3241,3 +3241,17 @@ active context window"* คิดทั้ง context สะสมใหม่�
 
 **สถานะ**: `:composeApp:testDebugUnitTest` **444/444** ✅
 
+
+---
+
+## 2026-09-18 — แก้: alert ระบบปลุก AI ค้าง TRIGGERED และหยุดสแกนหลังปลุกครั้งแรก
+
+อาการ (logcat จริง 23:21–23:25): ปลุก AI สำเร็จ 1 ครั้ง แล้วไม่ดึงแท่งเทียนอีกเลย, หน้า Cron job ค้าง TRIGGERED,
+4 นาทีต่อมาบริการหยุดตัวเอง ("No active alert jobs or scheduled tasks. Stopping service.")
+
+สาเหตุ: `getRunnableJobs` ข้าม job ที่ `is_triggered = 1` ยกเว้น `trading_signal_alert`
+— job `trading_anticipation` เป็น edge-trigger เหมือนกัน (ต้องสแกนรอบถัดไปเพื่อรีเซ็ตตัวเอง)
+แต่ไม่อยู่ในข้อยกเว้น พอปลุกครั้งแรกจึงหลุดจากรอบสแกนถาวร และบริการเห็นว่าไม่มี job เหลือ
+
+แก้: `getRunnableJobs` รวม `trading_anticipation`, หน้า Automation แสดง "TRIGGERED · ปลุก AI แล้ว รอเหตุการณ์ใหม่"
+และไม่แสดงปุ่ม 🔁 สำหรับ job ประเภทนี้ (รีเซ็ตเองในรอบถัดไป)
