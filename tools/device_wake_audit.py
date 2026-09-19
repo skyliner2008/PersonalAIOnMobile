@@ -39,10 +39,12 @@ UTC = dt.timezone.utc
 # ลำดับความน่าเชื่อถือของแหล่งแท่งเทียน — ตรงกับ OhlcvCentralStore.SOURCE_PRIORITY ในแอป
 SOURCE_PRIORITY = ["TV:OANDA", "TV:FX_IDC", "TV:TVC", "TV:BINANCE", "TV:NASDAQ", "TV:NYSE", "TV:", "BINANCE"]
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-except Exception:
-    pass
+# stderr ด้วย — ข้อความ error ของ sys.exit ไปทาง stderr (เดิมภาษาไทยออกมาเป็นรหัส escape บน Windows)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 # ─── adb ─────────────────────────────────────────────────────────────────────
@@ -189,6 +191,311 @@ def recompute(c, symbol, tf, bar_ts, detected_ms):
         print(f"   วันก่อน ({ts(pd[0][0])} → {ts(pd[-1][0])}) High={max(b[2] for b in pd)} Low={min(b[3] for b in pd)}")
 
 
+
+# ─── ตรวจเงื่อนไขของปัจจัยที่ปลุก (สูตรเดียวกับ triggers ในแอป) ─────────────────
+
+def _rsi_series(cl, n=14):
+    """Wilder RSI — เหมือน TaIndicators.rsiSeries"""
+    out = [None] * len(cl)
+    if len(cl) < n + 1:
+        return out
+    g = sum(max(cl[i] - cl[i - 1], 0) for i in range(1, n + 1)) / n
+    l = sum(max(cl[i - 1] - cl[i], 0) for i in range(1, n + 1)) / n
+    out[n] = 100.0 if l == 0 else 100 - 100 / (1 + g / l)
+    for i in range(n + 1, len(cl)):
+        d = cl[i] - cl[i - 1]
+        g = (g * (n - 1) + max(d, 0)) / n; l = (l * (n - 1) + max(-d, 0)) / n
+        out[i] = 100.0 if l == 0 else 100 - 100 / (1 + g / l)
+    return out
+
+
+def _williams(b, n=14):
+    hh = max(x[2] for x in b[-n:]); ll = min(x[3] for x in b[-n:])
+    return -50.0 if hh == ll else (hh - b[-1][4]) / (hh - ll) * -100
+
+
+def _vwap(b, offset_hours):
+    """VWAP ของ session ล่าสุด — เหมือน lastSessionAnchor + vwapAnchored (typical price)"""
+    day = 86_400_000; off = offset_hours * 3_600_000
+    anchor = ((b[-1][0] - off) // day) * day + off
+    sess = [x for x in b if x[0] >= anchor]
+    vol = sum(x[5] for x in sess)
+    if vol <= 0 or len(sess) < 3:
+        return None
+    return sum((x[2] + x[3] + x[4]) / 3 * x[5] for x in sess) / vol
+
+
+def _pivots(b, L=5):
+    """swing ที่ยืนยันแล้ว ตามตำแหน่งจุดยอดจริง (center) — เหมือน confirmedSwings + swing*Pivots"""
+    hs, ls = [], []
+    for cen in range(L, len(b) - L):
+        hc, lc = b[cen][2], b[cen][3]
+        win = b[cen - L:cen + L + 1]
+        if all(x[2] <= hc for x in win): hs.append((cen, hc))
+        if all(x[3] >= lc for x in win): ls.append((cen, lc))
+    return hs, ls
+
+
+# ปัจจัยที่ต้องใช้ข้อมูลที่สคริปต์ไม่มี: โครงสร้างตลาด (BOS/CHoCH), ภาพ 5TF (digest), engine เฉพาะ, ข้อมูลภายนอก
+_NEEDS_APP = {
+    "BOS", "CHOCH", "HTF_CHOCH_H1", "HTF_CHOCH_H4", "SWING_FAILURE", "HL_LH_CONFIRMED", "INTERNAL_EXTERNAL_MISMATCH",
+    "KEY_LEVEL_TOUCH", "OB_TOUCH", "OB_MITIGATED", "FVG_ENTER", "FVG_FILLED", "BREAKER_RETEST", "SR_FLIP_RETEST",
+    "VOLUME_PROFILE_LEVEL", "ENGULFING_AT_LEVEL", "VOLUME_DRYUP_AT_LEVEL", "OBV_DIVERGENCE", "RSI_DIVERGENCE",
+    "RSI_HIDDEN_DIVERGENCE", "MACD_DIVERGENCE", "HEAD_SHOULDERS", "TRIANGLE_WEDGE_BREAK", "CHANNEL_TOUCH",
+    "TRENDLINE_BREAK", "HARMONIC_COMPLETION", "ELLIOTT_STAGE_CHANGE", "ALL_TF_ALIGNED", "M5_CONFIRM_DIVERGENCE",
+    "HTF_CONFLICT", "LTF_PULLBACK_END", "TF_CONTINUATION", "INSTITUTIONAL_SHIFT", "DEEP_SCORE_CROSS",
+    "DXY_MOVE", "YIELD_SPIKE", "CORRELATION_BREAK", "CRYPTO_BROAD_MOVE", "HIGH_IMPACT_NEWS_SOON", "POST_NEWS_SPIKE",
+    "FEAR_GREED_EXTREME", "EQ_POOL_FORMED", "EQ_POOL_SWEPT",
+}
+
+
+def trigger_checks(b, symbol, h1=None, detected_ms=None):
+    """สูตรของปัจจัยที่ตรวจนอกแอปได้ — คืน {id: fn() -> (รายละเอียด, ทิศที่คำนวณได้ | None)}
+    b = แท่งปิดของ TF หลัก (แท่งสุดท้าย = แท่งที่ตรวจ), h1 = แท่ง H1 (ใช้กับ PDH/PDL)"""
+    cl = [x[4] for x in b]
+    atr = atr14(b)
+    last, prev = b[-1], b[-2]
+    e = {p: ema(cl, p) for p in (12, 20, 26, 50, 200)}
+    hist = macd_hist(cl)
+    rsi14 = _rsi_series(cl, 14); rsi5 = _rsi_series(cl, 5)
+    shift_h = -day_shift_ms(symbol) // 3_600_000
+
+    def ribbon(k):
+        a, m, z = e[20][k], e[50][k], e[200][k]
+        if None in (a, m, z): return None
+        return 1 if a > m > z else -1 if a < m < z else 0
+
+    checks = {}
+    checks["MACD_SIGNAL_CROSS"] = lambda: (f"hist {hist[-2]:.3f} → {hist[-1]:.3f}",
+        "BUY" if hist[-2] <= 0 < hist[-1] else "SELL" if hist[-2] >= 0 > hist[-1] else None)
+    def zero():
+        m1 = e[12][-1] - e[26][-1]; m0 = e[12][-2] - e[26][-2]
+        return (f"MACD line {m0:.3f} → {m1:.3f}", "BUY" if m0 <= 0 < m1 else "SELL" if m0 >= 0 > m1 else None)
+    checks["MACD_ZERO_CROSS"] = zero
+    def turn():
+        now, p1, p2 = hist[-1], hist[-2], hist[-3]
+        d = "BUY" if now < 0 and p1 < 0 and p1 < p2 and now > p1 else "SELL" if now > 0 and p1 > 0 and p1 > p2 and now < p1 else None
+        return (f"hist {p2:.3f}, {p1:.3f}, {now:.3f}", d)
+    checks["MACD_HISTOGRAM_TURN"] = turn
+    def cci_x():
+        c0, c1 = cci(b)
+        return (f"CCI {c0:.1f} → {c1:.1f}", "BUY" if c0 <= 100 < c1 else "SELL" if c0 >= -100 > c1 else None)
+    checks["CCI_100_CROSS"] = cci_x
+    checks["RSI_50_CROSS"] = lambda: (f"RSI {rsi14[-2]:.1f} → {rsi14[-1]:.1f}",
+        "BUY" if rsi14[-2] <= 50 < rsi14[-1] else "SELL" if rsi14[-2] >= 50 > rsi14[-1] else None)
+    checks["RSI_EXIT_EXTREME"] = lambda: (f"RSI {rsi14[-2]:.1f} → {rsi14[-1]:.1f}",
+        "BUY" if rsi14[-2] <= 30 < rsi14[-1] else "SELL" if rsi14[-2] >= 70 > rsi14[-1] else None)
+    checks["FAST_RSI_THRUST"] = lambda: (f"RSI(5) {rsi5[-2]:.1f} → {rsi5[-1]:.1f}",
+        "BUY" if rsi5[-2] <= 35 < rsi5[-1] else "SELL" if rsi5[-2] >= 65 > rsi5[-1] else None)
+    def wr():
+        w1, w0 = _williams(b), _williams(b[:-1])
+        return (f"%R {w0:.1f} → {w1:.1f}", "BUY" if w0 <= -80 < w1 else "SELL" if w0 >= -20 > w1 else None)
+    checks["WILLIAMS_R_EXIT"] = wr
+    def vol_spike():
+        avg = sum(x[5] for x in b[-21:-1]) / 20
+        r = last[5] / avg if avg > 0 else 0
+        d = ("BUY" if last[4] > last[1] else "SELL" if last[4] < last[1] else "NEUTRAL") if r >= 2 else None
+        return (f"volume {r:.2f}x ค่าเฉลี่ย 20 แท่ง", d)
+    checks["VOLUME_SPIKE"] = vol_spike
+    def dshift():
+        rec = sum(delta(x) for x in b[-10:]); rp = sum(delta(x) for x in b[-11:-1]); bef = sum(delta(x) for x in b[-20:-10])
+        d = "BUY" if rec > 0 >= rp and bef < 0 else "SELL" if rec < 0 <= rp and bef > 0 else None
+        return (f"delta {rp:,.1f} → {rec:,.1f} (ก่อนหน้า {bef:,.1f})", d)
+    checks["DELTA_SHIFT"] = dshift
+    def pullback():
+        t = ribbon(-1)
+        if t == 1:
+            lv = next((x for x in (e[20][-1], e[50][-1]) if last[3] <= x + 0.1 * atr and last[4] > x), None)
+            return (f"ribbon ขาขึ้น EMA20 {e[20][-1]:.2f} EMA50 {e[50][-1]:.2f} low {last[3]}", "BUY" if lv else None)
+        if t == -1:
+            lv = next((x for x in (e[20][-1], e[50][-1]) if last[2] >= x - 0.1 * atr and last[4] < x), None)
+            return (f"ribbon ขาลง EMA20 {e[20][-1]:.2f} EMA50 {e[50][-1]:.2f} high {last[2]}", "SELL" if lv else None)
+        return ("EMA20/50/200 ไม่เรียงตัว", None)
+    checks["EMA_PULLBACK"] = pullback
+    def ema_cross():
+        f0, f1, s0, s1 = ema(cl, 14)[-2], ema(cl, 14)[-1], ema(cl, 60)[-2], ema(cl, 60)[-1]
+        return (f"EMA14 {f0:.2f}→{f1:.2f} vs EMA60 {s0:.2f}→{s1:.2f}",
+                "BUY" if f0 <= s0 and f1 > s1 else "SELL" if f0 >= s0 and f1 < s1 else None)
+    checks["EMA_CROSS"] = ema_cross
+    def vwap_x():
+        v1, v0 = _vwap(b, shift_h), _vwap(b[:-1], shift_h)
+        if v1 is None or v0 is None: return ("VWAP คำนวณไม่ได้", None)
+        return (f"close {prev[4]}→{last[4]} vs VWAP {v0:.2f}→{v1:.2f}",
+                "BUY" if prev[4] <= v0 and last[4] > v1 else "SELL" if prev[4] >= v0 and last[4] < v1 else None)
+    checks["VWAP_RECLAIM"] = vwap_x
+    def obv_lead():
+        acc, obv = 0.0, [0.0]
+        for i in range(1, len(b)):
+            acc += b[i][5] if cl[i] > cl[i - 1] else -b[i][5] if cl[i] < cl[i - 1] else 0.0
+            obv.append(acc)
+        win = obv[-21:-1]; hi = max(x[2] for x in b[-21:-1]); lo = min(x[3] for x in b[-21:-1])
+        d = "BUY" if obv[-1] > max(win) >= obv[-2] and last[4] < hi else "SELL" if obv[-1] < min(win) <= obv[-2] and last[4] > lo else None
+        return (f"OBV {obv[-2]:,.0f} → {obv[-1]:,.0f} (กรอบ 20 แท่ง {min(win):,.0f}..{max(win):,.0f})", d)
+    checks["OBV_LEADING_BREAKOUT"] = obv_lead
+    def dtop():
+        hs, ls = _pivots(b)
+        c1, c0 = last[4], prev[4]
+        if len(hs) >= 2:
+            (i1, h1), (i2, h2) = hs[-2], hs[-1]
+            if abs(h1 - h2) <= 0.3 * atr and i2 - i1 >= 5:
+                neck = min(x[3] for x in b[i1:i2 + 1])
+                if c0 >= neck > c1: return (f"double top {h1}/{h2} neckline {neck}", "SELL")
+        if len(ls) >= 2:
+            (i1, l1), (i2, l2) = ls[-2], ls[-1]
+            if abs(l1 - l2) <= 0.3 * atr and i2 - i1 >= 5:
+                neck = max(x[2] for x in b[i1:i2 + 1])
+                if c0 <= neck < c1: return (f"double bottom {l1}/{l2} neckline {neck}", "BUY")
+        return ("ไม่เข้ารูปยอดคู่/ก้นคู่หลุด neckline", None)
+    checks["DOUBLE_TOP_BOTTOM"] = dtop
+    def ibb():
+        m, i, l = b[-3], b[-2], b[-1]
+        if not (i[2] < m[2] and i[3] > m[3]): return ("แท่งก่อนหน้าไม่ใช่ inside bar", None)
+        return (f"mother H{m[2]} L{m[3]} close {l[4]}", "BUY" if l[4] > m[2] else "SELL" if l[4] < m[3] else None)
+    checks["INSIDE_BAR_BREAK"] = ibb
+
+    body = abs(last[4] - last[1]); rng = last[2] - last[3]
+    uw = last[2] - max(last[1], last[4]); lw = min(last[1], last[4]) - last[3]
+    color = "BUY" if last[4] > last[1] else "SELL" if last[4] < last[1] else "NEUTRAL"
+    avg20 = sum(x[5] for x in b[-21:-1]) / 20
+
+    checks["IMPULSE_CANDLE"] = lambda: (f"body {body:.2f} = {body / atr:.2f} ATR (เกณฑ์ ≥ 1.5)", color if body >= 1.5 * atr else None)
+    def range_bo():
+        hi = max(x[2] for x in b[-21:-1]); lo = min(x[3] for x in b[-21:-1])
+        if hi - lo > 3 * atr: return (f"กรอบ 20 แท่ง {hi - lo:.2f} = {(hi - lo) / atr:.1f} ATR (กว้างเกิน 3)", None)
+        return (f"close {last[4]} vs กรอบ {lo}..{hi}", "BUY" if last[4] > hi else "SELL" if last[4] < lo else None)
+    checks["RANGE_BREAKOUT"] = range_bo
+    def failed_bo():
+        brk = b[-2]; win = b[-22:-2]
+        hi = max(x[2] for x in win); lo = min(x[3] for x in win)
+        d = "SELL" if brk[4] > hi > last[4] else "BUY" if brk[4] < lo < last[4] else None
+        return (f"แท่งหลุด close {brk[4]} → กลับ {last[4]} กรอบ {lo}..{hi}", d)
+    checks["FAILED_BREAKOUT"] = failed_bo
+    def pin():
+        if rng <= 0 or rng < 0.5 * atr: return (f"แท่งเล็กเกิน ({rng / atr:.2f} ATR)", None)
+        d = "BUY" if lw >= 2 * body and lw >= 0.6 * rng else "SELL" if uw >= 2 * body and uw >= 0.6 * rng else None
+        return (f"ไส้บน {uw / rng * 100:.0f}% ไส้ล่าง {lw / rng * 100:.0f}% body {body:.2f}", d)
+    checks["PIN_BAR"] = pin
+    def doji():
+        if rng <= 0 or body > 0.1 * rng: return (f"body {body:.2f} > 10% ของแท่ง", None)
+        hi = max(x[2] for x in b[-20:]); lo = min(x[3] for x in b[-20:])
+        return (f"doji ที่ high {last[2]} / low {last[3]} (20 แท่ง {lo}..{hi})", "SELL" if last[2] >= hi else "BUY" if last[3] <= lo else None)
+    checks["DOJI_AT_EXTREME"] = doji
+    def nr7():
+        is_nr7 = all(x[2] - x[3] >= rng for x in b[-7:])
+        inside = last[2] < prev[2] and last[3] > prev[3]
+        return (f"NR7={is_nr7} inside={inside}", "NEUTRAL" if is_nr7 or inside else None)
+    checks["NR7_INSIDE_BAR"] = nr7
+    def sweep():
+        prior = b[-11:-1]; ph = max(x[2] for x in prior); pl = min(x[3] for x in prior)
+        floor = 1.5 * max(body, 0.2 * atr)
+        d = "BUY" if last[3] < pl and lw >= floor else "SELL" if last[2] > ph and uw >= floor else None
+        return (f"high {last[2]} vs {ph}, low {last[3]} vs {pl}, ไส้ ≥ {floor:.2f}? บน {uw:.2f} ล่าง {lw:.2f}", d)
+    checks["LIQUIDITY_SWEEP_REJECTION"] = sweep
+    def absorb():
+        r = last[5] / avg20 if avg20 > 0 else 0
+        ok = r >= 1.8 and body <= 0.35 * atr
+        return (f"volume {r:.2f}x body {body / atr:.2f} ATR", ("BUY" if last[4] <= last[1] else "SELL") if ok else None)
+    checks["VOLUME_ABSORPTION"] = absorb
+    def accel():
+        def slope(v):
+            n = len(v); xm = (n - 1) / 2; ym = sum(v) / n
+            den = sum((i - xm) ** 2 for i in range(n))
+            return sum((i - xm) * (v[i] - ym) for i in range(n)) / den
+        fast = slope(cl[-10:]); slow = slope(cl[-30:-10]); fast_p = slope(cl[-11:-1])
+        acc = abs(fast) > 0.3 * atr and abs(fast) > 2 * abs(slow) and (slow == 0 or fast * slow > 0)
+        was = abs(fast_p) > 0.3 * atr and abs(fast_p) > 2 * abs(slow)
+        return (f"slope {fast_p / atr:.2f}→{fast / atr:.2f} ATR/แท่ง (ก่อนหน้า {slow / atr:.2f})",
+                ("BUY" if fast > 0 else "SELL") if acc and not was else None)
+    checks["TREND_ACCELERATION"] = accel
+    def bb(data):
+        w = data[-20:]; m = sum(w) / 20; sd = (sum((x - m) ** 2 for x in w) / 20) ** 0.5
+        return m + 2 * sd, m - 2 * sd
+    def band_rej():
+        up_p, lo_p = bb(cl[:-1]); up, lo = bb(cl)
+        d = "SELL" if prev[2] >= up_p and last[4] < up and last[4] < last[1] else \
+            "BUY" if prev[3] <= lo_p and last[4] > lo and last[4] > last[1] else None
+        return (f"BB ก่อน {lo_p:.2f}..{up_p:.2f} แท่งก่อน H{prev[2]} L{prev[3]} close {last[4]}", d)
+    checks["BAND_REJECTION"] = band_rej
+    def mfi(bb_):
+        tp = [(x[2] + x[3] + x[4]) / 3 for x in bb_]
+        pos = neg = 0.0
+        for i in range(len(bb_) - 14, len(bb_)):
+            f = tp[i] * bb_[i][5]
+            if tp[i] > tp[i - 1]: pos += f
+            elif tp[i] < tp[i - 1]: neg += f
+        return (50.0 if pos == 0 else 100.0) if neg == 0 else 100 - 100 / (1 + pos / neg)
+    def mfi_x():
+        m0, m1 = mfi(b[:-1]), mfi(b)
+        return (f"MFI {m0:.1f} → {m1:.1f}", "SELL" if m0 < 80 <= m1 else "BUY" if m0 > 20 >= m1 else None)
+    checks["MFI_EXTREME"] = mfi_x
+    def stoch(bb_):
+        raw = []
+        for i in range(13, len(bb_)):
+            hh = max(x[2] for x in bb_[i - 13:i + 1]); ll = min(x[3] for x in bb_[i - 13:i + 1])
+            raw.append((bb_[i][4] - ll) / (hh - ll) * 100 if hh > ll else 50.0)
+        slow = [sum(raw[i - 2:i + 1]) / 3 for i in range(2, len(raw))]
+        return slow[-1], sum(slow[-3:]) / 3
+    def stoch_x():
+        k0, d0 = stoch(b[:-1]); k1, d1 = stoch(b)
+        d = "BUY" if k0 <= d0 and k1 > d1 and d1 < 20 else "SELL" if k0 >= d0 and k1 < d1 and d1 > 80 else None
+        return (f"%K/%D {k0:.1f}/{d0:.1f} → {k1:.1f}/{d1:.1f}", d)
+    checks["STOCH_EXTREME_CROSS"] = stoch_x
+    def vwap_band():
+        day = 86_400_000; off = shift_h * 3_600_000
+        anchor = ((last[0] - off) // day) * day + off
+        sess = [x for x in b if x[0] >= anchor]; vol = sum(x[5] for x in sess)
+        if vol <= 0 or len(sess) < 3: return ("VWAP คำนวณไม่ได้", None)
+        tp = [(x[2] + x[3] + x[4]) / 3 for x in sess]
+        vw = sum(t * x[5] for t, x in zip(tp, sess)) / vol
+        sd = (sum(x[5] * (t - vw) ** 2 for t, x in zip(tp, sess)) / vol) ** 0.5
+        up, dn = vw + 2 * sd, vw - 2 * sd
+        touch = lambda x, lv: x[3] <= lv <= x[2]
+        d = "SELL" if touch(last, up) and not touch(prev, up) else "BUY" if touch(last, dn) and not touch(prev, dn) else None
+        return (f"VWAP {vw:.2f} ±2σ {dn:.2f}..{up:.2f} แท่ง {last[3]}..{last[2]}", d)
+    checks["VWAP_BAND_TOUCH"] = vwap_band
+    def pdh():
+        if detected_ms is None or not h1: return ("ไม่มีเวลาตรวจพบ/แท่ง H1", None)
+        shift = day_shift_ms(symbol); key = lambda ms: (ms + shift) // 86_400_000
+        days = defaultdict(list)
+        for x in h1:
+            if x[0] + 3_600_000 <= detected_ms: days[key(x[0])].append(x)
+        prevs = sorted(k for k in days if k < key(detected_ms))
+        if len(prevs) < 2: return ("ข้อมูลวันก่อนไม่พอ", None)
+        pd = days[prevs[-1]]; hi = max(x[2] for x in pd); lo = min(x[3] for x in pd)
+        touch = lambda x, lv: x[3] <= lv <= x[2]
+        hit = (touch(last, hi) and not touch(prev, hi)) or (touch(last, lo) and not touch(prev, lo))
+        return (f"PDH {hi} PDL {lo} แท่ง {last[3]}..{last[2]}", "NEUTRAL" if hit else None)
+    checks["PDH_PDL_TOUCH"] = pdh
+    return checks
+
+
+def verify_triggers(c, symbol, tf, bar_ts, woke, detected_ms=None):
+    """พิมพ์ ✓/✗ ต่อปัจจัยที่ปลุก — '—' = ตรวจนอกแอปไม่ได้ (ต้องใช้ engine/ข้อมูลภายนอกของแอป)"""
+    bars, _ = load_bars(c, symbol, tf)
+    # แอปใช้แท่ง TF หลักล่าสุด 800 แท่ง (Warmup.FULL_SET) — EMA ยาวขึ้นกับจุดเริ่ม จึงตัดให้เท่ากัน
+    b = [x for x in bars if x[0] <= bar_ts][-800:]
+    if len(b) < 60 or b[-1][0] != bar_ts:
+        return
+    checks = trigger_checks(b, symbol, load_bars(c, symbol, "1h")[0], detected_ms)
+
+    print("   ตรวจเงื่อนไขปัจจัย (คำนวณใหม่จากแท่งดิบ):")
+    for item in (woke or "").split(", "):
+        if "(" not in item:
+            continue
+        fid, side = item[:-1].split("(")
+        fn = checks.get(fid)
+        if fn is None:
+            why = "ต้องใช้ข้อมูลภายในแอป (โครงสร้าง/digest/engine/ข้อมูลภายนอก)" if fid in _NEEDS_APP else "ยังไม่มีสูตรในสคริปต์"
+            print(f"     —  {fid}({side}) {why}")
+            continue
+        try:
+            detail, got = fn()
+        except Exception as ex:  # ข้อมูลไม่พอ ฯลฯ
+            print(f"     ?  {fid}({side}) คำนวณไม่ได้: {ex}")
+            continue
+        ok = got == side
+        print(f"     {'✓' if ok else '✗'}  {fid}({side}) {detail}" + ("" if ok else f" → คำนวณได้ {got}"))
+
 # ─── main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -221,12 +528,15 @@ def main():
         # ai_confidence / ai_reason เพิ่มใน migration 14 — มือถือที่ยังใช้แอปรุ่นเก่าจะไม่มีคอลัมน์นี้
         cols = {r[1] for r in c.execute("pragma table_info(AnticipationFactorOutcome)")}
         has_reason = {"ai_confidence", "ai_reason"} <= cols
+        # AiWakeView เพิ่มใน migration 15 — ติดตามผลมุมมองของ AI (ชน TP/SL)
+        has_views = c.execute("select count(*) from sqlite_master where type='table' and name='AiWakeView'").fetchone()[0] == 1
         reason_sql = "max(ai_confidence), max(ai_reason)" if has_reason else "null, null"
         wakes = c.execute(f"""
             select signal_id, min(created_at), max(ai_decision), max(ai_bias),
                    group_concat(case when woke=1 then factor_id||'('||side||')' end, ', '),
-                   group_concat(case when woke=0 then factor_id end, ', '),
-                   max(ref_price), max(ref_atr), group_concat(distinct status), {reason_sql}
+                   group_concat(case when woke=0 then factor_id||'['||kind||']' end, ', '),
+                   max(case when woke=1 then ref_price end), max(case when woke=1 then ref_atr end),
+                   group_concat(distinct status), {reason_sql}
             from AnticipationFactorOutcome group by signal_id
             having sum(woke) > 0 order by min(created_at) desc limit ?""", (args.last,)).fetchall()
         if not has_reason:
@@ -238,11 +548,23 @@ def main():
             print(f"\n▶ {sig}  แท่ง {ts(bar)} | ตรวจพบ {ts(created)} | AI: {dec or '-'} {bias or ''}{conf_txt} | ราคาอ้างอิง {ref} ATR {atr:.3f} | สถานะวัดผล {status}")
             if reason:
                 print(f"   เหตุผล AI: {reason}")
+            if has_views:
+                v = c.execute("select status, result_r, move_atr, mfe_atr, mae_atr, bars, level_sl, level_tp from AiWakeView where signal_id=?", (sig,)).fetchone()
+                if v:
+                    st, rr, mv, mfe, mae, nb, vsl, vtp = v
+                    if st == "OPEN":
+                        print(f"   ผลมุมมอง AI: ⏳ ยังติดตามอยู่" + (f" (SL {vsl} / TP {vtp})" if vsl and vtp else ""))
+                    elif st in ("TP", "SL", "EXPIRED"):
+                        print(f"   ผลมุมมอง AI: {'✅' if st == 'TP' else '❌' if st == 'SL' else '⌛'} {st} {rr:+.2f}R ใน {nb} แท่ง (ไปตามทิศสูงสุด {mfe:.1f} ATR / สวนทิศสูงสุด {mae:.1f} ATR)")
+                    else:
+                        print(f"   ผลมุมมอง AI: ครบ {nb} แท่ง ราคาเคลื่อน {mv:+.1f} ATR (สูงสุด {mfe:.1f} ATR)")
             elif dec and has_reason:
                 print("   เหตุผล AI: (ไม่มี — การปลุกก่อนติดตั้งเวอร์ชันที่เก็บเหตุผล)")
             print(f"   ปัจจัยที่ปลุก: {woke}")
             if states:
-                print(f"   สภาวะใหม่ (บริบท): {states}")
+                # woke=0: สภาวะที่เพิ่งเป็นจริง [STATE] หรือเหตุการณ์ที่เกิดทีหลังในแท่งเดียวกัน [EVENT]
+                # (แท่งนั้นปลุกไปแล้ว — ปลุกได้แท่งละครั้ง) บันทึกเข้าการเรียนรู้แต่ไม่ได้ส่งให้ AI
+                print(f"   บันทึกเพิ่ม (ไม่ได้ปลุก AI): {states}")
             woke_ids = {w.split("(")[0] for w in (woke or "").split(", ") if w}
             card = None
             if dec != "SKIP":
@@ -266,6 +588,7 @@ def main():
             else:
                 print("   ⚠️ ไม่พบการ์ดในแชทของการปลุกนี้ (AI ไม่ตอบ/ถูกลบแชท/แจ้งแบบ direct ไม่สำเร็จ)")
             recompute(c, sym, tf, bar, created)
+            verify_triggers(c, sym, tf, bar, woke, created)
 
         if args.logcat:
             print("\n══ logcat ล่าสุด ══")

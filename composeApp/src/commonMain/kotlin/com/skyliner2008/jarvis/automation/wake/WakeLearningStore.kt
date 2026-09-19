@@ -350,6 +350,7 @@ object WakeLearningStore {
         val base = neutralBaseline()
         val db = JarvisDatabaseHolder.database
         val ai = runCatching { db?.jarvisDatabaseQueries?.getAiDecisionAccuracy()?.executeAsList() }.getOrNull().orEmpty()
+        val views = AiViewTracker.reportSection()
         return buildString {
             appendLine("🧠 **ผลการเรียนรู้ของระบบปลุก AI**")
             appendLine("วัดด้วย forward return $FORWARD_HORIZON_BARS แท่ง หน่วย ATR — ไม่ใช้ SL/TP สมมติ")
@@ -385,6 +386,7 @@ object WakeLearningStore {
                 }
                 appendLine("SKIP ที่ดี = ราคาขยับน้อยกว่า NOTIFY (ไม่ได้พลาดโอกาส)")
             }
+            views?.let { appendLine(); appendLine(it) }
         }.trim()
     }
 

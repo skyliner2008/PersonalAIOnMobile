@@ -169,6 +169,16 @@ internal class LiveVoiceAlertEngine(
     }
 
 
+    /**
+     * engine ที่ "คาดว่า" จะพูดการแจ้งเตือนนี้ — ใช้ติดป้ายการ์ดที่ขึ้นแชทก่อนเสียงเริ่ม
+     * (ถ้า Live ล้มแล้วถอยไป Android TTS ป้ายจะไม่ตรง แต่การ์ดขึ้นทันทีสำคัญกว่า — ผลจริงอยู่ใน log)
+     */
+    fun expectedEngineLabel(): String = when {
+        com.skyliner2008.jarvis.ai.LiveSessionBridge.isActive() -> "Live (active session)"
+        isLiveEngine(setting("alert_voice_engine").ifBlank { "device" }) -> "Gemini Live"
+        else -> "Android TTS"
+    }
+
     private fun isLiveEngine(engine: String): Boolean =
         engine == "live" || engine == "ai" || engine == "live31" || engine == "live25"
 

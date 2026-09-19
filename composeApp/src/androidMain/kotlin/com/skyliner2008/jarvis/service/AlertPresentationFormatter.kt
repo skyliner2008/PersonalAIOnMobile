@@ -70,6 +70,29 @@ object AlertPresentationFormatter {
 
     private fun fmtLevel(v: Double?): String? = v?.let { if (it >= 100) "%.2f".format(it) else "%.5f".format(it).trimEnd('0').trimEnd('.') }
 
+    /**
+     * บรรทัดระดับราคาที่ AI ให้ + Risk:Reward จากราคาปัจจุบัน — null ถ้า AI ไม่ได้ให้ระดับ
+     * RR ต่ำกว่า 1:1 ติดคำเตือน (prompt สั่งให้ SKIP แล้ว แต่ถ้า AI ยังแจ้งมา ผู้ใช้ต้องเห็น)
+     */
+    fun wakeLevelsLine(data: Map<String, String>, verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?): String? {
+        verdict ?: return null
+        val sl = fmtLevel(verdict.levelSl); val tp = fmtLevel(verdict.levelTp)
+        if (sl == null && tp == null) return null
+        val rr = verdict.rr(data[WAKE.K_CLOSE]?.replace(",", "")?.toDoubleOrNull())
+        return listOfNotNull(
+            sl?.let { "ผิดทาง $it" },
+            tp?.let { "เป้า $it" },
+            rr?.let { "RR 1:${"%.2f".format(it)}" + if (it < com.skyliner2008.jarvis.automation.wake.WakePrompt.MIN_RR) " ⚠️ ต่ำกว่า 1:1" else "" }
+        ).joinToString(" · ")
+    }
+
+    /** คำเตือนสำหรับเสียงพูด เมื่อ RR ต่ำกว่า 1:1 */
+    fun wakeRrWarningTh(data: Map<String, String>, verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?): String? {
+        val rr = verdict?.rr(data[WAKE.K_CLOSE]?.replace(",", "")?.toDoubleOrNull()) ?: return null
+        return if (rr < com.skyliner2008.jarvis.automation.wake.WakePrompt.MIN_RR)
+            "ระวัง ระยะถึงเป้าสั้นกว่าระยะถึงจุดผิดทาง อาร์อาร์ต่ำกว่าหนึ่งต่อหนึ่ง" else null
+    }
+
     /** metadata การ์ดปลุก AI — MessageBubble render ด้วย kind "anticipation" */
     fun wakeChatMeta(
         job: AlertJob, data: Map<String, String>,
@@ -87,6 +110,7 @@ object AlertPresentationFormatter {
         put("desc", wakeEventLinesForUser(data).joinToString("\n").ifBlank { "-" })
         put("confidence", verdict?.confidence?.toString() ?: "-")
         put("price", data[WAKE.K_CLOSE] ?: "-")
+        wakeLevelsLine(data, verdict)?.let { put("levels", it) }
         data[WAKE.K_MTF]?.takeIf { it.isNotBlank() }?.let { put("mtf", it) }
         (liveSummary ?: verdict?.summaryTh)?.takeIf { it.isNotBlank() }?.let { put("summary", it) }
         voice?.let { put("voice", it) }
@@ -151,10 +175,7 @@ object AlertPresentationFormatter {
             if (verdict != null) {
                 appendLine()
                 appendLine("**มุมมอง AI:** ${verdict.bias}${verdict.confidence?.let { " ($it%)" } ?: ""}")
-                val sl = fmtLevel(verdict.levelSl); val tp = fmtLevel(verdict.levelTp)
-                if (sl != null || tp != null) {
-                    appendLine("ระดับที่ AI จับตา: " + listOfNotNull(sl?.let { "ผิดทาง $it" }, tp?.let { "เป้า $it" }).joinToString(" · "))
-                }
+                wakeLevelsLine(data, verdict)?.let { appendLine("ระดับที่ AI จับตา: $it") }
                 if (verdict.summaryTh.isNotBlank()) {
                     appendLine()
                     appendLine("**JARVIS:** ${verdict.summaryTh}")
@@ -174,7 +195,10 @@ object AlertPresentationFormatter {
             "BTCUSDT", "BTCUSD" -> "บิทคอยน์"; "ETHUSDT", "ETHUSD" -> "อีเทอเรียม"
             else -> sym
         }
-        verdict?.summaryTh?.takeIf { it.isNotBlank() }?.let { return sanitizeForSpeech("$symTh: $it") }
+        verdict?.summaryTh?.takeIf { it.isNotBlank() }?.let { summary ->
+            val warn = wakeRrWarningTh(data, verdict)?.let { " $it" } ?: ""
+            return sanitizeForSpeech("$symTh: $summary$warn")
+        }
         val first = wakeEventLinesForUser(data).firstOrNull() ?: "มีเหตุการณ์ใหม่บนกราฟ"
         return sanitizeForSpeech("แจ้งเตือน $symTh $first")
     }

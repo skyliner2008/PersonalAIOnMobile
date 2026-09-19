@@ -1099,3 +1099,90 @@ SELECT COUNT(*) FROM TvCandle;
 -- งานคาดการณ์ที่ยังอยู่ในสถานะเฝ้า — ใช้กันลบซีรีส์ที่ยังถูกใช้
 getActiveAlertSymbols:
 SELECT DISTINCT symbol FROM AlertJob WHERE is_active = 1;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- AiWakeView — ติดตามผลมุมมองของ AI หลังถูกปลุก (P15)
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AiWakeView (
+    -- 1 แถวต่อการปลุก 1 ครั้ง (signal_id เดียวกับ AnticipationFactorOutcome)
+    signal_id TEXT NOT NULL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    decision TEXT NOT NULL,              -- NOTIFY | SKIP
+    bias TEXT NOT NULL,                  -- BUY | SELL | NEUTRAL
+    confidence INTEGER,
+    reason TEXT,
+    price REAL NOT NULL,                 -- ราคา ณ ตอนที่ AI ให้มุมมอง
+    atr REAL NOT NULL,
+    level_sl REAL,
+    level_tp REAL,
+    created_at INTEGER NOT NULL,
+    -- OPEN = กำลังติดตาม | TP / SL = ชนระดับก่อน | EXPIRED = ครบเวลาไม่ชนระดับ | CLOSED = วัดครบกรอบ (ไม่มีระดับ/SKIP)
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    result_r REAL,                       -- มีระดับ: +RR (TP) / −1 (SL) / ผลตอนหมดเวลา — หน่วย R
+    move_atr REAL,                       -- ราคาเคลื่อนไปตามทิศมุมมองเท่าไร (ATR) — SKIP/NEUTRAL: ขนาดการเคลื่อนที่
+    mfe_atr REAL,
+    mae_atr REAL,
+    bars INTEGER,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_view_open ON AiWakeView(status, symbol, interval);
+CREATE INDEX IF NOT EXISTS idx_ai_view_recent ON AiWakeView(symbol, created_at);
+
+upsertAiView:
+INSERT OR REPLACE INTO AiWakeView(
+    signal_id, symbol, interval, decision, bias, confidence, reason, price, atr, level_sl, level_tp, created_at, status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN');
+
+-- นำเข้าจากไฟล์การเรียนรู้ (ไม่ทับของเดิม)
+insertAiViewIfAbsent:
+INSERT OR IGNORE INTO AiWakeView(
+    signal_id, symbol, interval, decision, bias, confidence, reason, price, atr, level_sl, level_tp, created_at,
+    status, result_r, move_atr, mfe_atr, mae_atr, bars, resolved_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getOpenAiViews:
+SELECT * FROM AiWakeView WHERE status = 'OPEN' AND symbol = ? AND interval = ? ORDER BY created_at ASC LIMIT 200;
+
+closeAiView:
+UPDATE AiWakeView
+SET status = ?, result_r = ?, move_atr = ?, mfe_atr = ?, mae_atr = ?, bars = ?, resolved_at = ?
+WHERE signal_id = ?;
+
+getRecentAiViews:
+SELECT * FROM AiWakeView WHERE symbol = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?;
+
+-- สรุปผลมุมมองที่ปิดแล้ว แยกตามการตัดสิน/ทิศ/ผล
+getAiViewStats:
+SELECT decision, bias, status,
+       COUNT(*) AS n,
+       AVG(result_r) AS avg_r,
+       AVG(move_atr) AS avg_move,
+       AVG(mfe_atr) AS avg_mfe
+FROM AiWakeView
+WHERE status != 'OPEN'
+GROUP BY decision, bias, status;
+
+getAllAiViews:
+SELECT * FROM AiWakeView ORDER BY created_at ASC;
+
+expireStaleOpenAiViews:
+UPDATE AiWakeView SET status = 'EXPIRED', resolved_at = ? WHERE status = 'OPEN' AND created_at < ?;
+
+deleteAiViewsBefore:
+DELETE FROM AiWakeView WHERE created_at < ?;
+
+-- ย้อนเติมมุมมองที่ AI ตัดสินไปก่อนมีตาราง AiWakeView (ครั้งเดียว)
+getAiDecisionsForBackfill:
+SELECT signal_id, symbol, interval,
+       MAX(ai_decision) AS decision, MAX(ai_bias) AS bias, MAX(ai_confidence) AS confidence, MAX(ai_reason) AS reason,
+       MAX(CASE WHEN woke = 1 THEN ref_price END) AS price, MAX(CASE WHEN woke = 1 THEN ref_atr END) AS atr,
+       MIN(created_at) AS created_at
+FROM AnticipationFactorOutcome
+WHERE ai_decision IS NOT NULL
+GROUP BY signal_id;
+
+getWakeAiCards:
+SELECT timestamp, content, metadata FROM ChatMessage WHERE metadata LIKE '%"type":"wake_ai"%' ORDER BY timestamp;
+

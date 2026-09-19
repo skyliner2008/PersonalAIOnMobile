@@ -257,6 +257,19 @@ class WakeContext(
         ?.firstOrNull { it.tf.equals(tf, ignoreCase = true) }
         ?.let { if (it.trend > 0) "UP" else if (it.trend < 0) "DOWN" else "RANGE" }
 
+    /**
+     * เทรนด์ H4/H1/M15 เรียงทิศเดียวกันไหม: 1 = ขาขึ้นทั้งหมด, −1 = ขาลงทั้งหมด, 0 = ไม่เรียง/ไม่มีข้อมูล
+     * (M15 เกิด CHoCH สวนทางเมื่อไร trend ของ M15 จะกลับทิศเอง → ไม่นับว่าเรียงกันอีก)
+     */
+    val htfAlignment: Int by lazy {
+        val t = listOf("H4", "H1", "M15").map { trendOf(it) }
+        when {
+            t.all { it == "UP" } -> 1
+            t.all { it == "DOWN" } -> -1
+            else -> 0
+        }
+    }
+
     val isMetalOrFx: Boolean by lazy { TaIndicators.sessionOffsetHoursFor(symbol) != 0 }
     val isCrypto: Boolean by lazy {
         val s = symbol.uppercase()

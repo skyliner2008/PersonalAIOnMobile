@@ -503,7 +503,9 @@ internal sealed class AlertCardMeta {
     data class Anticipation(
         val name: String, val symbol: String, val side: String,
         val zone: String, val desc: String, val confidence: String,
-        val price: String, val mtf: String?, val summary: String?, val voice: String?
+        val price: String, val mtf: String?, val summary: String?, val voice: String?,
+        /** ระดับที่ AI ให้ + RR เช่น "ผิดทาง 81370.57 · เป้า 80844.58 · RR 1:0.76 ⚠️ ต่ำกว่า 1:1" */
+        val levels: String? = null
     ) : AlertCardMeta()
 
     data class Keyzone(
@@ -541,7 +543,8 @@ internal fun parseAlertCardMeta(metadata: String?, rawContent: String? = null): 
                 price = str("price") ?: "-",
                 mtf = str("mtf"),
                 summary = str("summary"),
-                voice = str("voice")
+                voice = str("voice"),
+                levels = str("levels")
             )
             "keyzone" -> AlertCardMeta.Keyzone(
                 name = str("name") ?: "Keyzone Hit",
@@ -806,6 +809,18 @@ private fun AnticipationAlertCard3D(meta: AlertCardMeta.Anticipation) {
                     )
                 }
             }
+        }
+
+        // ระดับที่ AI ให้ + RR (สีเหลืองเตือนเมื่อ RR ต่ำกว่า 1:1)
+        meta.levels?.takeIf { it.isNotBlank() }?.let { lv ->
+            Spacer(Modifier.height(6.dp))
+            Text(
+                lv,
+                color = if (lv.contains("⚠️")) JarvisTheme.Amber else Color.White.copy(0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace
+            )
         }
 
         Spacer(Modifier.height(8.dp))

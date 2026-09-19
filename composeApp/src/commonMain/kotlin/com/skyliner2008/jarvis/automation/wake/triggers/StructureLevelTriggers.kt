@@ -334,9 +334,16 @@ internal val LEVEL_TRIGGERS: List<WakeTrigger> = listOf(
         val lo = h1.lowest(100) ?: return@trigger null
         if (hi <= lo) return@trigger null
         val pos = (ctx.price - lo) / (hi - lo)
+        val pct = (pos * 100).toInt()
+        // ในเทรนด์ที่ H4/H1/M15 เรียงกัน ราคาอยู่ขอบกรอบตามทิศเทรนด์เป็นเรื่องปกติ ไม่ใช่สัญญาณกลับตัว
+        // (เดิมติดป้าย SELL ทุกครั้ง → AI แจ้ง SELL สวนขาขึ้น 9 ครั้ง ชน SL 8/8)
         when {
-            pos >= 0.9 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h", "ราคาอยู่โซน Premium สุดขอบ (${(pos * 100).toInt()}% ของ range H1)", "SELL")
-            pos <= 0.1 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h", "ราคาอยู่โซน Discount สุดขอบ (${(pos * 100).toInt()}% ของ range H1)", "BUY")
+            pos >= 0.9 && ctx.htfAlignment == 1 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h",
+                "ราคาอยู่บนสุดของ range H1 ($pct%) ในขาขึ้นที่ H4/H1/M15 เรียงกัน — บริบทของเทรนด์แรง ไม่ใช่สัญญาณขาย", "NEUTRAL")
+            pos <= 0.1 && ctx.htfAlignment == -1 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h",
+                "ราคาอยู่ล่างสุดของ range H1 ($pct%) ในขาลงที่ H4/H1/M15 เรียงกัน — บริบทของเทรนด์แรง ไม่ใช่สัญญาณซื้อ", "NEUTRAL")
+            pos >= 0.9 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h", "ราคาอยู่โซน Premium สุดขอบ ($pct% ของ range H1)", "SELL")
+            pos <= 0.1 -> TriggerEvent("PREMIUM_DISCOUNT_EXTREME", "1h", "ราคาอยู่โซน Discount สุดขอบ ($pct% ของ range H1)", "BUY")
             else -> null
         }
     },

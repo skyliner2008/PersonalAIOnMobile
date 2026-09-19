@@ -7,6 +7,7 @@ import com.skyliner2008.jarvis.tools.trading.AdvancedTradingEngine
 import com.skyliner2008.jarvis.tools.trading.Candle
 import com.skyliner2008.jarvis.tools.trading.ElliotWaveModern
 import com.skyliner2008.jarvis.tools.trading.HarmonicPattern
+import com.skyliner2008.jarvis.tools.trading.MarketHours
 import com.skyliner2008.jarvis.tools.trading.ModernTechnicalApiService
 import com.skyliner2008.jarvis.tools.trading.SmcApiService
 import com.skyliner2008.jarvis.tools.trading.TaIndicators
@@ -55,10 +56,24 @@ class AnticipationEngine(
         const val K_SUPPRESSED = "wake_suppressed"
         const val K_ERRORS = "wake_errors"
         const val K_MTF = "mtf_context"
+        /** H4/H1/M15 เรียงทิศเดียวกัน: UP / DOWN / (ว่าง) — prompt ห้ามแจ้งสวนทิศนี้ */
+        const val K_HTF_ALIGN = "wake_htf_align"
         const val K_CLOSE = "close"
         const val K_SYMBOL = "symbol"
         const val K_TIMEFRAME = "timeframe"
         const val K_TIME = "wake_time"
+        /** "1" = ตลาดปิด — ข้ามงานทั้งหมด (ไม่ดึงแท่งเทียน ไม่สแกน ไม่ปลุก AI) */
+        const val K_MARKET_CLOSED = "market_closed"
+        /** ATR ของ TF หลัก ณ ตอนตรวจพบ — ใช้บันทึกมุมมองของ AI */
+        const val K_ATR = "wake_atr"
+        /** มุมมองที่ AI เคยให้บน symbol นี้ + ผลล่าสุด (ส่งเข้า prompt) */
+        const val K_PREV_VIEWS = "wake_prev_views"
+
+        /** ไม่ปลุก AI ในช่วงท้ายก่อนตลาดปิดสิ้นสัปดาห์ (สภาพคล่องบาง ตั้งสถานะไม่ทัน) — ยังสแกนและเก็บการเรียนรู้ */
+        const val PRE_CLOSE_MINUTES = 60L
+
+        /** สถานะตลาดล่าสุดต่อ series — ใช้ log เฉพาะตอนเปลี่ยน (เปิด↔ปิด) ไม่ให้ log ถี่ทุกนาที */
+        private val lastMarketOpen = mutableMapOf<String, Boolean>()
 
         /** ตลาดที่เกี่ยวข้อง (key → TradingView symbol) — ทอง/FX → DXY + US10Y, คริปโต → BTC + BTC.D */
         fun intermarketSymbolsFor(symbol: String): Map<String, String> = when {
@@ -120,6 +135,24 @@ class AnticipationEngine(
         }
         val nowMs = Clock.System.now().toEpochMilliseconds()
         val seriesKey = "$symbol@$tf"
+
+        // ── 0) ตลาดปิด → ข้ามทั้งหมด (ไม่ดึงแท่งเทียน ไม่สแกน ไม่เรียก AI) ─────
+        val market = MarketHours.status(symbol, nowMs)
+        if (lastMarketOpen.put(seriesKey, market.open) != market.open) {
+            logDebug("WakeEngine", if (market.open) "▶ $seriesKey ตลาดเปิด — เริ่มสแกน" else "⏸ $seriesKey ${market.reasonTh} — ข้ามการสแกน")
+        }
+        if (!market.open) {
+            return buildMap {
+                put(K_SYMBOL, symbol); put(K_TIMEFRAME, tf)
+                put(K_WAKE, "0"); put(K_WAKE_ID, "0")
+                put(K_EVENT_COUNT, "0"); put(K_BUY, "0"); put(K_SELL, "0")
+                put(K_MARKET_CLOSED, "1")
+                put(K_SUPPRESSED, market.reasonTh ?: "ตลาดปิด")
+                put(K_TIME, timeLine(nowMs))
+                market.nextOpenMs?.let { put("market_next_open", timeLine(it)) }
+            }
+        }
+        val preClose = market.minutesToWeeklyClose?.let { it <= PRE_CLOSE_MINUTES } == true
 
         // ── 1) ข้อมูล 5TF (+ TF หลักถ้าอยู่นอกชุด) ─────────────────────────
         suspend fun fetch(t: String, bars: Int) =
@@ -198,6 +231,7 @@ class AnticipationEngine(
             val d = WakeGovernor.decide(seriesKey, symbol, barTs, nowMs)
             when {
                 !d.allowed -> suppressed = d.reason
+                preClose -> suppressed = "อีก ${market.minutesToWeeklyClose} นาทีตลาดปิดสิ้นสัปดาห์ — ไม่ปลุก AI"
                 preview -> suppressed = "สแกนดูอย่างเดียว (ไม่ปลุก AI)"
                 else -> {
                     wake = true
@@ -210,6 +244,9 @@ class AnticipationEngine(
         if (!preview) {
             // ── 6) ปิดผลการเรียนรู้ที่ครบกรอบ ─────────────────────────────
             runCatching { WakeLearningStore.resolvePending(symbol, tf, primaryClosed) }
+            // ── ติดตามผลมุมมองของ AI (ชน TP/SL หรือยัง) ──
+            runCatching { AiViewTracker.backfillOnce() }
+            runCatching { AiViewTracker.resolve(symbol, tf, primaryClosed, ctx.m1.bars) }
             // ── ความจำสำหรับรอบถัดไป (รวมสถานะ governor ให้รอดการรีสตาร์ท) ──
             WakeSettings.saveMemory(seriesKey, nextMemory(ctx, memory, scan) + WakeGovernor.exportState(seriesKey, barTs, tfMs))
         }
@@ -230,6 +267,8 @@ class AnticipationEngine(
             put(K_SYMBOL, symbol)
             put(K_TIMEFRAME, tf)
             put(K_CLOSE, p(refPrice))
+            put(K_ATR, refAtr.toString())
+            runCatching { AiViewTracker.promptSection(symbol, refPrice, nowMs) }.getOrNull()?.let { put(K_PREV_VIEWS, it) }
             put(K_TIME, timeLine(nowMs))
             put(K_WAKE, if (wake) "1" else "0")
             put(K_WAKE_ID, if (wake) barTs.toString() else "0")
@@ -243,6 +282,7 @@ class AnticipationEngine(
                 "• [${tfLabel(s.tf)}] ${s.what}${if (s.direction != "NEUTRAL") " (${s.direction})" else ""}"
             })
             put(K_MTF, digest?.text ?: "")
+            put(K_HTF_ALIGN, when (ctx.htfAlignment) { 1 -> "UP"; -1 -> "DOWN"; else -> "" })
             suppressed?.let { put(K_SUPPRESSED, it) }
             if (scan.errors.isNotEmpty()) put(K_ERRORS, scan.errors.joinToString("; ").take(500))
         }

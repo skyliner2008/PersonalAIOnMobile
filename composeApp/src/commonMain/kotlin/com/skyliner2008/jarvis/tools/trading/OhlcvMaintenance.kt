@@ -92,6 +92,11 @@ object OhlcvMaintenance {
 
         // แถวการเรียนรู้ที่รอผลเกิน 30 วัน (job ถูกลบ / ไม่มีใครสแกนแล้ว) — ปิดเป็น EXPIRED
         runCatching { db.jarvisDatabaseQueries.expireStalePendingFactorOutcomes(nowMs, nowMs - 30 * DAY_MS) }
+        // มุมมองของ AI ที่ติดตามไม่จบใน 30 วัน / เก่ากว่า 1 ปี
+        runCatching { db.jarvisDatabaseQueries.expireStaleOpenAiViews(nowMs, nowMs - 30 * DAY_MS) }
+        runCatching {
+            db.jarvisDatabaseQueries.deleteAiViewsBefore(nowMs - com.skyliner2008.jarvis.automation.wake.AiViewTracker.RETENTION_DAYS * DAY_MS)
+        }
 
         // ประวัติการเรียนรู้ของระบบปลุกเก่ากว่า 1 ปี
         val before = runCatching { db.jarvisDatabaseQueries.countFactorOutcomes().executeAsOne() }.getOrDefault(0L)

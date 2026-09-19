@@ -21,7 +21,22 @@ object WakePrompt {
         val summaryTh: String
     ) {
         val notify: Boolean get() = decision == "NOTIFY"
+
+        /**
+         * Risk:Reward จากราคาปัจจุบัน = ระยะถึงเป้า ÷ ระยะถึงจุดผิดทาง
+         * null ถ้าไม่มีทิศ หรือไม่มีระดับครบทั้งสอง
+         */
+        fun rr(price: Double?): Double? {
+            if (price == null || price <= 0 || bias !in setOf("BUY", "SELL")) return null
+            val sl = levelSl ?: return null
+            val tp = levelTp ?: return null
+            val risk = kotlin.math.abs(price - sl)
+            return if (risk > 0) kotlin.math.abs(tp - price) / risk else null
+        }
     }
+
+    /** RR ขั้นต่ำที่ยอมให้แจ้งผู้ใช้ — ต่ำกว่านี้ AI ต้องตอบ SKIP และการ์ดจะเตือน */
+    const val MIN_RR = 1.0
 
     /**
      * system prompt เฉพาะงานนี้ — แทน system prompt แชทของ JARVIS (ยาวหลายหมื่นตัวอักษร
@@ -49,6 +64,21 @@ object WakePrompt {
         return if (sl == v.levelSl && tp == v.levelTp) v else v.copy(levelSl = sl, levelTp = tp)
     }
 
+    /**
+     * ตาข่ายรองรับกติกา "ห้ามแจ้งสวนเทรนด์ที่ H4/H1/M15 เรียงกัน" — ถ้า AI ยังตอบ NOTIFY สวนทาง เปลี่ยนเป็น SKIP
+     * (คงทิศที่ AI เสนอไว้ ให้ [AiViewTracker] วัดได้ว่าถ้าแจ้งไปจะถูกหรือผิด)
+     * @param align ค่า [AnticipationEngine.K_HTF_ALIGN]: "UP" / "DOWN" / อื่นๆ = ไม่เรียง
+     */
+    fun enforceTrend(v: Verdict, align: String?): Verdict {
+        val blocked = v.notify && ((align == "UP" && v.bias == "SELL") || (align == "DOWN" && v.bias == "BUY"))
+        if (!blocked) return v
+        val trend = if (align == "UP") "ขาขึ้น" else "ขาลง"
+        return v.copy(
+            decision = "SKIP",
+            reasonTh = "ระบบไม่แจ้ง: AI เสนอ ${v.bias} สวนเทรนด์ H4/H1/M15 ที่เรียงเป็น$trend — ${v.reasonTh}".take(1000)
+        )
+    }
+
     fun build(symbol: String, data: Map<String, String>): String = buildString {
         val tf = data[AnticipationEngine.K_TIMEFRAME] ?: "-"
         appendLine("บทบาท: คุณคือนักวิเคราะห์เทคนิค — ระบบเฝ้าระวังเพิ่งปลุกคุณเพราะตรวจพบเหตุการณ์บนกราฟ")
@@ -67,16 +97,33 @@ object WakePrompt {
             appendLine("══ สภาวะที่เป็นอยู่ตอนนี้ (บริบท) ══")
             appendLine(states)
         }
+        data[AnticipationEngine.K_PREV_VIEWS]?.takeIf { it.isNotBlank() }?.let {
+            appendLine()
+            appendLine("══ มุมมองที่คุณเคยให้บน $symbol (24 ชม.ล่าสุด) และผลจริง ══")
+            appendLine(it)
+        }
         appendLine()
-        appendLine("══ โครงสร้างตลาด 5 ไทม์เฟรม ══")
+        appendLine("══ โครงสร้างตลาด D1 + 5 ไทม์เฟรม (บรรทัดย่อยใต้แต่ละ TF = โครงสร้างของขาและแรง/แท่งเทียนล่าสุด) ══")
         appendLine(data[AnticipationEngine.K_MTF]?.ifBlank { "-" } ?: "-")
+        when (data[AnticipationEngine.K_HTF_ALIGN]) {
+            "UP" -> { appendLine(); appendLine("⚠️ เทรนด์ H4/H1/M15 เรียงเป็นขาขึ้นทั้งหมด — ห้ามตอบ NOTIFY + SELL") }
+            "DOWN" -> { appendLine(); appendLine("⚠️ เทรนด์ H4/H1/M15 เรียงเป็นขาลงทั้งหมด — ห้ามตอบ NOTIFY + BUY") }
+        }
         appendLine()
         appendLine("แนวทางการวิเคราะห์:")
+        appendLine("- ห้ามแจ้งสวนเทรนด์ที่ H4/H1/M15 เรียงทิศเดียวกัน (ราคาอยู่ Premium/Discount สุดขอบ, overbought/oversold, " +
+            "ไส้เทียนหรือแท่งกลับตัว ไม่พอ) — ต้องรอให้ M15 เกิด CHoCH สวนทางก่อน ซึ่งจะทำให้ trend M15 กลับทิศและไม่นับว่าเรียงกันแล้ว " +
+            "ระหว่างนั้นให้มองหาจังหวะตามเทรนด์ หรือตอบ SKIP")
         appendLine("- ทิศทางที่แต่ละเหตุการณ์ชี้เป็นแค่ข้อสังเกตจากอินดิเคเตอร์ ไม่ใช่ข้อสรุป — ชั่งน้ำหนักเองจากโครงสร้าง H4/H1 และการยืนยันของ M5")
         appendLine("- \"สถิติ\" คือผลจริงที่ระบบเคยวัดได้เมื่อปัจจัยนั้นยิงในอดีต — ให้น้ำหนักกับตัวที่สถิติดีและเชื่อถือได้ (n มาก)")
         appendLine("- เหตุการณ์ที่ปลุกอาจไม่ใช่สิ่งสำคัญที่สุด ถ้าเห็นอย่างอื่นที่สำคัญกว่าจากข้อมูล ให้ยึดสิ่งนั้น")
         appendLine("- ถ้าหลักฐานขัดแย้งกันหรือไม่ชัดเจน ให้ตอบ SKIP (ไม่ต้องรบกวนผู้ใช้)")
+        appendLine("- ถ้ามีมุมมองที่ยังเปิดอยู่ (ยังไม่ชน SL/TP) ทิศเดียวกัน และเหตุการณ์ใหม่แค่ยืนยันของเดิม ให้ตอบ SKIP (ไม่แจ้งซ้ำ)")
+        appendLine("- ถ้าจะแจ้งทิศตรงข้ามกับมุมมองที่ยังเปิดอยู่ ต้องบอกใน REASON_TH และ SUMMARY_TH ว่าอะไรเปลี่ยนไป และมุมมองเดิมควรถือว่าจบแล้ว")
+        appendLine("- ใช้สถิติผลมุมมองของคุณเองประกอบการตั้งความมั่นใจ — ถ้าช่วงนี้ชน SL บ่อย ให้ระวังมากขึ้น")
         appendLine("- ถ้าน่าสนใจ กำหนดระดับราคาเองจากแนวรับ/แนวต้าน/swing/OB ที่ให้มาเท่านั้น")
+        appendLine("- ถ้า BIAS เป็น BUY/SELL ต้องมี LEVEL_SL และ LEVEL_TP ที่ให้ Risk:Reward อย่างน้อย 1:1 จากราคาปัจจุบัน " +
+            "(ระยะถึง TP ≥ ระยะถึง SL) — ถ้าหาระดับที่ให้ RR ถึง 1:1 ไม่ได้จากข้อมูลที่มี ให้ตอบ SKIP")
         appendLine("- ใช้เฉพาะข้อมูลข้างบน ห้ามสมมติข่าว ราคา หรืออินดิเคเตอร์อื่น ห้ามรับประกันผลกำไร")
         appendLine()
         appendLine("ตอบตามรูปแบบนี้เท่านั้น 7 บรรทัด:")

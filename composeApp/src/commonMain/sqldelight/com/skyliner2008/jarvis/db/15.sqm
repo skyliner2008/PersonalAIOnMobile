@@ -1,0 +1,31 @@
+-- P15: ติดตามผล "มุมมอง" ของ AI ทุกการปลุก
+--
+-- เดิมวัดผลแค่รายปัจจัย (forward return 12 แท่ง) — ไม่รู้ว่ามุมมองที่ AI แจ้ง (BUY/SELL + SL/TP) ถูกหรือผิด
+-- ตารางนี้เก็บมุมมองละ 1 แถว แล้วติดตามว่าราคาชน TP หรือ SL ก่อน หรือหมดเวลา
+-- ผลที่ได้ถูกส่งกลับเข้า prompt ของการปลุกครั้งถัดไป (AI รู้ว่าเพิ่งแจ้งอะไรไป และผลเป็นอย่างไร)
+CREATE TABLE IF NOT EXISTS AiWakeView (
+    -- 1 แถวต่อการปลุก 1 ครั้ง (signal_id เดียวกับ AnticipationFactorOutcome)
+    signal_id TEXT NOT NULL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    decision TEXT NOT NULL,              -- NOTIFY | SKIP
+    bias TEXT NOT NULL,                  -- BUY | SELL | NEUTRAL
+    confidence INTEGER,
+    reason TEXT,
+    price REAL NOT NULL,                 -- ราคา ณ ตอนที่ AI ให้มุมมอง
+    atr REAL NOT NULL,
+    level_sl REAL,
+    level_tp REAL,
+    created_at INTEGER NOT NULL,
+    -- OPEN = กำลังติดตาม | TP / SL = ชนระดับก่อน | EXPIRED = ครบเวลาไม่ชนระดับ | CLOSED = วัดครบกรอบ (ไม่มีระดับ/SKIP)
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    result_r REAL,                       -- มีระดับ: +RR (TP) / −1 (SL) / ผลตอนหมดเวลา — หน่วย R
+    move_atr REAL,                       -- ราคาเคลื่อนไปตามทิศมุมมองเท่าไร (ATR) — SKIP/NEUTRAL: ขนาดการเคลื่อนที่
+    mfe_atr REAL,
+    mae_atr REAL,
+    bars INTEGER,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_view_open ON AiWakeView(status, symbol, interval);
+CREATE INDEX IF NOT EXISTS idx_ai_view_recent ON AiWakeView(symbol, created_at);

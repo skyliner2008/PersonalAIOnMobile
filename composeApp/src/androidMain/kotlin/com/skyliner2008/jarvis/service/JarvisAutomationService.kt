@@ -258,6 +258,22 @@ class JarvisAutomationService : Service() {
         liveSummary: Boolean = false,
         timeframeMin: Int? = null
     ) {
+        // การ์ดไม่ขึ้นกับผลเสียง (ไม่ได้ให้ Live เขียนสรุปใส่การ์ด) → ขึ้นแชททันที แล้วค่อยพูด
+        // เดิมรอพูดจบก่อน (Live พูด ~30 วิ + รอปิด stream) การ์ดจึงเด้งหลังเสียงจบไปครึ่งนาที
+        if (!liveSummary) {
+            val voiceOn = settingEnabled("alert_voice", true)
+            val expected = if (voiceOn) voiceEngine.expectedEngineLabel() else null
+            pushToChat(cardBody, metaFor(expected, null))
+            if (voiceOn) {
+                val result = voiceEngine.speakAlert(shortSpeech, fullSpeech, false, timeframeMin)
+                // เตือนเฉพาะตอนสลับประเภทจริง (Live ↔ Android TTS) — ชื่อโมเดล Live ต่างจากป้าย "Gemini Live" เป็นเรื่องปกติ
+                val isTts = { label: String? -> label?.startsWith("Android TTS") == true }
+                if (isTts(result.engineLabel) != isTts(expected)) {
+                    logDebug("AutomationService", "🔊 เสียงจริงใช้ ${result.engineLabel} (การ์ดติดป้าย $expected ไว้ก่อนพูด)")
+                }
+            }
+            return
+        }
         if (settingEnabled("alert_voice", true)) {
             val result = voiceEngine.speakAlert(shortSpeech, fullSpeech, liveSummary, timeframeMin)
             val effectiveSummary = if (liveSummary && !result.summary.isNullOrBlank()) result.summary else null
@@ -534,10 +550,20 @@ class JarvisAutomationService : Service() {
                 .onFailure { logError("AutomationService", "⏰ Wake analysis error: ${it.message}", it) }
                 .getOrNull()
                 ?.let { com.skyliner2008.jarvis.automation.wake.WakePrompt.sanitize(it, price) }
+                ?.let { v ->
+                    com.skyliner2008.jarvis.automation.wake.WakePrompt.enforceTrend(v, data[E.K_HTF_ALIGN]).also {
+                        if (it !== v) logDebug("AutomationService", "⏰ บล็อก NOTIFY ${v.bias} สวนเทรนด์ ${data[E.K_HTF_ALIGN]} ${job.symbol}")
+                    }
+                }
             if (verdict != null) {
                 if (signalId.isNotBlank()) {
                     com.skyliner2008.jarvis.automation.wake.WakeLearningStore
                         .setAiDecision(signalId, verdict.decision, verdict.bias, verdict.confidence, verdict.reasonTh)
+                    // มุมมองนี้จะถูกติดตามผล (ชน TP/SL) และส่งกลับเข้า prompt ครั้งถัดไป
+                    com.skyliner2008.jarvis.automation.wake.AiViewTracker.record(
+                        signalId, data[E.K_SYMBOL] ?: job.symbol.substringBefore("@"), data[E.K_TIMEFRAME] ?: "15m",
+                        verdict, price ?: 0.0, data[E.K_ATR]?.toDoubleOrNull() ?: 0.0, System.currentTimeMillis()
+                    )
                 }
                 if (!verdict.notify) {
                     logDebug("AutomationService",
@@ -556,7 +582,8 @@ class JarvisAutomationService : Service() {
             cardBody = AlertPresentationFormatter.buildWakeChatCard(job, data, verdict),
             metaFor = { v, s -> AlertPresentationFormatter.wakeChatMeta(job, data, verdict, s, type, v) },
             shortSpeech = AlertPresentationFormatter.buildWakeSpeech(job, data, verdict),
-            fullSpeech = verdict?.summaryTh?.ifBlank { null } ?: body,
+            fullSpeech = (verdict?.summaryTh?.ifBlank { null } ?: body) +
+                (AlertPresentationFormatter.wakeRrWarningTh(data, verdict)?.let { " $it" } ?: ""),
             liveSummary = false,
             timeframeMin = evaluator.symbolTimeframeMin(job.symbol))
     }

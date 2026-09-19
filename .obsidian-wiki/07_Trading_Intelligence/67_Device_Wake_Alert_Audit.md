@@ -30,7 +30,24 @@ python tools/device_wake_audit.py --last 5 --logcat
 4. **ค่าที่คำนวณใหม่จากแท่งเทียนดิบ** ของแท่งนั้น — ATR14, High/Low วันก่อน, high/low 10 และ 20 แท่ง,
    ไส้เทียน, CCI20, MACD histogram, แรงซื้อขายสุทธิ (delta) 10 แท่ง
    — เลือกแหล่งแท่งเทียนและขอบวันเทรดด้วยกติกาเดียวกับแอป (ดูข้อ 3)
-5. **(`--logcat`)** log 30 บรรทัดล่าสุด, ระยะห่างเฉลี่ยของการดึงแท่งเทียน, และจำนวนครั้งที่ TradingView ตอบ error
+5. **ตรวจเงื่อนไขปัจจัยที่ปลุก** — คำนวณสูตรเดียวกับ `triggers/*.kt` ใหม่จากแท่งดิบ แล้วขึ้น ✓ / ✗ พร้อมตัวเลข
+   (MACD 3 แบบ, RSI 3 แบบ, CCI, %R, MFI, Stochastic, Bollinger rejection, volume spike/absorption, delta,
+   EMA cross/pullback, VWAP reclaim/band, OBV, ยอดคู่/ก้นคู่, inside bar, impulse, range/failed breakout,
+   pin bar, doji, NR7, sweep, trend acceleration, PDH/PDL)
+   "— ต้องใช้ข้อมูลภายในแอป" = ต้องใช้โครงสร้างตลาด/digest/engine/ข้อมูลภายนอก · "— ยังไม่มีสูตรในสคริปต์" = คำนวณได้แต่ยังไม่ได้ใส่
+   (Ichimoku, Squeeze fire, ADX)
+   ราคาอ้างอิงใช้ของแถวที่ปลุก AI จริง; "บันทึกเพิ่ม (ไม่ได้ปลุก AI)" = สภาวะใหม่ [STATE] หรือเหตุการณ์ที่เกิดทีหลังในแท่งเดียวกัน [EVENT]
+6. **(`--logcat`)** log 30 บรรทัดล่าสุด, ระยะห่างเฉลี่ยของการดึงแท่งเทียน, และจำนวนครั้งที่ TradingView ตอบ error
+
+### ตรวจค่าปัจจัยทั้ง 115 ตัวแบบเล่นซ้ำ (ไม่ใช่แค่ตัวที่ปลุก)
+
+```bash
+python tools/wake_factor_replay.py BTCUSDT --bars 300
+```
+ดึงแท่ง 1m/5m/15m/1h/4h จากมือถือ → รัน `WakeFactorReplayTest` (โค้ดจริงของแอป, ไฟล์ทำงานอยู่ `composeApp/build/wake_replay/`)
+ทีละแท่ง TF หลักด้วยแท่งที่ปิดแล้ว ณ เวลานั้น แล้วเทียบกับสูตรอิสระ: (1) อินดิเคเตอร์ทุก TF ทั้งของปัจจัยและภาพ 5TF
+(1b) trend/`ล่าสุด=` ในภาพ 5TF (2) ปัจจัยที่มีสูตรใน `trigger_checks` ทุกแท่ง ทั้งตอนเกิดและไม่เกิด (3) อัตราการเกิดทุกตัว + error
+(4) ภาพ 5TF ล่าสุดที่ AI เห็น — ไม่มีข้อมูลภายนอก/memory จึงเกิดไม่ได้: DXY/ข่าว/F&G/Deep score/Harmonic/Elliott/OB_MITIGATED/ALL_TF_ALIGNED
 
 ## 2. วิธีทำเอง (ถ้าสคริปต์ใช้ไม่ได้)
 
@@ -58,6 +75,7 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
 | `AppSetting` | `alert_voice_engine`, `alert_ai_summary`, `wake.usage` (วัน:จำนวนปลุก), `wake.mem.<SYMBOL@TF>` (memory + สถานะ governor) |
 | `AnticipationFactorOutcome` | 1 แถว/ปัจจัย/การปลุก — `signal_id`, `woke`, `ai_decision`, `ai_bias`, `ai_confidence`, `ai_reason`, `ref_price`, `ref_atr`, `status` (PENDING/RESOLVED/EXPIRED) |
 | `ChatMessage` | การ์ดที่ส่งเข้าแชท — `metadata` มี `"type":"wake_ai"` หรือ `"wake_direct"`, `side`, `confidence`, `summary`, `mtf` (snapshot 5TF ที่ AI เห็น), `voice` |
+| `AiWakeView` | มุมมอง AI 1 แถว/การปลุก — `decision`, `bias`, `level_sl/tp`, `status` (OPEN/TP/SL/EXPIRED/CLOSED), `result_r`, `move_atr`, `mfe_atr`, `mae_atr` (migration 15) |
 | `TvCandle` | แท่งเทียนดิบ (`symbol`, `interval` = 1m/5m/15m/1h/4h, `source` เช่น TV:OANDA, `ts` = เวลาเปิดแท่ง UTC ms) |
 
 ## 3. การตีความ
@@ -80,6 +98,11 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
 - `SmcApiService: TV native bridge bars loaded: N for OANDA:XAUUSD/<res>` ตามด้วย `TV delta XAUUSD/<tf>` —
   ห่างกันไม่เกิน ~1 วิ ทั้งรอบสแกนจบใน ~5 วิ และเริ่มรอบใหม่ทุก ~1 นาที
 - `TvHistoryBridge: ... protocol_error/symbol_error` = TradingView ปฏิเสธคำสั่ง (ถ้าเห็นบ่อย ให้ตรวจ `TvProtocol`)
+- `WakeEngine: ⏸ XAUUSD@15m ตลาดปิดสุดสัปดาห์ ... — ข้ามการสแกน` / `▶ ... ตลาดเปิด — เริ่มสแกน` = log ตอนสถานะตลาดเปลี่ยน
+  (ทอง/FX ปิดศุกร์ 17:00 → อาทิตย์ 17:00 FX / 18:00 ทอง เวลานิวยอร์ก, ทองพักทุกวัน 17:00–18:00 NY — ระหว่างปิดไม่มี `TV delta` เลย)
+- การปลุกที่ถูกระงับในชั่วโมงสุดท้ายก่อนปิดสิ้นสัปดาห์จะมีแถวการเรียนรู้แต่ไม่มี `ai_decision` (ไม่ได้เรียก AI)
+- การ์ดแจ้งเตือนแสดง `ผิดทาง · เป้า · RR 1:x` — ถ้า RR < 1 ขึ้น "⚠️ ต่ำกว่า 1:1" (สคริปต์อ่านจากบรรทัด "ระดับที่ AI จับตา")
+- `AiViewTracker: BTCUSDT/15m ปิดผลมุมมอง AI N รายการ` = มุมมองชน TP/SL/หมดเวลา — สคริปต์แสดงเป็นบรรทัด "ผลมุมมอง AI" ใต้แต่ละการปลุก
 - `SIGNAL_EVENT ... field=wake ... action=FIRE` ตอนปลุก → `⏰ WAKE ...` → `🧠 AI summary OK` → `🔊 speakAlert` → `💬 pushToChat`
 - รอบถัดไป `action=RESET` (job กลับเป็น ACTIVE)
 - ถ้าเห็น `No active alert jobs ... Stopping service.` ทั้งที่มี job → job หลุดจากรอบสแกน (เคยเป็นบัค — แก้ใน `9a843c3`)

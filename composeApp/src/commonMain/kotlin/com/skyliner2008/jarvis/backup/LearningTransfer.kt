@@ -57,13 +57,24 @@ object LearningTransfer {
         val cooldownBars: Int? = null
     )
 
+    /** มุมมองของ AI + ผลที่ติดตามได้ (P15) — ไฟล์รุ่นเก่าไม่มี จึงเป็นรายการว่าง */
+    @Serializable
+    data class View(
+        val signalId: String, val symbol: String, val interval: String,
+        val decision: String, val bias: String, val confidence: Long? = null, val reason: String? = null,
+        val price: Double, val atr: Double, val levelSl: Double? = null, val levelTp: Double? = null,
+        val createdAt: Long, val status: String, val resultR: Double? = null, val moveAtr: Double? = null,
+        val mfeAtr: Double? = null, val maeAtr: Double? = null, val bars: Long? = null, val resolvedAt: Long? = null
+    )
+
     @Serializable
     data class Bundle(
         val format: String = FORMAT,
         val version: Int = VERSION,
         val exportedAt: Long,
         val settings: Settings,
-        val outcomes: List<Outcome>
+        val outcomes: List<Outcome>,
+        val views: List<View> = emptyList()
     )
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -86,17 +97,25 @@ object LearningTransfer {
                     it.ai_decision, it.ai_bias, it.status, it.forward_r, it.mfe_r, it.mae_r,
                     it.created_at, it.resolved_at, it.ai_confidence, it.ai_reason
                 )
+            },
+            views = db.jarvisDatabaseQueries.getAllAiViews().executeAsList().map {
+                View(
+                    it.signal_id, it.symbol, it.interval, it.decision, it.bias, it.confidence, it.reason,
+                    it.price, it.atr, it.level_sl, it.level_tp, it.created_at, it.status, it.result_r,
+                    it.move_atr, it.mfe_atr, it.mae_atr, it.bars, it.resolved_at
+                )
             }
         )
     }
 
     fun exportJson(db: JarvisDatabase): String = json.encodeToString(Bundle.serializer(), buildBundle(db))
 
-    data class ImportResult(val total: Int, val inserted: Int, val skipped: Int, val settingsApplied: Boolean) {
+    data class ImportResult(val total: Int, val inserted: Int, val skipped: Int, val settingsApplied: Boolean, val views: Int = 0) {
         fun describeTh(): String = buildString {
             append("นำเข้าการเรียนรู้ $inserted แถว")
             if (skipped > 0) append(" (ข้าม $skipped แถวที่มีอยู่แล้ว)")
             append(" จากทั้งหมด $total")
+            if (views > 0) append(" · มุมมอง AI $views รายการ")
             if (settingsApplied) append(" · นำเข้าการตั้งค่าปัจจัย/งบการปลุกแล้ว")
         }
     }
@@ -123,6 +142,12 @@ object LearningTransfer {
                     o.aiConfidence, o.aiReason
                 )
             }
+            bundle.views.forEach { v ->
+                q.insertAiViewIfAbsent(
+                    v.signalId, v.symbol, v.interval, v.decision, v.bias, v.confidence, v.reason, v.price, v.atr,
+                    v.levelSl, v.levelTp, v.createdAt, v.status, v.resultR, v.moveAtr, v.mfeAtr, v.maeAtr, v.bars, v.resolvedAt
+                )
+            }
         }
         val inserted = (q.countFactorOutcomes().executeAsOne() - before).toInt()
         if (applySettings) {
@@ -133,7 +158,7 @@ object LearningTransfer {
             s.cooldownBars?.let { WakeSettings.cooldownBars = it }
         }
         WakeLearningStore.invalidateCache()
-        return ImportResult(bundle.outcomes.size, inserted, bundle.outcomes.size - inserted, applySettings)
+        return ImportResult(bundle.outcomes.size, inserted, bundle.outcomes.size - inserted, applySettings, bundle.views.size)
     }
 
     fun suggestedFileName(nowMs: Long = Clock.System.now().toEpochMilliseconds()): String =

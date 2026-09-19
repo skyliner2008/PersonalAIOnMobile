@@ -77,6 +77,10 @@ class AnticipationToolActions(
         val s = scanner ?: return "⚠️ ระบบสแกนยังไม่พร้อม (รอการเชื่อมต่อ)"
         val d = runCatching { s("$symbol@$tf") }.getOrElse { return "❌ สแกนไม่สำเร็จ: ${it.message}" }
         d["error"]?.let { return "❌ $it" }
+        if (d[AnticipationEngine.K_MARKET_CLOSED] == "1") {
+            return "⏸ $symbol: ${d[AnticipationEngine.K_SUPPRESSED]} — ระบบไม่ดึงแท่งเทียนและไม่ปลุก AI ระหว่างตลาดปิด" +
+                (d["market_next_open"]?.let { "\nเปิดอีกครั้ง: $it" } ?: "")
+        }
         return buildString {
             appendLine("⚡ **ผลสแกนระบบปลุก — $symbol ${tf.uppercase()}** · ราคา ${d[AnticipationEngine.K_CLOSE]}")
             val events = d[AnticipationEngine.K_EVENTS].orEmpty()
