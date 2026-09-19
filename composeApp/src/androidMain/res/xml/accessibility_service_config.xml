@@ -6,13 +6,14 @@
     canRetrieveWindowContent="true"       — อ่าน UI tree ของแอปอื่นได้ (screen reading)
     canPerformGestures="true"             — ทำ gesture (tap, swipe) บนหน้าจอได้ (API 24+)
     flagReportViewIds="true"              — รับ resource-id ของ view เพื่อ target-click แม่นยำ
+    flagRetrieveInteractiveWindows        — อ่าน/คลิกได้ทุกหน้าต่าง (dialog, popup ขอสิทธิ์, แผงแจ้งเตือน)
     flagRequestFilterKeyEvents="true"     — รับ key events เพื่อ intercept hardware buttons ถ้าต้องการ
     notificationTimeout="100"             — throttle event ไม่ให้ท่วม (ms)
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagRequestFilterKeyEvents|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagReportViewIds|flagRequestFilterKeyEvents|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
     android:notificationTimeout="100"

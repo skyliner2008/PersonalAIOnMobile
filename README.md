@@ -952,6 +952,8 @@
 
 ### 🧠 3. Advanced 6-Layer Memory Engine
 - **Layer 1: Core Memory** — จำข้อมูลตัวตนผู้ใช้/AI (identity จัดการผ่าน tool/Settings เท่านั้น กัน heuristic ทับ)
+  - `device_read_screen` อ่านทุกหน้าต่างที่โต้ตอบได้ (รวม dialog/popup ขอสิทธิ์) รวมถึงปุ่มไอคอนที่ไม่มีข้อความ แต่ละรายการมีพิกัดกึ่งกลาง `@(x,y)` ให้ส่งต่อเป็น `device_tap(x, y)` ได้ทันที และจำกัดไว้ 80 รายการต่อครั้ง (`ScreenSnapshotFormatter.kt`)
+  - gesture (tap/scroll) มี timeout 3 วินาที — ไม่ค้าง Live session แม้ระบบปฏิเสธ gesture
 - **Layer 2: Working Memory** — บันทึกประวัติการคุยลง SQLite ทันที (Context Tracking)
 - **Layer 3: Archival Memory** — Semantic Search / Vector Embeddings (Local ONNX หรือ Gemini Cloud — auto-backfill)
 - **Layer 4: GraphRAG Knowledge Graph** — โครงข่ายความสัมพันธ์แนวคิด + retrieval จริงผ่าน `recall_memory`
@@ -1069,8 +1071,8 @@
 - `device_make_call` & `device_send_sms`: โทรออกและส่งข้อความ SMS
 - `device_set_alarm`: ตั้งนาฬิกาปลุกในระบบ Android
 - `device_open_url` & `device_search_web`: เปิดเว็บเบราว์เซอร์หรือค้นหา Google
-- `device_read_screen`: อ่านข้อมูลหน้าจอปัจจุบันผ่าน Accessibility Service
-- `device_tap`: แตะปุ่มหรือพิกัดบนหน้าจอ
+- `device_read_screen`: อ่านข้อมูลหน้าจอปัจจุบันผ่าน Accessibility Service (ทุกหน้าต่าง + พิกัด `@(x,y)` ต่อ element)
+- `device_tap`: แตะปุ่มด้วยข้อความ, view id (แบบสั้นได้) หรือพิกัดจาก `device_read_screen`
 - `device_type_text`: พิมพ์ข้อความลงในช่องที่โฟกัสอยู่
 - `device_scroll`: เลื่อนหน้าจอขึ้นหรือลง
 - `device_press_button`: สั่งปุ่มระบบ (Back, Home, Recents, Notifications, Screenshot, Lock Screen, Wake Screen)

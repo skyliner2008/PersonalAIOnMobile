@@ -1,6 +1,7 @@
 package com.skyliner2008.jarvis.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Path
@@ -10,6 +11,8 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import com.skyliner2008.jarvis.tools.device.ScreenSnapshotFormatter
 
 /**
  * JarvisAccessibilityService — สมองกลที่ควบคุมมือถือทั้งเครื่องแทนผู้ใช้
@@ -43,31 +46,6 @@ class JarvisAccessibilityService : AccessibilityService() {
         const val ACTION_SERVICE_DISCONNECTED = "com.skyliner2008.jarvis.A11Y_DISCONNECTED"
     }
 
-    /**
-     * ข้อมูล UI node ที่อ่านจากหน้าจอ — ส่งกลับให้ AI วิเคราะห์
-     */
-    data class ScreenNode(
-        val text: String?,
-        val contentDescription: String?,
-        val className: String?,
-        val viewId: String?,
-        val isClickable: Boolean,
-        val isEditable: Boolean,
-        val isChecked: Boolean?,
-        val bounds: Rect?,
-        val childCount: Int
-    ) {
-        /** สรุปสั้นๆ สำหรับ AI */
-        fun toSummary(): String = buildString {
-            val label = text ?: contentDescription ?: ""
-            if (label.isNotBlank()) append(label)
-            if (isClickable) append(" [คลิกได้]")
-            if (isEditable) append(" [แก้ไขได้]")
-            if (isChecked != null) append(if (isChecked) " [✓]" else " [☐]")
-            if (viewId != null) append(" (id:$viewId)")
-        }
-    }
-
     /** Package ของแอปที่ผู้ใช้เปิดอยู่ล่าสุด */
     @Volatile
     var currentPackage: String? = null
@@ -83,6 +61,11 @@ class JarvisAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // อ่าน dialog / popup / แผงแจ้งเตือนที่อยู่คนละ window ได้ (ตั้งใน XML แล้ว — ย้ำที่นี่กันกรณี config เก่าค้าง)
+        serviceInfo?.let { info ->
+            info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            serviceInfo = info
+        }
         Log.i(TAG, "✅ JarvisAccessibilityService CONNECTED — device control ready")
         sendBroadcast(Intent(ACTION_SERVICE_CONNECTED).setPackage(packageName))
     }
@@ -159,129 +142,143 @@ class JarvisAccessibilityService : AccessibilityService() {
     // ─── Screen Reading ────────────────────────────────────────────────────
 
     /**
-     * อ่าน UI tree ของหน้าจอปัจจุบัน — คืนเป็น list ของ ScreenNode
-     * @param maxDepth ความลึกสูงสุดที่จะ traverse (กัน infinite loop)
-     * @param textOnly ถ้า true จะเก็บเฉพาะ node ที่มีข้อความ
+     * Root ของทุกหน้าต่างที่ผู้ใช้โต้ตอบได้ เรียงจากชั้นบนสุดลงล่าง (dialog/popup มาก่อน)
+     * ข้าม status bar / nav bar / overlay — ถ้าอ่าน windows ไม่ได้ ใช้ rootInActiveWindow แทน
+     * ผู้เรียกต้อง recycle root ที่ได้เอง
      */
-    fun readScreen(maxDepth: Int = 10, textOnly: Boolean = true): List<ScreenNode> {
-        val root = rootInActiveWindow ?: return emptyList()
-        val nodes = mutableListOf<ScreenNode>()
-        traverseNode(root, nodes, 0, maxDepth, textOnly)
-        root.recycle()
-        return nodes
-    }
-
-    /**
-     * สรุปหน้าจอเป็นข้อความสำหรับ AI อ่าน
-     */
-    fun readScreenAsText(): String {
-        val nodes = readScreen(textOnly = true)
-        if (nodes.isEmpty()) return "ไม่สามารถอ่านหน้าจอได้ (หน้าจออาจล็อคอยู่)"
-
-        return buildString {
-            appendLine("📱 แอปปัจจุบัน: ${currentPackage ?: "ไม่ทราบ"}")
-            appendLine("📄 Activity: ${currentActivity ?: "ไม่ทราบ"}")
-            appendLine()
-            appendLine("--- เนื้อหาบนหน้าจอ ---")
-            nodes.forEachIndexed { i, node ->
-                val summary = node.toSummary()
-                if (summary.isNotBlank()) {
-                    appendLine("${i + 1}. $summary")
-                }
+    private fun interactiveRoots(): List<Pair<AccessibilityWindowInfo?, AccessibilityNodeInfo>> {
+        val result = mutableListOf<Pair<AccessibilityWindowInfo?, AccessibilityNodeInfo>>()
+        val allWindows = try { windows } catch (e: Exception) { emptyList<AccessibilityWindowInfo>() }
+        allWindows
+            .filter { w ->
+                w.type == AccessibilityWindowInfo.TYPE_APPLICATION ||
+                    (w.type == AccessibilityWindowInfo.TYPE_SYSTEM && (w.isActive || w.isFocused))
             }
+            .sortedByDescending { it.layer }
+            .forEach { w -> w.root?.let { result += w to it } }
+        if (result.isEmpty()) rootInActiveWindow?.let { result += null to it }
+        return result
+    }
+
+    /**
+     * อ่าน UI tree ของทุกหน้าต่างที่โต้ตอบได้ — เก็บ node ที่มีข้อความ หรือกด/พิมพ์ได้ (รวมปุ่มไอคอนที่ไม่มีข้อความ)
+     * @param maxDepth ความลึกสูงสุดที่จะ traverse (Compose/RecyclerView ลึกเกิน 10 ชั้นบ่อย)
+     */
+    fun readScreen(maxDepth: Int = 30): List<ScreenSnapshotFormatter.Window> =
+        interactiveRoots().map { (window, root) ->
+            val elements = mutableListOf<ScreenSnapshotFormatter.Element>()
+            traverseNode(root, elements, 0, maxDepth, coveredByAncestor = false)
+            val snapshot = ScreenSnapshotFormatter.Window(
+                title = window?.title?.toString(),
+                packageName = root.packageName?.toString(),
+                isActive = window?.isActive ?: true,
+                elements = elements
+            )
+            root.recycle()
+            snapshot
         }
-    }
 
     /**
-     * ค้นหา node ที่มีข้อความตรงกัน
+     * สรุปหน้าจอเป็นข้อความสำหรับ AI อ่าน — มีพิกัด @(x,y) ทุก element และจำกัดจำนวนบรรทัด
      */
-    fun findNodesByText(text: String): List<AccessibilityNodeInfo> {
-        val root = rootInActiveWindow ?: return emptyList()
-        val found = root.findAccessibilityNodeInfosByText(text) ?: emptyList()
-        return found.toList()
-    }
+    fun readScreenAsText(maxElements: Int = ScreenSnapshotFormatter.DEFAULT_MAX_ELEMENTS): String =
+        ScreenSnapshotFormatter.format(currentPackage, currentActivity, readScreen(), maxElements)
 
     /**
-     * ค้นหา node ด้วย view ID (เช่น "com.google.android.apps.maps:id/search_omnibox")
+     * @param coveredByAncestor true เมื่อ parent ที่กดได้ยืมข้อความของลูกไปเป็นชื่อปุ่มแล้ว
+     *        → ลูกที่เป็นแค่ข้อความ (กดไม่ได้) จะไม่ถูกแสดงซ้ำ
      */
-    fun findNodesById(viewId: String): List<AccessibilityNodeInfo> {
-        val root = rootInActiveWindow ?: return emptyList()
-        val found = root.findAccessibilityNodeInfosByViewId(viewId) ?: emptyList()
-        return found.toList()
-    }
-
     private fun traverseNode(
         node: AccessibilityNodeInfo,
-        result: MutableList<ScreenNode>,
+        result: MutableList<ScreenSnapshotFormatter.Element>,
         depth: Int,
         maxDepth: Int,
-        textOnly: Boolean
+        coveredByAncestor: Boolean
     ) {
         if (depth > maxDepth) return
+        if (!node.isVisibleToUser) return
 
-        val text = node.text?.toString()
-        val desc = node.contentDescription?.toString()
-        val hasContent = !text.isNullOrBlank() || !desc.isNullOrBlank()
+        val ownLabel = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+            .firstOrNull { it.isNotBlank() }
+        val interactive = node.isClickable || node.isEditable
+        val bounds = Rect().also { node.getBoundsInScreen(it) }
+        var coverChildren = coveredByAncestor
 
-        if (!textOnly || hasContent) {
-            val bounds = Rect()
-            node.getBoundsInScreen(bounds)
-            result.add(ScreenNode(
-                text = text,
-                contentDescription = desc,
+        if (!bounds.isEmpty && (interactive || (ownLabel != null && !coveredByAncestor))) {
+            // ปุ่มที่ไม่มีข้อความของตัวเอง (เช่น LinearLayout ห่อ TextView) → ยืมข้อความจากลูก
+            val label = ownLabel ?: if (node.isClickable) descendantLabel(node) else null
+            if (ownLabel == null && label != null) coverChildren = true
+            result += ScreenSnapshotFormatter.Element(
+                label = label,
                 className = node.className?.toString(),
                 viewId = node.viewIdResourceName,
                 isClickable = node.isClickable,
                 isEditable = node.isEditable,
                 isChecked = if (node.isCheckable) node.isChecked else null,
-                bounds = bounds,
-                childCount = node.childCount
-            ))
+                centerX = bounds.centerX(),
+                centerY = bounds.centerY()
+            )
         }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            traverseNode(child, result, depth + 1, maxDepth, textOnly)
+            traverseNode(child, result, depth + 1, maxDepth, coverChildren)
             child.recycle()
         }
+    }
+
+    /** รวมข้อความจากลูกหลานสูงสุด 3 ชิ้น (ลึก 4 ชั้น) เพื่อใช้เป็นชื่อปุ่ม */
+    private fun descendantLabel(node: AccessibilityNodeInfo): String? {
+        val parts = mutableListOf<String>()
+        fun collect(n: AccessibilityNodeInfo, depth: Int) {
+            if (parts.size >= 3 || depth > 4) return
+            for (i in 0 until n.childCount) {
+                if (parts.size >= 3) return
+                val child = n.getChild(i) ?: continue
+                val text = listOfNotNull(child.text?.toString(), child.contentDescription?.toString())
+                    .firstOrNull { it.isNotBlank() }
+                if (text != null) parts += text.trim() else collect(child, depth + 1)
+                child.recycle()
+            }
+        }
+        collect(node, 1)
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
     }
 
     // ─── UI Automation ─────────────────────────────────────────────────────
 
     /**
-     * คลิก node ที่มีข้อความตรงกับ text (หา match แรก)
+     * คลิก node ที่มีข้อความตรงกับ text — ค้นทุกหน้าต่าง เริ่มจากชั้นบนสุด (dialog ก่อน)
      * @return true ถ้าคลิกสำเร็จ
      */
-    fun clickByText(text: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val nodes = root.findAccessibilityNodeInfosByText(text) ?: return false
-        for (node in nodes) {
-            if (performClickOnNode(node)) {
-                Log.d(TAG, "CLICK by text: '$text' — OK")
-                root.recycle()
-                return true
-            }
-        }
-        root.recycle()
-        Log.w(TAG, "CLICK by text: '$text' — ไม่พบ node ที่คลิกได้")
-        return false
-    }
+    fun clickByText(text: String): Boolean =
+        clickFirst("text '$text'") { root -> root.findAccessibilityNodeInfosByText(text) }
 
     /**
-     * คลิก node ด้วย view ID
+     * คลิก node ด้วย view ID — รับได้ทั้งแบบเต็ม (`pkg:id/name`) และแบบสั้น (`name` ตามที่ read_screen แสดง)
      */
-    fun clickById(viewId: String): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val nodes = root.findAccessibilityNodeInfosByViewId(viewId) ?: return false
-        for (node in nodes) {
-            if (performClickOnNode(node)) {
-                Log.d(TAG, "CLICK by id: '$viewId' — OK")
-                root.recycle()
-                return true
-            }
+    fun clickById(viewId: String): Boolean =
+        clickFirst("id '$viewId'") { root ->
+            val fullId = if (viewId.contains(":id/")) viewId else "${root.packageName}:id/$viewId"
+            root.findAccessibilityNodeInfosByViewId(fullId)
         }
-        root.recycle()
-        Log.w(TAG, "CLICK by id: '$viewId' — ไม่พบ node ที่คลิกได้")
+
+    private fun clickFirst(what: String, find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>?): Boolean {
+        val roots = interactiveRoots()
+        try {
+            for ((_, root) in roots) {
+                val nodes = find(root) ?: continue
+                for (node in nodes) {
+                    if (node.isVisibleToUser && performClickOnNode(node)) {
+                        Log.d(TAG, "CLICK by $what — OK")
+                        return true
+                    }
+                }
+            }
+        } finally {
+            roots.forEach { it.second.recycle() }
+        }
+        Log.w(TAG, "CLICK by $what — ไม่พบ node ที่คลิกได้")
         return false
     }
 
@@ -290,51 +287,55 @@ class JarvisAccessibilityService : AccessibilityService() {
      * (ต้อง API 24+)
      */
     fun tapAtPosition(x: Float, y: Float, callback: ((Boolean) -> Unit)? = null): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            Log.w(TAG, "tapAtPosition requires API 24+")
-            return false
-        }
         Log.d(TAG, "TAP at ($x, $y)")
-        val path = Path().apply { moveTo(x, y) }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 100))
-            .build()
-        return dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                Log.d(TAG, "TAP at ($x, $y) — completed")
-                callback?.invoke(true)
-            }
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                Log.w(TAG, "TAP at ($x, $y) — cancelled")
-                callback?.invoke(false)
-            }
-        }, null)
+        return dispatchStroke(Path().apply { moveTo(x, y) }, 100, "TAP ($x, $y)", callback)
     }
 
     /**
      * Swipe gesture (เลื่อนหน้าจอ)
      */
     fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long = 300, callback: ((Boolean) -> Unit)? = null): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            Log.w(TAG, "swipe requires API 24+")
-            return false
-        }
         Log.d(TAG, "SWIPE ($startX,$startY) → ($endX,$endY)")
         val path = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
         }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
-            .build()
-        return dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                callback?.invoke(true)
-            }
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                callback?.invoke(false)
-            }
-        }, null)
+        return dispatchStroke(path, durationMs, "SWIPE", callback)
+    }
+
+    /**
+     * ส่ง gesture เส้นเดียว — รับประกันว่า callback ถูกเรียก "ครั้งเดียวเสมอ" แม้ dispatch ไม่ผ่าน
+     * (เดิม dispatchGesture คืน false โดยไม่เรียก callback → coroutine ฝั่ง executor ค้างถาวร)
+     */
+    private fun dispatchStroke(path: Path, durationMs: Long, label: String, callback: ((Boolean) -> Unit)?): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.w(TAG, "$label requires API 24+")
+            callback?.invoke(false)
+            return false
+        }
+        val dispatched = try {
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
+                .build()
+            dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    callback?.invoke(true)
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.w(TAG, "$label — cancelled")
+                    callback?.invoke(false)
+                }
+            }, null)
+        } catch (e: IllegalArgumentException) {
+            // พิกัดติดลบ / path ไม่ถูกต้อง — StrokeDescription โยน exception
+            Log.w(TAG, "$label — invalid gesture: ${e.message}")
+            false
+        }
+        if (!dispatched) {
+            Log.w(TAG, "$label — dispatchGesture rejected")
+            callback?.invoke(false)
+        }
+        return dispatched
     }
 
     /**
@@ -364,7 +365,8 @@ class JarvisAccessibilityService : AccessibilityService() {
      */
     fun typeText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        // service-level findFocus: ค้นทุกหน้าต่าง (ช่องพิมพ์ใน dialog)
+        val focusedNode = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (focusedNode != null && focusedNode.isEditable) {
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -400,7 +402,8 @@ class JarvisAccessibilityService : AccessibilityService() {
      */
     fun clearAndType(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
-        val focusedNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: run {
+        // service-level findFocus: ค้นทุกหน้าต่าง (ช่องพิมพ์ใน dialog)
+        val focusedNode = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: run {
             root.recycle()
             return false
         }

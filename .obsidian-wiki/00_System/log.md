@@ -1,3 +1,14 @@
+## 2026-09-19 — Device Control เฟส A: AI เห็นพิกัดปุ่มและกดได้จริง
+- **User Request**: รีวิวโหมดขับขี่ที่ควบคุมมือถือได้ 100% แล้วดำเนินการเฟส A (ดู [[Review_2026-09-19_Driving_Mode_Full_Device_Control]])
+- **Changes**:
+  - ใหม่ `ScreenSnapshotFormatter.kt` (commonMain): จัดรูปผลอ่านจอ — พิกัด `@(x,y)` ทุก element, ปุ่มไอคอนแสดงเป็น `(ไม่มีข้อความ ImageButton) [ปุ่ม]`, ตัด label ≤60 ตัว, เพดาน 80 รายการ + บอกจำนวนที่เหลือ, หัวข้อแยกตามหน้าต่าง
+  - `JarvisAccessibilityService.kt`: อ่าน/คลิกทุกหน้าต่างที่โต้ตอบได้ (`getWindows()` เรียงชั้นบนก่อน → dialog มาก่อน), เก็บ node ที่ clickable/editable แม้ไม่มีข้อความ, ปุ่มที่ไม่มีข้อความยืมข้อความลูก (ไม่แสดงซ้ำ), ข้าม node ที่มองไม่เห็น, maxDepth 10→30, `clickById` รับ id แบบสั้น, `typeText` หา focus ข้ามหน้าต่าง, `dispatchStroke()` เรียก callback เสมอแม้ dispatch ถูกปฏิเสธ; ลบ `ScreenNode`/`findNodesByText`/`findNodesById` (dead code + leak)
+  - `DeviceControlExecutor.kt`: `awaitGesture()` ห่อ tap/scroll ด้วย `withTimeoutOrNull(3s)` — แก้ Live session ค้างถาวร
+  - `accessibility_service_config.xml`: เพิ่ม `flagRetrieveInteractiveWindows` (และตั้งซ้ำใน `onServiceConnected`)
+  - `DeviceToolDefinitions.kt`: บอก AI ให้ใช้ `@(x,y)` กับ `device_tap` และอ่านซ้ำหลังกด
+  - Test ใหม่ `ScreenSnapshotFormatterTest` (7 เคส) — `testDebugUnitTest` ผ่านทั้งหมด
+- **พบบนเครื่องจริง (SM-S908E)**: `enabled_accessibility_services = null` — Accessibility Service ไม่เคยถูกเปิด ผู้ใช้ต้องเปิดเองที่ ตั้งค่า > การช่วยเหลือการเข้าถึง > แอปที่ติดตั้ง > JARVIS
+
 ## 2026-09-18 — Compose Canvas Engine: ปรับโทนให้ตรงภาพ LOOI 40 Moodset (Neon Cyan & Sensor Style)
 - **User Request**: ปรับโหมดสัตว์เลี้ยง Compose Canvas Engine ให้สวยงามคล้ายภาพต้นฉบับ LOOI Robot 40 Moodset
 - **Changes**:

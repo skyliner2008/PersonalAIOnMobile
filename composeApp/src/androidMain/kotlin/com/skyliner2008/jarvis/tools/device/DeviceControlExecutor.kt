@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -45,6 +46,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
     companion object {
         private const val TAG = "DeviceControl"
+        private const val GESTURE_TIMEOUT_MS = 3_000L
     }
 
     private val locationProvider = com.skyliner2008.jarvis.location.LocationProvider(context)
@@ -1214,6 +1216,17 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         return svc
     }
 
+    /**
+     * รอผล gesture แบบมีเพดานเวลา — ถ้า service ไม่ตอบ (gesture ค้าง/ถูกยกเลิกเงียบ) คืน false
+     * แทนการแขวน tool call ไว้ตลอดไป (Live session จะเงียบระหว่างขับรถ)
+     */
+    private suspend fun awaitGesture(start: (callback: (Boolean) -> Unit) -> Unit): Boolean =
+        withTimeoutOrNull(GESTURE_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                start { success -> if (cont.isActive) cont.resume(success) }
+            }
+        } ?: false.also { Log.w(TAG, "Gesture timed out after ${GESTURE_TIMEOUT_MS}ms") }
+
     private fun executeReadScreen(args: Map<String, String>): String {
         val svc = requireA11y()
             ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน — ไปที่ ตั้งค่า > การเข้าถึง > JARVIS แล้วเปิด"
@@ -1242,9 +1255,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         val x = args["x"]?.toFloatOrNull()
         val y = args["y"]?.toFloatOrNull()
         if (x != null && y != null) {
-            val result = suspendCancellableCoroutine<Boolean> { cont ->
-                svc.tapAtPosition(x, y) { success -> cont.resume(success) }
-            }
+            val result = awaitGesture { done -> svc.tapAtPosition(x, y, done) }
             return if (result) "👆 แตะตำแหน่ง ($x, $y) สำเร็จ" else "❌ แตะตำแหน่ง ($x, $y) ไม่สำเร็จ"
         }
 
@@ -1271,12 +1282,10 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน"
         val direction = args["direction"]?.lowercase()?.trim() ?: "down"
 
-        val result = suspendCancellableCoroutine<Boolean> { cont ->
-            when (direction) {
-                "down", "ลง" -> svc.scrollDown { cont.resume(it) }
-                "up", "ขึ้น" -> svc.scrollUp { cont.resume(it) }
-                else -> cont.resume(false)
-            }
+        val result = when (direction) {
+            "down", "ลง" -> awaitGesture { done -> svc.scrollDown(done) }
+            "up", "ขึ้น" -> awaitGesture { done -> svc.scrollUp(done) }
+            else -> false
         }
 
         return if (result) {

@@ -297,19 +297,19 @@ object DeviceToolDefinitions {
         // ═══ Screen Interaction (Accessibility) ═══
         FunctionDeclaration(
             name = "device_read_screen",
-            description = "อ่านข้อมูล/ข้อความทั้งหมดที่แสดงบนหน้าจอปัจจุบัน (ต้องเปิด Accessibility Service). ใช้เมื่อผู้ใช้สั่ง 'อ่านหน้าจอ', 'หน้าจอมีอะไร', 'ดูหน้าจอให้หน่อย'. คืนรายการ UI elements ทั้งหมดรวมถึงข้อความ ปุ่ม และ interactive elements.",
+            description = "อ่านข้อมูล/ข้อความทั้งหมดที่แสดงบนหน้าจอปัจจุบัน (ต้องเปิด Accessibility Service). ใช้เมื่อผู้ใช้สั่ง 'อ่านหน้าจอ', 'หน้าจอมีอะไร', 'ดูหน้าจอให้หน่อย'. คืนรายการ UI elements (ข้อความ ปุ่ม ช่องพิมพ์ รวมถึงปุ่มไอคอนที่ไม่มีข้อความ) จากทุกหน้าต่างรวม dialog/popup โดยแต่ละรายการมีพิกัดกึ่งกลาง @(x,y) — ใช้ก่อน device_tap เสมอเมื่อไม่แน่ใจว่าปุ่มอยู่ตรงไหน และอ่านซ้ำหลังกดเพื่อยืนยันว่าหน้าจอเปลี่ยนแล้ว.",
             parameters = null
         ),
         FunctionDeclaration(
             name = "device_tap",
-            description = "แตะ/คลิกที่ตำแหน่งหรือปุ่มบนหน้าจอ (ต้องเปิด Accessibility). ใช้เมื่อผู้ใช้สั่ง 'แตะปุ่ม...', 'กดที่...', 'คลิก...'.",
+            description = "แตะ/คลิกที่ตำแหน่งหรือปุ่มบนหน้าจอ (ต้องเปิด Accessibility). ใช้เมื่อผู้ใช้สั่ง 'แตะปุ่ม...', 'กดที่...', 'คลิก...'. ปุ่มที่มีข้อความใช้ text; ปุ่มไอคอนที่ไม่มีข้อความ หรือเมื่อแตะด้วย text ไม่สำเร็จ ให้ใช้ x,y จาก @(x,y) ใน device_read_screen.",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "text" to ParameterProperty("STRING", "ข้อความบนปุ่ม/element ที่ต้องการแตะ เช่น 'ตกลง', 'Submit', 'ยืนยัน'"),
-                    "view_id" to ParameterProperty("STRING", "Resource ID ของ view (optional, ถ้ารู้)"),
-                    "x" to ParameterProperty("NUMBER", "พิกัด X บนหน้าจอ (optional, ใช้คู่กับ y)"),
-                    "y" to ParameterProperty("NUMBER", "พิกัด Y บนหน้าจอ (optional, ใช้คู่กับ x)")
+                    "view_id" to ParameterProperty("STRING", "Resource ID ของ view (optional) — ใช้ค่า id: จาก device_read_screen ได้เลย เช่น 'send'"),
+                    "x" to ParameterProperty("NUMBER", "พิกัด X (px) จาก @(x,y) ใน device_read_screen (optional, ใช้คู่กับ y)"),
+                    "y" to ParameterProperty("NUMBER", "พิกัด Y (px) จาก @(x,y) ใน device_read_screen (optional, ใช้คู่กับ x)")
                 ),
                 required = emptyList()
             )
