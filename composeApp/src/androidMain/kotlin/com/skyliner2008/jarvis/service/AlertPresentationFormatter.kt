@@ -58,7 +58,8 @@ object AlertPresentationFormatter {
     /** บรรทัดเหตุการณ์สำหรับผู้ใช้ — ตัดรหัสปัจจัย/สถิติ (ส่วนนั้นมีไว้ให้ AI อ่าน) */
     internal fun wakeEventLinesForUser(data: Map<String, String>): List<String> =
         (data[WAKE.K_EVENTS] ?: "").lines()
-            .map { it.trim().removePrefix("•").trim().replace(Regex("\\s*\\([A-Z0-9_]+ · สถิติ:.*\\)\\s*$"), "") }
+            // "(ID · สถิติ H1: …)" — ตั้งแต่ P16 มีชื่อ TF ต่อท้ายคำว่าสถิติ
+            .map { it.trim().removePrefix("•").trim().replace(Regex("\\s*\\([A-Z0-9_]+ · สถิติ[^:]*:.*\\)\\s*$"), "") }
             .filter { it.isNotBlank() }
 
     private fun wakeSide(data: Map<String, String>, verdict: com.skyliner2008.jarvis.automation.wake.WakePrompt.Verdict?): String {

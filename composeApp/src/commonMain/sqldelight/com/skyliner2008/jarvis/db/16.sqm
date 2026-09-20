@@ -1,0 +1,56 @@
+-- P16: การเรียนรู้แยกตาม "ปัจจัย × TF"
+--
+-- เดิมทุกปัจจัยถูกประเมินบน TF หลักของ job (M15) อย่างเดียว และ UNIQUE(signal_id, factor_id)
+-- ทำให้ปัจจัยเดียวกันบันทึกซ้ำคนละ TF ในการสแกนเดียวกันไม่ได้
+-- ตอนนี้ปัจจัยถูกประเมินบน M1/M5/M15/H1/H4 → เพิ่ม factor_tf (TF ที่ปัจจัยเกิด) และสร้างตารางใหม่
+-- (SQLite แก้ UNIQUE ด้วย ALTER ไม่ได้) — แถวเดิมทั้งหมดเกิดบน TF หลัก จึงใช้ interval เป็น factor_tf
+CREATE TABLE AnticipationFactorOutcome_v16 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id TEXT NOT NULL,
+    factor_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    side TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref_price REAL NOT NULL,
+    ref_atr REAL NOT NULL,
+    woke INTEGER NOT NULL DEFAULT 0,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    vol_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    ai_decision TEXT,
+    ai_bias TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    forward_r REAL,
+    mfe_r REAL,
+    mae_r REAL,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    ai_confidence INTEGER,
+    ai_reason TEXT,
+    factor_tf TEXT NOT NULL DEFAULT '',
+    UNIQUE(signal_id, factor_id, factor_tf)
+);
+
+INSERT INTO AnticipationFactorOutcome_v16(
+    id, signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
+    mtf_align, adx_bucket, vol_bucket, session, ai_decision, ai_bias, status,
+    forward_r, mfe_r, mae_r, created_at, resolved_at, ai_confidence, ai_reason, factor_tf
+)
+SELECT id, signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
+       mtf_align, adx_bucket, vol_bucket, session, ai_decision, ai_bias, status,
+       forward_r, mfe_r, mae_r, created_at, resolved_at, ai_confidence, ai_reason, interval
+FROM AnticipationFactorOutcome;
+
+DROP TABLE AnticipationFactorOutcome;
+ALTER TABLE AnticipationFactorOutcome_v16 RENAME TO AnticipationFactorOutcome;
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_lookup
+ON AnticipationFactorOutcome(factor_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_context
+ON AnticipationFactorOutcome(factor_id, mtf_align, adx_bucket, session);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_pending
+ON AnticipationFactorOutcome(status, symbol, interval, created_at);

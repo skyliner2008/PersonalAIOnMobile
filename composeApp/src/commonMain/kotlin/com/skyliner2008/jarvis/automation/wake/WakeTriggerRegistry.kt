@@ -78,4 +78,34 @@ object WakeTriggerRegistry {
         }
         return ScanResult(ev, st, errors)
     }
+
+    /** แท่งขั้นต่ำของ TF ที่จะประเมินปัจจัยบน TF นั้น */
+    private const val MIN_TF_BARS = 60
+
+    /**
+     * ประเมินทุกปัจจัยบนหลาย TF — ปัจจัยที่ใช้ได้ทุก TF ถูกประเมินบนแต่ละ TF ใน [tfs] (TriggerEvent.tf = TF นั้น)
+     * ปัจจัยตายตัว ([WakeTfProfile.FIXED]) ประเมินครั้งเดียว และ tf ของเหตุการณ์ถูกปรับเป็น TF จริง
+     */
+    fun scanAllTf(ctx: WakeContext, tfs: List<String>, enabledIds: Set<String>? = null): ScanResult {
+        val ev = mutableListOf<TriggerEvent>()
+        val st = mutableListOf<TriggerEvent>()
+        val errors = mutableListOf<String>()
+        val views = tfs.distinct().filter { ctx.series(it).n >= MIN_TF_BARS }.map { ctx.forTf(it) }
+        for (t in ALL) {
+            if (enabledIds != null && t.id.uppercase() !in enabledIds) continue
+            val fixed = WakeTfProfile.isFixed(t.id)
+            for (c in if (fixed) listOf(ctx) else views) {
+                val hit = try {
+                    t.detect(c)
+                } catch (e: Throwable) {
+                    errors += "${t.id}@${c.primaryTf}: ${e::class.simpleName} ${e.message}"
+                    null
+                } ?: continue
+                val tf = if (fixed) WakeTfProfile.normalizeEventTf(hit.tf, ctx.primaryTf) else c.primaryTf
+                val e = if (hit.tf == tf) hit else hit.copy(tf = tf)
+                if (t.kind == TriggerKind.EVENT) ev += e else st += e
+            }
+        }
+        return ScanResult(ev, st, errors)
+    }
 }

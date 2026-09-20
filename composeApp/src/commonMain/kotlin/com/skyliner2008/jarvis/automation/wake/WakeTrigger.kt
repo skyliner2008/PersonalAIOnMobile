@@ -182,6 +182,22 @@ class Series(val tf: String, all: List<Candle>) {
 // WakeContext — สิ่งที่ trigger ทุกตัวเห็นตอนประเมิน
 // ═════════════════════════════════════════════════════════════════════════════
 
+/** Series ของทุก TF — สร้างครั้งเดียวต่อรอบสแกน แล้วแชร์ให้ทุกมุมมอง TF ([WakeContext.forTf]) */
+class SeriesSet(
+    m1: List<Candle>, m5: List<Candle>, m15: List<Candle>, h1: List<Candle>, h4: List<Candle>,
+    intermarket: Map<String, List<Candle>>, extra: Map<String, List<Candle>>
+) {
+    val m1 = Series("1m", m1)
+    val m5 = Series("5m", m5)
+    val m15 = Series("15m", m15)
+    val h1 = Series("1h", h1)
+    val h4 = Series("4h", h4)
+    val inter: Map<String, Series> = intermarket.mapValues { Series("1h", it.value) }
+    val extra: Map<String, Series> = extra.entries.associate { (tf, bars) ->
+        TaIndicators.normalizeTimeframe(tf).let { it to Series(it, bars) }
+    }
+}
+
 /**
  * ครบทั้ง 5 TF ตามสเปกของระบบ:
  *   M1  → ราคาปัจจุบัน
@@ -192,47 +208,71 @@ class Series(val tf: String, all: List<Candle>) {
  * พร้อมข้อมูลเสริม: intermarket (DXY / US10Y / BTC.D), ปฏิทินข่าว, Fear&Greed
  * และ [memory] ค่าจากการสแกนรอบก่อน (ใช้ตรวจ "การตัดผ่าน" ของค่าภายนอก)
  */
-class WakeContext(
+class WakeContext private constructor(
     val symbol: String,
-    /** TF ที่ alert job นี้เฝ้าอยู่ — TF หลักของ trigger ที่ไม่ระบุ TF */
+    /**
+     * TF ที่ trigger แบบ "ใช้ได้ทุก TF" กำลังถูกประเมิน ([primary]) — เริ่มต้น = TF ของ alert job
+     * [forTf] สร้างมุมมองของ TF อื่นโดยใช้ Series ชุดเดิม (ไม่คำนวณอินดิเคเตอร์ซ้ำ)
+     */
     val primaryTf: String,
-    m1: List<Candle>,
-    m5: List<Candle>,
-    m15: List<Candle>,
-    h1: List<Candle>,
-    h4: List<Candle>,
+    private val set: SeriesSet,
     val digest: MarketContextDigest.Digest?,
     /** แท่ง H1 ของตลาดที่เกี่ยวข้อง เช่น "DXY", "US10Y", "BTC.D" */
-    val intermarket: Map<String, List<Candle>> = emptyMap(),
-    val macroEvents: List<TradingApiService.MacroEvent> = emptyList(),
-    val fearGreed: Int? = null,
+    val intermarket: Map<String, List<Candle>>,
+    val macroEvents: List<TradingApiService.MacroEvent>,
+    val fearGreed: Int?,
     /** คะแนน Deep Analysis ปัจจุบัน (0-100) ถ้ามี */
-    val deepScore: Int? = null,
-    /** Harmonic pattern ที่ตรวจพบบน TF หลัก */
-    val harmonics: List<com.skyliner2008.jarvis.tools.trading.HarmonicPattern> = emptyList(),
+    val deepScore: Int?,
+    /** Harmonic pattern ที่ตรวจพบบน TF ของ job */
+    val harmonics: List<com.skyliner2008.jarvis.tools.trading.HarmonicPattern>,
     /** สถานะ Elliott wave ปัจจุบัน */
-    val elliott: com.skyliner2008.jarvis.tools.trading.ElliotWaveModern? = null,
+    val elliott: com.skyliner2008.jarvis.tools.trading.ElliotWaveModern?,
     /** ค่าจากการสแกนครั้งก่อนของ symbol นี้ */
-    val memory: Map<String, String> = emptyMap(),
-    val nowMs: Long,
-    /**
-     * TF หลักที่อยู่นอกชุด 5TF (เช่น 30m) — ให้ trigger ที่ใช้ [primary] ทำงานบน TF จริงของ job
-     * เดิม job @30m ถูกประเมินบน M15 เงียบๆ ทั้งที่การ์ดแสดงว่า 30M
-     */
-    extra: Map<String, List<Candle>> = emptyMap()
+    val memory: Map<String, String>,
+    val nowMs: Long
 ) {
-    val m1 = Series("1m", m1)
-    val m5 = Series("5m", m5)
-    val m15 = Series("15m", m15)
-    val h1 = Series("1h", h1)
-    val h4 = Series("4h", h4)
+    constructor(
+        symbol: String,
+        primaryTf: String,
+        m1: List<Candle>,
+        m5: List<Candle>,
+        m15: List<Candle>,
+        h1: List<Candle>,
+        h4: List<Candle>,
+        digest: MarketContextDigest.Digest?,
+        intermarket: Map<String, List<Candle>> = emptyMap(),
+        macroEvents: List<TradingApiService.MacroEvent> = emptyList(),
+        fearGreed: Int? = null,
+        deepScore: Int? = null,
+        harmonics: List<com.skyliner2008.jarvis.tools.trading.HarmonicPattern> = emptyList(),
+        elliott: com.skyliner2008.jarvis.tools.trading.ElliotWaveModern? = null,
+        memory: Map<String, String> = emptyMap(),
+        nowMs: Long,
+        /**
+         * TF หลักที่อยู่นอกชุด 5TF (เช่น 30m) — ให้ trigger ที่ใช้ [primary] ทำงานบน TF จริงของ job
+         * เดิม job @30m ถูกประเมินบน M15 เงียบๆ ทั้งที่การ์ดแสดงว่า 30M
+         */
+        extra: Map<String, List<Candle>> = emptyMap()
+    ) : this(
+        symbol, TaIndicators.normalizeTimeframe(primaryTf), SeriesSet(m1, m5, m15, h1, h4, intermarket, extra),
+        digest, intermarket, macroEvents, fearGreed, deepScore, harmonics, elliott, memory, nowMs
+    )
 
-    private val interSeries = intermarket.mapValues { Series("1h", it.value) }
-    fun inter(key: String): Series? = interSeries[key]
-
-    private val extraSeries = extra.entries.associate { (tf, bars) ->
-        TaIndicators.normalizeTimeframe(tf).let { it to Series(it, bars) }
+    /** มุมมองเดียวกันแต่ให้ [primary] เป็น [tf] — ใช้ประเมินปัจจัยตัวเดียวกันบนหลาย TF */
+    fun forTf(tf: String): WakeContext {
+        val t = TaIndicators.normalizeTimeframe(tf)
+        return if (t == primaryTf) this else WakeContext(
+            symbol, t, set, digest, intermarket, macroEvents, fearGreed, deepScore, harmonics, elliott, memory, nowMs
+        )
     }
+
+    val m1: Series get() = set.m1
+    val m5: Series get() = set.m5
+    val m15: Series get() = set.m15
+    val h1: Series get() = set.h1
+    val h4: Series get() = set.h4
+
+    fun inter(key: String): Series? = set.inter[key]
 
     fun series(tf: String): Series = when (val t = TaIndicators.normalizeTimeframe(tf)) {
         "1m" -> m1
@@ -240,7 +280,7 @@ class WakeContext(
         "15m" -> m15
         "1h" -> h1
         "4h" -> h4
-        else -> extraSeries[t] ?: m15
+        else -> set.extra[t] ?: m15
     }
 
     /** Series ของ TF หลัก */

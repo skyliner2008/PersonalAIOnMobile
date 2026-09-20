@@ -97,8 +97,8 @@ class AnticipationEngine(
          * ระหว่างรอบ ถ้า alert เบื้องหลังกับการสแกนจากแชทรันพร้อมกันจะชนกัน
          */
         private val scanLock = Mutex()
-        private const val MAX_EVENT_LINES = 15
-        private const val MAX_STATE_LINES = 12
+        private const val MAX_EVENT_LINES = 20
+        private const val MAX_STATE_LINES = 16
 
         private const val INTERMARKET_TTL_MS = 5 * 60_000L
         private const val MACRO_TTL_MS = 30 * 60_000L
@@ -155,15 +155,16 @@ class AnticipationEngine(
         val preClose = market.minutesToWeeklyClose?.let { it <= PRE_CLOSE_MINUTES } == true
 
         // ── 1) ข้อมูล 5TF (+ TF หลักถ้าอยู่นอกชุด) ─────────────────────────
-        suspend fun fetch(t: String, bars: Int) =
-            runCatching { smcApi.fetchCandlesWithSource(symbol, t, bars).candles }.getOrElse { emptyList() }
+        // ทุก TF ใช้ FULL_SET — ปัจจัยถูกประเมินบนทุก TF แล้ว (เดิม M1 300 / M5 500 / H4 400 แท่ง พอแค่ภาพตลาด)
         val full = TaIndicators.Warmup.FULL_SET
-        val m1 = fetch("1m", if (tf == "1m") full else 300)
-        val m5 = fetch("5m", if (tf == "5m") full else 500)
-        val m15 = fetch("15m", full)
-        val h1 = fetch("1h", full)
-        val h4 = fetch("4h", if (tf == "4h") full else 400)
-        val m30 = if (tf == "30m") fetch("30m", full) else emptyList()
+        suspend fun fetch(t: String) =
+            runCatching { smcApi.fetchCandlesWithSource(symbol, t, full).candles }.getOrElse { emptyList() }
+        val m1 = fetch("1m")
+        val m5 = fetch("5m")
+        val m15 = fetch("15m")
+        val h1 = fetch("1h")
+        val h4 = fetch("4h")
+        val m30 = if (tf == "30m") fetch("30m") else emptyList()
 
         val primaryAll = when (tf) { "1m" -> m1; "5m" -> m5; "30m" -> m30; "1h" -> h1; "4h" -> h4; else -> m15 }
         val primaryClosed = primaryAll.filter { it.isClosed }
@@ -174,7 +175,8 @@ class AnticipationEngine(
             )
         }
         val barTs = primaryClosed.last().timestamp
-        val tfMs = TaIndicators.timeframeMillis(tf)
+        // รหัสการสแกน = นาทีที่สแกน — การปลุกเกิดได้ทุกนาที (เดิมผูกกับแท่ง TF หลัก ปลุกได้ครั้งเดียวต่อ 15 นาที)
+        val scanTs = nowMs - nowMs % 60_000L
 
         // ── 2) ภาพตลาด + ข้อมูลเสริม ──────────────────────────────────────
         val digest = runCatching {
@@ -198,71 +200,107 @@ class AnticipationEngine(
             extra = if (m30.isNotEmpty()) mapOf("30m" to m30) else emptyMap()
         )
 
-        // ── 3) สแกน ───────────────────────────────────────────────────────
-        val scan = WakeTriggerRegistry.scan(ctx, WakeSettings.enabledIds())
+        // ── 3) สแกนทุกปัจจัยบนทุก TF ─────────────────────────────────────────
+        val evalTfs = (WakeTfProfile.EVAL_TFS + tf).distinct()
+        val scan = WakeTriggerRegistry.scanAllTf(ctx, evalTfs, WakeSettings.enabledIds())
         if (scan.errors.isNotEmpty()) logDebug("WakeEngine", "$seriesKey trigger errors: ${scan.errors.take(5)}")
 
-        // ── 4) คัด + บันทึกการเรียนรู้ ─────────────────────────────────────
-        val freshEvents = WakeGovernor.freshEvents(seriesKey, scan.events, barTs, tfMs, commit = !preview)
-        val prevActive = memory["active_states"]?.split(",")?.filter { it.isNotBlank() }?.toSet().orEmpty()
-        val newStates = scan.states.filter { "${it.triggerId}:${it.direction}" !in prevActive }
+        // ── 4) คัด + บันทึกการเรียนรู้ (ทุกปัจจัย × ทุก TF — ฟรี ไม่ใช้โทเคน) ─────
+        val barTsByTf = evalTfs.associateWith { ctx.series(it).last?.timestamp ?: 0L }.filterValues { it > 0 }
+        val freshEvents = WakeGovernor.freshEvents(seriesKey, scan.events, barTsByTf, commit = !preview)
+        val prevActive = memory["active_states"]?.split(",")?.filter { it.isNotBlank() }
+            // รุ่นก่อน P16 เก็บ "ID:DIR" (เกิดบน TF หลักเสมอ)
+            ?.map { if ('@' in it) it else it.substringBefore(':') + "@" + tf + ":" + it.substringAfter(':') }
+            ?.toSet().orEmpty()
+        val newStates = scan.states.filter { stateKey(it) !in prevActive }
 
-        val signalId = "$symbol|$tf|$barTs"
+        val signalId = "$symbol|$tf|$scanTs"
         // ราคาอ้างอิง = ราคา ณ ตอนตรวจพบจริง (ไม่ใช่ราคาปิดของแท่ง TF หลักที่ปิดไปแล้ว)
-        // — เหตุการณ์จาก M1/M5/ข่าว/intermarket เกิดกลางแท่งได้ บน H4 ราคาปิดอาจเก่าไปหลายชั่วโมง
         val refPrice = ctx.price.takeIf { it > 0 } ?: primaryClosed.last().close
         val refAtr = ctx.atr
-        if (!preview && refAtr > 0) {
-            WakeLearningStore.record((freshEvents + newStates).map { e ->
+        if (!preview && refPrice > 0) {
+            WakeLearningStore.record((freshEvents + newStates).mapNotNull { e ->
+                val c = ctx.forTf(e.tf)
+                val atr = c.atr.takeIf { it > 0 } ?: return@mapNotNull null
                 WakeLearningStore.Record(
-                    signalId = signalId, factorId = e.triggerId, symbol = symbol, interval = tf,
+                    signalId = signalId, factorId = e.triggerId, symbol = symbol, interval = tf, factorTf = e.tf,
                     side = e.direction, kind = WakeTriggerRegistry.find(e.triggerId)?.kind?.name ?: "EVENT",
-                    refPrice = refPrice, refAtr = refAtr,
-                    context = learningContext(ctx, e.direction), createdAt = nowMs
+                    refPrice = refPrice, refAtr = atr,
+                    context = learningContext(c, e.direction), createdAt = nowMs
                 )
             })
         }
 
         // ── 5) ตัดสินการปลุก ──────────────────────────────────────────────
-        val wakingEvents = freshEvents.filter { !WakeLearningStore.isDemoted(it.triggerId) }
+        // ปลุกได้เฉพาะปัจจัย × TF ที่เหมาะ (ชุดเริ่มต้น + ผลจริง) — ที่เหลือเก็บสถิติอย่างเดียว
+        val wakingEvents = freshEvents.filter { WakeLearningStore.tfVerdict(it.triggerId, it.tf, tf).wakes }
+        val hasCarried = !preview && WakeGovernor.hasDeferred(seriesKey, nowMs)
         var wake = false
         var suppressed: String? = null
-        if (wakingEvents.isNotEmpty()) {
-            val d = WakeGovernor.decide(seriesKey, symbol, barTs, nowMs)
+        var carried: List<Pair<TriggerEvent, Long>> = emptyList()
+        if (wakingEvents.isNotEmpty() || hasCarried) {
+            val d = WakeGovernor.decide(seriesKey, symbol, nowMs)
             when {
-                !d.allowed -> suppressed = d.reason
+                !d.allowed -> {
+                    suppressed = d.reason
+                    // ไม่ทิ้ง — พกไปแสดงในการปลุกครั้งถัดไป (ไม่เกิน CARRY_MS)
+                    if (!preview) WakeGovernor.defer(seriesKey, wakingEvents, nowMs)
+                }
                 preClose -> suppressed = "อีก ${market.minutesToWeeklyClose} นาทีตลาดปิดสิ้นสัปดาห์ — ไม่ปลุก AI"
                 preview -> suppressed = "สแกนดูอย่างเดียว (ไม่ปลุก AI)"
                 else -> {
                     wake = true
-                    WakeGovernor.register(seriesKey, symbol, barTs, nowMs)
-                    WakeLearningStore.markWoke(signalId, wakingEvents.map { it.triggerId })
+                    WakeGovernor.register(seriesKey, symbol, nowMs)
+                    carried = WakeGovernor.takeDeferred(seriesKey, nowMs).filter { (c, _) ->
+                        wakingEvents.none { it.triggerId == c.triggerId && it.tf == c.tf && it.direction == c.direction }
+                    }
+                    WakeLearningStore.markWoke(signalId, wakingEvents.map { WakeLearningStore.key(it.triggerId, it.tf) })
                 }
             }
         }
 
         if (!preview) {
-            // ── 6) ปิดผลการเรียนรู้ที่ครบกรอบ ─────────────────────────────
-            runCatching { WakeLearningStore.resolvePending(symbol, tf, primaryClosed) }
+            // ── 6) ปิดผลการเรียนรู้ที่ครบกรอบ (แต่ละแถววัดด้วยแท่งของ TF ที่มันเกิด) ──
+            runCatching { WakeLearningStore.resolvePending(symbol, tf, evalTfs.associateWith { ctx.series(it).bars }) }
             // ── ติดตามผลมุมมองของ AI (ชน TP/SL หรือยัง) ──
             runCatching { AiViewTracker.backfillOnce() }
             runCatching { AiViewTracker.resolve(symbol, tf, primaryClosed, ctx.m1.bars) }
             // ── ความจำสำหรับรอบถัดไป (รวมสถานะ governor ให้รอดการรีสตาร์ท) ──
-            WakeSettings.saveMemory(seriesKey, nextMemory(ctx, memory, scan) + WakeGovernor.exportState(seriesKey, barTs, tfMs))
+            WakeSettings.saveMemory(seriesKey, nextMemory(ctx, memory, scan) + WakeGovernor.exportState(seriesKey, nowMs))
         }
 
         // ── payload ────────────────────────────────────────────────────────
-        fun eventLine(e: TriggerEvent): String {
-            val demoted = WakeLearningStore.isDemoted(e.triggerId)
+        fun eventLine(e: TriggerEvent, agoMs: Long? = null): String {
+            val c = ctx.forTf(e.tf)
+            val verdict = WakeLearningStore.tfVerdict(e.triggerId, e.tf, tf)
             val dir = if (e.direction == "NEUTRAL") "" else " → ชี้ ${e.direction}"
-            val stat = WakeLearningStore.describeForAi(e.triggerId, learningContext(ctx, e.direction))
-            return "• [${tfLabel(e.tf)}] ${e.what}$dir  (${e.triggerId} · สถิติ: $stat${if (demoted) " · ⬇️ สถิติไม่ดี" else ""})"
+            val stat = WakeLearningStore.describeForAi(e.triggerId, e.tf, learningContext(c, e.direction))
+            val mark = when (verdict) {
+                WakeLearningStore.TfVerdict.DEMOTED -> " · ⬇️ สถิติบน TF นี้ไม่ดี"
+                WakeLearningStore.TfVerdict.PROMOTED -> " · ⬆️ สถิติบน TF นี้ดี"
+                else -> ""
+            }
+            val ago = agoMs?.let { " (เกิดเมื่อ ${(it / 60_000L).coerceAtLeast(1)} นาทีก่อน)" } ?: ""
+            return "• [${tfLabel(e.tf)}] ${e.what}$dir$ago  (${e.triggerId} · สถิติ ${tfLabel(e.tf)}: $stat$mark)"
         }
-        // ตอนปลุก: แสดงเฉพาะเหตุการณ์ใหม่ / ตอนสแกนดู: แสดงทุกเหตุการณ์ที่เป็นจริงบนแท่งล่าสุด
-        val shownEvents = (if (wake) freshEvents else scan.events).take(MAX_EVENT_LINES)
+        // เรียง TF ใหญ่ก่อน (H4 → M1) — AI อ่านบริบทใหญ่ก่อนจังหวะ
+        fun rank(t: String) = -TaIndicators.timeframeMillis(t)
+        val lines: List<String> = if (wake) {
+            (wakingEvents.map { it to null } + carried.map { (e, at) -> e to (nowMs - at) })
+                .sortedBy { rank(it.first.tf) }.take(MAX_EVENT_LINES).map { (e, ago) -> eventLine(e, ago) }
+        } else {
+            // สแกนดู / ไม่ได้ปลุก: เหตุการณ์ที่ปลุกได้ทั้งหมดบนแท่งล่าสุดของแต่ละ TF
+            scan.events.filter { WakeLearningStore.tfVerdict(it.triggerId, it.tf, tf).wakes }
+                .sortedBy { rank(it.tf) }.take(MAX_EVENT_LINES).map { eventLine(it) }
+        }
+        val triggerKeys = if (wake) (wakingEvents + carried.map { it.first }) else
+            scan.events.filter { WakeLearningStore.tfVerdict(it.triggerId, it.tf, tf).wakes }
         // ตัวนับที่ใช้เป็นเงื่อนไข alert ได้ ต้องเป็น 0 เมื่อไม่ได้ปลุก
         // (เดิมนับเหตุการณ์ที่ติดงบด้วย → alert แบบ wake_event_count/wake_buy ยิงทุกแท่งและเรียก AI เกินงบ)
-        val countedEvents = if (wake) wakingEvents else emptyList()
+        val countedEvents = if (wake) wakingEvents + carried.map { it.first } else emptyList()
+        // สภาวะ: เฉพาะ TF ที่เหมาะกับปัจจัยนั้น เรียง TF ใหญ่ก่อน (ทุก TF รวมกันยาวเกินและเป็น noise)
+        val shownStates = scan.states.filter { WakeTfProfile.isDefaultWakeTf(it.triggerId, it.tf, tf) }
+            .sortedBy { rank(it.tf) }.take(MAX_STATE_LINES)
         return buildMap {
             put(K_SYMBOL, symbol)
             put(K_TIMEFRAME, tf)
@@ -271,14 +309,14 @@ class AnticipationEngine(
             runCatching { AiViewTracker.promptSection(symbol, refPrice, nowMs) }.getOrNull()?.let { put(K_PREV_VIEWS, it) }
             put(K_TIME, timeLine(nowMs))
             put(K_WAKE, if (wake) "1" else "0")
-            put(K_WAKE_ID, if (wake) barTs.toString() else "0")
+            put(K_WAKE_ID, if (wake) scanTs.toString() else "0")
             put(K_SIGNAL_ID, signalId)
             put(K_EVENT_COUNT, countedEvents.size.toString())
             put(K_BUY, countedEvents.count { it.direction == "BUY" }.toString())
             put(K_SELL, countedEvents.count { it.direction == "SELL" }.toString())
-            put(K_TRIGGERS, shownEvents.joinToString(",") { it.triggerId })
-            put(K_EVENTS, shownEvents.joinToString("\n") { eventLine(it) })
-            put(K_STATES, scan.states.take(MAX_STATE_LINES).joinToString("\n") { s ->
+            put(K_TRIGGERS, triggerKeys.take(MAX_EVENT_LINES).joinToString(",") { "${it.triggerId}@${it.tf}" })
+            put(K_EVENTS, lines.joinToString("\n"))
+            put(K_STATES, shownStates.joinToString("\n") { s ->
                 "• [${tfLabel(s.tf)}] ${s.what}${if (s.direction != "NEUTRAL") " (${s.direction})" else ""}"
             })
             put(K_MTF, digest?.text ?: "")
@@ -287,6 +325,8 @@ class AnticipationEngine(
             if (scan.errors.isNotEmpty()) put(K_ERRORS, scan.errors.joinToString("; ").take(500))
         }
     }
+
+    private fun stateKey(e: TriggerEvent) = "${e.triggerId}@${e.tf}:${e.direction}"
 
     /** เวลา UTC + session — ให้ AI รู้ว่าอยู่ช่วงไหนของวัน/สัปดาห์ (ตลาดปิด, ช่วง London/NY) */
     private fun timeLine(nowMs: Long): String {
@@ -326,7 +366,7 @@ class AnticipationEngine(
             m["ob_levels"] = (d.levelsAbove + d.levelsBelow).filter { it.kind.contains("OB") }
                 .joinToString(",") { "${if (it.kind.contains("Demand", true)) "D" else "S"}:${it.price}" }
         }
-        m["active_states"] = scan.states.joinToString(",") { "${it.triggerId}:${it.direction}" }
+        m["active_states"] = scan.states.joinToString(",") { stateKey(it) }
         if (scan.events.any { it.triggerId == "HIGH_IMPACT_NEWS_SOON" }) {
             val nowS = ctx.nowMs / 1000
             val soon = ctx.macroEvents.filter { it.isHighImpact && it.epochSeconds in nowS..(nowS + 1800) }

@@ -46,7 +46,9 @@ object LearningTransfer {
         val resolvedAt: Long? = null,
         /** เพิ่มภายหลัง (P14) — ไฟล์รุ่นเก่าไม่มี จึงเป็น null */
         val aiConfidence: Long? = null,
-        val aiReason: String? = null
+        val aiReason: String? = null,
+        /** TF ที่ปัจจัยเกิด (P16) — ไฟล์รุ่นเก่าไม่มี = เกิดบน TF หลัก (interval) */
+        val factorTf: String? = null
     )
 
     @Serializable
@@ -54,7 +56,8 @@ object LearningTransfer {
         val disabledFactors: List<String> = emptyList(),
         val hourlyBudget: Int? = null,
         val dailyBudget: Int? = null,
-        val cooldownBars: Int? = null
+        val cooldownBars: Int? = null,
+        val minGapMinutes: Int? = null
     )
 
     /** มุมมองของ AI + ผลที่ติดตามได้ (P15) — ไฟล์รุ่นเก่าไม่มี จึงเป็นรายการว่าง */
@@ -67,6 +70,14 @@ object LearningTransfer {
         val mfeAtr: Double? = null, val maeAtr: Double? = null, val bars: Long? = null, val resolvedAt: Long? = null
     )
 
+    /** สถิติสะสมของปัจจัย × TF ที่ยุบแถวดิบไปแล้ว (P17) — ไฟล์รุ่นเก่าไม่มี */
+    @Serializable
+    data class Stat(
+        val factorId: String, val factorTf: String, val side: String,
+        val mtfAlign: String, val adxBucket: String, val session: String,
+        val n: Long, val sumR: Double, val sumAbs: Double, val wins: Long, val updatedAt: Long
+    )
+
     @Serializable
     data class Bundle(
         val format: String = FORMAT,
@@ -74,7 +85,8 @@ object LearningTransfer {
         val exportedAt: Long,
         val settings: Settings,
         val outcomes: List<Outcome>,
-        val views: List<View> = emptyList()
+        val views: List<View> = emptyList(),
+        val stats: List<Stat> = emptyList()
     )
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -88,15 +100,20 @@ object LearningTransfer {
                 disabledFactors = WakeSettings.disabled.sorted(),
                 hourlyBudget = WakeSettings.hourlyBudget,
                 dailyBudget = WakeSettings.dailyBudget,
-                cooldownBars = WakeSettings.cooldownBars
+                cooldownBars = WakeSettings.cooldownBars,
+                minGapMinutes = WakeSettings.minGapMinutes
             ),
             outcomes = rows.map {
                 Outcome(
                     it.signal_id, it.factor_id, it.symbol, it.interval, it.side, it.kind,
                     it.ref_price, it.ref_atr, it.woke, it.mtf_align, it.adx_bucket, it.vol_bucket, it.session,
                     it.ai_decision, it.ai_bias, it.status, it.forward_r, it.mfe_r, it.mae_r,
-                    it.created_at, it.resolved_at, it.ai_confidence, it.ai_reason
+                    it.created_at, it.resolved_at, it.ai_confidence, it.ai_reason, it.factor_tf
                 )
+            },
+            stats = db.jarvisDatabaseQueries.getAllFactorStats().executeAsList().map {
+                Stat(it.factor_id, it.factor_tf, it.side, it.mtf_align, it.adx_bucket, it.session,
+                    it.n, it.sum_r, it.sum_abs, it.wins, it.updated_at)
             },
             views = db.jarvisDatabaseQueries.getAllAiViews().executeAsList().map {
                 View(
@@ -139,8 +156,12 @@ object LearningTransfer {
                     o.signalId, o.factorId.uppercase(), o.symbol, o.interval, o.side, o.kind,
                     o.refPrice, o.refAtr, o.woke, o.mtfAlign, o.adxBucket, o.volBucket, o.session,
                     o.aiDecision, o.aiBias, o.status, o.forwardR, o.mfeR, o.maeR, o.createdAt, o.resolvedAt,
-                    o.aiConfidence, o.aiReason
+                    o.aiConfidence, o.aiReason, o.factorTf?.ifBlank { null } ?: o.interval
                 )
+            }
+            bundle.stats.forEach { st ->
+                q.insertFactorStatIfAbsent(st.factorId, st.factorTf, st.side, st.mtfAlign, st.adxBucket, st.session,
+                    st.n, st.sumR, st.sumAbs, st.wins, st.updatedAt)
             }
             bundle.views.forEach { v ->
                 q.insertAiViewIfAbsent(
@@ -156,6 +177,7 @@ object LearningTransfer {
             s.hourlyBudget?.let { WakeSettings.hourlyBudget = it }
             s.dailyBudget?.let { WakeSettings.dailyBudget = it }
             s.cooldownBars?.let { WakeSettings.cooldownBars = it }
+            s.minGapMinutes?.let { WakeSettings.minGapMinutes = it }
         }
         WakeLearningStore.invalidateCache()
         return ImportResult(bundle.outcomes.size, inserted, bundle.outcomes.size - inserted, applySettings, bundle.views.size)

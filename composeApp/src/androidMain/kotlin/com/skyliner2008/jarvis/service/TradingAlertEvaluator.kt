@@ -492,7 +492,10 @@ internal class TradingAlertEvaluator(
             val now = System.currentTimeMillis()
             val lastAt = signalAlertLastHandledAt[signalThrottleKey] ?: 0L
             val lastId = signalAlertLastHandledId[signalThrottleKey] ?: 0L
-            throttledSignal = signalId == lastId || (lastAt > 0L && now - lastAt < signalAlertCooldownMs)
+            // งานปลุก AI คุมจังหวะเองใน WakeGovernor (ระยะห่าง/งบ) และ wake_id ไม่ซ้ำต่อการปลุก
+            // — throttle 90 วิ ตรงนี้เคยทำให้การปลุกที่ห่างกัน 1 นาทีถูกทิ้ง ทั้งที่ engine ใช้งบไปแล้ว
+            val timeThrottle = job.tool_name != com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME
+            throttledSignal = signalId == lastId || (timeThrottle && lastAt > 0L && now - lastAt < signalAlertCooldownMs)
             if (throttledSignal) {
                 logDebug(
                     "AutomationService",

@@ -25,45 +25,76 @@ class WakeSystemTest {
     @BeforeTest
     fun reset() = WakeGovernor.resetForTest()
 
-    private fun ev(id: String, dir: String = "BUY") = TriggerEvent(id, "15m", "เหตุการณ์ $id", dir, 100.0)
+    private fun ev(id: String, dir: String = "BUY", tf: String = "15m") = TriggerEvent(id, tf, "เหตุการณ์ $id", dir, 100.0)
+    private fun bars(ts: Long) = mapOf("15m" to ts)
 
     // ─── Governor ────────────────────────────────────────────────────────────
 
     @Test
     fun cooldownSuppressesSameTriggerSameDirection() {
         val key = "XAUUSD@15m"
-        val first = WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0, tfMs)
+        val first = WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0))
         assertEquals(1, first.size)
         // แท่งถัดไป (อยู่ใน cooldown) → ไม่นับซ้ำ
-        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0 + tfMs, tfMs).isEmpty())
+        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0 + tfMs)).isEmpty())
         // ทิศตรงข้าม = เหตุการณ์ใหม่
-        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS", "SELL")), t0 + tfMs, tfMs).size)
+        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS", "SELL")), bars(t0 + tfMs)).size)
         // พ้น cooldown แล้ว → ยิงได้อีก
         val after = t0 + (WakeSettings.cooldownBars + 1) * tfMs
-        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), after, tfMs).size)
+        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(after)).size)
+    }
+
+    /** ปัจจัยเดียวกันคนละ TF = คนละเหตุการณ์ และ cooldown นับเป็นแท่งของ TF ที่เกิด */
+    @Test
+    fun cooldownIsPerFactorAndTimeframe() {
+        val key = "BTCUSDT@15m"
+        val ts = mapOf("1m" to t0, "5m" to t0, "15m" to t0, "1h" to t0)
+        val both = WakeGovernor.freshEvents(key, listOf(ev("RSI_50_CROSS", tf = "5m"), ev("RSI_50_CROSS", tf = "1h")), ts)
+        assertEquals(2, both.size, "RSI_50_CROSS บน M5 และ H1 ต้องนับแยกกัน")
+        // 4 แท่ง M5 ต่อมา (20 นาที) พ้น cooldown ของ M5 แต่ยังอยู่ใน cooldown ของ H1
+        val later = mapOf("5m" to t0 + 4 * 300_000L, "1h" to t0)
+        val again = WakeGovernor.freshEvents(key, listOf(ev("RSI_50_CROSS", tf = "5m"), ev("RSI_50_CROSS", tf = "1h")), later)
+        assertEquals(listOf("5m"), again.map { it.tf })
     }
 
     @Test
-    fun oneWakePerBarAndHourlyBudget() {
+    fun minimumGapAndHourlyBudget() {
         val key = "XAUUSD@15m"
-        val d1 = WakeGovernor.decide(key, "XAUUSD", t0, t0)
-        assertTrue(d1.allowed)
-        WakeGovernor.register(key, "XAUUSD", t0, t0)
-        assertFalse(WakeGovernor.decide(key, "XAUUSD", t0, t0 + 1_000).allowed, "แท่งเดิมต้องไม่ปลุกซ้ำ")
+        assertTrue(WakeGovernor.decide(key, "XAUUSD", t0).allowed)
+        WakeGovernor.register(key, "XAUUSD", t0)
+        val gap = WakeSettings.minGapMinutes * 60_000L
+        assertFalse(WakeGovernor.decide(key, "XAUUSD", t0 + gap - 1_000).allowed, "ต้องเว้นระยะขั้นต่ำ")
+        // พ้นระยะห่างแล้วปลุกได้ แม้ยังอยู่ในแท่ง M15 เดิม (เดิมปลุกได้ครั้งเดียวต่อแท่ง)
+        assertTrue(WakeGovernor.decide(key, "XAUUSD", t0 + gap).allowed)
 
-        // ใช้งบรายชั่วโมงให้หมด (คนละแท่ง)
+        // ใช้งบรายชั่วโมงให้หมด
         repeat(WakeSettings.hourlyBudget - 1) { i ->
-            val bar = t0 + (i + 1) * tfMs
-            assertTrue(WakeGovernor.decide(key, "XAUUSD", bar, t0 + i * 60_000L).allowed)
-            WakeGovernor.register(key, "XAUUSD", bar, t0 + i * 60_000L)
+            val at = t0 + (i + 1) * gap
+            assertTrue(WakeGovernor.decide(key, "XAUUSD", at).allowed, "ครั้งที่ ${i + 2}")
+            WakeGovernor.register(key, "XAUUSD", at)
         }
-        val blocked = WakeGovernor.decide(key, "XAUUSD", t0 + 99 * tfMs, t0 + 30 * 60_000L)
+        val blocked = WakeGovernor.decide(key, "XAUUSD", t0 + WakeSettings.hourlyBudget * gap)
         assertFalse(blocked.allowed)
         assertNotNull(blocked.reason)
         // สินทรัพย์อื่นยังมีงบของตัวเอง
-        assertTrue(WakeGovernor.decide("BTCUSDT@15m", "BTCUSDT", t0, t0 + 30 * 60_000L).allowed)
+        assertTrue(WakeGovernor.decide("BTCUSDT@15m", "BTCUSDT", t0 + 30 * 60_000L).allowed)
         // ผ่านไปเกิน 1 ชม. งบกลับมา
-        assertTrue(WakeGovernor.decide(key, "XAUUSD", t0 + 200 * tfMs, t0 + 2 * 3_600_000L).allowed)
+        assertTrue(WakeGovernor.decide(key, "XAUUSD", t0 + 2 * 3_600_000L).allowed)
+    }
+
+    /** เหตุการณ์ที่ติดระยะห่างไม่หาย — พกไปการปลุกครั้งถัดไป แต่ไม่เกิน CARRY_MS */
+    @Test
+    fun blockedEventsCarryToNextWake() {
+        val key = "BTCUSDT@15m"
+        WakeGovernor.defer(key, listOf(ev("LIQUIDITY_SWEEP_REJECTION", tf = "1m")), t0)
+        WakeGovernor.defer(key, listOf(ev("LIQUIDITY_SWEEP_REJECTION", tf = "1m")), t0 + 30_000L)   // ซ้ำ ไม่เพิ่ม
+        assertTrue(WakeGovernor.hasDeferred(key, t0 + 60_000L))
+        val carried = WakeGovernor.takeDeferred(key, t0 + 60_000L)
+        assertEquals(1, carried.size)
+        assertEquals(t0, carried.single().second)
+        assertTrue(WakeGovernor.takeDeferred(key, t0 + 61_000L).isEmpty(), "ดึงแล้วต้องล้าง")
+        WakeGovernor.defer(key, listOf(ev("VOLUME_SPIKE", tf = "5m")), t0)
+        assertFalse(WakeGovernor.hasDeferred(key, t0 + WakeGovernor.CARRY_MS + 1), "เก่าเกินไปหมดความหมาย")
     }
 
     // ─── Learning math ───────────────────────────────────────────────────────
@@ -170,22 +201,33 @@ class WakeSystemTest {
     @Test
     fun previewScanDoesNotConsumeCooldown() {
         val key = "XAUUSD@15m"
-        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0, tfMs, commit = false).size)
+        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0), commit = false).size)
         // การสแกนดูอย่างเดียวต้องไม่ทำให้ alert เบื้องหลังพลาดเหตุการณ์เดียวกัน
-        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0, tfMs).size)
+        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0)).size)
     }
 
     @Test
     fun governorStateSurvivesRestart() {
         val key = "XAUUSD@15m"
-        WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0, tfMs)
-        WakeGovernor.register(key, "XAUUSD", t0, t0)
-        val saved = WakeGovernor.exportState(key, t0, tfMs)
+        WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS"), ev("EMA_CROSS", tf = "1h")), mapOf("15m" to t0, "1h" to t0))
+        WakeGovernor.register(key, "XAUUSD", t0)
+        val saved = WakeGovernor.exportState(key, t0 + 1_000)
 
         WakeGovernor.resetForTest()          // จำลองบริการรีสตาร์ท
         WakeGovernor.seed(key, saved)
-        assertFalse(WakeGovernor.decide(key, "XAUUSD", t0, t0 + 1_000).allowed, "แท่งที่ปลุกไปแล้วต้องไม่ถูกปลุกซ้ำหลังรีสตาร์ท")
-        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), t0 + tfMs, tfMs).isEmpty(), "cooldown ต้องคงอยู่")
+        assertFalse(WakeGovernor.decide(key, "XAUUSD", t0 + 1_000).allowed, "การปลุกล่าสุดต้องคงอยู่หลังรีสตาร์ท")
+        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0 + tfMs)).isEmpty(), "cooldown ต้องคงอยู่")
+        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS", tf = "1h")), mapOf("1h" to t0 + 3_600_000L)).isEmpty(),
+            "cooldown ของ H1 ต้องคงอยู่")
+    }
+
+    /** memory รุ่นก่อน P16 ("ID|DIR@ts") = เกิดบน TF ของ job */
+    @Test
+    fun legacyCooldownMemoryMapsToJobTimeframe() {
+        val key = "XAUUSD@15m"
+        WakeGovernor.seed(key, mapOf("gov_fired" to "EMA_CROSS|BUY@$t0", "gov_last_wake" to "$t0"))
+        assertTrue(WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS")), bars(t0 + tfMs)).isEmpty())
+        assertEquals(1, WakeGovernor.freshEvents(key, listOf(ev("EMA_CROSS", tf = "5m")), mapOf("5m" to t0)).size)
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.skyliner2008.jarvis
 
 import com.skyliner2008.jarvis.automation.smc.MarketContextDigest
 import com.skyliner2008.jarvis.automation.wake.WakeContext
+import com.skyliner2008.jarvis.automation.wake.WakeLearningStore
+import com.skyliner2008.jarvis.automation.wake.WakeTfProfile
 import com.skyliner2008.jarvis.automation.wake.WakeTriggerRegistry
 import com.skyliner2008.jarvis.tools.trading.Candle
 import com.skyliner2008.jarvis.tools.trading.TaIndicators
@@ -37,12 +39,15 @@ class WakeFactorReplayTest {
         val primaryTf = meta[1].trim()
         val points = meta[2].trim().toInt()
         val tfs = listOf("1m", "5m", "15m", "1h", "4h")
-        val limits = mapOf("1m" to 300, "5m" to 500, "15m" to TaIndicators.Warmup.FULL_SET,
-            "1h" to TaIndicators.Warmup.FULL_SET, "4h" to 400)
+        // เหมือน AnticipationEngine: ทุก TF ใช้ FULL_SET (ปัจจัยถูกประเมินทุก TF)
+        val limits = tfs.associateWith { TaIndicators.Warmup.FULL_SET }
         val all = tfs.associateWith { load(it) }
         val ms = tfs.associateWith { TaIndicators.timeframeMillis(it) }
-        val primary = all.getValue(primaryTf)
-        val pMs = ms.getValue(primaryTf)
+        // จุดเวลาที่เล่นซ้ำ = เวลาปิดแท่งของ step TF (บรรทัดที่ 4 ของ meta, เริ่มต้น = TF ของ job)
+        // step 1m = เหมือนมือถือที่สแกนทุกนาที
+        val stepTf = meta.getOrNull(3)?.trim()?.takeIf { it in tfs } ?: primaryTf
+        val primary = all.getValue(stepTf)
+        val pMs = ms.getValue(stepTf)
 
         val out = File(dir, "out.jsonl").bufferedWriter()
         out.use { w ->
@@ -100,15 +105,18 @@ class WakeFactorReplayTest {
                     w.write("{\"t\":$t,\"k\":\"struct\",\"tf\":\"$tf\",\"trend\":${st.trend[s.n - 1]},\"events\":[${evs.joinToString(",") { q(it) }}]}\n")
                 }
 
-                // ปัจจัยทั้งหมด (ตัวละตัว เพื่อจับ error)
-                for (tr in WakeTriggerRegistry.ALL) {
-                    val r = runCatching { tr.detect(ctx) }
-                    r.exceptionOrNull()?.let {
-                        w.write("{\"t\":$t,\"k\":\"error\",\"id\":\"${tr.id}\",\"msg\":${q("${it::class.simpleName} ${it.message}")}}\n")
-                    }
-                    val e = r.getOrNull() ?: continue
+                // ปัจจัยทั้งหมดบนทุก TF — เหมือน AnticipationEngine (scanAllTf) + เวลาที่ใช้ต่อรอบ
+                val started = System.nanoTime()
+                val scan = WakeTriggerRegistry.scanAllTf(ctx, tfs)
+                val scanMs = (System.nanoTime() - started) / 1e6
+                w.write("{\"t\":$t,\"k\":\"perf\",\"scan_ms\":$scanMs}\n")
+                scan.errors.forEach { w.write("{\"t\":$t,\"k\":\"error\",\"id\":${q(it.substringBefore('@'))},\"msg\":${q(it)}}\n") }
+                for (e in scan.events + scan.states) {
+                    val tr = WakeTriggerRegistry.find(e.triggerId) ?: continue
+                    val wakes = WakeLearningStore.tfVerdict(e.triggerId, e.tf, primaryTf).wakes
                     w.write("{\"t\":$t,\"k\":\"fire\",\"id\":\"${tr.id}\",\"kind\":\"${tr.kind}\",\"group\":\"${tr.evidenceGroup}\"," +
-                        "\"tf\":\"${e.tf}\",\"dir\":\"${e.direction}\",\"what\":${q(e.what)}}\n")
+                        "\"tf\":\"${e.tf}\",\"dir\":\"${e.direction}\",\"wakes\":$wakes,\"fixed\":${WakeTfProfile.isFixed(tr.id)}," +
+                        "\"what\":${q(e.what)}}\n")
                 }
             }
             // ทะเบียนปัจจัย

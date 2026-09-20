@@ -8,7 +8,8 @@
      - ปัจจัยที่มีสูตรใน device_wake_audit.trigger_checks: เทียบทุกแท่ง ทั้งตอนเกิดและตอนไม่เกิด (จับทั้งยิงผิดและพลาด)
      - ปัจจัยที่เหลือ: อัตราการเกิด, error, ทิศ — หาตัวที่ไม่เคยเกิดหรือเกิดแทบทุกแท่ง
 
-ใช้:  python tools/wake_factor_replay.py [SYMBOL] [--tf 15m] [--bars 300] [--db jarvis.db]
+ใช้:  python tools/wake_factor_replay.py [SYMBOL] [--tf 15m] [--bars 300] [--step 1m] [--db jarvis.db]
+     --step 1m = เล่นซ้ำทุกนาที (เหมือนมือถือที่สแกนทุกนาที) — ใช้จำลองความถี่การปลุก
 """
 import argparse
 import json
@@ -27,7 +28,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.path.join(ROOT, "composeApp", "build", "wake_replay")
 TFS = ["1m", "5m", "15m", "1h", "4h"]
 TF_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000}
-LIMITS = {"1m": 300, "5m": 500, "15m": 800, "1h": 800, "4h": 400}   # เหมือน AnticipationEngine
+LIMITS = {tf: 800 for tf in ["1m", "5m", "15m", "1h", "4h"]}   # เหมือน AnticipationEngine (FULL_SET ทุก TF)
+TF_LABEL = {"1m": "M1", "5m": "M5", "15m": "M15", "1h": "H1", "4h": "H4"}
 DIGEST_TF = {"D1": "1d", "H4": "4h", "H1": "1h", "M15": "15m", "M5": "5m", "M1": "1m"}
 
 
@@ -235,7 +237,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("symbol", nargs="?", default="BTCUSDT")
     ap.add_argument("--tf", default="15m")
-    ap.add_argument("--bars", type=int, default=300, help="จำนวนแท่ง TF หลักที่เล่นซ้ำ")
+    ap.add_argument("--bars", type=int, default=300, help="จำนวนจุดเวลาที่เล่นซ้ำ (แท่งของ --step)")
+    ap.add_argument("--step", help="TF ของจุดเวลาที่เล่นซ้ำ (ค่าเริ่มต้น = --tf)")
     ap.add_argument("--db", help="ใช้ไฟล์ jarvis.db ที่มีอยู่แทนการดึงจากมือถือ")
     ap.add_argument("--skip-gradle", action="store_true", help="ใช้ out.jsonl เดิม")
     args = ap.parse_args()
@@ -267,7 +270,7 @@ def main():
                 for x in bars[tf]:
                     f.write(f"{x[0]},{x[1]},{x[2]},{x[3]},{x[4]},{x[5]}\n")
         with open(os.path.join(WORK, "meta.txt"), "w") as f:
-            f.write(f"{sym}\n{args.tf}\n{args.bars}\n")
+            f.write(f"{sym}\n{args.tf}\n{args.bars}\n{args.step or args.tf}\n")
         gradlew = os.path.join(ROOT, "gradlew.bat" if os.name == "nt" else "gradlew")
         print("รันโค้ดของแอป (WakeFactorReplayTest)…")
         r = subprocess.run([gradlew, ":composeApp:testDebugUnitTest", "--tests", "*WakeFactorReplayTest*", "-q", "--rerun"],
@@ -395,79 +398,143 @@ def main():
     for x in lbad:
         print(f"     {x}")
 
-    # ── 2) ปัจจัยที่มีสูตรอิสระ — เทียบทุกแท่ง ───────────────────────────────
-    fires = defaultdict(dict)   # t -> id -> row
+    # ── 2) ปัจจัยที่มีสูตรอิสระ — เทียบทุกแท่งของทุก TF ─────────────────────────
+    fires = {}   # (t, id, tf) -> row
     for r in rows:
         if r["k"] == "fire":
-            fires[r["t"]][r["id"]] = r
+            fires[(r["t"], r["id"], r["tf"])] = r
     errors = [r for r in rows if r["k"] == "error"]
-    ptf = args.tf
     stats = defaultdict(Counter); samples = defaultdict(list)
     h1_all = bars["1h"]
+    seen_bar = set()
     for t in points:
-        b = cut(ptf, t)
-        checks = A.trigger_checks(b, sym, [x for x in h1_all if x[0] + TF_MS["1h"] <= t], t)
-        for fid, fn in checks.items():
-            try:
-                detail, want = fn()
-            except Exception as ex:   # ข้อมูลไม่พอ
-                want, detail = "ERR", str(ex)
-            got = fires[t].get(fid, {}).get("dir")
-            # ปัจจัยที่ดูแท่งอื่นที่ไม่ใช่ TF หลักจะไม่อยู่ในชุดนี้
-            if want == "ERR":
-                stats[fid]["err"] += 1
-            elif got == want:
-                stats[fid]["both_fire" if want else "both_quiet"] += 1
-            else:
-                kind = "app_only" if want is None else "ref_only" if got is None else "dir_diff"
-                stats[fid][kind] += 1
-                if len(samples[fid]) < 3:
-                    samples[fid].append(f"{A.ts(t)} แอป={got} อ้างอิง={want} | {detail}")
-    print(f"\n══ 2) ปัจจัยที่มีสูตรอิสระ ({len(stats)} ตัว) — เทียบทุก {len(points)} แท่ง ══")
+        h1_cut = [x for x in h1_all if x[0] + TF_MS["1h"] <= t]
+        for tf in TFS:
+            b = cut(tf, t)
+            if len(b) < 60 or (tf, b[-1][0]) in seen_bar:
+                continue   # แท่งเดิมของ TF นี้ตรวจไปแล้ว (TF ใหญ่ถูกประเมินซ้ำทุกจุดเวลาจนกว่าจะปิดแท่งใหม่)
+            seen_bar.add((tf, b[-1][0]))
+            for fid, fn in A.trigger_checks(b, sym, h1_cut, t).items():
+                try:
+                    detail, want = fn()
+                except Exception as ex:   # ข้อมูลไม่พอ
+                    want, detail = "ERR", str(ex)
+                got = fires.get((t, fid, tf), {}).get("dir")
+                k = (fid, tf)
+                if want == "ERR":
+                    stats[k]["err"] += 1
+                elif got == want:
+                    stats[k]["both_fire" if want else "both_quiet"] += 1
+                else:
+                    kind = "app_only" if want is None else "ref_only" if got is None else "dir_diff"
+                    stats[k][kind] += 1
+                    if len(samples[k]) < 3:
+                        samples[k].append(f"{A.ts(t)} [{TF_LABEL[tf]}] แอป={got} อ้างอิง={want} | {detail}")
+    fids = sorted({k[0] for k in stats})
+    print(f"\n══ 2) ปัจจัยที่มีสูตรอิสระ ({len(fids)} ตัว) × {len(TFS)} TF — เทียบทุกแท่ง ทั้งตอนเกิดและไม่เกิด ══")
+    print("  (ตัวเลข = จำนวนแท่งที่เกิดตรงกัน / ที่ตรวจทั้งหมด)")
+    print(f"  {'ปัจจัย':<27} " + " ".join(f"{TF_LABEL[tf]:>9}" for tf in TFS))
     mism = 0
-    for fid in sorted(stats):
-        s = stats[fid]; wrong = s["app_only"] + s["ref_only"] + s["dir_diff"]
-        mism += wrong > 0
-        print(f"  {'✓' if not wrong else '✗'} {fid:<27} เกิดตรงกัน {s['both_fire']:>3} · ไม่เกิดตรงกัน {s['both_quiet']:>3}"
-              + (f" · แอปเกิดแต่สูตรไม่เกิด {s['app_only']} · สูตรเกิดแต่แอปไม่เกิด {s['ref_only']} · ทิศต่าง {s['dir_diff']}" if wrong else "")
-              + (f" · คำนวณไม่ได้ {s['err']}" if s["err"] else ""))
-        for x in samples[fid]:
-            print(f"       {x}")
-    print(f"  → ไม่ตรง {mism} ตัว")
+    for fid in fids:
+        cells = []; bad_row = False
+        for tf in TFS:
+            st = stats.get((fid, tf))
+            if not st:
+                cells.append(f"{'-':>9}"); continue
+            wrong = st["app_only"] + st["ref_only"] + st["dir_diff"]
+            bad_row |= wrong > 0
+            total = st["both_fire"] + st["both_quiet"] + wrong
+            cells.append(f"{('✗' if wrong else '') + str(st['both_fire']) + '/' + str(total):>9}")
+        mism += bad_row
+        print(f"  {'✗' if bad_row else '✓'} {fid:<25} " + " ".join(cells))
+        for tf in TFS:
+            for x in samples.get((fid, tf), []):
+                print(f"       {x}")
+    print(f"  → ปัจจัย×TF ที่ไม่ตรง: {sum(1 for k, v in stats.items() if v['app_only'] + v['ref_only'] + v['dir_diff'])} (ปัจจัย {mism} ตัว)")
 
-    # ── 3) ภาพรวมทุกปัจจัย ────────────────────────────────────────────────────
-    print(f"\n══ 3) ทุกปัจจัย {len(reg)} ตัว — อัตราการเกิดบน {len(points)} แท่ง ══")
-    cnt = Counter(); dirs = defaultdict(Counter); tfs_used = defaultdict(Counter)
+    # ── 3) ภาพรวมทุกปัจจัย × TF ────────────────────────────────────────────────
+    uniq = {}   # (id, tf, bar) -> row — นับครั้งละแท่งของ TF นั้น
+    bar_of = {}
     for t in points:
-        for fid, r in fires[t].items():
-            cnt[fid] += 1; dirs[fid][r["dir"]] += 1; tfs_used[fid][r["tf"]] += 1
+        for tf in TFS:
+            b = cut(tf, t)
+            if b:
+                bar_of[(t, tf)] = b[-1][0]
+    for (t, fid, tf), r in fires.items():
+        uniq.setdefault((fid, tf, bar_of.get((t, tf), t)), r)
+    span_h = (points[-1] - points[0]) / 3_600_000 or 1
+    print(f"\n══ 3) ทุกปัจจัย {len(reg)} ตัว — จำนวนครั้งที่เกิด (นับครั้งละแท่ง) ในช่วง {span_h:.0f} ชม. · * = ปลุก AI ได้บน TF นั้น ══")
+    cnt = Counter(); wake_tf = set()
+    for (fid, tf, _), r in uniq.items():
+        cnt[(fid, tf)] += 1
+        if r.get("wakes"):
+            wake_tf.add((fid, tf))
+    fixed_ids = {r["id"] for r in rows if r["k"] == "fire" and r.get("fixed")}
     by_group = defaultdict(list)
     for fid, r in reg.items():
         by_group[r["group"]].append(fid)
-    never = []; always = []
+    never = []
+    print(f"    {'ปัจจัย':<27} {'ชนิด':<5} " + " ".join(f"{TF_LABEL[tf]:>6}" for tf in TFS))
     for g, ids in by_group.items():
         print(f"  [{g}]")
         for fid in ids:
-            n = cnt[fid]; r = reg[fid]
-            pct = 100 * n / len(points)
-            mark = "  " if fid not in stats else "✓ " if not (stats[fid]["app_only"] + stats[fid]["ref_only"] + stats[fid]["dir_diff"]) else "✗ "
-            if n == 0:
+            r = reg[fid]
+            if sum(cnt[(fid, tf)] for tf in TFS) == 0:
                 never.append(fid)
-            if r["kind"] == "EVENT" and pct > 40:
-                always.append(fid)
-            d = " ".join(f"{k}:{v}" for k, v in dirs[fid].most_common())
-            tf = ",".join(tfs_used[fid])
-            print(f"    {mark}{fid:<27} {r['kind']:<5} {n:>4} ({pct:4.1f}%) {tf:<14} {d}")
-    print(f"\n  ไม่เกิดเลยใน {len(points)} แท่ง: {len(never)} ตัว — {', '.join(never)}")
-    if always:
-        print(f"  EVENT ที่เกิด > 40% ของแท่ง (น่าสงสัยว่าเงื่อนไขหลวม): {', '.join(always)}")
+            cells = " ".join(f"{(str(cnt[(fid, tf)]) + ('*' if (fid, tf) in wake_tf else '')) if cnt[(fid, tf)] else '·':>6}" for tf in TFS)
+            print(f"    {fid:<27} {r['kind']:<5} {cells}{'  (ตายตัว)' if fid in fixed_ids else ''}")
+    print(f"\n  ไม่เกิดเลยบนทุก TF: {len(never)} ตัว — {', '.join(never)}")
+    ev_tf = Counter(); ev_wake = Counter()
+    for (fid, tf, _), r in uniq.items():
+        if r["kind"] == "EVENT":
+            ev_tf[tf] += 1
+            if r.get("wakes"):
+                ev_wake[tf] += 1
+    print("  เหตุการณ์ต่อชั่วโมง (ทั้งหมด / ที่ปลุก AI ได้): " +
+          " · ".join(f"{TF_LABEL[tf]} {ev_tf[tf] / span_h:.1f}/{ev_wake[tf] / span_h:.1f}" for tf in TFS))
     if errors:
-        e = Counter(f"{x['id']}: {x['msg']}" for x in errors)
+        e = Counter(f"{x['msg'][:120]}" for x in errors)
         print(f"  ❌ error ระหว่างประเมิน {len(errors)} ครั้ง:")
         for k, v in e.most_common(10):
             print(f"     {v}× {k}")
     else:
         print("  error ระหว่างประเมิน: ไม่มี")
+    perf = [r["scan_ms"] for r in rows if r["k"] == "perf"]
+    if perf:
+        perf.sort()
+        print(f"  เวลาประเมิน 115 ปัจจัย × 5 TF ต่อรอบ (JVM บน PC): เฉลี่ย {sum(perf) / len(perf):.0f} ms · p95 {perf[int(len(perf) * 0.95)]:.0f} ms")
+
+    # ── 3b) จำลองการปลุกตามกติกาใหม่ (cooldown 3 แท่งต่อปัจจัย×TF, เว้น 1 นาที, 40/ชม., พกเหตุการณ์ 10 นาที) ──
+    step_ms = TF_MS.get(args.step or args.tf, 900_000)
+    last_fired = {}; last_wake = None; wakes = []; deferred = []
+    by_t = defaultdict(list)
+    for (t, fid, tf), r in fires.items():
+        if r["kind"] == "EVENT" and r.get("wakes"):
+            by_t[t].append(r)
+    for t in points:
+        fresh = []
+        for r in by_t.get(t, []):
+            k = (r["id"], r["tf"], r["dir"]); bt = bar_of.get((t, r["tf"]), t)
+            prev = last_fired.get(k)
+            if prev is None or bt - prev > 3 * TF_MS[r["tf"]]:
+                last_fired[k] = bt; fresh.append(r)
+        deferred = [(r, at) for r, at in deferred if t - at <= 600_000]
+        if not fresh and not deferred:
+            continue
+        recent = [w for w in wakes if t - w[0] < 3_600_000]
+        if (last_wake is None or t - last_wake >= 60_000) and len(recent) < 40:
+            wakes.append((t, fresh + [r for r, _ in deferred])); last_wake = t; deferred = []
+        else:
+            deferred += [(r, t) for r in fresh]
+    if wakes:
+        hours = max(span_h, step_ms / 3_600_000)
+        mix = Counter(r["tf"] for _, evs in wakes for r in evs)
+        print(f"\n══ 3b) จำลองการปลุก (สแกนทุก {TF_LABEL.get(args.step or args.tf, args.step)}) ══")
+        print(f"  ปลุก {len(wakes)} ครั้งใน {hours:.1f} ชม. = {len(wakes) / hours:.1f} ครั้ง/ชม. (~{len(wakes) / hours * 24:.0f}/วัน ถ้าตลาดเปิดทั้งวัน)")
+        print(f"  เหตุการณ์ต่อการปลุก เฉลี่ย {sum(len(e) for _, e in wakes) / len(wakes):.1f} · TF ของเหตุการณ์: " +
+              " · ".join(f"{TF_LABEL[tf]} {mix[tf]}" for tf in TFS if mix[tf]))
+        if (args.step or args.tf) != "1m":
+            print("  (จุดเวลาห่างกันเกิน 1 นาที — ใช้ --step 1m เพื่อจำลองแบบมือถือ)")
 
     last = [r for r in rows if r["k"] == "digest_text"]
     if last:

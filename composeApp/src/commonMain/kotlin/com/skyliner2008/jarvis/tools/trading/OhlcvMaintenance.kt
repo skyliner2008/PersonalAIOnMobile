@@ -96,13 +96,21 @@ object OhlcvMaintenance {
         runCatching { db.jarvisDatabaseQueries.expireStaleOpenAiViews(nowMs, nowMs - 30 * DAY_MS) }
         runCatching {
             db.jarvisDatabaseQueries.deleteAiViewsBefore(nowMs - com.skyliner2008.jarvis.automation.wake.AiViewTracker.RETENTION_DAYS * DAY_MS)
+            db.jarvisDatabaseQueries.deleteOldSkipAiViews(
+                nowMs - com.skyliner2008.jarvis.automation.wake.AiViewTracker.SKIP_RETENTION_DAYS * DAY_MS)
         }
 
         // ประวัติการเรียนรู้ของระบบปลุกเก่ากว่า 1 ปี
         val before = runCatching { db.jarvisDatabaseQueries.countFactorOutcomes().executeAsOne() }.getOrDefault(0L)
         runCatching {
-            db.jarvisDatabaseQueries.deleteFactorOutcomesBefore(nowMs - WakeLearningStore.RETENTION_DAYS * DAY_MS)
+            // ยุบก่อนลบ ใน transaction เดียว — ถ้ายุบสำเร็จแต่ลบพลาด สถิติจะถูกนับซ้ำ
+            db.transaction {
+                WakeLearningStore.foldAgedBeforeDelete(nowMs)
+                db.jarvisDatabaseQueries.deleteFactorOutcomesBefore(nowMs - WakeLearningStore.RETENTION_DAYS * DAY_MS)
+            }
         }
+        // ยุบแถวที่วัดผลแล้วและไม่ได้ปลุก AI เป็นสถิติสะสม (5 TF ทุกนาที = ~6,000 แถว/วัน/สินทรัพย์)
+        runCatching { WakeLearningStore.foldOldOutcomes(nowMs) }
         val after = runCatching { db.jarvisDatabaseQueries.countFactorOutcomes().executeAsOne() }.getOrDefault(before)
         if (after != before) WakeLearningStore.invalidateCache()
 

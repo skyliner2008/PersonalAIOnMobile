@@ -965,7 +965,10 @@ CREATE TABLE IF NOT EXISTS AnticipationFactorOutcome (
     -- เหตุผลและความมั่นใจของ AI (ทั้ง NOTIFY และ SKIP) — เพิ่มใน 14.sqm จึงอยู่ท้ายตาราง
     ai_confidence INTEGER,
     ai_reason TEXT,
-    UNIQUE(signal_id, factor_id)
+    -- TF ที่ปัจจัยเกิด (P16) — ปัจจัยเดียวถูกประเมินบน M1/M5/M15/H1/H4 จึงเกิดได้หลายแถวต่อการสแกน
+    -- วัดผลด้วยแท่ง/ATR ของ TF นี้ ([FORWARD_HORIZON_BARS] แท่งของ TF นี้)
+    factor_tf TEXT NOT NULL DEFAULT '',
+    UNIQUE(signal_id, factor_id, factor_tf)
 );
 
 CREATE INDEX IF NOT EXISTS idx_anticipation_factor_lookup
@@ -982,17 +985,20 @@ INSERT OR IGNORE INTO AnticipationFactorOutcome(
     signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
     mtf_align, adx_bucket, vol_bucket, session,
     ai_decision, ai_bias, status, forward_r, mfe_r, mae_r, created_at, resolved_at,
-    ai_confidence, ai_reason
+    ai_confidence, ai_reason, factor_tf
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+-- keys = "FACTOR@tf"
 markFactorOutcomesWoke:
-UPDATE AnticipationFactorOutcome SET woke = 1 WHERE signal_id = ? AND factor_id IN ?;
+UPDATE AnticipationFactorOutcome SET woke = 1 WHERE signal_id = ? AND (factor_id || '@' || factor_tf) IN ?;
 
+-- เฉพาะแถวที่ปลุก AI จริง — แถวของปัจจัย/TF ที่แค่เก็บสถิติในรอบเดียวกันไม่ใช่สิ่งที่ AI เห็น
+-- (และถ้าติด ai_decision ไปด้วย จะยุบเป็นสถิติสะสมไม่ได้ ตาราง AnticipationFactorOutcome จะบวมเร็วมาก)
 setFactorOutcomeAiDecision:
 UPDATE AnticipationFactorOutcome
 SET ai_decision = ?, ai_bias = ?, ai_confidence = ?, ai_reason = ?
-WHERE signal_id = ?;
+WHERE signal_id = ? AND woke = 1;
 
 getPendingFactorOutcomes:
 SELECT * FROM AnticipationFactorOutcome
@@ -1007,14 +1013,14 @@ WHERE id = ?;
 
 -- สรุปรวมรายปัจจัย×สภาพแวดล้อม — ดึงครั้งเดียวแล้วแคช (ไม่ query ทุกรอบสแกน)
 getFactorAggregates:
-SELECT factor_id, side, mtf_align, adx_bucket, session,
+SELECT factor_id, factor_tf, side, mtf_align, adx_bucket, session,
        COUNT(*) AS n,
        SUM(forward_r) AS sum_r,
        SUM(ABS(forward_r)) AS sum_abs,
        SUM(CASE WHEN forward_r > 0 THEN 1 ELSE 0 END) AS wins
 FROM AnticipationFactorOutcome
 WHERE status = 'RESOLVED'
-GROUP BY factor_id, side, mtf_align, adx_bucket, session;
+GROUP BY factor_id, factor_tf, side, mtf_align, adx_bucket, session;
 
 -- ความแม่นของ AI หลังถูกปลุก — วัด "ตามทิศที่ AI มอง" ต่อ 1 การปลุก (signal_id)
 -- up_r = การเคลื่อนที่ขึ้นหน่วย ATR: แถว BUY เก็บตามทิศขึ้น, SELL กลับเครื่องหมาย, NEUTRAL เก็บแบบมีเครื่องหมาย
@@ -1035,7 +1041,7 @@ FROM (
            AVG(CASE side WHEN 'SELL' THEN -forward_r ELSE forward_r END) *
                (CASE MAX(ai_bias) WHEN 'BUY' THEN 1.0 WHEN 'SELL' THEN -1.0 ELSE NULL END) AS ai_r
     FROM AnticipationFactorOutcome
-    WHERE status = 'RESOLVED' AND ai_decision IS NOT NULL
+    WHERE status = 'RESOLVED' AND ai_decision IS NOT NULL AND factor_tf = interval
     GROUP BY signal_id
 )
 GROUP BY ai_decision, ai_bias;
@@ -1062,6 +1068,81 @@ SELECT COUNT(*) FROM AnticipationFactorOutcome;
 
 deleteFactorOutcomesBefore:
 DELETE FROM AnticipationFactorOutcome WHERE created_at < ?;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- สถิติสะสมของปัจจัย (P17) — ยุบแถวที่วัดผลแล้วและไม่ได้ปลุก AI
+-- 5 TF × ทุกนาที = ~6,000 แถว/วัน/สินทรัพย์ เก็บดิบ 365 วันไม่ไหวบนมือถือ
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AnticipationFactorStat (
+    factor_id TEXT NOT NULL,
+    factor_tf TEXT NOT NULL,
+    side TEXT NOT NULL,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    sum_r REAL NOT NULL,
+    sum_abs REAL NOT NULL,
+    wins INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (factor_id, factor_tf, side, mtf_align, adx_bucket, session)
+);
+
+-- รวมแถวดิบที่วัดผลแล้ว (ไม่ได้ปลุก AI) เข้าสถิติสะสม — ต้องรันคู่กับ deleteFoldedFactorOutcomes ใน transaction เดียว
+foldResolvedFactorOutcomes:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+SELECT o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session,
+       COALESCE(s.n, 0) + COUNT(*),
+       COALESCE(s.sum_r, 0) + SUM(o.forward_r),
+       COALESCE(s.sum_abs, 0) + SUM(ABS(o.forward_r)),
+       COALESCE(s.wins, 0) + SUM(CASE WHEN o.forward_r > 0 THEN 1 ELSE 0 END),
+       ?
+FROM AnticipationFactorOutcome o
+LEFT JOIN AnticipationFactorStat s
+  ON s.factor_id = o.factor_id AND s.factor_tf = o.factor_tf AND s.side = o.side
+ AND s.mtf_align = o.mtf_align AND s.adx_bucket = o.adx_bucket AND s.session = o.session
+WHERE o.status = 'RESOLVED' AND o.woke = 0 AND o.ai_decision IS NULL AND o.created_at < ?
+GROUP BY o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session;
+countFoldableFactorOutcomes:
+SELECT COUNT(*) FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED' AND woke = 0 AND ai_decision IS NULL AND created_at < ?;
+
+deleteFoldedFactorOutcomes:
+DELETE FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED' AND woke = 0 AND ai_decision IS NULL AND created_at < ?;
+
+-- ยุบทุกแถวที่วัดผลแล้วก่อนถึงเวลาลบทิ้ง (รวมแถวที่ปลุก AI) — สถิติการเรียนรู้ต้องไม่หายไปกับการลบ
+foldAllResolvedFactorOutcomes:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+SELECT o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session,
+       COALESCE(s.n, 0) + COUNT(*),
+       COALESCE(s.sum_r, 0) + SUM(o.forward_r),
+       COALESCE(s.sum_abs, 0) + SUM(ABS(o.forward_r)),
+       COALESCE(s.wins, 0) + SUM(CASE WHEN o.forward_r > 0 THEN 1 ELSE 0 END),
+       ?
+FROM AnticipationFactorOutcome o
+LEFT JOIN AnticipationFactorStat s
+  ON s.factor_id = o.factor_id AND s.factor_tf = o.factor_tf AND s.side = o.side
+ AND s.mtf_align = o.mtf_align AND s.adx_bucket = o.adx_bucket AND s.session = o.session
+WHERE o.status = 'RESOLVED' AND o.created_at < ?
+GROUP BY o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session;
+getFactorStats:
+SELECT factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins FROM AnticipationFactorStat;
+
+getAllFactorStats:
+SELECT * FROM AnticipationFactorStat;
+
+-- นำเข้าจากไฟล์การเรียนรู้ (ไม่ทับสถิติที่เครื่องนี้สะสมเอง)
+insertFactorStatIfAbsent:
+INSERT OR IGNORE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertFactorStat:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+countFactorStats:
+SELECT COUNT(*) FROM AnticipationFactorStat;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- OHLCV series access — ลบซีรีส์ที่ไม่ได้ใช้นาน คุมขนาดฐานข้อมูล (P13)
@@ -1172,6 +1253,10 @@ UPDATE AiWakeView SET status = 'EXPIRED', resolved_at = ? WHERE status = 'OPEN' 
 
 deleteAiViewsBefore:
 DELETE FROM AiWakeView WHERE created_at < ?;
+
+-- มุมมอง SKIP เก่ากว่าหน้าต่างสถิติ (30 วัน) ไม่ได้ใช้แล้ว — ปลุกได้ทุกนาทีจึงมีวันละหลายร้อยแถว
+deleteOldSkipAiViews:
+DELETE FROM AiWakeView WHERE decision = 'SKIP' AND created_at < ?;
 
 -- ย้อนเติมมุมมองที่ AI ตัดสินไปก่อนมีตาราง AiWakeView (ครั้งเดียว)
 getAiDecisionsForBackfill:

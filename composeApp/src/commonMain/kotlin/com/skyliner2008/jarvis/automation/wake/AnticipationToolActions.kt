@@ -106,11 +106,12 @@ class AnticipationToolActions(
         args["hourly_budget"]?.toIntOrNull()?.let { WakeSettings.hourlyBudget = it }
         args["daily_budget"]?.toIntOrNull()?.let { WakeSettings.dailyBudget = it }
         args["cooldown_bars"]?.toIntOrNull()?.let { WakeSettings.cooldownBars = it }
+        args["min_gap_minutes"]?.toIntOrNull()?.let { WakeSettings.minGapMinutes = it }
         return buildString {
             appendLine("⚙️ **อัปเดตการตั้งค่าระบบปลุกแล้ว**")
             appendLine("• เปิดใช้ ${WakeSettings.enabledIds().size}/${WakeTriggerRegistry.ALL.size} ปัจจัย")
             if (off.isNotEmpty()) appendLine("• ปิดโดยผู้ใช้: ${off.sorted().joinToString(", ")}")
-            appendLine("• งบ: ${WakeSettings.hourlyBudget}/ชม./สินทรัพย์ · ${WakeSettings.dailyBudget}/วัน · cooldown ${WakeSettings.cooldownBars} แท่ง")
+            appendLine("• งบ: ${WakeSettings.hourlyBudget}/ชม./สินทรัพย์ · ${WakeSettings.dailyBudget}/วัน · เว้น ${WakeSettings.minGapMinutes} นาที/ครั้ง · cooldown ${WakeSettings.cooldownBars} แท่งของ TF ที่เกิด")
         }.trim()
     }
 
@@ -118,22 +119,27 @@ class AnticipationToolActions(
         val off = WakeSettings.disabled
         return buildString {
             appendLine("📋 **ปัจจัยปลุก AI ทั้งหมด ${WakeTriggerRegistry.ALL.size} ตัว ใน ${WakeTriggerRegistry.BY_GROUP.size} หมวด**")
-            appendLine("E = เหตุการณ์ (ปลุก AI ได้) · S = สภาวะ (เป็นบริบท) · ✅ เปิด · ⛔ ปิดโดยผู้ใช้ · ⬇️ ลดชั้นโดยระบบเรียนรู้")
+            appendLine("E = เหตุการณ์ (ปลุก AI ได้) · S = สภาวะ (เป็นบริบท) · ✅ เปิด · ⛔ ปิดโดยผู้ใช้")
+            appendLine("TF: ตัวหนา = ปลุก AI ได้ · ⬆️ เลื่อนชั้น / ⬇️ ลดชั้นโดยระบบเรียนรู้ · ที่เหลือเก็บสถิติอย่างเดียว · \"ตายตัว\" = ประเมินครั้งเดียว")
             EvidenceGroup.entries.forEach { g ->
                 val list = WakeTriggerRegistry.BY_GROUP[g].orEmpty()
                 if (list.isEmpty()) return@forEach
                 appendLine()
                 appendLine("**${g.labelTh}** (${list.size})")
                 list.forEach { t ->
-                    val mark = when {
-                        t.id in off -> "⛔"
-                        WakeLearningStore.isDemoted(t.id) -> "⬇️"
-                        else -> "✅"
+                    val mark = if (t.id in off) "⛔" else "✅"
+                    val tfs = if (WakeTfProfile.isFixed(t.id)) " · ตายตัว" else " · " + WakeTfProfile.EVAL_TFS.joinToString(" ") { tf ->
+                        val v = WakeLearningStore.tfVerdict(t.id, tf, WakeTfProfile.M15)
+                        val label = tfLabel(tf)
+                        when (v) {
+                            WakeLearningStore.TfVerdict.WAKE -> "**$label**"
+                            WakeLearningStore.TfVerdict.PROMOTED -> "**$label**⬆️"
+                            WakeLearningStore.TfVerdict.DEMOTED -> "$label⬇️"
+                            WakeLearningStore.TfVerdict.RECORD -> label
+                        }
                     }
-                    val st = WakeLearningStore.overall(t.id)?.let { s ->
-                        if (s.directional) " · n=${s.n} ${"%+.2f".format(s.avgR)}R" else " · n=${s.n} ${"%.1f".format(s.avgR)}×ATR"
-                    } ?: ""
-                    appendLine("$mark `${t.id}` [${if (t.kind == TriggerKind.EVENT) "E" else "S"}] ${t.name}$st")
+                    val n = WakeTfProfile.EVAL_TFS.sumOf { WakeLearningStore.overall(t.id, it)?.n ?: 0 }
+                    appendLine("$mark `${t.id}` [${if (t.kind == TriggerKind.EVENT) "E" else "S"}] ${t.name}$tfs${if (n > 0) " · n=$n" else ""}")
                 }
             }
         }.trim()
@@ -146,16 +152,16 @@ class AnticipationToolActions(
         if (rows.isEmpty()) return "📭 ยังไม่มีประวัติการยิงของปัจจัยสำหรับ $symbol"
         return buildString {
             appendLine("🔍 **ประวัติปัจจัยล่าสุด — $symbol** (${rows.size} รายการ)")
-            appendLine("| ปัจจัย | TF | ทิศ | บริบท | ปลุก AI | AI ตัดสิน | ผล |")
+            appendLine("| ปัจจัย | TF ที่เกิด | ทิศ | บริบท | ปลุก AI | AI ตัดสิน | ผล |")
             appendLine("|---|---|---|---|---|---|---|")
             rows.forEach { r ->
                 val res = when {
                     r.status == "EXPIRED" -> "— วัดผลไม่ได้ (ข้อมูลไม่ครอบคลุม)"
-                    r.status != "RESOLVED" -> "⏳ รอครบ ${WakeLearningStore.FORWARD_HORIZON_BARS} แท่ง"
+                    r.status != "RESOLVED" -> "⏳ รอครบ ${WakeLearningStore.FORWARD_HORIZON_BARS} แท่ง ${tfLabel(r.factor_tf.ifBlank { r.interval })}"
                     r.side == "NEUTRAL" -> "ขยับ ${"%.1f".format(kotlin.math.abs(r.forward_r ?: 0.0))}×ATR"
                     else -> "${"%+.2f".format(r.forward_r ?: 0.0)}R"
                 }
-                appendLine("| ${r.factor_id} | ${r.interval} | ${r.side} | ${r.mtf_align}/${r.adx_bucket}/${r.session} | ${if (r.woke == 1L) "✅" else "—"} | ${r.ai_decision ?: "—"}${r.ai_bias?.let { "/$it" } ?: ""}${r.ai_confidence?.let { " $it%" } ?: ""} | $res |")
+                appendLine("| ${r.factor_id} | ${tfLabel(r.factor_tf.ifBlank { r.interval })} | ${r.side} | ${r.mtf_align}/${r.adx_bucket}/${r.session} | ${if (r.woke == 1L) "✅" else "—"} | ${r.ai_decision ?: "—"}${r.ai_bias?.let { "/$it" } ?: ""}${r.ai_confidence?.let { " $it%" } ?: ""} | $res |")
             }
         }.trim()
     }
@@ -165,17 +171,27 @@ class AnticipationToolActions(
         if (stats.isEmpty()) {
             return "⏳ ยังไม่มีปัจจัยที่สถิติพอ (ต้องการ n ≥ ${WakeLearningStore.MIN_SAMPLES}) — ปล่อยให้ระบบเก็บข้อมูลต่อก่อน"
         }
+        // key = "FACTOR@tf"
+        fun parts(k: String) = k.substringBefore('@') to k.substringAfter('@')
         val good = stats.filter { it.value.directional && it.value.avgR > 0.2 }.entries.sortedByDescending { it.value.avgR }.take(10)
-        val bad = WakeLearningStore.allOverall().keys.filter { WakeLearningStore.isDemoted(it) }
+        val bad = WakeLearningStore.allOverall().keys.filter { k -> parts(k).let { (id, tf) -> WakeLearningStore.isDemoted(id, tf) } }
+        val promoted = WakeLearningStore.allOverall().keys.filter { k -> parts(k).let { (id, tf) -> WakeLearningStore.isPromoted(id, tf) && !WakeTfProfile.isDefaultWakeTf(id, tf, WakeTfProfile.M15) } }
         return buildString {
             appendLine("💡 **คำแนะนำจากผลการเรียนรู้**")
             if (good.isNotEmpty()) {
                 appendLine("ปัจจัยที่ให้ผลดีที่สุด:")
-                good.forEach { (id, s) -> appendLine("• `$id` — n=${s.n} avg ${"%+.2f".format(s.avgR)}R ไปตามทิศ ${"%.0f".format(s.winRate * 100)}%") }
+                good.forEach { (k, s) ->
+                    val (id, tf) = parts(k)
+                    appendLine("• `$id` บน ${tfLabel(tf)} — n=${s.n} avg ${"%+.2f".format(s.avgR)}R ไปตามทิศ ${"%.0f".format(s.winRate * 100)}%")
+                }
+            }
+            if (promoted.isNotEmpty()) {
+                appendLine()
+                appendLine("เลื่อนชั้นให้ปลุก AI ได้ (TF นอกชุดเริ่มต้นแต่ผลดี): ${promoted.joinToString(", ") { k -> parts(k).let { "${it.first}@${tfLabel(it.second)}" } }}")
             }
             if (bad.isNotEmpty()) {
                 appendLine()
-                appendLine("ปัจจัยที่ระบบลดชั้นแล้ว (ยังเก็บสถิติ แต่ไม่ปลุก AI): ${bad.joinToString(", ")}")
+                appendLine("ลดชั้นแล้ว (ยังเก็บสถิติ แต่ไม่ปลุก AI): ${bad.joinToString(", ") { k -> parts(k).let { "${it.first}@${tfLabel(it.second)}" } }}")
             }
         }.trim()
     }
@@ -190,8 +206,10 @@ class AnticipationToolActions(
                 appendLine("• ชั่วโมงที่ผ่านมา: " + u.perSymbolLastHour.entries.joinToString(", ") { "${it.key} ${it.value}/${WakeSettings.hourlyBudget}" })
             }
             appendLine("• ปัจจัยเปิดใช้: ${WakeSettings.enabledIds().size}/${WakeTriggerRegistry.ALL.size}")
-            val demoted = WakeLearningStore.allOverall().keys.count { WakeLearningStore.isDemoted(it) }
-            if (demoted > 0) appendLine("• ลดชั้นโดยระบบเรียนรู้: $demoted ตัว")
+            appendLine("• ประเมินทุกปัจจัยบน ${WakeTfProfile.EVAL_TFS.joinToString("/") { tfLabel(it) }} ทุกนาที · เว้น ${WakeSettings.minGapMinutes} นาที/การปลุก")
+            val keys = WakeLearningStore.allOverall().keys
+            val demoted = keys.count { k -> WakeLearningStore.isDemoted(k.substringBefore('@'), k.substringAfter('@')) }
+            if (demoted > 0) appendLine("• ปัจจัย×TF ที่ลดชั้นโดยระบบเรียนรู้: $demoted")
         }.trim()
     }
 }

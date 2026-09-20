@@ -44,6 +44,8 @@ python tools/device_wake_audit.py --last 5 --logcat
 ```bash
 python tools/wake_factor_replay.py BTCUSDT --bars 300
 ```
+`--step 1m` = เล่นซ้ำทุกนาทีเหมือนมือถือ (ส่วน 3b จำลองความถี่การปลุกตามกติกาจริง)
+
 ดึงแท่ง 1m/5m/15m/1h/4h จากมือถือ → รัน `WakeFactorReplayTest` (โค้ดจริงของแอป, ไฟล์ทำงานอยู่ `composeApp/build/wake_replay/`)
 ทีละแท่ง TF หลักด้วยแท่งที่ปิดแล้ว ณ เวลานั้น แล้วเทียบกับสูตรอิสระ: (1) อินดิเคเตอร์ทุก TF ทั้งของปัจจัยและภาพ 5TF
 (1b) trend/`ล่าสุด=` ในภาพ 5TF (2) ปัจจัยที่มีสูตรใน `trigger_checks` ทุกแท่ง ทั้งตอนเกิดและไม่เกิด (3) อัตราการเกิดทุกตัว + error
@@ -75,13 +77,16 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
 | `AppSetting` | `alert_voice_engine`, `alert_ai_summary`, `wake.usage` (วัน:จำนวนปลุก), `wake.mem.<SYMBOL@TF>` (memory + สถานะ governor) |
 | `AnticipationFactorOutcome` | 1 แถว/ปัจจัย/การปลุก — `signal_id`, `woke`, `ai_decision`, `ai_bias`, `ai_confidence`, `ai_reason`, `ref_price`, `ref_atr`, `status` (PENDING/RESOLVED/EXPIRED) |
 | `ChatMessage` | การ์ดที่ส่งเข้าแชท — `metadata` มี `"type":"wake_ai"` หรือ `"wake_direct"`, `side`, `confidence`, `summary`, `mtf` (snapshot 5TF ที่ AI เห็น), `voice` |
+| `AnticipationFactorOutcome.factor_tf` | TF ที่ปัจจัยเกิด (migration 16) — ปัจจัยเดียวเกิดได้หลาย TF ในการสแกนเดียว, `signal_id` = `SYMBOL|TF|นาทีที่สแกน` (เดิม = เวลาเปิดแท่ง TF หลัก) |
 | `AiWakeView` | มุมมอง AI 1 แถว/การปลุก — `decision`, `bias`, `level_sl/tp`, `status` (OPEN/TP/SL/EXPIRED/CLOSED), `result_r`, `move_atr`, `mfe_atr`, `mae_atr` (migration 15) |
 | `TvCandle` | แท่งเทียนดิบ (`symbol`, `interval` = 1m/5m/15m/1h/4h, `source` เช่น TV:OANDA, `ts` = เวลาเปิดแท่ง UTC ms) |
 
 ## 3. การตีความ
 
 - เวลาในฐานข้อมูลเป็น **UTC ms** — เวลาไทย = UTC + 7
-- `signal_id = SYMBOL|TF|ts` — `ts` คือเวลาเปิดของแท่ง TF หลักที่ **ปิดล่าสุด** ตอนปลุก (เช่น ปลุก 23:21 ไทย → แท่ง M15 23:00)
+- `signal_id = SYMBOL|TF|ts` — ตั้งแต่ 2026-09-20 (P16) `ts` = **นาทีที่สแกน** (ปลุกได้ทุกนาที);
+  ก่อนหน้านั้น = เวลาเปิดของแท่ง TF หลักที่ปิดล่าสุด — สคริปต์หาแท่ง TF หลักจากเวลาที่ตรวจพบให้เอง
+- ปัจจัยที่ปลุกแสดงเป็น `ID@TF(ทิศ)` และถูกตรวจบนแท่งปิดล่าสุดของ **TF ที่มันเกิด** ณ เวลาที่ตรวจพบ
 - `created_at` ของแถวการเรียนรู้ = เวลาเริ่มรอบสแกนที่ตรวจพบ — การ์ดเข้าแชทหลังจากนั้นไม่กี่วินาที (+ เวลาที่ AI วิเคราะห์ ~2–3 วิ)
   (ก่อนแก้เรื่องดึงแท่งช้า ห่างกัน 2–3 นาที — ดูข้อ 4)
 - **วันก่อนหน้า (PDH/PDL)**: ทอง/เงิน/FX (ทั้งสองฝั่งเป็น USD/EUR/GBP/JPY/CHF/AUD/CAD/NZD) เริ่มวันเทรด 22:00 UTC (= 05:00 ไทย)
@@ -118,6 +123,17 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
     → TradingView ตอบ `protocol_error` ใน 0.3 วิ แต่ bridge ไม่ฟัง error จึงรอ timeout 12 วิ ก่อนไปเส้นสำรอง
   - แก้: `TvProtocol` (commonMain) สร้างเฟรมด้วย JSON encoder + เลิกรอทันทีเมื่อเจอ error
   - ผลบนเครื่องจริง: **0.5–0.9 วิ/ครั้ง** (เฉลี่ย 0.7 วิ จาก 262 ครั้ง), สแกน 1 รอบ **4–6 วิ** (จาก 1.5–2.5 นาที)
+
+### ผลการตรวจ 2026-09-20 02:55 ไทย (หลังติดตั้ง D1 + กติกาสวนเทรนด์)
+
+- 8 การปลุก BTC ล่าสุด (00:45–02:45) ปัจจัยที่มีสูตร ✓ ทั้งหมด (17 รายการ, ✗ 0); เล่นซ้ำ 16 แท่งล่าสุดด้วย
+  `wake_factor_replay.py` ตรงสูตรอิสระทุกค่า (ปัจจัย 30 ตัว, D1–M1, รายละเอียดต่อ TF, PDH/PWH)
+- AI ตอบ SKIP ทั้ง 8 ครั้ง — เหตุผลตรงกับภาพตลาดขณะนั้นทุกข้อ (H4/H1/M15 UP, M5/M1 DOWN, H1 อยู่ 91–98% ของกรอบ,
+  volume M15 0.2–0.5x) ไม่มี NOTIFY สวนเทรนด์อีก (ก่อนแก้: SELL สวนขาขึ้น 9 ครั้ง)
+- ปลุกทุกแท่ง M15 เป็นไปตามออกแบบ (cooldown 3 แท่งต่อปัจจัย, งบ 6/ชม.) — ปัจจัย oscillator/VWAP ยิงสลับทิศเกือบทุกแท่ง
+  จึงใช้ ~4 ครั้ง/ชม. ที่ส่วนใหญ่จบด้วย SKIP; ถ้าต้องการประหยัดโทเคน พิจารณาไม่ปลุกเมื่อปัจจัยใหม่ขัดกันเองทั้งหมด
+- CONFIDENCE ของ SKIP เป็น 0% เกือบทุกครั้ง (AI ใส่ 0 เมื่อไม่มีทิศ) — ไม่ใช่บัค แต่ใช้ประเมินคุณภาพ SKIP ไม่ได้
+- ดึงแท่งเทียนเฉลี่ย 0.8 วิ (n=555)
 
 ## 5. ประวัติการแก้สคริปต์
 - 2026-09-19: แสดงความมั่นใจ + เหตุผลของ AI ทุกการปลุก (รองรับฐานข้อมูลรุ่นก่อน migration 14),

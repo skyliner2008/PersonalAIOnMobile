@@ -469,32 +469,56 @@ def trigger_checks(b, symbol, h1=None, detected_ms=None):
     return checks
 
 
-def verify_triggers(c, symbol, tf, bar_ts, woke, detected_ms=None):
-    """พิมพ์ ✓/✗ ต่อปัจจัยที่ปลุก — '—' = ตรวจนอกแอปไม่ได้ (ต้องใช้ engine/ข้อมูลภายนอกของแอป)"""
-    bars, _ = load_bars(c, symbol, tf)
-    # แอปใช้แท่ง TF หลักล่าสุด 800 แท่ง (Warmup.FULL_SET) — EMA ยาวขึ้นกับจุดเริ่ม จึงตัดให้เท่ากัน
-    b = [x for x in bars if x[0] <= bar_ts][-800:]
-    if len(b) < 60 or b[-1][0] != bar_ts:
-        return
-    checks = trigger_checks(b, symbol, load_bars(c, symbol, "1h")[0], detected_ms)
+TF_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}
+TF_LABEL = {"1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30", "1h": "H1", "4h": "H4"}
 
-    print("   ตรวจเงื่อนไขปัจจัย (คำนวณใหม่จากแท่งดิบ):")
+
+def last_closed_bar(c, symbol, tf, at_ms):
+    """แท่งปิดล่าสุดของ tf ณ เวลา at_ms (แอปใช้แท่งล่าสุด 800 แท่ง = Warmup.FULL_SET ทุก TF)"""
+    bars, _ = load_bars(c, symbol, tf)
+    return [x for x in bars if x[0] + TF_MS.get(tf, 900_000) <= at_ms][-800:]
+
+
+def verify_triggers(c, symbol, tf, bar_ts, woke, detected_ms=None):
+    """พิมพ์ ✓/✗ ต่อปัจจัยที่ปลุก — '—' = ตรวจนอกแอปไม่ได้ (ต้องใช้ engine/ข้อมูลภายนอกของแอป)
+    woke = "ID@tf(SIDE), …" (ตั้งแต่ P16 ปัจจัยเกิดได้หลาย TF) หรือ "ID(SIDE), …" (รุ่นก่อน = TF หลัก)
+    แต่ละปัจจัยตรวจบนแท่งปิดล่าสุดของ TF ที่มันเกิด ณ เวลาที่ตรวจพบ"""
+    h1 = load_bars(c, symbol, "1h")[0]
+    cache = {}
+
+    def checks_for(ftf):
+        if ftf not in cache:
+            if detected_ms is not None:
+                b = last_closed_bar(c, symbol, ftf, detected_ms)
+            else:
+                bars, _ = load_bars(c, symbol, ftf)
+                b = [x for x in bars if x[0] <= bar_ts][-800:]
+            cache[ftf] = trigger_checks(b, symbol, h1, detected_ms) if len(b) >= 60 else None
+        return cache[ftf]
+
+    print("   ตรวจเงื่อนไขปัจจัย (คำนวณใหม่จากแท่งดิบของ TF ที่ปัจจัยเกิด):")
     for item in (woke or "").split(", "):
         if "(" not in item:
             continue
-        fid, side = item[:-1].split("(")
+        key, side = item[:-1].split("(")
+        fid, _, ftf = key.partition("@")
+        ftf = ftf or tf
+        checks = checks_for(ftf)
+        if checks is None:
+            print(f"     ?  {fid}@{TF_LABEL.get(ftf, ftf)}({side}) ไม่มีแท่ง {ftf} พอในฐานข้อมูล")
+            continue
         fn = checks.get(fid)
         if fn is None:
             why = "ต้องใช้ข้อมูลภายในแอป (โครงสร้าง/digest/engine/ข้อมูลภายนอก)" if fid in _NEEDS_APP else "ยังไม่มีสูตรในสคริปต์"
-            print(f"     —  {fid}({side}) {why}")
+            print(f"     —  {fid}@{TF_LABEL.get(ftf, ftf)}({side}) {why}")
             continue
         try:
             detail, got = fn()
         except Exception as ex:  # ข้อมูลไม่พอ ฯลฯ
-            print(f"     ?  {fid}({side}) คำนวณไม่ได้: {ex}")
+            print(f"     ?  {fid}@{TF_LABEL.get(ftf, ftf)}({side}) คำนวณไม่ได้: {ex}")
             continue
         ok = got == side
-        print(f"     {'✓' if ok else '✗'}  {fid}({side}) {detail}" + ("" if ok else f" → คำนวณได้ {got}"))
+        print(f"     {'✓' if ok else '✗'}  {fid}@{TF_LABEL.get(ftf, ftf)}({side}) {detail}" + ("" if ok else f" → คำนวณได้ {got}"))
 
 # ─── main ────────────────────────────────────────────────────────────────────
 
@@ -519,7 +543,7 @@ def main():
 
         print("\n══ การตั้งค่า ══")
         for k in ["alert_voice", "alert_voice_engine", "alert_ai_summary", "model_name",
-                  "wake.usage", "wake.budget.hourly", "wake.budget.daily", "wake.cooldown.bars", "wake.disabled"]:
+                  "wake.usage", "wake.budget.hourly", "wake.budget.daily", "wake.cooldown.bars", "wake.min_gap.minutes", "wake.disabled"]:
             v = c.execute("select value from AppSetting where key=?", (k,)).fetchone()
             print(f" {k} = {v[0] if v else '(ไม่ได้ตั้ง → ค่าเริ่มต้น)'}")
         print(" (alert_voice_engine: device = Android TTS · live = Gemini Live · ถ้ากำลังคุย Live อยู่ session นั้นพูดแทน)")
@@ -531,11 +555,16 @@ def main():
         # AiWakeView เพิ่มใน migration 15 — ติดตามผลมุมมองของ AI (ชน TP/SL)
         has_views = c.execute("select count(*) from sqlite_master where type='table' and name='AiWakeView'").fetchone()[0] == 1
         reason_sql = "max(ai_confidence), max(ai_reason)" if has_reason else "null, null"
+        # factor_tf เพิ่มใน migration 16 — ปัจจัยเกิดได้หลาย TF ในการสแกนเดียว
+        fkey = "factor_id||'@'||factor_tf" if "factor_tf" in cols else "factor_id"
+        # ATR ของ TF หลัก (แถวของ TF อื่นเก็บ ATR ของ TF ตัวเอง — H4 ใหญ่กว่า M15 หลายเท่า)
+        atr_sql = ("coalesce(max(case when woke=1 and factor_tf=interval then ref_atr end), "
+                   "max(case when factor_tf=interval then ref_atr end))") if "factor_tf" in cols else "max(case when woke=1 then ref_atr end)"
         wakes = c.execute(f"""
             select signal_id, min(created_at), max(ai_decision), max(ai_bias),
-                   group_concat(case when woke=1 then factor_id||'('||side||')' end, ', '),
-                   group_concat(case when woke=0 then factor_id||'['||kind||']' end, ', '),
-                   max(case when woke=1 then ref_price end), max(case when woke=1 then ref_atr end),
+                   group_concat(case when woke=1 then {fkey}||'('||side||')' end, ', '),
+                   group_concat(case when woke=0 then {fkey}||'['||kind||']' end, ', '),
+                   max(case when woke=1 then ref_price end), {atr_sql},
                    group_concat(distinct status), {reason_sql}
             from AnticipationFactorOutcome group by signal_id
             having sum(woke) > 0 order by min(created_at) desc limit ?""", (args.last,)).fetchall()
@@ -543,9 +572,12 @@ def main():
             print(" (ฐานข้อมูลยังไม่มีคอลัมน์เหตุผล/ความมั่นใจของ AI — แอปรุ่นก่อน migration 14)")
         cards = c.execute("select timestamp, content, metadata from ChatMessage where metadata like '%\"wake_%' order by timestamp").fetchall()
         for sig, created, dec, bias, woke, states, ref, atr, status, conf, reason in reversed(wakes):
-            sym, tf, bar = sig.split("|"); bar = int(bar)
+            sym, tf, sid_ts = sig.split("|"); sid_ts = int(sid_ts)
+            # ตั้งแต่ P16 รหัส = นาทีที่สแกน (ปลุกได้ทุกนาที) — แท่ง TF หลัก = แท่งปิดล่าสุด ณ เวลาที่ตรวจพบ
+            prim = last_closed_bar(c, sym, tf, created)
+            bar = prim[-1][0] if prim else sid_ts
             conf_txt = f" {conf}%" if conf is not None else ""
-            print(f"\n▶ {sig}  แท่ง {ts(bar)} | ตรวจพบ {ts(created)} | AI: {dec or '-'} {bias or ''}{conf_txt} | ราคาอ้างอิง {ref} ATR {atr:.3f} | สถานะวัดผล {status}")
+            print(f"\n▶ {sig}  แท่ง {tf} ล่าสุด {ts(bar)} | ตรวจพบ {ts(created)} | AI: {dec or '-'} {bias or ''}{conf_txt} | ราคาอ้างอิง {ref} ATR {tf} {f"{atr:.3f}" if atr else "-"} | สถานะวัดผล {status}")
             if reason:
                 print(f"   เหตุผล AI: {reason}")
             if has_views:
@@ -565,14 +597,15 @@ def main():
                 # woke=0: สภาวะที่เพิ่งเป็นจริง [STATE] หรือเหตุการณ์ที่เกิดทีหลังในแท่งเดียวกัน [EVENT]
                 # (แท่งนั้นปลุกไปแล้ว — ปลุกได้แท่งละครั้ง) บันทึกเข้าการเรียนรู้แต่ไม่ได้ส่งให้ AI
                 print(f"   บันทึกเพิ่ม (ไม่ได้ปลุก AI): {states}")
-            woke_ids = {w.split("(")[0] for w in (woke or "").split(", ") if w}
+            woke_ids = {w.split("(")[0] for w in (woke or "").split(", ") if w}   # "ID@tf" (หรือ "ID" รุ่นก่อน)
             card = None
             if dec != "SKIP":
                 for x in cards:
                     if not (0 <= x[0] - created <= 15 * 60_000):
                         continue
                     zone = set((json.loads(x[2]).get("zone") or "").split(","))
-                    if woke_ids <= zone:   # การ์ดของการปลุกนี้ต้องมีปัจจัยที่ปลุกครบ
+                    # การ์ดรุ่นก่อน P16 เก็บแค่ "ID" — เทียบแบบไม่มี TF ด้วย
+                    if woke_ids <= zone or {w.split("@")[0] for w in woke_ids} <= {z.split("@")[0] for z in zone}:
                         card = x
                         break
             if card:

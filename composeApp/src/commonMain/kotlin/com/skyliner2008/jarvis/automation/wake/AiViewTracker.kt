@@ -27,6 +27,12 @@ object AiViewTracker {
     private const val PROMPT_MAX_VIEWS = 4
     const val RETENTION_DAYS = 365
 
+    /**
+     * มุมมอง SKIP เก็บสั้นกว่า — ใช้แค่ในสถิติ 30 วันของ [trackRecord]
+     * (ปลุกได้ทุกนาทีตั้งแต่ P16 จึงมี SKIP วันละหลายร้อยแถว ส่วน NOTIFY เก็บเต็ม 1 ปีเพื่อดูผลย้อนหลัง)
+     */
+    const val SKIP_RETENTION_DAYS = 30
+
     data class View(
         val signalId: String, val symbol: String, val interval: String,
         val decision: String, val bias: String, val confidence: Int?, val reason: String?,
