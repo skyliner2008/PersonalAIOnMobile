@@ -53,7 +53,7 @@ internal object OrderBlockDetection {
             if (hasFvg) {
                 bullOBs.add(0, SmcOrderBlock(
                     isBull = true, top = gMax(candles[obIdx]), bottom = gMin(candles[obIdx]),
-                    barIndex = obIdx, hasFvg = true, volume = candles[obIdx].volume
+                    barIndex = obIdx, hasFvg = true, volume = candles[obIdx].volume, breakIndex = breakIdx
                 ))
             }
         }
@@ -83,21 +83,26 @@ internal object OrderBlockDetection {
             if (hasFvg) {
                 bearOBs.add(0, SmcOrderBlock(
                     isBull = false, top = gMax(candles[obIdx]), bottom = gMin(candles[obIdx]),
-                    barIndex = obIdx, hasFvg = true, volume = candles[obIdx].volume
+                    barIndex = obIdx, hasFvg = true, volume = candles[obIdx].volume, breakIndex = breakIdx
                 ))
             }
         }
 
         // mitigation & invalidation
+        //
+        // เริ่มนับ "ราคากลับมาแตะโซน" หลังแท่งที่ทะลุโครงสร้าง (breakIndex) — ไม่ใช่หลังแท่ง OB
+        // แท่งถัดจาก OB คือ impulse ที่สร้าง OB นั้นเอง และมักคาบเกี่ยวโซนอยู่แล้ว
+        // ถ้านับตั้งแต่ตรงนั้น OB แทบทุกอันจะเป็น "ถูกแตะแล้ว" ทันทีที่เกิด
+        // (วัดบนแท่ง BTC จริง 24 หน้าต่าง: OB ที่ยัง active มีแค่ 1 หน้าต่าง ทั้งที่ตรวจเจอ OB 0–11 อันต่อหน้าต่าง)
         val last = candles[candles.size - 1]
         for (ob in bullOBs) {
-            for (j in ob.barIndex + 1 until candles.size) {
+            for (j in maxOf(ob.barIndex, ob.breakIndex) + 1 until candles.size) {
                 if (candles[j].low <= ob.top && candles[j].high >= ob.bottom) { ob.mitigated = true; break }
             }
             if (candleMin(last) < ob.bottom) ob.invalidated = true
         }
         for (ob in bearOBs) {
-            for (j in ob.barIndex + 1 until candles.size) {
+            for (j in maxOf(ob.barIndex, ob.breakIndex) + 1 until candles.size) {
                 if (candles[j].high >= ob.bottom && candles[j].low <= ob.top) { ob.mitigated = true; break }
             }
             if (candleMax(last) > ob.top) ob.invalidated = true

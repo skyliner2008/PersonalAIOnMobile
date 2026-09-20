@@ -3433,3 +3433,19 @@ active context window"* คิดทั้ง context สะสมใหม่�
 การยุบสถิติ (ค่าตรงเป๊ะหลังยุบ 2 รอบ), governor (cooldown ต่อ TF / ระยะห่าง / พกเหตุการณ์ / memory รุ่นเก่า), เวลาประเมิน ~16 ms/รอบ
 
 เทสต์ 493/493 · ติดตั้งบนมือถือแล้ว (schema 18)
+
+---
+
+## 2026-09-20 — แก้บั๊ก FVG/OB ใน SmcEngine (Order Block ไม่เคยทำงานเลย) + installDebug สร้างแอปโคลน
+
+- **บั๊ก 1 หน้าต่างค้นหาไม่ตรงกัน**: `FvgDetection` หา FVG 30 แท่งท้าย แต่ `OrderBlockDetection` ค้น swing ทั้ง 300 แท่ง
+  และรับ OB เฉพาะที่มี FVG ห่าง ≤5 แท่ง → บน BTC จริง OB = 0 อันเสมอ
+  แก้ใน `SmcEngine`: ส่ง FVG ที่ค้นทั้งหน้าต่างให้ OB (`activeFvgs` ของฝั่งเข้าเทรดยังเป็น 30 แท่งท้าย ไม่เปลี่ยนพฤติกรรม)
+- **บั๊ก 2 นับ mitigation ตั้งแต่แท่งถัดจาก OB** ซึ่งคือ impulse ที่สร้าง OB เอง → OB ถูกตีว่า "ถูกแตะแล้ว" ทันทีที่เกิด
+  แก้: เริ่มนับหลัง `breakIndex` (แท่งทะลุโครงสร้าง) — เพิ่มฟิลด์ `SmcOrderBlock.breakIndex`
+- ผลบนแท่งจริง: OB ที่ยัง active จาก 1/24 หน้าต่าง → **17/24**; ระดับ Supply/Demand OB เข้าภาพตลาดของ AI แล้ว
+  (เล่นซ้ำ 200 จุด เจอระดับ OB 9 ครั้ง) และฝั่งสัญญาณได้ OB setup / กำแพง OB / คะแนน confluence กลับมา
+- เทสต์ใหม่ `SmcOrderBlockTest` 3 เคส (หน้าต่าง FVG, mitigation หลัง break, snapshot) — รวม 496/496
+- **installDebug สร้างแอป 2 อัน**: `adb install` ติดตั้งให้ทุก user profile เครื่องเปิด Dual Messenger (user 95 = DUAL_APP)
+  จึงได้ไอคอนโคลนทุกครั้ง → ตั้ง `installation { installOptions("--user", "0") }` ใน `composeApp/build.gradle.kts`
+  และถอนของ user 95 ออกแล้ว (ยืนยัน: user 0 installed=true, user 95 installed=false)

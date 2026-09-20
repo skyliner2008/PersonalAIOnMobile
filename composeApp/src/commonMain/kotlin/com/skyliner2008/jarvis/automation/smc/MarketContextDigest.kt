@@ -188,19 +188,11 @@ object MarketContextDigest {
         val fvg = UnifiedSmcSignals.fvgTouch(m15)
         fvg.bullMid.filter { !it.isNaN() }.lastOrNull()?.let { if (it > price) above += Level(it, "FVG bull mid") else below += Level(it, "FVG bull mid") }
         fvg.bearMid.filter { !it.isNaN() }.lastOrNull()?.let { if (it > price) above += Level(it, "FVG bear mid") else below += Level(it, "FVG bear mid") }
-        // OB (M15 window) — supply/demand ที่ยัง active
-        //
-        // ไม่ใช้ SmcEngine.buildSnapshot: มันส่ง FVG ที่ [FvgDetection] หาเฉพาะ 30 แท่งท้าย เข้า [OrderBlockDetection]
-        // ที่ค้นหา swing ทั้ง 300 แท่ง และรับ OB เฉพาะที่มี FVG ห่างไม่เกิน 5 แท่ง → แทบไม่เกิด OB เลย
-        // (ตรวจบนแท่ง BTC จริง 300 แท่ง: FVG 3 อันอยู่ท้ายสุด, OB = 0 → ระดับ OB ไม่เคยถึง AI
-        //  และปัจจัย OB_TOUCH/OB_MITIGATED ไม่เคยยิง) — ที่นี่หา FVG ทั้งหน้าต่างก่อนส่งให้ OB
+        // OB จาก SmcEngine (M15 window) — supply/demand ที่ยัง active
         runCatching {
-            val win = m15.takeLast(300)
-            val fvgs = FvgDetection.detect(win, lookback = win.size)
-            val dir = MarketStructureDetector.detect(win).direction
-            val (bullObs, bearObs) = OrderBlockDetection.detect(win, fvgs, dir)
-            bullObs.filter { !it.mitigated }.take(2).forEach { below += Level(0.5 * (it.top + it.bottom), "Demand/OB") }
-            bearObs.filter { !it.mitigated }.take(2).forEach { above += Level(0.5 * (it.top + it.bottom), "Supply/OB") }
+            val snap = SmcEngine.buildSnapshot(m15.takeLast(300), symbol, "15m")
+            snap.bullObs.filter { !it.mitigated }.take(2).forEach { below += Level(0.5 * (it.top + it.bottom), "Demand/OB") }
+            snap.bearObs.filter { !it.mitigated }.take(2).forEach { above += Level(0.5 * (it.top + it.bottom), "Supply/OB") }
         }
 
         // เดิม take(3) — ตัดข้อมูลทิ้งทั้งที่งบโทเคนเหลือเฟือ

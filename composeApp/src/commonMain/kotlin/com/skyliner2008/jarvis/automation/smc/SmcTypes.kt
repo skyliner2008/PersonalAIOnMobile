@@ -31,7 +31,9 @@ data class SmcOrderBlock(
     var mitigated: Boolean = false,
     val hasFvg: Boolean = false,
     var invalidated: Boolean = false,
-    val volume: Double = 0.0
+    val volume: Double = 0.0,
+    /** แท่งที่ราคาทะลุโครงสร้าง (จบ impulse ที่สร้าง OB นี้) — เริ่มนับ mitigation หลังจากแท่งนี้ */
+    val breakIndex: Int = barIndex
 )
 
 data class LiquidityZone(

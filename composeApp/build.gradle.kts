@@ -121,6 +121,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    // ติดตั้งเฉพาะผู้ใช้หลัก — `adb install` ปกติติดตั้งให้ทุก user profile
+    // เครื่องที่เปิด Dual Messenger ของซัมซุง (user 95 = DUAL_APP) จึงได้ไอคอนแอปโคลนเพิ่มมาทุกครั้งที่ installDebug
+    installation {
+        installOptions("--user", "0")
+    }
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false

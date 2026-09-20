@@ -28,12 +28,17 @@ object SmcEngine {
         // 1. Market Structure
         val structure = MarketStructureDetector.detect(candles)
 
-        // 2. FVG
-        val allFvgs = FvgDetection.detect(candles)
-        val activeFvgs = allFvgs.filter { !it.mitigated }
+        // 2. FVG — ช่วงล่าสุด (ค่าเริ่มต้น 30 แท่ง) สำหรับจุดเข้าเทรด/กำแพง
+        val recentFvgs = FvgDetection.detect(candles)
+        val activeFvgs = recentFvgs.filter { !it.mitigated }
 
         // 3. Order Blocks
-        val (bullObs, bearObs) = OrderBlockDetection.detect(candles, allFvgs, structure.direction)
+        // OB ต้องการ FVG อยู่ห่างไม่เกิน 5 แท่งจากแท่ง OB และค้นหา swing ทั้งหน้าต่าง (300+ แท่ง)
+        // ถ้าใช้ FVG แค่ 30 แท่งท้าย OB ที่เก่ากว่านั้นจะหา FVG คู่ไม่เจอ → ไม่เกิด OB เลย
+        // (วัดบนแท่ง BTC จริง 300 แท่ง: FVG 3 อันอยู่ท้ายสุด → OB 0 อัน; ค้นทั้งหน้าต่างได้ FVG 42 อัน → OB 8 อัน)
+        // ผลคือทั้ง setup แบบ OB, กำแพง OB, คะแนน confluence ของโซน และระดับ OB ในภาพตลาด ไม่เคยทำงานเลย
+        val obFvgs = FvgDetection.detect(candles, lookback = candles.size)
+        val (bullObs, bearObs) = OrderBlockDetection.detect(candles, obFvgs, structure.direction)
 
         // 4. Premium/Discount
         val premiumDiscount = classifyPremiumDiscount(structure, lastPrice)
