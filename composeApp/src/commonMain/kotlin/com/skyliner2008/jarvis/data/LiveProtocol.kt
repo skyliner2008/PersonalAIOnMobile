@@ -97,6 +97,13 @@ object LiveProtocol {
             "${if (role == "user") "ผู้ใช้" else "จาวิส"}: ${if (text.length > maxCharsPerTurn) text.take(maxCharsPerTurn) + "…" else text}"
         }
 
+    /**
+     * ข้อความในฐานข้อมูลเป็นคำพูดสดของ Live หรือไม่ (`{"mode": "live_voice"}` รวมแบบ interrupted)
+     * — ผล tool/รายงาน (`live_voice_tool_result`) ไม่นับ เพราะเป็นเนื้อหาที่ต้องแสดงในแชท
+     */
+    fun isLiveTranscript(metadata: String?): Boolean =
+        metadata?.filterNot { it.isWhitespace() }?.contains("\"mode\":\"live_voice\"") == true
+
     /** ประกอบ history สำหรับ reconnect ที่ไม่มี resumption handle — จำกัดความยาวกัน setup ใหญ่เกิน */
     fun buildReconnectHistory(
         initialHistory: String,

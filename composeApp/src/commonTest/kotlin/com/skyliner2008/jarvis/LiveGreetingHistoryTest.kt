@@ -63,6 +63,15 @@ class LiveGreetingHistoryTest {
     }
 
     @Test
+    fun `live transcripts are hidden from chat but tool reports are kept`() {
+        assertTrue(LiveProtocol.isLiveTranscript("{\"mode\": \"live_voice\"}"))
+        assertTrue(LiveProtocol.isLiveTranscript("{\"mode\": \"live_voice\", \"interrupted\": true}"))
+        assertFalse(LiveProtocol.isLiveTranscript("{\"mode\": \"live_voice_tool_result\"}"))
+        assertFalse(LiveProtocol.isLiveTranscript("{\"mode\": \"specialist_session\"}"))
+        assertFalse(LiveProtocol.isLiveTranscript(null))
+    }
+
+    @Test
     fun `session history keeps only the newest turns`() {
         val turns = (1..20).map { "user" to "คำถาม $it" }
         val history = LiveProtocol.buildSessionHistory(turns, maxTurns = 8)

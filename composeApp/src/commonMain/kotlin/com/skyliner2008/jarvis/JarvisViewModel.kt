@@ -769,6 +769,7 @@ class JarvisViewModel(
         voiceManager = voiceManager,
         messages = chat.messagesMutable,
         coreContextProvider = { buildRuntimeCoreContext() },
+        historyTurnsProvider = { chat.recentConversationTurns() },
         onUserSpeakingChanged = { speaking ->
             if (speaking != _isUserSpeaking.value) {
                 _isUserSpeaking.value = speaking

@@ -30,6 +30,8 @@ class VoiceController(
     private val messages: MutableStateFlow<List<Message>>,
     /** core memory + MT5 runtime context สำหรับเปิด live session */
     private val coreContextProvider: suspend () -> String,
+    /** บทสนทนาล่าสุดจากฐานข้อมูล (role to text) — แชทไม่แสดงคำพูดสดของ Live จึงใช้ messages แทนไม่ได้ */
+    private val historyTurnsProvider: suspend () -> List<Pair<String, String>>,
     /** bridge สถานะ "ผู้ใช้กำลังพูด" ให้ VM/camera (Adaptive Vision) */
     private val onUserSpeakingChanged: (Boolean) -> Unit
 ) {
@@ -160,20 +162,16 @@ class VoiceController(
                 val historySnapshot = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
                     ""
                 } else {
-                    // ตัดข้อความสถานะ, ผล tool ดิบ (markdown ยาว — คำตอบที่พูดจริงอยู่ข้อความถัดไปแล้ว)
-                    // และคำทักทายเปิดเซสชันของทั้งสองฝั่ง (ดู LiveProtocol.buildSessionHistory)
-                    val turns = messages.value
-                        .filter { msg ->
-                            val c = msg.content.trim()
-                            !msg.isStatic &&
-                            msg.metadata?.contains("live_voice_tool_result") != true &&
+                    // ตัดข้อความสถานะและคำสั่งสลับโหมด; คำทักทายเปิดเซสชันของทั้งสองฝั่งตัดใน LiveProtocol.buildSessionHistory
+                    val turns = historyTurnsProvider()
+                        .filter { (_, text) ->
+                            val c = text.trim()
                             !c.contains("LIVE READY") &&
                             !c.contains("กำลังเชื่อมต่อ Live session") &&
                             !c.contains("โหมดสัตว์เลี้ยง") &&
                             !c.contains("โหมดควบคุม") &&
                             !c.contains("โหมดขับขี่")
                         }
-                        .map { it.role to it.content }
                     com.skyliner2008.jarvis.data.LiveProtocol.buildSessionHistory(turns)
                 }
 
