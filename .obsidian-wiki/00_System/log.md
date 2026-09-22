@@ -1,3 +1,13 @@
+## 2026-09-23 — แก้: แอปพังตอนเปิด "no such column: ChatMessage.id" (จาก commit 7c5ca46)
+- **อาการ** (logcat จริง 02:26): `SQLiteException` ใน `JarvisMemoryManager.getHistoryAfter` → FATAL บน main ทุกครั้งที่เปิดแอป
+- **สาเหตุ**: รอบก่อนเขียน `getHistoryAfter` เป็น `SELECT * FROM (SELECT * … LIMIT ?) ORDER BY timestamp ASC`
+  SQLDelight ขยาย `SELECT *` ด้านนอกเป็น `ChatMessage.id, …` ซึ่ง SQLite อ้างถึงจากนอก subquery ไม่ได้ — compile ผ่าน แต่พังตอนรัน
+  ตอนนั้นผมตรวจด้วย SQL ที่เขียนเองใน Python ไม่ใช่ SQL ที่ generate จริง จึงไม่เจอ; เทสต์หน่วยก็ไม่เจอเพราะไม่มีเทสต์ไหนเปิดฐานข้อมูลจริง
+- **แก้**: query เหลือ `WHERE timestamp > ? ORDER BY timestamp DESC LIMIT ?` แล้ว `asReversed()` ใน Kotlin (ผลเหมือนเดิม: 300 รายการล่าสุด เรียงเก่า→ใหม่)
+- **เครื่องมือใหม่** `tools/verify_sqldelight_queries.py`: อ่านโค้ดที่ SQLDelight generate → สร้าง schema ใน memory → `EXPLAIN` ทุก query
+  ผล 136 query ผิด 0 (ยืนยันว่าจับบั๊กเดิมได้: `no such column: ChatMessage.id`) — **รันทุกครั้งที่แก้ไฟล์ .sq**
+- **Verify**: ติดตั้งบน SM-S908E แล้ว เปิดแอปได้ ไม่มี crash, `user_version` = 19, มี `idx_chat_message_ts`; เทสต์ผ่าน 510 ข้าม 5
+
 ## 2026-09-23 — ตรวจ log 09-17 → 09-23 และแก้จุดที่พบ
 - **User Request**: "ตรวจสอบ การปรับปรุงพัฒนาโปรเจค จาก log.md ตั้งแต่ 2026-09-17 ถึงปัจจุบัน" → "ดำเนินการทั้งหมด หลังจากนั้นค่อย push"
 - **ผลตรวจ**: รายการใน log ตรงกับ commit `9f9a178` → `8b0b9b3` และไฟล์ที่อ้างถึงมีอยู่จริงทั้งหมด; เทสต์ก่อนแก้ 515/515

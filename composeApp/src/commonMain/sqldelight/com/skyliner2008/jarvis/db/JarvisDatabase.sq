@@ -142,11 +142,10 @@ VALUES (?, ?, ?, ?);
 getRecentHistory:
 SELECT * FROM ChatMessage ORDER BY timestamp DESC LIMIT :limit;
 
--- ข้อความหลัง :since แต่ไม่เกิน :limit รายการล่าสุด (เรียงเก่า→ใหม่)
+-- ข้อความหลัง :since ไม่เกิน :limit รายการล่าสุด เรียง ใหม่→เก่า (ผู้เรียกกลับลำดับเอง)
+-- ห้ามห่อด้วย subquery: SQLDelight ขยาย SELECT * ด้านนอกเป็น ChatMessage.id ซึ่ง SQLite อ้างถึงไม่ได้ → แอปพังตอนเปิด
 getHistoryAfter:
-SELECT * FROM (
-    SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp DESC LIMIT :limit
-) ORDER BY timestamp ASC;
+SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp DESC LIMIT :limit;
 
 getOldMessages:
 SELECT * FROM ChatMessage ORDER BY timestamp ASC LIMIT :limit;
