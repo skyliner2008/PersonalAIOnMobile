@@ -483,6 +483,224 @@ class TradingApiService(private val client: HttpClient) {
         return scanTradingViewByMarket(market, exchange, sortBy, sortOrder, extraFilters, columns, limit)
     }
 
+    private val fundamentalColumns = listOf(
+        "name", "description", "close", "change", "change_abs", "currency", "sector", "industry", "country",
+        "market_cap_basic", "price_earnings_ttm", "price_sales_current", "price_book_fq", "price_free_cash_flow_ttm",
+        "enterprise_value_fq", "enterprise_value_to_revenue_ttm",
+        "earnings_per_share_basic_ttm", "earnings_per_share_diluted_ttm", "earnings_per_share_basic_fy",
+        "dividends_yield_current", "dps_common_stock_prim_issue_fy",
+        "total_shares_outstanding_fundamental", "float_shares_outstanding",
+        "total_debt_fq", "net_debt_fq", "total_assets_fq", "total_liabilities_fq", "total_equity_fq", "debt_to_equity_fq",
+        "total_revenue_ttm", "total_revenue_fy", "total_revenue_fq",
+        "net_income_ttm", "net_income_fy", "net_income_fq",
+        "operating_margin_ttm", "net_margin_ttm", "free_cash_flow_ttm",
+        "return_on_equity_fq", "return_on_assets_fq", "return_on_invested_capital_fq",
+        "price_target_average", "price_target_high", "price_target_low",
+        "Recommend.All", "beta_1_year", "price_52_week_high", "price_52_week_low", "Perf.Y", "Perf.YTD"
+    )
+
+    /**
+     * ดึงข้อมูลพื้นฐาน งบดุล งบการเงิน และมัลติเปิลประเมินมูลค่า (Fundamental Overview)
+     * รองรับหุ้นไทย (SET/MAI) และหุ้นต่างประเทศ (NASDAQ, NYSE, etc.)
+     */
+    suspend fun getStockFundamentals(rawSymbol: String, requestedExchange: String? = null): StockFundamentalData? {
+        val s = rawSymbol.trim().uppercase()
+        val (detectedExchange, cleanSymbol) = when {
+            ":" in s -> s.substringBefore(":") to s.substringAfter(":")
+            s.endsWith(".BK") -> "SET" to s.removeSuffix(".BK")
+            !requestedExchange.isNullOrBlank() -> requestedExchange.uppercase() to s
+            else -> null to s
+        }
+
+        val attempts = mutableListOf<Pair<String, List<String>>>()
+        if (detectedExchange != null) {
+            val market = exchangeToMarket(detectedExchange)
+            attempts.add(market to listOf("$detectedExchange:$cleanSymbol"))
+        } else {
+            // ลองตลาดไทยก่อน (SET, MAI) แล้วตามด้วยตลาดสหรัฐ (NASDAQ, NYSE, AMEX)
+            attempts.add("thailand" to listOf("SET:$cleanSymbol", "MAI:$cleanSymbol"))
+            attempts.add("america" to listOf("NASDAQ:$cleanSymbol", "NYSE:$cleanSymbol", "AMEX:$cleanSymbol"))
+            attempts.add("global" to listOf(cleanSymbol))
+        }
+
+        for ((marketPath, tickers) in attempts) {
+            try {
+                val url = "https://scanner.tradingview.com/$marketPath/scan"
+                val payload = buildJsonObject {
+                    put("symbols", buildJsonObject {
+                        put("tickers", buildJsonArray { tickers.forEach { add(it) } })
+                    })
+                    put("columns", buildJsonArray { fundamentalColumns.forEach { add(it) } })
+                }
+                val resp = client.post(url) {
+                    contentType(ContentType.Application.Json)
+                    setBody(payload.toString())
+                    header("User-Agent", "Mozilla/5.0")
+                    timeout { requestTimeoutMillis = 15_000 }
+                }
+                if (!resp.status.isSuccess()) continue
+                val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+                val data = root["data"]?.jsonArray ?: continue
+                for (item in data) {
+                    val node = item.jsonObject
+                    val fullTicker = node["s"]?.jsonPrimitive?.content ?: continue
+                    val vals = node["d"]?.jsonArray ?: continue
+                    if (vals.isEmpty() || vals[0] is JsonNull) continue
+
+                    fun dbl(idx: Int): Double? {
+                        val el = vals.getOrNull(idx) ?: return null
+                        if (el is JsonNull) return null
+                        return el.jsonPrimitive.doubleOrNull
+                    }
+
+                    fun str(idx: Int): String {
+                        val el = vals.getOrNull(idx) ?: return ""
+                        if (el is JsonNull) return ""
+                        return el.jsonPrimitive.contentOrNull ?: ""
+                    }
+
+                    val name = str(0)
+                    val description = str(1)
+                    val close = dbl(2)
+                    val change = dbl(3)
+                    val changeAbs = dbl(4)
+                    val currency = str(5)
+                    val sector = str(6)
+                    val industry = str(7)
+                    val country = str(8)
+                    val marketCap = dbl(9)
+                    val peTtm = dbl(10)
+                    val psCurrent = dbl(11)
+                    val pbFq = dbl(12)
+                    val pfcfTtm = dbl(13)
+                    val evFq = dbl(14)
+                    val evToRev = dbl(15)
+                    val epsBasicTtm = dbl(16)
+                    val epsDilutedTtm = dbl(17)
+                    val epsBasicFy = dbl(18)
+                    val divYield = dbl(19)
+                    val dpsFy = dbl(20)
+                    val totalShares = dbl(21)
+                    val floatShares = dbl(22)
+                    val totalDebt = dbl(23)
+                    val netDebt = dbl(24)
+                    val totalAssets = dbl(25)
+                    val totalLiabilities = dbl(26)
+                    val totalEquity = dbl(27)
+                    val debtToEquity = dbl(28)
+                    val revTtm = dbl(29)
+                    val revFy = dbl(30)
+                    val revFq = dbl(31)
+                    val niTtm = dbl(32)
+                    val niFy = dbl(33)
+                    val niFq = dbl(34)
+                    val opMargin = dbl(35)
+                    val netMargin = dbl(36)
+                    val fcf = dbl(37)
+                    val roe = dbl(38)
+                    val roa = dbl(39)
+                    val roic = dbl(40)
+                    val ptAvg = dbl(41)
+                    val ptHigh = dbl(42)
+                    val ptLow = dbl(43)
+                    val recScore = dbl(44)
+                    val beta = dbl(45)
+                    val high52 = dbl(46)
+                    val low52 = dbl(47)
+                    val perfY = dbl(48)
+                    val perfYtd = dbl(49)
+
+                    // คำนวณอนุพันธ์
+                    val cashAndEquiv = if (totalDebt != null && netDebt != null) {
+                        kotlin.math.max(0.0, totalDebt - netDebt)
+                    } else null
+
+                    val closelyHeldShares = if (totalShares != null && floatShares != null) {
+                        kotlin.math.max(0.0, totalShares - floatShares)
+                    } else null
+
+                    val floatPct = if (totalShares != null && totalShares > 0.0 && floatShares != null) {
+                        (floatShares / totalShares) * 100.0
+                    } else null
+
+                    val closelyHeldPct = if (totalShares != null && totalShares > 0.0 && closelyHeldShares != null) {
+                        (closelyHeldShares / totalShares) * 100.0
+                    } else null
+
+                    val upsidePct = if (close != null && close > 0.0 && ptAvg != null) {
+                        ((ptAvg - close) / close) * 100.0
+                    } else null
+
+                    val resolvedEx = fullTicker.substringBefore(":", detectedExchange ?: "SET")
+
+                    return StockFundamentalData(
+                        symbol = cleanSymbol,
+                        ticker = fullTicker,
+                        name = if (name.isNotBlank()) name else cleanSymbol,
+                        description = if (description.isNotBlank()) description else cleanSymbol,
+                        exchange = resolvedEx,
+                        currency = currency,
+                        sector = sector,
+                        industry = industry,
+                        country = country,
+                        closePrice = close,
+                        changePrice = change,
+                        changePct = changeAbs,
+                        high52w = high52,
+                        low52w = low52,
+                        beta1y = beta,
+                        perf1y = perfY,
+                        perfYtd = perfYtd,
+                        marketCap = marketCap,
+                        peTtm = peTtm,
+                        psCurrent = psCurrent,
+                        pbFq = pbFq,
+                        pfcfTtm = pfcfTtm,
+                        enterpriseValue = evFq,
+                        evToRevenueTtm = evToRev,
+                        epsBasicTtm = epsBasicTtm,
+                        epsDilutedTtm = epsDilutedTtm,
+                        epsBasicFy = epsBasicFy,
+                        dividendYieldCurrent = divYield,
+                        dpsFy = dpsFy,
+                        totalShares = totalShares,
+                        floatShares = floatShares,
+                        floatPct = floatPct,
+                        closelyHeldShares = closelyHeldShares,
+                        closelyHeldPct = closelyHeldPct,
+                        totalDebt = totalDebt,
+                        netDebt = netDebt,
+                        cashAndEquivalents = cashAndEquiv,
+                        totalAssets = totalAssets,
+                        totalLiabilities = totalLiabilities,
+                        totalEquity = totalEquity,
+                        debtToEquity = debtToEquity,
+                        totalRevenueTtm = revTtm,
+                        totalRevenueFy = revFy,
+                        totalRevenueFq = revFq,
+                        netIncomeTtm = niTtm,
+                        netIncomeFy = niFy,
+                        netIncomeFq = niFq,
+                        freeCashFlowTtm = fcf,
+                        operatingMarginTtm = opMargin,
+                        netMarginTtm = netMargin,
+                        returnOnEquity = roe,
+                        returnOnAssets = roa,
+                        returnOnInvestedCapital = roic,
+                        targetPriceAvg = ptAvg,
+                        targetPriceHigh = ptHigh,
+                        targetPriceLow = ptLow,
+                        upsidePct = upsidePct,
+                        recommendationScore = recScore
+                    )
+                }
+            } catch (_: Exception) {
+                // ข้ามไปลอง attempt ถัดไป
+            }
+        }
+        return null
+    }
+
 
     suspend fun getTechnicalAnalysis(symbol: String, exchange: String, interval: String = "1h"): Map<String, String> {
         return try {
@@ -526,28 +744,374 @@ class TradingApiService(private val client: HttpClient) {
 
     private val taColumns = listOf("close", "change", "volume", "RSI", "MACD.macd", "MACD.signal", "BB.basis", "BB.width", "ATR", "ADX", "Recommend.All", "buy_signals", "sell_signals", "neutral_signals")
 
-    suspend fun getRedditSentiment(symbol: String): Map<String, Any> {
-        val query = symbol.uppercase().removeSuffix("-USD")
-        var total = 0; var bull = 0; var bear = 0
-        for (sub in listOf("wallstreetbets", "stocks", "investing")) {
-            try {
-                val resp = client.get("https://www.reddit.com/r/$sub/search.json") { parameter("q", query); parameter("sort", "hot"); parameter("t", "day"); header("User-Agent", "Mozilla/5.0") }
-                if (!resp.status.isSuccess()) continue
-                val posts = json.parseToJsonElement(resp.bodyAsText()).jsonObject["data"]?.jsonObject?.get("children")?.jsonArray ?: continue
-                posts.forEach { post ->
-                    val title = post.jsonObject["data"]?.jsonObject?.get("title")?.jsonPrimitive?.content?.lowercase() ?: return@forEach
-                    total++; if (listOf("buy", "bull", "moon").any { title.contains(it) }) bull++; if (listOf("sell", "bear", "crash").any { title.contains(it) }) bear++
-                }
-            } catch (_: Exception) {}
+    suspend fun getBinanceFuturesPositioning(symbol: String): BinancePositioningSentiment? = coroutineScope {
+        val raw = symbol.uppercase().trim()
+            .removePrefix("BINANCE:")
+            .removePrefix("BYBIT:")
+            .removePrefix("OKX:")
+            .removeSuffix("-USD")
+            .removeSuffix("/USDT")
+            .removeSuffix("USD")
+            .removeSuffix(".P")
+        val pair = if (raw.endsWith("USDT")) raw else "${raw}USDT"
+
+        try {
+            val globalJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val topJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/topLongShortPositionRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val takerJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/takerlongshortRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val global = globalJob.await() ?: return@coroutineScope null
+            val top = topJob.await()
+            val taker = takerJob.await()
+
+            val retailLong = (global["longAccount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val retailShort = (global["shortAccount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val retailRatio = global["longShortRatio"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+
+            val topLong = (top?.get("longAccount")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val topShort = (top?.get("shortAccount")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val topRatio = top?.get("longShortRatio")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+
+            val takerRatio = taker?.get("buySellRatio")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+            val takerBuy = taker?.get("buyVol")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+            val takerSell = taker?.get("sellVol")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+
+            val divSignal = when {
+                retailRatio < 0.95 && topRatio > 1.3 -> "🟢 Contrarian Bullish (รายย่อย Short หนัก / Smart Money ถือ Long ได้เปรียบ Short Squeeze)"
+                retailRatio > 1.4 && topRatio < 0.9 -> "🔴 Contrarian Bearish (รายย่อยไล่ Long สูง / Smart Money ดัก Short เสี่ยงโดนทุบ Long Squeeze)"
+                retailRatio > 1.2 && topRatio > 1.2 -> "📈 Strong Trend Following (ทั้งรายย่อยและเจ้ามือเปิด Long สอดคล้องกัน)"
+                retailRatio < 0.85 && topRatio < 0.85 -> "📉 Strong Bearish Trend (ทั้งตลาดมองลงสอดคล้องกัน)"
+                takerRatio > 1.2 -> "⚡ Taker Aggression: แรงเคาะขวานำตลาด (Aggressive Buying)"
+                takerRatio < 0.8 -> "⚡ Taker Aggression: แรงเทขายเคาะซ้ายกดตลาด (Aggressive Selling)"
+                else -> "⚖️ Balanced Positioning (สถานะทั้งสองฝั่งใกล้เคียงกัน)"
+            }
+
+            BinancePositioningSentiment(
+                symbol = pair,
+                retailLongAccountPct = retailLong,
+                retailShortAccountPct = retailShort,
+                retailLongShortRatio = retailRatio,
+                topTraderLongPositionPct = topLong,
+                topTraderShortPositionPct = topShort,
+                topTraderLongShortRatio = topRatio,
+                takerBuySellRatio = takerRatio,
+                takerBuyVol = takerBuy,
+                takerSellVol = takerSell,
+                divergenceSignal = divSignal
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "Binance positioning error: ${e.message}")
+            null
         }
-        val score = if (total > 0) (bull - bear).toDouble() / total else 0.0
-        return mapOf(
+    }
+
+    suspend fun getCnnStockFearAndGreed(): CnnFearAndGreedData? {
+        return try {
+            val resp = client.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata") {
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                header("Referer", "https://www.cnn.com/markets/fear-and-greed")
+                header("Origin", "https://www.cnn.com")
+                header("Accept", "application/json")
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val fng = root["fear_and_greed"]?.jsonObject ?: return null
+
+            val score = fng["score"]?.jsonPrimitive?.doubleOrNull ?: 50.0
+            val rating = fng["rating"]?.jsonPrimitive?.contentOrNull ?: "neutral"
+            val prevClose = fng["previous_close"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1W = fng["previous_1_week"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1M = fng["previous_1_month"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1Y = fng["previous_1_year"]?.jsonPrimitive?.doubleOrNull ?: score
+
+            val ratingThai = when (rating.lowercase()) {
+                "extreme fear" -> "หวาดกลัวสุดขีด (Extreme Fear)"
+                "fear" -> "วิตกกังวล (Fear)"
+                "greed" -> "เริ่มโลภ (Greed)"
+                "extreme greed" -> "โลภสุดขีด (Extreme Greed)"
+                else -> "เป็นกลาง (Neutral)"
+            }
+
+            val indicatorMeta = listOf(
+                Pair("market_momentum_sp500", "โมเมนตัมตลาด (S&P 500 vs 125-day MA)"),
+                Pair("stock_price_strength", "ความแข็งแกร่งราคา (หุ้นทำ New 52W High vs Low)"),
+                Pair("stock_price_breadth", "ปริมาณการซื้อขายหนุนตลาด (McClellan Volume)"),
+                Pair("put_call_options", "อัตราส่วน Put/Call Options (CBOE)"),
+                Pair("market_volatility_vix", "ดัชนีความผันผวน (VIX vs 50-day MA)"),
+                Pair("junk_bond_demand", "ความต้องการถือ Junk Bond (Credit Spread)"),
+                Pair("safe_haven_demand", "ความต้องการสินทรัพย์ปลอดภัย (Stocks vs Bonds)")
+            )
+
+            val subs = indicatorMeta.mapNotNull { (key, labelTh) ->
+                val obj = root[key]?.jsonObject ?: return@mapNotNull null
+                val subScore = obj["score"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+                val subRating = obj["rating"]?.jsonPrimitive?.contentOrNull ?: "neutral"
+                CnnSubIndicator(
+                    name = key,
+                    labelThai = labelTh,
+                    score = subScore,
+                    rating = subRating
+                )
+            }
+
+            CnnFearAndGreedData(
+                score = score,
+                rating = rating,
+                ratingThai = ratingThai,
+                previousClose = prevClose,
+                previous1Week = prev1W,
+                previous1Month = prev1M,
+                previous1Year = prev1Y,
+                subIndicators = subs
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "CNN Fear & Greed error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun getRedditSentiment(symbol: String): Map<String, Any> {
+        val query = symbol.uppercase().removeSuffix("-USD").removeSuffix("USDT").removeSuffix("/USDT")
+
+        // 1) เช็ค Binance Futures Positioning ถ้าเป็นคริปโต
+        val binancePos = getBinanceFuturesPositioning(query)
+
+        // 2) ดึงข่าวและพาดหัวข่าวเจาะจง Sentiment ผ่าน Google News RSS
+        val qAsset = getAssetQuery(query)
+        val q = "$qAsset market sentiment".encodeURLParameter()
+        val newsItems = try {
+            fetchFeed("Google News Sentiment", "https://news.google.com/rss/search?q=$q&hl=en-US&gl=US&ceid=US:en") { xml ->
+                parseRssItems(xml, "Google News", null)
+            }
+        } catch (_: Exception) { emptyList() }
+
+        var bull = 0
+        var bear = 0
+        val topPosts = mutableListOf<String>()
+
+        newsItems.take(15).forEach { item ->
+            val title = item["title"].orEmpty()
+            val text = (title + " " + item["description"].orEmpty()).lowercase()
+            topPosts.add(title)
+            val isBull = listOf("surge", "bull", "jump", "rally", "gain", "high", "positive", "boom", "buy", "upward", "breakout", "ath").any { text.contains(it) }
+            val isBear = listOf("fall", "drop", "bear", "crash", "loss", "low", "negative", "slump", "sell", "plunge", "risk", "warning", "caution", "dip").any { text.contains(it) }
+            if (isBull && !isBear) bull++
+            if (isBear && !isBull) bear++
+            if (isBull && isBear) { bull++; bear++ }
+        }
+
+        val total = newsItems.size
+        var score = if (bull + bear > 0) (bull - bear).toDouble() / (bull + bear) else 0.0
+
+        // ถ่วงน้ำหนักด้วย Positioning ของ Smart Money ถ้ามีข้อมูล
+        if (binancePos != null) {
+            val ratioBias = (binancePos.topTraderLongShortRatio - 1.0).coerceIn(-1.0, 1.0) * 0.4
+            score = (score * 0.6 + ratioBias).coerceIn(-1.0, 1.0)
+        }
+
+        val label = when {
+            score >= 0.2 -> "Bullish"
+            score <= -0.2 -> "Bearish"
+            else -> "Neutral"
+        }
+
+        val out = mutableMapOf<String, Any>(
             "symbol" to query,
-            "sentiment_score" to score,
-            "sentiment_label" to if (score > 0.1) "Bullish" else if (score < -0.1) "Bearish" else "Neutral",
-            "posts_analyzed" to total,
+            "sentiment_score" to "%.2f".format(score),
+            "sentiment_label" to label,
+            "posts_analyzed" to (total.takeIf { it > 0 } ?: (bull + bear).coerceAtLeast(1)),
             "bullish_posts" to bull,
-            "bearish_posts" to bear
+            "bearish_posts" to bear,
+            "top_posts" to topPosts.take(5),
+            "source" to "Multi-Source Intelligence"
+        )
+        if (binancePos != null) {
+            out["positioning_divergence"] = binancePos.divergenceSignal
+            out["retail_long_short_ratio"] = binancePos.retailLongShortRatio
+            out["top_trader_long_short_ratio"] = binancePos.topTraderLongShortRatio
+            out["taker_buy_sell_ratio"] = binancePos.takerBuySellRatio
+        }
+        return out
+    }
+
+    suspend fun getUnifiedCompositeSentiment(rawSymbol: String? = null): UnifiedCompositeSentiment = coroutineScope {
+        val s = rawSymbol?.trim()?.uppercase()
+        val isGlobal = s.isNullOrBlank() || s in listOf("ALL", "MARKET", "GLOBAL", "MACRO", "TOTAL")
+
+        if (isGlobal) {
+            val cryptoJob = async { getFearGreedIndex(5) }
+            val cnnJob = async { getCnnStockFearAndGreed() }
+
+            val cryptoFng = cryptoJob.await()
+            val cnnData = cnnJob.await()
+
+            val cryptoScore = cryptoFng["value"]?.toDoubleOrNull() ?: 50.0
+            val cnnScore = cnnData?.score ?: 50.0
+
+            val compositeScore = when {
+                cryptoFng["error"] == null && cnnData != null -> (cnnScore * 0.60) + (cryptoScore * 0.40)
+                cnnData != null -> cnnScore
+                cryptoFng["error"] == null -> cryptoScore
+                else -> 50.0
+            }
+
+            val (label, labelTh, emoji) = UnifiedCompositeSentiment.classifyScore(compositeScore)
+            val meter = UnifiedCompositeSentiment.makeMeterBar(compositeScore)
+
+            val pillars = mutableListOf<SentimentPillar>()
+            if (cnnData != null) {
+                pillars.add(SentimentPillar("ตลาดหุ้นสหรัฐฯ (CNN Fear & Greed)", cnnScore, 60, "${cnnData.ratingThai} (${"%.1f".format(cnnScore)}/100)"))
+            }
+            if (cryptoFng["error"] == null) {
+                pillars.add(SentimentPillar("ตลาดคริปโต (Crypto Fear & Greed)", cryptoScore, 40, "${cryptoFng["classification"]} (${"%.0f".format(cryptoScore)}/100)"))
+            }
+
+            val contrarian = when {
+                compositeScore <= 24.0 -> "🟢 Contrarian Macro Signal: ตลาดโลกอยู่ในจุด Extreme Fear (หวาดกลัวสุดขีด) มักเป็นจุดสะสมสินทรัพย์เสี่ยงรอบใหญ่"
+                compositeScore >= 76.0 -> "🔴 Contrarian Macro Signal: ตลาดโลกอยู่ในจุด Extreme Greed (โลภสุดขีด) ความผันผวนต่ำเกินไป ระวังแรงขายทำกำไรฉับพลัน"
+                else -> null
+            }
+
+            return@coroutineScope UnifiedCompositeSentiment(
+                target = "GLOBAL_MACRO",
+                isGlobalMacro = true,
+                compositeScore = compositeScore,
+                compositeLabel = label,
+                labelThai = labelTh,
+                emoji = emoji,
+                meterBar = meter,
+                pillars = pillars,
+                cnnFearGreed = cnnData,
+                cryptoFearGreed = if (cryptoFng["error"] == null) cryptoFng else null,
+                contrarianAlert = contrarian
+            )
+        }
+
+        val cleanSym = s.removePrefix("BINANCE:").removePrefix("SET:").removeSuffix("-USD").removeSuffix("USDT").removeSuffix("/USDT")
+        val isCrypto = cleanSym in listOf("BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "SUI", "PEPE", "SHIB", "NEAR", "APT", "DOT", "MATIC")
+            || s.contains("USDT") || s.contains("BTC") || s.contains("ETH")
+        val isUsStock = cleanSym in listOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "SPY", "QQQ", "DIA", "IWM")
+
+        val newsJob = async { getRedditSentiment(s) }
+        val positioningJob = async { if (isCrypto) getBinanceFuturesPositioning(cleanSym) else null }
+        val cnnJob = async { if (isUsStock || cleanSym in listOf("SPX", "NDX", "US30", "XAUUSD", "GOLD")) getCnnStockFearAndGreed() else null }
+        val cryptoFngJob = async { if (isCrypto) getFearGreedIndex(3) else null }
+        val taJob = async {
+            val ex = resolveExchange(s, null)
+            runCatching { getTechnicalAnalysis(s, ex, "1D") }.getOrDefault(emptyMap())
+        }
+
+        val newsData = newsJob.await()
+        val binancePos = positioningJob.await()
+        val cnnData = cnnJob.await()
+        val cryptoFng = cryptoFngJob.await()
+        val taData = taJob.await()
+
+        val newsBias = newsData["sentiment_score"]?.toString()?.toDoubleOrNull() ?: 0.0
+        val newsScore = ((newsBias + 1.0) * 50.0).coerceIn(0.0, 100.0)
+
+        val marketFgScore = when {
+            isCrypto && cryptoFng?.get("error") == null -> cryptoFng?.get("value")?.toDoubleOrNull() ?: 50.0
+            cnnData != null -> cnnData.score
+            else -> 50.0
+        }
+
+        val (posScore, posDetail) = when {
+            binancePos != null -> {
+                val ratioScore = when {
+                    binancePos.topTraderLongShortRatio > 1.8 -> 85.0
+                    binancePos.topTraderLongShortRatio > 1.3 -> 70.0
+                    binancePos.topTraderLongShortRatio < 0.7 -> 25.0
+                    binancePos.topTraderLongShortRatio < 0.9 -> 35.0
+                    else -> 50.0
+                }
+                val takerBonus = (binancePos.takerBuySellRatio - 1.0) * 20.0
+                val calculated = (ratioScore + takerBonus).coerceIn(5.0, 95.0)
+                Pair(calculated, "Smart Money Long: ${"%.1f".format(binancePos.topTraderLongPositionPct)}% (Ratio ${"%.2f".format(binancePos.topTraderLongShortRatio)}) | ${binancePos.divergenceSignal}")
+            }
+            cnnData != null -> {
+                val putCall = cnnData.subIndicators.firstOrNull { it.name == "put_call_options" }?.score ?: 50.0
+                Pair(putCall, "CBOE Options Sentiment: ${"%.1f".format(putCall)}/100")
+            }
+            else -> Pair(50.0, "ไม่มีข้อมูลสัญญาอนุพันธ์เฉพาะตัว")
+        }
+
+        val recAll = taData["recommend_score"]?.toDoubleOrNull() ?: 0.0
+        val taScore = ((recAll + 1.0) * 50.0).coerceIn(0.0, 100.0)
+
+        val compositeScore = (newsScore * 0.30) + (marketFgScore * 0.25) + (posScore * 0.30) + (taScore * 0.15)
+        val (label, labelTh, emoji) = UnifiedCompositeSentiment.classifyScore(compositeScore)
+        val meter = UnifiedCompositeSentiment.makeMeterBar(compositeScore)
+
+        val pillars = listOf(
+            SentimentPillar("ข่าวสาร & กระแสสังคม (News & Social)", newsScore, 30, "Bias: $newsBias (${newsData["bullish_posts"]} บวก / ${newsData["bearish_posts"]} ลบ)"),
+            SentimentPillar("ดัชนีอารมณ์ตลาดรวม (Market F&G)", marketFgScore, 25, if (isCrypto) "Crypto F&G: ${"%.0f".format(marketFgScore)}/100" else "CNN Stock F&G: ${"%.1f".format(marketFgScore)}/100"),
+            SentimentPillar("สถานะการถือครองสัญญา (Positioning)", posScore, 30, posDetail),
+            SentimentPillar("ความเห็นอินดิเคเตอร์เทคนิค (Technical)", taScore, 15, "สัญญาณ: ${taData["signal"] ?: "HOLD"} (Score ${taData["recommend_score"] ?: "0"})")
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val headlines = newsData["top_posts"] as? List<String> ?: emptyList()
+
+        val contrarian = when {
+            binancePos != null && binancePos.retailLongShortRatio < 0.95 && binancePos.topTraderLongShortRatio > 1.3 ->
+                "🟢 Contrarian Alert: เกิดสัญญาณ Short Squeeze! รายย่อยแห่เปิด Short แต่ Smart Money ถือ Long หนาแน่น ลุ้นดีดกิน SL ฝั่ง Short"
+            binancePos != null && binancePos.retailLongShortRatio > 1.4 && binancePos.topTraderLongShortRatio < 0.9 ->
+                "🔴 Contrarian Alert: เกิดสัญญาณ Long Squeeze / Bull Trap! รายย่อยไล่ Long หนาแน่น แต่เจ้ามือเริ่มสะสม Short ระวังโดนทุบ"
+            compositeScore <= 24.0 ->
+                "🟢 Contrarian Opportunity: อารมณ์ตลาดอยู่ในจุด Extreme Fear (หวาดกลัวสุดขีด) มักเป็นช่วงปลายของการเทขาย (Capitulation) และจุดสะสมของ Smart Money"
+            compositeScore >= 76.0 ->
+                "🔴 Contrarian Warning: อารมณ์ตลาดอยู่ในจุด Extreme Greed (โลภสุดขีด) ฝูงชนตื่นเต้นเกินเหตุ (Euphoria) เพิ่มความระวังการแจกจ่ายของ (Distribution)"
+            else -> null
+        }
+
+        UnifiedCompositeSentiment(
+            target = s,
+            isGlobalMacro = false,
+            compositeScore = compositeScore,
+            compositeLabel = label,
+            labelThai = labelTh,
+            emoji = emoji,
+            meterBar = meter,
+            pillars = pillars,
+            binancePositioning = binancePos,
+            cnnFearGreed = cnnData,
+            cryptoFearGreed = if (cryptoFng?.get("error") == null) cryptoFng else null,
+            topHeadlines = headlines,
+            contrarianAlert = contrarian
         )
     }
 

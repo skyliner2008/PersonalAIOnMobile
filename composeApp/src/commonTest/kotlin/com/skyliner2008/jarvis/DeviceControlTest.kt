@@ -39,6 +39,8 @@ class DeviceControlTest {
 
         // Screen Interaction (Accessibility)
         assertTrue("device_read_screen" in names)
+        assertTrue("device_screenshot" in names)
+        assertTrue("device_gesture" in names)
         assertTrue("device_tap" in names)
         assertTrue("device_type_text" in names)
         assertTrue("device_scroll" in names)

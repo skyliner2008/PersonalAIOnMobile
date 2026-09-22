@@ -6,6 +6,47 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Chat Message Timestamp (LINE Style) & 24-Hour Active History Retention Filter (2026-09-23):**
+> - **ตัวแสดงเวลาส่งข้อความมุมขวาล่างสไตล์ LINE**: บับเบิลข้อความทั้งฝั่งผู้ใช้และ AI มีตัวแสดงเวลาส่งข้อความ (`HH:mm` เช่น `14:32`) ขนาดตัวเล็กกระชับ (`fontSize = 9.5.sp`, Monospace) จัดวางชิดมุมขวาล่าง (`Alignment.End`) สวยงาม เป็นระเบียบ ไม่เกะกะสายตา
+> - **ตัวกรองประวัติแชทไม่เกิน 24 ชั่วโมง**: ช่องแชทกำหนดเงื่อนไขเวลาแสดงเฉพาะข้อความที่ยังไม่ครบ 24 ชั่วโมง (`< 24 ชม.`) เมื่อข้อความมีอายุครบ 24 ชั่วโมง จะไม่แสดงในช่องแชท (แต่ยังคงถูกเก็บรักษาไว้ในคลังความรู้และประวัติฐานข้อมูลอย่างปลอดภัย) พร้อมระบบ Real-time ticker ที่ตัดข้อความเก่าออกอัตโนมัติขณะเปิดแอปทิ้งไว้
+>
+> **Mobile Chat Layout & Markdown Engine Upgrade + Message Persistence Fix (2026-09-23):**
+> - **แก้ปัญหาหน้าแชทตัวหนังสือติดกัน/อ่านยาก และบับเบิลข้อความแคบเกินไป**:
+>   - ขยายความกว้าง Message Bubble ฝั่งผู้ช่วยให้ตอบสนองพื้นที่หน้าจอมือถือจริง (`Modifier.weight(1f, fill = false).widthIn(max = 640.dp)`) แทนค่าคงที่ 320dp เดิม
+>   - อัปเกรดตัวประมวลผล Markdown ในแชท (`MessageBubble.kt`) รองรับการแยกบล็อก: **Headings (`#`, `##`, `###`)**, **Dividers (`---`, `===`)**, **Paragraph Spacing** บนบรรทัดว่าง, **Bullet & Numbered Lists (`-`, `*`, `1.`)** พร้อมไอคอน Bullet สี Cyan และการเยื้องย่อหน้า
+>   - รองรับ **Inline Code Badges (`` `code` ``)** ด้วย Monospace font แก้ปัญหาสัญลักษณ์กราฟิก/แท่งเกจวัด (`[████░░]`) แสดงผลเป็นกล่องสี่เหลี่ยมกลวง `▯` บนสมาร์ตโฟนบางรุ่น
+> - **แก้ปัญหาข้อความหายหรือแสดงไม่ครบเมื่อเปิดแอปใหม่**:
+>   - ยกเลิกการตัดทอนข้อความ `text.take(2000)` ใน `LiveGeminiService.emitTextToChat` ทำให้บทวิเคราะห์และรายงานขนาดยาวถูกบันทึกลง SQLite Database แบบเต็ม 100%
+>   - เพิ่มปริมาณการโหลดประวัติแชทเริ่มต้น (`ChatController.loadHistory`) จาก 20 ข้อจำเป็น 100 ข้อความ ป้องกันประวัติแชทเก่าถูกกลืนหายหลังใช้งานคำสั่งเสียง
+>
+> **JARVIS Master All-in-One Sentiment Engine & Composite Index (2026-09-22):**
+> - **รวมศูนย์ Sentiment ทุกมิติเป็นเครื่องยนต์หลักหนึ่งเดียว (`trading_sentiment`)**:
+>   - รวมทุกองค์ประกอบ (News Bias, Market Fear & Greed, Binance Futures Positioning, Technical Indicator Consensus) เข้าสู่ **JARVIS Composite Sentiment Index (0–100)**
+>   - แสดงผลผ่าน Visual Meter Bar `[████████░░]` พร้อมจำแนก 5 ระดับอารมณ์สากล: Extreme Fear (0-24), Fear (25-44), Neutral (45-55), Greed (56-75), Extreme Greed (76-100)
+>   - **4 เสาหลัก (4-Pillars Framework)**:
+>     1. *News & Social Bias (30%)*: ข่าวสารเจาะจงรายสินทรัพย์ (Google News, Yahoo Finance, CoinDesk RSS) พร้อมคะแนน Sentiment Bias (-1.0 ถึง +1.0)
+>     2. *Market Fear & Greed (25%)*: Alternative.me (คริปโต) / CNN Fear & Greed 7 ตัวชี้วัดย่อยระดับสถาบัน (หุ้นสหรัฐฯ, ทองคำ, ดัชนี)
+>     3. *Derivatives Positioning (30%)*: สัดส่วนบัญชีรายย่อย Long/Short vs พอร์ตเจ้ามือ/Top Traders จาก Binance Futures และ Taker Volume Ratio
+>     4. *Technical Consensus (15%)*: ฉันทามติอินดิเคเตอร์เทคนิค 1D (TradingView Recommend Score)
+>   - **Global Macro Mode**: สรุปภาพรวมความเสี่ยงโลก (เมื่อไม่ระบุ symbol หรือส่ง "all") โดยคำนวณจาก CNN Stock F&G (60%) + Crypto F&G (40%)
+>   - **Contrarian Alert Detector**: แจ้งเตือนสภาวะผิดปกติ เช่น Short Squeeze (รายย่อยแห่ Short แต่เจ้ามือถือ Long หนาแน่น) หรือ Bull Trap ทันที
+>   - **AI Behavioral Economics Synthesis**: Gemini AI วิเคราะห์ระยะจิตวิทยาฝูงชน (Crowd Psychology Phase) และสรุปกลยุทธ์เชิงพฤติกรรมศาสตร์
+> - รายละเอียด: [.obsidian-wiki/07_Trading_Intelligence/05_Sentiment_Analysis_Logic.md](.obsidian-wiki/07_Trading_Intelligence/05_Sentiment_Analysis_Logic.md)
+>
+> **Stock Fundamental & Financial Analysis Engine + TradingView Financials Visual Dashboard (2026-09-22):**
+> - **ยกระดับ `trading_fundamental_analysis` สู่ Financial Analysis Engine เต็มรูปแบบ** — เชื่อมต่อ TradingView Scanner API ดึงตัวเลขจริงครบ 50+ ตัวชี้วัดสำคัญ ครอบคลุมทั้งหุ้นไทย (SET/MAI เช่น SCB, PTT, CPALL) และหุ้นสหรัฐฯ/สากล (NASDAQ/NYSE เช่น AAPL, NVDA, TSLA)
+> - **การแสดงผลระดับสถาบัน 6 หมวดหมู่เทียบเคียง TradingView**:
+>   1. **ข้อเท็จจริงที่มีนัยยะ (Key Metrics)**: Market Cap, P/E (TTM), Basic EPS, P/S, P/B, P/FCF, Dividend Yield, DPS, 52W Range, Beta 1Y
+>   2. **ความเป็นเจ้าของ (Ownership & Float)**: Total Shares, Free Float %, Closely-held %, Visual Float Bar `[████████░░]`
+>   3. **โครงสร้างเงินทุน & งบดุล (Capital Structure & Solvency)**: Enterprise Value (EV), Total Debt, Cash & Equivalents, Net Debt, Total Equity, Total Assets, Debt-to-Equity (D/E)
+>   4. **ผลการดำเนินงาน & ความสามารถทำกำไร (Financials & Profitability)**: Revenue (TTM/FQ/FY), Net Income (TTM/FQ/FY), Free Cash Flow (FCF), Operating Margin, Net Margin, ROE, ROA, ROIC
+>   5. **มุมมองนักวิเคราะห์ & โมเมนตัมราคา (Consensus & Targets)**: Target Price (Avg/High/Low), Upside %, 1Y & YTD Performance
+>   6. **AI Multi-Dimensional Analysis (6 มิติ)**: วิเคราะห์เจาะลึก Valuation, Solvency, Profitability, Dividend Safety, Ownership และสรุป Fundamental Health Score (0-100) พร้อม Bullish Factors และ Bearish Risks
+> - **TradingView Financials Visual Dashboard (โหมดการเงินในหน้าจอชาร์ต)**:
+>   - เพิ่มโหมดที่ 3 `🏛️ การเงิน / งบดุล` (`viewMode = "financials"`) ใน `TradingChartScreen.kt` ฝังวิดเจ็ต TradingView Financials แท้ (`financials.html`) แสดงผลแท็บ ภาพรวม, งบการเงิน, สถิติ, เงินปันผล, ผลประกอบการ, Donut Chart ความเป็นเจ้าของ และ Waterfall Chart โครงสร้างเงินทุน ตรงตามหน้า TradingView
+>   - รองรับการแปลงชื่อย่อหุ้นไทยอัตโนมัติ (`toTvSymbol`) สลับสัญลักษณ์หุ้นแบบ Dynamic และ Quick Preset Chips (SET:SCB, PTT, KBANK, CPALL, AAPL, NVDA, XAUUSD, BTCUSDT)
+> - รายละเอียด: [.obsidian-wiki/07_Trading_Intelligence/68_Stock_Fundamental_Financial_Engine.md](.obsidian-wiki/07_Trading_Intelligence/68_Stock_Fundamental_Financial_Engine.md)
+>
 > **AI Wake Engine Goes Live, OHLCV Pruning & Backup/Restore (2026-09-18):**
 > - **ระบบปลุก AI (คาดการณ์ล่วงหน้า) ทำงานจริงแล้ว และแยกจาก Signal Alert** — alert job `trading_anticipation` (field `wake`) เฝ้า 5TF ด้วยปัจจัย ~115 ตัว 15 หมวด; เมื่อเกิดเหตุการณ์ AI ดู snapshot 5TF แล้วตัดสินเอง **NOTIFY / SKIP** (ไม่มี Entry/SL/TP สำเร็จรูปจากปัจจัย) และคำตัดสินถูกบันทึกลงการเรียนรู้เพื่อวัดว่า AI ถูกแค่ไหน. job คาดการณ์เดิมถูกย้ายให้อัตโนมัติ
 > - **ประหยัดโทเคน Live** — การวิเคราะห์ใช้ Flash Lite แบบ stateless; Live แค่พูดสรุปสั้นที่ AI เขียนแล้ว
@@ -956,6 +997,9 @@
 - **UI Automation (Android Accessibility Service)** — อ่านโครงสร้างหน้าจอ (`device_read_screen`), แตะปุ่ม (`device_tap`), พิมพ์ข้อความ (`device_type_text`) และเลื่อนหน้าจอ (`device_scroll`)
   - `device_read_screen` อ่านทุกหน้าต่างที่โต้ตอบได้ (รวม dialog/popup ขอสิทธิ์) รวมถึงปุ่มไอคอนที่ไม่มีข้อความ แต่ละรายการมีพิกัดกึ่งกลาง `@(x,y)` ให้ส่งต่อเป็น `device_tap(x, y)` ได้ทันที และจำกัดไว้ 80 รายการต่อครั้ง (`ScreenSnapshotFormatter.kt`)
   - gesture (tap/scroll) มี timeout 3 วินาที — ไม่ค้าง Live session แม้ระบบปฏิเสธ gesture
+  - `device_screenshot` จับภาพหน้าจอจริง (API 30+) ส่งเข้า Gemini Live ผ่านท่อเดียวกับกล้อง — อ่านแผนที่/รูป/กราฟ/WebView ที่ a11y tree อ่านไม่ออกได้
+  - `device_gesture` (กดค้าง, ปัด 4 ทิศ, ลาก) และ `device_type_text(submit=true)` กดส่ง/ค้นหาบนคีย์บอร์ดได้จริง
+  - `device_open_app` รอหน้าจอเปลี่ยนแล้วแนบสรุปหน้าจอแรกกลับมาให้ AI ทันที
 
 ### 🧠 3. Advanced 6-Layer Memory Engine
 - **Layer 1: Core Memory** — จำข้อมูลตัวตนผู้ใช้/AI (identity จัดการผ่าน tool/Settings เท่านั้น กัน heuristic ทับ)
@@ -1063,7 +1107,7 @@
 
 ## 📦 Tool Catalogue (Total: 100+ Tools)
 
-### 📱 DEVICE CONTROL TOOLS (18 tools)
+### 📱 DEVICE CONTROL TOOLS (31 tools)
 - `device_flashlight`: ควบคุมไฟฉาย (ON, OFF, TOGGLE)
 - `device_volume`: ปรับระดับเสียง (UP, DOWN, MUTE, UNMUTE, SET %, STATUS) ทุกสตรีม
 - `device_brightness`: ปรับความสว่างหน้าจอ (SET %, AUTO)
@@ -1077,7 +1121,9 @@
 - `device_set_alarm`: ตั้งนาฬิกาปลุกในระบบ Android
 - `device_open_url` & `device_search_web`: เปิดเว็บเบราว์เซอร์หรือค้นหา Google
 - `device_read_screen`: อ่านข้อมูลหน้าจอปัจจุบันผ่าน Accessibility Service (ทุกหน้าต่าง + พิกัด `@(x,y)` ต่อ element)
+- `device_screenshot`: จับภาพหน้าจอจริงส่งให้ AI ดู (Android 11+)
 - `device_tap`: แตะปุ่มด้วยข้อความ, view id (แบบสั้นได้) หรือพิกัดจาก `device_read_screen`
+- `device_gesture`: กดค้าง / ปัดซ้าย-ขวา-บน-ล่าง / ลากวัตถุ
 - `device_type_text`: พิมพ์ข้อความลงในช่องที่โฟกัสอยู่
 - `device_scroll`: เลื่อนหน้าจอขึ้นหรือลง
 - `device_press_button`: สั่งปุ่มระบบ (Back, Home, Recents, Notifications, Screenshot, Lock Screen, Wake Screen)

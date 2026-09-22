@@ -186,19 +186,23 @@ object TradingToolDefinitions {
             )
         ),
 
-        // ── 11. Reddit Sentiment ───────────────────────────────────────────
+        // ── 11. Multi-Source Sentiment Intelligence (Master All-in-One Engine) ───
         FunctionDeclaration(
             name = "trading_sentiment",
-            description = """วิเคราะห์ความรู้สึกของ Reddit community ต่อ symbol ที่กำหนด
-                |ดู posts จาก wallstreetbets, investing, CryptoCurrency
-                |บอก bullish/bearish score และ top posts ที่ hot
-                |ใช้เมื่อผู้ใช้ถามว่า "Reddit พูดถึง BTC ยังไง", "sentiment AAPL", "ตลาดมอง ETH ยังไง" """.trimMargin(),
+            description = """วิเคราะห์ Sentiment อารมณ์ตลาดและสถานะการถือครองแบบรวมศูนย์ (JARVIS Master All-in-One Sentiment Engine)
+                |คำนวณคะแนนรวม Composite Sentiment Index (0-100) พร้อม Visual Meter Bar และการประเมิน 4 เสาหลัก (4-Pillars):
+                |1. Real-time Market News & Social Bias: ข่าวสารและกระแสสังคมพร้อมสัดส่วน Bullish/Bearish
+                |2. Market Fear & Greed Index: ดัชนีความกลัว/ความโลภ (Crypto Alternative.me & US Equities CNN 7 ตัวชี้วัดย่อย)
+                |3. Derivatives Market Positioning: สัดส่วน Retail vs Smart Money (Whales), Long/Short Ratio, Taker Volume และสัญญาณ Contrarian Squeeze
+                |4. Technical Indicator Consensus: ฉันทามติอินดิเคเตอร์เทคนิค (RSI, MACD, Trend)
+                |รองรับทั้งภาพรวม Macro/ตลาดรวม (ไม่ต้องระบุ symbol) หรือเจาะจงรายสินทรัพย์ (Crypto: BTC, ETH, หุ้น US: AAPL, NVDA, ทองคำ: XAUUSD, หุ้นไทย: SET:SCB)
+                |ใช้เมื่อผู้ใช้ถาม: "sentiment", "sentiment ตลาด", "ความรู้สึกตลาด", "อารมณ์ตลาดวันนี้", "sentiment BTC", "ตลาดมอง AAPL ยังไง", "คน Long หรือ Short เยอะกว่ากัน" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol" to ParameterProperty("STRING", "Symbol เช่น BTC, AAPL, ETH, NVDA, TSLA")
+                    "symbol" to ParameterProperty("STRING", "Symbol ที่ต้องการวิเคราะห์ เช่น BTC, ETH, AAPL, NVDA, XAUUSD, SET:SCB (หากไม่ระบุหรือระบุ 'all' จะวิเคราะห์ภาพรวม Global Macro)")
                 ),
-                required = listOf("symbol")
+                required = emptyList()
             )
         ),
 
@@ -221,7 +225,7 @@ object TradingToolDefinitions {
         // ── 13. Combined Analysis (Power Tool) ────────────────────────────
         FunctionDeclaration(
             name = "trading_combined",
-            description = """วิเคราะห์ครบทุกด้านพร้อมกัน: TA + Reddit Sentiment + Financial News
+            description = """วิเคราะห์ครบทุกด้านพร้อมกัน: TA + Multi-Source Sentiment + Financial News
                 |ให้ Confluence Decision สุดท้าย (BUY/SELL/MIXED) พร้อม reasoning
                 |ใช้เมื่อผู้ใช้ถามว่า "วิเคราะห์ BTC ทุกด้าน", "ดู ETH full analysis", "combined BTCUSDT" """.trimMargin(),
             parameters = FunctionParameters(
@@ -243,14 +247,16 @@ object TradingToolDefinitions {
         
         FunctionDeclaration(
             name = "trading_fundamental_analysis",
-            description = """วิเคราะห์ปัจจัยพื้นฐาน (Fundamental) ของหุ้นรายตัว
-                |แสดง Revenue Growth, Profit Margins, P/E Ratio, Debt/Equity, ราคาเป้าหมาย (Target Price)
-                |และข้อเสนอแนะ (Recommendation) จากนักวิเคราะห์
-                |ใช้เมื่อผู้ใช้ถาม: "ดูปัจจัยพื้นฐาน AAPL", "หุ้น NVDA พื้นฐานเป็นยังไง" """.trimMargin(),
+            description = """วิเคราะห์ปัจจัยพื้นฐาน (Fundamental), งบดุล (Balance Sheet), งบการเงิน และมัลติเปิลประเมินมูลค่าของหุ้นรายตัว
+                |แสดงข้อมูลครบถ้วน: Market Cap, P/E (TTM), P/S, P/B, P/FCF, EV, หนี้สินรวม, เงินสดในมือ, สัดส่วนผู้ถือหุ้นรายย่อย (Free Float), Margins, ROE, ROA, ROIC, Target Price
+                |พร้อมบทวิเคราะห์ปัจจัยพื้นฐานรอบด้าน 6 มิติโดย AI (Valuation, Solvency, Profitability, Dividend Safety, Ownership, Fundamental Health Score)
+                |รองรับหุ้นไทย (SET/MAI เช่น SCB, PTT, CPALL, BDMS) และหุ้นสหรัฐฯ/สากล (เช่น AAPL, NVDA, TSLA)
+                |ใช้เมื่อผู้ใช้ถาม: "ดูงบดุล SCB", "วิเคราะห์พื้นฐานหุ้น PTT", "งบการเงิน AAPL", "หุ้น NVDA พื้นฐานเป็นยังไง" """.trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbol" to ParameterProperty("STRING", "Symbol เช่น AAPL, TSLA, NVDA")
+                    "symbol" to ParameterProperty("STRING", "สัญลักษณ์หุ้น เช่น SCB, PTT, CPALL, AAPL, NVDA, TSLA"),
+                    "exchange" to ParameterProperty("STRING", "ตลาดหลักทรัพย์ (ไม่บังคับ) เช่น SET, MAI, NASDAQ, NYSE")
                 ),
                 required = listOf("symbol")
             )
@@ -258,11 +264,22 @@ object TradingToolDefinitions {
 
         FunctionDeclaration(
             name = "trading_fear_greed",
-            description = """ดึงดัชนีความกลัวและความโลภ (Crypto Fear & Greed Index ตัวจริงจาก alternative.me — ฟรี real-time)
-                |แสดงค่า 0-100, การตีความภาษาไทย และอนุกรมย้อนหลัง 7 วันพร้อมทิศทางอารมณ์ตลาด
-                |ใช้เพื่อดู Sentiment ภาพรวมของตลาด Crypto ว่าอยู่ในจุดที่กลัวสุดขีด (ซื้อ) หรือโลภสุดขีด (ขาย)
-                |ใช้เมื่อผู้ใช้ถาม: "ตลาดคริปโตตอนนี้เป็นยังไง", "กลัวหรือโลภแล้วตอนนี้" """.trimMargin(),
-            parameters = null
+            description = """ดึงดัชนีความกลัวและความโลภ (Fear & Greed Index) Real-time
+                |รองรับทั้ง Crypto (alternative.me) และตลาดหุ้นสหรัฐฯ US Equities (CNN Fear & Greed พร้อม 7 Sub-indicators)
+                |แสดงค่า 0-100, การตีความภาษาไทย และอนุกรมย้อนหลังพร้อมทิศทางอารมณ์ตลาด
+                |ใช้เพื่อดู Sentiment ภาพรวมว่าตลาดอยู่ในจุดที่กลัวสุดขีด (Extreme Fear) หรือโลภสุดขีด (Extreme Greed)
+                |ใช้เมื่อผู้ใช้ถาม: "ตลาดตอนนี้กลัวหรือโลภ", "Fear and Greed Index", "ตลาดหุ้นสหรัฐกลัวหรือโลภ" """.trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "market" to ParameterProperty(
+                        type = "STRING",
+                        description = "ตลาดที่ต้องการดู: 'crypto' (Crypto Fear & Greed), 'stocks' (CNN US Stock Market Fear & Greed), หรือ 'all' (ดูคู่กันทั้ง 2 ตลาด)",
+                        enum = listOf("crypto", "stocks", "all")
+                    )
+                ),
+                required = emptyList()
+            )
         ),
 
         FunctionDeclaration(
@@ -361,7 +378,7 @@ object TradingToolDefinitions {
                 |- trading_signal_alert 📡 (สัญญาณเทรด "ที่เพิ่งเกิด" ในแท่งปิดล่าสุด จาก Unified SMC Multi-TF (engine หลัก ประเมินบน 15m) + Momentum / Reversal (classic ที่ forensics 2026-08-27 พิสูจน์ว่ามี edge) + SMC Engine — เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m): ตั้ง signal_buy >= 1 หรือ signal_sell >= 1 (สร้าง 2 job ถ้าต้องการทั้งสองฝั่ง) — เมื่อสัญญาณเกิด ระบบส่ง payload ครบ (เหตุผลเงื่อนไข, Entry/SL/TP เฉพาะกลยุทธ์, RR, บริบทกราฟ) ให้ AI quick-check ก่อนแจ้งผู้ใช้ — ใช้เมื่อผู้ใช้ขอ "แจ้งเตือนเมื่อมีสัญญาณ Buy/Sell", "ตั้ง signal alert ทอง 15m"
                 |- trading_technical_analysis (เลือก TF ด้วย symbol@TF เช่น XAUUSD@15m, default 1h): close, RSI, MACD.macd, MACD.signal, BB.basis, ATR, ADX, Recommend.All, recommend_score, signal (STRONG BUY/SELL ใช้กับ ==), volume
                 |- trading_deep_analysis_suite (วิเคราะห์ 5 มิติ — เลือก TF ด้วย symbol@TF): summaryScore (0-100), lsdState (BULLISH/BEARISH/NEUTRAL ใช้กับ ==/contains), lsdConfluenceTF (1-4), deltaLabel (ใช้กับ ==/contains), deltaValue, fiboScore (0-10), momentum (EXPANSION/SQUEEZE/REVERSAL ใช้กับ ==/contains), isSqueeze (0/1), close
-                |- trading_sentiment: sentiment_score, bullish_posts, bearish_posts, posts_analyzed, sentiment_label (ใช้กับ ==) ⚠️ Reddit มักตอบ 403 ช่วงนี้ — หลีกเลี่ยงถ้าไม่จำเป็น
+                |- trading_sentiment: composite_score (0-100), composite_label (EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED), sentiment_score (-1.0 to 1.0), bullish_posts, bearish_posts, posts_analyzed, sentiment_label (ใช้กับ ==)
                 |- trading_fear_greed: value (0-100), classification (ใช้กับ ==)
                 |- trading_crypto_overview: btc_dominance, eth_dominance, market_cap_change_24h, total_market_cap_usd, total_volume_24h_usd, active_cryptocurrencies, markets
                 |

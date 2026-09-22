@@ -5,6 +5,8 @@
     accessibilityEventTypes="typeAllMask" — รับทุก event เพื่อติดตาม context ของแอปที่ใช้งานอยู่
     canRetrieveWindowContent="true"       — อ่าน UI tree ของแอปอื่นได้ (screen reading)
     canPerformGestures="true"             — ทำ gesture (tap, swipe) บนหน้าจอได้ (API 24+)
+    canTakeScreenshot="true"              — จับภาพหน้าจอส่งให้ AI ดู (device_screenshot)
+                                            ขาดแอตทริบิวต์นี้ takeScreenshot() จะล้มเหลวทันที (พบจากทดสอบจริง 2026-09-20)
     flagReportViewIds="true"              — รับ resource-id ของ view เพื่อ target-click แม่นยำ
     flagRetrieveInteractiveWindows        — อ่าน/คลิกได้ทุกหน้าต่าง (dialog, popup ขอสิทธิ์, แผงแจ้งเตือน)
     flagRequestFilterKeyEvents="true"     — รับ key events เพื่อ intercept hardware buttons ถ้าต้องการ
@@ -16,6 +18,7 @@
     android:accessibilityFlags="flagReportViewIds|flagRequestFilterKeyEvents|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
     android:notificationTimeout="100"
     android:settingsActivity="com.skyliner2008.jarvis.MainActivity"
     android:description="@string/accessibility_service_description" />

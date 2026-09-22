@@ -56,6 +56,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     var currentActivity: String? = null
         private set
 
+
     // ─── Lifecycle ──────────────────────────────────────────────────────────
 
     override fun onServiceConnected() {
@@ -139,6 +140,50 @@ class JarvisAccessibilityService : AccessibilityService() {
         return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
     }
 
+    /**
+     * จับภาพหน้าจอจริงแล้วคืน Bitmap ให้ AI ดู (API 30+)
+     * ต่างจาก [takeScreenshot] ที่เป็น GLOBAL_ACTION — อันนั้นแค่เซฟลงแกลเลอรี ไม่คืนภาพ
+     */
+    fun captureScreenBitmap(callback: (android.graphics.Bitmap?) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.w(TAG, "captureScreenBitmap requires API 30+")
+            callback(null)
+            return
+        }
+        try {
+            takeScreenshot(
+                android.view.Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        val buffer = result.hardwareBuffer
+                        val bitmap = try {
+                            val hardware = android.graphics.Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
+                            // hardware bitmap อ่าน pixel ตรงๆ ไม่ได้ → copy เป็น ARGB_8888 ก่อนบีบ JPEG
+                            hardware?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                                .also { hardware?.recycle() }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "screenshot convert failed: ${e.message}")
+                            null
+                        } finally {
+                            buffer.close()
+                        }
+                        callback(bitmap)
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        // ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT = 3 (เรียกถี่กว่า 1 ครั้ง/วินาที)
+                        Log.w(TAG, "takeScreenshot failed: code=$errorCode")
+                        callback(null)
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "takeScreenshot threw: ${e.message}")
+            callback(null)
+        }
+    }
+
     // ─── Screen Reading ────────────────────────────────────────────────────
 
     /**
@@ -156,6 +201,14 @@ class JarvisAccessibilityService : AccessibilityService() {
             }
             .sortedByDescending { it.layer }
             .forEach { w -> w.root?.let { result += w to it } }
+
+        // วิดเจ็ตลอยของ JARVIS เองไม่ใช่เนื้อหาที่ผู้ใช้สนใจ — ตัดออกถ้ายังมีหน้าต่างแอปอื่นให้อ่าน
+        val others = result.filter { it.second.packageName?.toString() != packageName }
+        if (others.isNotEmpty() && others.size < result.size) {
+            result.filterNot { it in others }.forEach { it.second.recycle() }
+            return others
+        }
+
         if (result.isEmpty()) rootInActiveWindow?.let { result += null to it }
         return result
     }
@@ -336,6 +389,109 @@ class JarvisAccessibilityService : AccessibilityService() {
             callback?.invoke(false)
         }
         return dispatched
+    }
+
+    /**
+     * กดค้าง (long press) ที่พิกัด — เปิดเมนูบริบท เลือกข้อความ ลากไอคอน ฯลฯ
+     */
+    fun longPressAtPosition(x: Float, y: Float, durationMs: Long = 800, callback: ((Boolean) -> Unit)? = null): Boolean {
+        Log.d(TAG, "LONG PRESS at ($x, $y) ${durationMs}ms")
+        return dispatchStroke(Path().apply { moveTo(x, y) }, durationMs, "LONG PRESS ($x, $y)", callback)
+    }
+
+    /**
+     * ปัดหน้าจอตามทิศทาง โดยอิงสัดส่วนของจอ (ไม่ต้องให้ AI คำนวณพิกัดเอง)
+     * @param direction up / down / left / right — ทิศที่ "นิ้วลาก" ไป
+     */
+    fun swipeDirection(direction: String, durationMs: Long = 350, callback: ((Boolean) -> Unit)? = null): Boolean {
+        val m = resources.displayMetrics
+        val w = m.widthPixels.toFloat()
+        val h = m.heightPixels.toFloat()
+        return when (direction) {
+            "up", "ขึ้น" -> swipe(w * 0.5f, h * 0.75f, w * 0.5f, h * 0.25f, durationMs, callback)
+            "down", "ลง" -> swipe(w * 0.5f, h * 0.25f, w * 0.5f, h * 0.75f, durationMs, callback)
+            "left", "ซ้าย" -> swipe(w * 0.8f, h * 0.5f, w * 0.2f, h * 0.5f, durationMs, callback)
+            "right", "ขวา" -> swipe(w * 0.2f, h * 0.5f, w * 0.8f, h * 0.5f, durationMs, callback)
+            else -> {
+                Log.w(TAG, "swipeDirection: ทิศทางไม่รองรับ '$direction'")
+                callback?.invoke(false)
+                false
+            }
+        }
+    }
+
+    /**
+     * เลื่อนเนื้อหา "ภายใน list/scroll view" ด้วย ACTION_SCROLL_FORWARD/BACKWARD
+     * แม่นยำกว่าการปัดกลางจอ (ไม่ไปโดนปุ่มหรือ pull-to-refresh) — คืน false ถ้าไม่เจอ node ที่เลื่อนได้
+     */
+    fun scrollNode(forward: Boolean): Boolean {
+        val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        val roots = interactiveRoots()
+        try {
+            for ((_, root) in roots) {
+                // เดิมใช้ node ที่เลื่อนได้ "ตัวแรกที่เจอ" ซึ่งมักเป็นแถบชิปแนวนอนด้านบน (เช่นตัวกรองใน YouTube)
+                // สั่งแล้ว performAction คืน true แต่หน้าจอหลักไม่ขยับ — พบจากทดสอบจริง 2026-09-20
+                val target = findMainScrollable(root) ?: continue
+                val ok = target.performAction(action)
+                target.recycle()
+                if (ok) {
+                    Log.d(TAG, "SCROLL node ${if (forward) "forward" else "backward"} — OK")
+                    return true
+                }
+            }
+        } finally {
+            roots.forEach { it.second.recycle() }
+        }
+        return false
+    }
+
+    /**
+     * หา list หลักของหน้า: node ที่เลื่อนได้ "แนวตั้ง" และกินพื้นที่มากที่สุด
+     * (ข้ามแถบเลื่อนแนวนอนอย่างแถบชิป/แถบสตอรี่ที่เตี้ยกว่ากว้าง)
+     */
+    private fun findMainScrollable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var best: AccessibilityNodeInfo? = null
+        var bestArea = 0
+
+        fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 30) return
+            if (node.isScrollable && node.isVisibleToUser) {
+                val bounds = Rect().also { node.getBoundsInScreen(it) }
+                val area = bounds.width() * bounds.height()
+                if (bounds.height() >= bounds.width() / 2 && area > bestArea) {
+                    best?.recycle()
+                    best = AccessibilityNodeInfo.obtain(node)
+                    bestArea = area
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                visit(child, depth + 1)
+                child.recycle()
+            }
+        }
+
+        visit(root, 0)
+        return best
+    }
+
+    /**
+     * กดปุ่ม "ส่ง/ค้นหา/Enter" บนคีย์บอร์ดของช่องพิมพ์ที่โฟกัสอยู่ (API 30+)
+     * ใช้ต่อจาก typeText เพื่อส่งข้อความจริง ไม่ใช่แค่พิมพ์ค้างไว้
+     */
+    fun pressImeAction(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.w(TAG, "pressImeAction requires API 30+")
+            return false
+        }
+        val node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: run {
+            Log.w(TAG, "pressImeAction: ไม่พบช่องพิมพ์ที่โฟกัสอยู่")
+            return false
+        }
+        val result = node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        node.recycle()
+        Log.d(TAG, "IME ENTER — ${if (result) "OK" else "FAIL"}")
+        return result
     }
 
     /**

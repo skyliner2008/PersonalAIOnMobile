@@ -47,6 +47,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
     companion object {
         private const val TAG = "DeviceControl"
         private const val GESTURE_TIMEOUT_MS = 3_000L
+        private const val SCREENSHOT_TIMEOUT_MS = 4_000L
+        /** เพดานเวลารอให้แอปที่เพิ่งเปิดแสดงหน้าจอ ก่อนสรุปหน้าจอกลับให้ AI */
+        private const val APP_LAUNCH_SETTLE_TIMEOUT_MS = 2_500L
     }
 
     private val locationProvider = com.skyliner2008.jarvis.location.LocationProvider(context)
@@ -87,7 +90,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
                 // ── Screen Interaction (Accessibility) ──
                 "device_read_screen"   -> executeReadScreen(args)
+                "device_screenshot"    -> executeScreenshot(args)
                 "device_tap"           -> executeTap(args)
+                "device_gesture"       -> executeGesture(args)
                 "device_type_text"     -> executeTypeText(args)
                 "device_scroll"        -> executeScroll(args)
                 "device_press_button"  -> executePressButton(args)
@@ -832,28 +837,61 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
     // ███ 2. APP LAUNCHER ███
     // ═══════════════════════════════════════════════════════════════════════
 
-    private fun executeOpenApp(args: Map<String, String>): String {
+    private suspend fun executeOpenApp(args: Map<String, String>): String {
         val appName = args["app_name"]?.trim()
         val packageName = args["package_name"]?.trim()
 
         // ลองเปิดด้วย package name ก่อน
         if (!packageName.isNullOrBlank()) {
-            return launchByPackage(packageName)
+            val result = launchByPackage(packageName)
+            // package ที่ AI เดามาอาจไม่มีในเครื่องรุ่นนี้ — ถ้าล้มเหลวและมีชื่อแอปมาด้วย ให้หาจากแอปที่ติดตั้งจริง
+            if (result.startsWith("❌") && !appName.isNullOrBlank()) {
+                resolveAppPackage(appName)?.takeIf { it != packageName }?.let { fallback ->
+                    Log.d(TAG, "executeOpenApp: '$packageName' ล้มเหลว → ลอง '$fallback' จากชื่อ '$appName'")
+                    return awaitAppReady(launchByPackage(fallback), fallback)
+                }
+            }
+            return awaitAppReady(result, packageName)
         }
 
         if (appName.isNullOrBlank()) return "❌ ต้องระบุ app_name หรือ package_name"
 
-        // แปลงชื่อแอปเป็น package (ค้นหาจาก installed apps)
+        // แปลงชื่อแอปเป็น package (ค้นหาจากแอปที่เปิดได้จริงในเครื่อง)
         val resolvedPackage = resolveAppPackage(appName)
-        if (resolvedPackage != null) {
-            return launchByPackage(resolvedPackage)
-        }
+            ?: return "❌ ไม่พบแอป '$appName' ในเครื่อง"
+        return awaitAppReady(launchByPackage(resolvedPackage), resolvedPackage)
+    }
 
-        return "❌ ไม่พบแอป '$appName' ในเครื่อง"
+    /**
+     * รอให้แอปที่เพิ่งสั่งเปิดขึ้นหน้าจอจริงก่อนคืนผล — ไม่งั้น AI ที่เรียก device_read_screen
+     * ต่อทันทีจะได้หน้าจอเดิม (startActivity คืนค่าก่อนแอปวาดเสร็จ)
+     */
+    private suspend fun awaitAppReady(launchResult: String, expectedPackage: String): String {
+        if (launchResult.startsWith("❌")) return launchResult
+        val svc = JarvisAccessibilityService.instance ?: return launchResult
+
+        val deadline = System.currentTimeMillis() + APP_LAUNCH_SETTLE_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (svc.currentPackage == expectedPackage) {
+                delay(300) // ให้หน้าแรกวาดเสร็จก่อนอ่าน
+                return "$launchResult\n\n${svc.readScreenAsText()}"
+            }
+            delay(150)
+        }
+        return "$launchResult (หน้าจอยังไม่เปลี่ยนภายใน ${APP_LAUNCH_SETTLE_TIMEOUT_MS / 1000} วินาที — เรียก device_read_screen เพื่อดูสถานะล่าสุด)"
     }
 
     private fun launchByPackage(pkg: String): String {
         Log.d(TAG, "launchByPackage: attempting to launch '$pkg'")
+
+        // กลับมาที่ JARVIS เอง — ต้องขยายจากวิดเจ็ตลอยกลับเป็นเต็มจอ ไม่ใช่แค่ startActivity
+        if (pkg == context.packageName) {
+            val mgr = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()
+            mgr?.wakeScreen()
+            mgr?.enable()
+            MainActivity.instance?.expandAlwaysLive()
+            return "🤖 กลับมาที่หน้าจาวิสแล้วค่ะ"
+        }
         // 1. Try standard getLaunchIntentForPackage
         var intent = context.packageManager.getLaunchIntentForPackage(pkg)
 
@@ -920,6 +958,10 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
     private fun resolveAppPackage(appName: String): String? {
         val lowerName = appName.lowercase()
+        // ชื่อเรียกตัวเอง — label ของแอปคือ "Personal AI Bot" ผู้ใช้จึงหาด้วยคำว่า "จาวิส" ไม่เจอ
+        if (lowerName in setOf("jarvis", "จาวิส", "จาวิท", "จาวิต", "จารวิส", "personal ai bot", "จาวิสบอท")) {
+            return context.packageName
+        }
         // ชื่อแอปยอดนิยม → package mapping
         val knownApps = mapOf(
             "google maps" to "com.google.android.apps.maps",
@@ -978,19 +1020,27 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             "แปลภาษา" to "com.google.android.apps.translate",
         )
 
-        // ตรงจาก mapping
-        knownApps[lowerName]?.let { return it }
-
-        // ค้นหาจากชื่อแอปที่ติดตั้ง
         val pm = context.packageManager
-        val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-        for (app in apps) {
-            val label = pm.getApplicationLabel(app).toString().lowercase()
-            if (label == lowerName || label.contains(lowerName)) {
-                return app.packageName
-            }
+        // แอปที่ "เปิดได้จริง" ในเครื่องนี้ (มี Launcher Activity) — ครอบคลุมแอปของ OEM ที่ package ต่างจาก Pixel
+        val launchable = pm.queryIntentActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+        ).mapNotNull { it.activityInfo?.applicationInfo }
+
+        // 1. mapping ชื่อยอดนิยม — ใช้ได้เฉพาะเมื่อ package นั้นเปิดได้จริงในเครื่องนี้
+        //    (เดิมคืนค่าทันที ทำให้ 'กล้อง' → com.android.camera ล้มเหลวบน Samsung/OEM อื่น)
+        knownApps[lowerName]?.let { mapped ->
+            if (launchable.any { it.packageName == mapped }) return mapped
+            Log.d(TAG, "resolveAppPackage: '$mapped' ไม่มีในเครื่องนี้ → ค้นจากชื่อแอปที่ติดตั้งแทน")
         }
-        return null
+
+        // 2. ค้นจาก label ของแอปที่เปิดได้จริง — ตรงเป๊ะก่อน แล้วค่อยขึ้นต้นด้วย แล้วค่อยมีคำนั้นอยู่
+        val labeled = launchable.map { pm.getApplicationLabel(it).toString().lowercase() to it.packageName }
+        labeled.firstOrNull { it.first == lowerName }?.let { return it.second }
+        labeled.firstOrNull { it.first.startsWith(lowerName) }?.let { return it.second }
+        labeled.firstOrNull { it.first.contains(lowerName) }?.let { return it.second }
+
+        // 3. ท้ายสุด: mapping ที่หาในเครื่องไม่เจอ (เผื่อแอปซ่อน launcher icon แต่เปิดด้วย intent ได้)
+        return knownApps[lowerName]
     }
 
     private fun getAppLabel(packageName: String): String {
@@ -1227,6 +1277,13 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             }
         } ?: false.also { Log.w(TAG, "Gesture timed out after ${GESTURE_TIMEOUT_MS}ms") }
 
+    /** ลายเซ็นหน้าจอแบบเบา — ใช้เทียบว่าเนื้อหาขยับจริงหลังสั่งเลื่อน */
+    private fun screenSignature(svc: JarvisAccessibilityService): String =
+        svc.readScreen().asSequence()
+            .flatMap { it.elements.asSequence() }
+            .take(15)
+            .joinToString("|") { "${it.label.orEmpty()}@${it.centerY}" }
+
     private fun executeReadScreen(args: Map<String, String>): String {
         val svc = requireA11y()
             ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน — ไปที่ ตั้งค่า > การเข้าถึง > JARVIS แล้วเปิด"
@@ -1262,19 +1319,107 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         return "❌ ต้องระบุ text, view_id, หรือ x+y"
     }
 
-    private fun executeTypeText(args: Map<String, String>): String {
+    private suspend fun executeTypeText(args: Map<String, String>): String {
         val svc = requireA11y()
             ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน"
         val text = args["text"]?.trim()
             ?: return "❌ ต้องระบุ text (ข้อความที่จะพิมพ์)"
         val clear = args["clear"]?.lowercase() in listOf("true", "1", "yes", "ล้าง")
+        val submit = args["submit"]?.lowercase() in listOf("true", "1", "yes", "ส่ง")
 
         val result = if (clear) svc.clearAndType(text) else svc.typeText(text)
-        return if (result) {
-            "⌨️ พิมพ์ข้อความ \"${text.take(50)}${if (text.length > 50) "..." else ""}\" สำเร็จ"
-        } else {
-            "❌ ไม่สามารถพิมพ์ได้ — ไม่พบช่อง input ที่แก้ไขได้"
+        if (!result) {
+            // พบบ่อยตอนสั่ง "พิมพ์ค้นหาใน YouTube" ทั้งที่ยังไม่ได้แตะช่องค้นหา — บอกขั้นตอนถัดไปให้ AI ทำต่อเอง
+            return "❌ ไม่พบช่องพิมพ์ที่เปิดอยู่บนหน้าจอ — ให้ทำตามลำดับนี้: " +
+                "1) device_read_screen 2) device_tap ที่ช่องค้นหา/ช่องพิมพ์ (element ที่มี [ช่องพิมพ์] หรือปุ่มค้นหา เช่น 'ค้นหา', 'Search') " +
+                "3) device_type_text ซ้ำอีกครั้ง"
         }
+
+        val preview = "\"${text.take(50)}${if (text.length > 50) "..." else ""}\""
+        if (!submit) return "⌨️ พิมพ์ข้อความ $preview สำเร็จ (ยังไม่ได้ส่ง — ใช้ submit=true หรือแตะปุ่มส่ง)"
+
+        delay(300) // ให้แอปอัปเดตช่องพิมพ์และเปิดปุ่มส่งก่อนสั่ง Enter
+        return if (svc.pressImeAction()) {
+            "⌨️ พิมพ์ $preview และกดส่งเรียบร้อย"
+        } else {
+            "⌨️ พิมพ์ $preview แล้ว แต่กดส่งอัตโนมัติไม่สำเร็จ — อ่านหน้าจอแล้วแตะปุ่มส่งด้วย device_tap"
+        }
+    }
+
+    private suspend fun executeGesture(args: Map<String, String>): String {
+        val svc = requireA11y()
+            ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน"
+        val action = args["action"]?.lowercase()?.trim()
+            ?: return "❌ ต้องระบุ action (long_press / swipe / drag)"
+        val durationMs = args["duration_ms"]?.toLongOrNull()
+
+        return when (action) {
+            "long_press", "longpress", "กดค้าง" -> {
+                val x = args["x"]?.toFloatOrNull()
+                val y = args["y"]?.toFloatOrNull()
+                if (x == null || y == null) {
+                    return "❌ long_press ต้องระบุ x และ y (จาก @(x,y) ใน device_read_screen)"
+                }
+                val ok = awaitGesture { done -> svc.longPressAtPosition(x, y, durationMs ?: 800L, done) }
+                if (ok) "👆 กดค้างที่ ($x, $y) สำเร็จ" else "❌ กดค้างที่ ($x, $y) ไม่สำเร็จ"
+            }
+            "swipe", "ปัด" -> {
+                val direction = args["direction"]?.lowercase()?.trim()
+                    ?: return "❌ swipe ต้องระบุ direction (up/down/left/right)"
+                val ok = awaitGesture { done -> svc.swipeDirection(direction, durationMs ?: 350L, done) }
+                if (ok) "👉 ปัดหน้าจอไปทาง $direction สำเร็จ" else "❌ ปัดหน้าจอไปทาง $direction ไม่สำเร็จ"
+            }
+            "drag", "ลาก" -> {
+                val x1 = args["x"]?.toFloatOrNull()
+                val y1 = args["y"]?.toFloatOrNull()
+                val x2 = args["to_x"]?.toFloatOrNull()
+                val y2 = args["to_y"]?.toFloatOrNull()
+                if (x1 == null || y1 == null || x2 == null || y2 == null) {
+                    return "❌ drag ต้องระบุ x, y, to_x, to_y"
+                }
+                val ok = awaitGesture { done -> svc.swipe(x1, y1, x2, y2, durationMs ?: 500L, done) }
+                if (ok) "👉 ลากจาก ($x1, $y1) ไป ($x2, $y2) สำเร็จ" else "❌ ลากไม่สำเร็จ"
+            }
+            else -> "❌ action ที่รองรับ: long_press, swipe, drag"
+        }
+    }
+
+    private suspend fun executeScreenshot(args: Map<String, String>): String {
+        val svc = requireA11y()
+            ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน"
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return "❌ การส่งภาพหน้าจอให้ AI ดู ต้องใช้ Android 11 ขึ้นไป — ใช้ device_read_screen แทน"
+        }
+        if (!ScreenVisionBridge.isAvailable) {
+            return "❌ ยังไม่ได้เชื่อมต่อ Live session — ใช้ device_read_screen แทน"
+        }
+
+        val bitmap = withTimeoutOrNull(SCREENSHOT_TIMEOUT_MS) {
+            suspendCancellableCoroutine<android.graphics.Bitmap?> { cont ->
+                svc.captureScreenBitmap { bmp -> if (cont.isActive) cont.resume(bmp) }
+            }
+        } ?: return "❌ จับภาพหน้าจอไม่สำเร็จ (ระบบจำกัดไม่ให้จับถี่เกิน 1 ครั้ง/วินาที) — ลองใหม่อีกครั้งหรือใช้ device_read_screen"
+
+        val jpegBase64 = withContext(Dispatchers.IO) { encodeJpegBase64(bitmap) }
+        bitmap.recycle()
+        ScreenVisionBridge.send(jpegBase64)
+        return "🖼️ ส่งภาพหน้าจอปัจจุบันให้ดูแล้ว — ดูภาพล่าสุดที่เพิ่งเข้ามาแล้วตอบสิ่งที่เห็นจริงบนหน้าจอ " +
+            "(แอป: ${svc.currentPackage ?: "ไม่ทราบ"}) หากต้องการพิกัดปุ่มเพื่อกด ให้เรียก device_read_screen ต่อ"
+    }
+
+    /** ย่อภาพให้กว้างไม่เกิน 1080px ก่อนบีบ JPEG — ลดขนาด payload ที่ส่งเข้า Live session */
+    private fun encodeJpegBase64(bitmap: android.graphics.Bitmap): String {
+        val maxWidth = 1080
+        val scaled = if (bitmap.width > maxWidth) {
+            val height = (bitmap.height.toFloat() * maxWidth / bitmap.width).toInt().coerceAtLeast(1)
+            android.graphics.Bitmap.createScaledBitmap(bitmap, maxWidth, height, true)
+        } else {
+            bitmap
+        }
+        val stream = java.io.ByteArrayOutputStream()
+        scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, stream)
+        if (scaled !== bitmap) scaled.recycle()
+        return android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
     }
 
     private suspend fun executeScroll(args: Map<String, String>): String {
@@ -1282,16 +1427,31 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             ?: return "⚠️ ต้องเปิด Accessibility Service ก่อน"
         val direction = args["direction"]?.lowercase()?.trim() ?: "down"
 
-        val result = when (direction) {
-            "down", "ลง" -> awaitGesture { done -> svc.scrollDown(done) }
-            "up", "ขึ้น" -> awaitGesture { done -> svc.scrollUp(done) }
-            else -> false
+        val forward = when (direction) {
+            "down", "ลง" -> true
+            "up", "ขึ้น" -> false
+            else -> return "❌ ทิศทางที่รองรับ: down, up"
         }
 
-        return if (result) {
-            "📜 เลื่อนหน้าจอ${if (direction in listOf("down", "ลง")) "ลง" else "ขึ้น"}สำเร็จ"
+        val label = if (forward) "ลง" else "ขึ้น"
+        val before = screenSignature(svc)
+
+        // เลื่อนภายใน list/scroll view ก่อน (แม่นกว่า ไม่ไปโดนปุ่มหรือ pull-to-refresh)
+        // ถ้าหน้านั้นไม่มี node ที่เลื่อนได้ (เช่น WebView/Canvas) ค่อยปัดกลางจอ
+        var moved = svc.scrollNode(forward) && screenSignature(svc) != before
+        if (!moved) {
+            // node scroll ไม่ขยับจริง (หรือไม่มี node) — ปัดกลางจอเป็นทางสำรอง แล้วตรวจซ้ำ
+            awaitGesture { done -> if (forward) svc.scrollDown(done) else svc.scrollUp(done) }
+            delay(400) // รอ animation ของการเลื่อนให้นิ่งก่อนอ่านซ้ำ
+            moved = screenSignature(svc) != before
+        }
+
+        // เดิมรายงาน "สำเร็จ" ทุกครั้งที่ระบบรับคำสั่ง ทั้งที่หน้าจออยู่ที่เดิม (พบจากทดสอบจริง 2026-09-20)
+        return if (moved) {
+            "📜 เลื่อนหน้าจอ${label}แล้ว"
         } else {
-            "❌ เลื่อนหน้าจอไม่สำเร็จ"
+            "⚠️ สั่งเลื่อน${label}แล้วแต่หน้าจอไม่ขยับ — อาจสุดหน้าแล้ว หรือหน้านี้เลื่อนไม่ได้ " +
+                "ให้บอกผู้ใช้ตามจริง อย่าบอกว่าเลื่อนสำเร็จ"
         }
     }
 

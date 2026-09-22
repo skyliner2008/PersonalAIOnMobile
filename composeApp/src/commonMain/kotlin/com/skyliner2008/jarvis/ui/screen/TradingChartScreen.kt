@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,11 +45,12 @@ import kotlinx.serialization.json.put
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 
 /**
- * TradingChartScreen V2 — AI-controllable chart dashboard
+ * TradingChartScreen V2.5 — AI-controllable chart dashboard
  *
- * 2 โหมด:
+ * 3 โหมด:
  * - "dashboard"   → Lightweight Charts multi-pane (offline, เร็ว, วาด indicator/SMC ได้, AI ปรับ layout ได้)
  * - "tradingview" → TradingView Advanced Chart widget เดิม (online, full tools)
+ * - "financials"  → TradingView Company Financials, Balance Sheet, Valuation & Ownership widget (online)
  */
 @OptIn(ExperimentalResourceApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +73,7 @@ fun TradingChartScreen(
     onToggleOverlay: (String) -> Unit,
     onSetLocale: (String) -> Unit,
     onSetHideSideToolbar: (Boolean) -> Unit,
+    onSetSymbol: ((String) -> Unit)? = null,
     onClose: () -> Unit
 ) {
     BackHandler(onBack = onClose)
@@ -91,6 +95,7 @@ fun TradingChartScreen(
         ) {
             DashboardChip("📊 Dashboard", viewMode == "dashboard") { onSetViewMode("dashboard") }
             DashboardChip("🌐 TradingView", viewMode == "tradingview") { onSetViewMode("tradingview") }
+            DashboardChip("🏛️ การเงิน / งบดุล", viewMode == "financials") { onSetViewMode("financials") }
 
             if (viewMode == "dashboard") {
                 Text("│", color = Color.White.copy(alpha = 0.3f))
@@ -120,41 +125,53 @@ fun TradingChartScreen(
 
         // ─── Content ──────────────────────────────────────────────────────────
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (viewMode == "dashboard") {
-                DashboardWebView(
-                    symbol = symbol,
-                    interval = interval,
-                    layout = layout,
-                    overlays = overlays,
-                    candles = candles,
-                    smcResult = smcResult,
-                    signalMarkers = signalMarkers,
-                    refreshToken = refreshToken
-                )
-                if (dataLoading && candles.isEmpty()) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center),
-                        color = JarvisTheme.Cyan
+            when (viewMode) {
+                "dashboard" -> {
+                    DashboardWebView(
+                        symbol = symbol,
+                        interval = interval,
+                        layout = layout,
+                        overlays = overlays,
+                        candles = candles,
+                        smcResult = smcResult,
+                        signalMarkers = signalMarkers,
+                        refreshToken = refreshToken
+                    )
+                    if (dataLoading && candles.isEmpty()) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.align(Alignment.Center),
+                            color = JarvisTheme.Cyan
+                        )
+                    }
+                }
+                "financials" -> {
+                    FinancialsWebView(
+                        symbol = symbol,
+                        locale = locale,
+                        refreshToken = refreshToken
                     )
                 }
-            } else {
-                TradingViewWebView(
-                    symbol = symbol,
-                    interval = interval,
-                    locale = locale,
-                    hideSideToolbar = hideSideToolbar,
-                    refreshToken = refreshToken
-                )
+                else -> {
+                    TradingViewWebView(
+                        symbol = symbol,
+                        interval = interval,
+                        locale = locale,
+                        hideSideToolbar = hideSideToolbar,
+                        refreshToken = refreshToken
+                    )
+                }
             }
         }
     }
 
     if (showSettings) {
         WidgetSettingsDialog(
+            currentSymbol = symbol,
             locale = locale,
             hideSideToolbar = hideSideToolbar,
             onSetLocale = onSetLocale,
             onSetHideSideToolbar = onSetHideSideToolbar,
+            onSetSymbol = onSetSymbol,
             onClose = { showSettings = false }
         )
     }
@@ -309,22 +326,102 @@ private fun TradingViewWebView(
     WebView(state = state, navigator = navigator, modifier = Modifier.fillMaxSize())
 }
 
+/** TradingView Company Financials, Balance Sheet, Valuation & Ownership widget (online) */
+@OptIn(ExperimentalResourceApi::class)
+@Composable
+private fun FinancialsWebView(
+    symbol: String,
+    locale: String,
+    refreshToken: Long
+) {
+    val state = remember { WebViewState(WebContent.Url("file:///android_asset/chart_widget/financials.html")) }
+    val navigator = rememberWebViewNavigator()
+
+    state.webSettings.isJavaScriptEnabled = true
+    state.webSettings.androidWebSettings.safeBrowsingEnabled = true
+    state.webSettings.androidWebSettings.domStorageEnabled = true
+    state.webSettings.androidWebSettings.isAlgorithmicDarkeningAllowed = true
+
+    val pageReady = state.loadingState is com.multiplatform.webview.web.LoadingState.Finished
+
+    LaunchedEffect(pageReady, symbol, locale, refreshToken) {
+        if (!pageReady) return@LaunchedEffect
+        navigator.evaluateJavaScript(
+            """
+            if (window.jarvisFinancialsBridge && window.jarvisFinancialsBridge.setAll) {
+                window.jarvisFinancialsBridge.setAll("$symbol", "$locale");
+            }
+            """.trimIndent()
+        )
+    }
+
+    WebView(state = state, navigator = navigator, modifier = Modifier.fillMaxSize())
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WidgetSettingsDialog(
+    currentSymbol: String,
     locale: String,
     hideSideToolbar: Boolean,
     onSetLocale: (String) -> Unit,
     onSetHideSideToolbar: (Boolean) -> Unit,
+    onSetSymbol: ((String) -> Unit)? = null,
     onClose: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Widget Settings", color = Color.White) },
+        title = { Text("ตั้งค่ากราฟ & แดชบอร์ด", color = Color.White) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (onSetSymbol != null) {
+                    Text(
+                        "สัญลักษณ์สินทรัพย์ / หุ้น (ปัจจุบัน: $currentSymbol)",
+                        color = Color.White.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    var inputSymbol by remember { mutableStateOf(currentSymbol) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputSymbol,
+                            onValueChange = { inputSymbol = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("เช่น SCB, PTT, AAPL", color = Color.Gray) },
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (inputSymbol.isNotBlank()) {
+                                    onSetSymbol(inputSymbol.trim())
+                                }
+                            }
+                        ) {
+                            Text("ใช้")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("SET:SCB", "SET:PTT", "SET:KBANK", "SET:CPALL", "AAPL", "NVDA", "XAUUSD", "BTCUSDT").forEach { preset ->
+                            FilterChip(
+                                selected = currentSymbol.equals(preset, ignoreCase = true),
+                                onClick = {
+                                    inputSymbol = preset
+                                    onSetSymbol(preset)
+                                },
+                                label = { Text(preset, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+                }
+
                 Text(
-                    "Locale",
+                    "ภาษา (Locale)",
                     color = Color.White.copy(alpha = 0.9f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -332,7 +429,7 @@ private fun WidgetSettingsDialog(
                     FilterChip(
                         selected = locale.lowercase().startsWith("th"),
                         onClick = { onSetLocale("th_TH") },
-                        label = { Text("Thai") }
+                        label = { Text("ไทย (Thai)") }
                     )
                     FilterChip(
                         selected = !locale.lowercase().startsWith("th"),
@@ -354,7 +451,7 @@ private fun WidgetSettingsDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onClose) { Text("เสร็จสิ้น") } },
         containerColor = JarvisTheme.Dark
     )
 }

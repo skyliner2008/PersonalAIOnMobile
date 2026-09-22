@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JARVIS Financials Widget</title>
+    <style>
+        :root {
+            --bg: #131722;
+            --text: #b2b5be;
+            --accent: #00e5ff;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        #widget-root {
+            width: 100%;
+            min-height: 100%;
+            height: 100%;
+        }
+        .tradingview-widget-container {
+            width: 100%;
+            height: 100%;
+            min-height: 600px;
+        }
+        .tradingview-widget-container__widget {
+            width: 100%;
+            height: 100%;
+        }
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 14px;
+            color: var(--accent);
+            background: rgba(19, 23, 34, 0.9);
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 229, 255, 0.2);
+            pointer-events: none;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(0, 229, 255, 0.3);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+<div id="widget-root"></div>
+<div id="loading" class="loading">
+    <div class="loading-spinner"></div>
+    <span>กำลังโหลดข้อมูลงบการเงิน...</span>
+</div>
+
+<script>
+    const state = {
+        symbol: "SET:SCB",
+        locale: "th_TH",
+        theme: "dark"
+    };
+
+    const thaiSetStocks = new Set([
+        "SCB", "PTT", "CPALL", "KBANK", "AOT", "DELTA", "BDMS", "GULF", "ADVANC", "PTTEP",
+        "TRUE", "SCC", "CPN", "BBL", "KTB", "MINT", "CRC", "LH", "TOP", "BANPU",
+        "WHA", "HMPRO", "IVL", "GPSC", "BGRIM", "TIDLOR", "MTC", "SAWAD", "TCAP", "KKP",
+        "CBG", "OSP", "TU", "CPF", "BEM", "BTS", "CENTEL", "ERW", "MAJOR", "KCE", "HANA",
+        "JMT", "JMART", "SINGER", "COM7", "SPALI", "AP", "SIRI", "QH", "PSH", "STA", "STGT",
+        "BJC", "GLOBAL", "AMATA", "BCP", "IRPC", "OR", "RATCH", "EGCO", "TTB", "TISCO",
+        "SCGP", "ITC", "TLI", "BAM", "CHG", "BCH", "VGI", "TASCO", "MEGA", "DOHOME",
+        "FORTH", "PLANB", "AWC", "MOSHI", "SAPPE", "ICHI", "COCOCO", "PLUS", "SNNP", "MALEE"
+    ]);
+
+    function toTvSymbol(input) {
+        const symbol = (input || "").trim().toUpperCase().replace(/\s+/g, "");
+        if (!symbol) return "SET:SCB";
+        if (symbol.includes(":")) return symbol;
+        if (symbol === "XAUUSD" || symbol === "GOLD") return "OANDA:XAUUSD";
+        if (symbol.endsWith("USDT")) return `BINANCE:${symbol}`;
+        if (thaiSetStocks.has(symbol)) return `SET:${symbol}`;
+        if (symbol.length === 6 && (symbol.startsWith("USD") || symbol.startsWith("EUR") || symbol.startsWith("GBP") || symbol.startsWith("AUD") || symbol.startsWith("NZD") || symbol.startsWith("CAD") || symbol.startsWith("CHF") || symbol.startsWith("JPY"))) {
+            return `OANDA:${symbol}`;
+        }
+        return `NASDAQ:${symbol}`;
+    }
+
+    function toLocale(input) {
+        return (input || "").toLowerCase().startsWith("th") ? "th_TH" : "en";
+    }
+
+    function renderWidget() {
+        const root = document.getElementById("widget-root");
+        const loading = document.getElementById("loading");
+        root.innerHTML = "";
+        if (loading) loading.style.display = "flex";
+
+        const container = document.createElement("div");
+        container.className = "tradingview-widget-container";
+        container.style.width = "100%";
+        container.style.height = "100%";
+
+        const widget = document.createElement("div");
+        widget.className = "tradingview-widget-container__widget";
+        widget.style.width = "100%";
+        widget.style.height = "100%";
+
+        container.appendChild(widget);
+        root.appendChild(container);
+
+        const script = document.createElement("script");
+        script.type = "text/javascript";
+        script.async = true;
+        script.src = "https://s3.tradingview.com/external-embedding/embed-widget-financials.js";
+        script.text = JSON.stringify({
+            isTransparent: false,
+            largeChartUrl: "",
+            displayMode: "regular",
+            width: "100%",
+            height: "100%",
+            colorTheme: state.theme,
+            symbol: state.symbol,
+            locale: state.locale
+        });
+        script.onload = () => {
+            if (loading) loading.style.display = "none";
+        };
+        container.appendChild(script);
+    }
+
+    window.jarvisFinancialsBridge = {
+        setSymbol(symbol) {
+            const newSym = toTvSymbol(symbol);
+            if (newSym === state.symbol) return;
+            state.symbol = newSym;
+            renderWidget();
+        },
+        setLocale(locale) {
+            const newLoc = toLocale(locale);
+            if (newLoc === state.locale) return;
+            state.locale = newLoc;
+            renderWidget();
+        },
+        setAll(symbol, locale) {
+            const newSym = toTvSymbol(symbol);
+            const newLoc = toLocale(locale);
+            if (newSym === state.symbol && newLoc === state.locale) return;
+            state.symbol = newSym;
+            state.locale = newLoc;
+            renderWidget();
+        }
+    };
+
+    window.onload = function() {
+        renderWidget();
+    };
+</script>
+</body>
+</html>

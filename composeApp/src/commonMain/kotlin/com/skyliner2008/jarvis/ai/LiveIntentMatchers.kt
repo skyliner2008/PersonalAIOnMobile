@@ -214,6 +214,21 @@ object LiveIntentMatchers {
     }
 
     /**
+     * ผู้ใช้สั่งให้ "พิมพ์/ค้นหา/ตอบข้อความ" จริงหรือไม่
+     *
+     * ใช้กัน device_type_text ที่โมเดลเรียกเอง — พบจริง 2026-09-20: ผู้ใช้พูดแค่ "เปิด YouTube"
+     * แต่โมเดลพิมพ์คำค้นหาที่ค้างจากบทสนทนาก่อนหน้าแล้วกดส่งให้เอง
+     */
+    fun hasTypingIntent(prompt: String): Boolean {
+        val terms = listOf(
+            "พิมพ์", "ค้นหา", "เสิร์ช", "หาเพลง", "หาคลิป", "หาวิดีโอ", "หาข้อมูล", "เขียน",
+            "ตอบ", "ส่งข้อความ", "ใส่ข้อความ", "กรอก", "แชท", "ทัก",
+            "search", "type", "write", "reply", "enter", "fill", "message"
+        )
+        return matchesAny(prompt, terms)
+    }
+
+    /**
      * redirect guard ทุกตัว (always live / avatar / media / navigation / notification / location / parking / night)
      * ทำงานได้เฉพาะเมื่อ tool ที่ถูกเรียกอยู่ในกลุ่มที่ model มักเรียกผิด และคำขอไม่ใช่คำถามเทรด
      */

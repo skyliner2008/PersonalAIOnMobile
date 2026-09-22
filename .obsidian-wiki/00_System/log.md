@@ -1,3 +1,164 @@
+## 2026-09-23 — Chat Message Timestamp (LINE Style) & 24-Hour Active History Retention Filter
+- **User Request**: "เพิ่มอีกนิดนึง ข้อความ ไม่มีตัวแสดงเวลา เอาแบบคล้ายๆ line ที่จะมี ตัวแสดงเวลา การส่งข้อความที่ มุมขวา เป็นตัวเล็กๆ ส่วนประวัติแชท ให้มี ที่แสดง ในช่องแชท ให้ใช้เวลา เป็นตัวกำหนด จะแสดงประวัติที่ยังไม่ครบ 24 ชั่วโมง เท่านั้น เมื่อครบ 24 ชั่ว จะไม่แสดงในช่องแชท"
+- **Changes**:
+  - **LINE-Style Message Timestamp (`MessageBubble.kt`)**:
+    - เพิ่ม `formatMessageTime(epochMs)` แปลงเวลาเป็นรูปแบบ `HH:mm` (เช่น `14:32`, `01:45`) ตาม TimeZone ของระบบเครื่อง
+    - แสดงผลตัวเลขเวลาตัวเล็กๆ (`fontSize = 9.5.sp`, `FontFamily.Monospace`) ที่มุมขวาล่างของบับเบิลข้อความ (`Modifier.align(Alignment.End)`) สไตล์แอป LINE สวยงาม ชัดเจน และไม่รบกวนเนื้อหา
+    - ปรับสีข้อความเวลาอัตโนมัติ: บับเบิล User ใช้สี `JarvisTheme.Cyan.copy(0.75f)` และบับเบิล AI ใช้สี `Color.White.copy(0.45f)`
+  - **24-Hour Active Chat Retention Filter (`ChatController.kt`, `JarvisMemoryManager.kt`, `App.kt`)**:
+    - **ชั้นฐานข้อมูล SQLite (`JarvisMemoryManager.kt` & `ChatController.kt`)**: เพิ่มฟังก์ชัน `getHistoryAfter(since: Long)` เพื่อโหลดเฉพาะข้อความที่มีอายุไม่เกิน 24 ชั่วโมง (`Clock.System.now() - 24 ชั่วโมง`) ขึ้นมาแสดงในห้องแชทเมื่อเปิดแอปใหม่ ส่วนข้อความที่เก่ากว่า 24 ชั่วโมงจะถูกเก็บรักษาไว้ในฐานข้อมูล/คลังความรู้ แต่ไม่นำมาแสดงให้รกช่องแชท
+    - **ชั้นหน้าจอ UI (`App.kt`)**: เพิ่มตัวกรอง `visibleMessages` ทำงานร่วมกับ Timer Ticker (`LaunchedEffect` อัปเดตทุก 1 นาที) เพื่อตรวจสอบและนำข้อความที่มีอายุครบ 24 ชั่วโมงออกจากหน้าจอแชทแบบ Real-time โดยอัตโนมัติ
+  - **Data Model & Preservation (`JarvisViewModel.kt` & `ChatController.kt`)**:
+    - เพิ่มฟิลด์ `timestamp: Long = Clock.System.now().toEpochMilliseconds()` ใน `data class Message`
+    - ปรับปรุง `appendAssistantMessage` ให้ใช้ `last.copy(content = content)` เพื่อคงเวลา timestamp เริ่มต้นของข้อความไว้ตลอดการสตรีมคำตอบของ AI
+  - **Testing & Verification**:
+    - สร้าง `ChatTimestampAndRetentionTest.kt` ทดสอบการสร้าง Timestamp, รูปแบบ `HH:mm`, และการกรองข้อความอายุเกิน 24 ชั่วโมง (`BUILD SUCCESSFUL`)
+    - ติดตั้งและทดสอบการรันบนอุปกรณ์จริง Samsung Galaxy S22 Ultra (`SM-S908E`) เรียบร้อยแล้ว
+
+## 2026-09-23 — Mobile Chat Layout & Markdown Engine Upgrade + Message Persistence Fix
+- **User Request**: "ปัญหา ที่ฉันเจอในหน้าแชท ของ ai บ่อย คือการแสดงข้อมูลที่ไม่เหมาะสมกับหน้าจอ หรือพื้นที่ในหน้าแชท ทำให้ส่วนใหญ่จะอ่านยาก เพราะติดกันหมด และบางครั้ง ข้อความจะหายไป หรือแสดงไม่ครบ เมื่อมีการปิดเปิด app ใหม่"
+- **Changes**:
+  - **Message Persistence & History Layer (`LiveGeminiService.kt` & `ChatController.kt`)**:
+    - แก้ปัญหาข้อความถูกตัดขาดเมื่อปิดเปิดแอปใหม่: ยกเลิกการตัดทอนข้อความ `text.take(2000)` ใน `LiveGeminiService.emitTextToChat` ทำให้รายงานผลวิเคราะห์, ตารางการเงิน และข้อมูลขนาดยาวถูกบันทึกลงฐานข้อมูล SQLite (`ChatMessage`) ครบถ้วน 100% ไม่ถูกตัดข้อความทิ้ง
+    - แก้ปัญหาข้อความเก่าหายไปเมื่อเปิดแอปใหม่: ปรับปรุง `ChatController.loadHistory()` จากเดิมโหลดเพียง 20 ข้อความล่าสุด (`getRecentHistory(20)`) เพิ่มเป็น 100 ข้อความ (`getRecentHistory(100)`) ป้องกันไม่ให้ประวัติแชทเก่าถูกกลืนหายหลังมีการคุยเสียงสั้นๆ หรือการทำงานของ Live Voice
+  - **UI & Markdown Rendering Engine (`MessageBubble.kt`)**:
+    - **ขยายพื้นที่แสดงผลตอบสนองหน้าจอมือถือ**: ปรับบับเบิลข้อความฝั่งผู้ช่วย (AI Assistant) จากเดิมที่จำกัดความกว้างตายตัว `Modifier.widthIn(max = 320.dp)` ให้ใช้ `Modifier.weight(1f, fill = false).widthIn(max = 640.dp)` ทำให้การ์ดข้อความขยายเต็มความกว้างหน้าจอมือถือ (เช่น Galaxy S22 Ultra กว้าง 412dp) ใช้นาฬิกา/พื้นที่หน้าจอได้อย่างเต็มที่ ไม่เบียดตัวหนังสือจนตัดคำบ่อย
+    - **ระบบแยกบล็อก Markdown สวยงาม (Rich Block Parser)**:
+      - เพิ่ม `HeaderBlock`: จัดรูปแบบหัวข้อ `#`, `##`, `###`, `####` ด้วยฟอนต์ขนาดใหญ่ หนา มีสี Cyan เฉพาะ เพิ่มระยะเว้นวรรคบน/ล่างอย่างลงตัว
+      - เพิ่ม `DividerBlock`: แปลงเส้นแบ่งคั่น `---`, `===`, `***` เป็นเส้นขีดแนวนอน `HorizontalDivider` หรูหราทันสมัย สบายตา
+      - เพิ่ม `EmptyLineBlock`: จัดการบรรทัดว่างด้วยระยะเว้นวรรคพารากราฟ (`Spacer(6.dp)`) ป้องกันไม่ให้ข้อความยาวติดกันเป็นก้อน ("ติดกันหมด")
+      - เพิ่ม `BulletBlock`: แสดงผลรายการสัญลักษณ์หัวข้อย่อย (`-`, `*`, `•`) และตัวเลขลำดับ (`1.`, `2.`) พร้อมไอคอน Bullet สี Cyan และการเยื้องย่อหน้า (Indentation) ที่เป็นระเบียบ
+      - เพิ่ม `Inline Code Badge`: รองรับ syntax เครื่องหมาย backtick (`` `code` ``) โดยแสดงผลด้วย `FontFamily.Monospace` พื้นหลังกรอบมนสีเทาเข้มขอบ Cyan ช่วยแก้ปัญหาสัญลักษณ์ Visual Meter Bar (`█`) ที่ในฟอนต์ระบบซัมซุงเคยแสดงผลเป็นกล่องสี่เหลี่ยมกลวง `▯`
+  - **Data Presentation (`MarketTechnicalToolHandler.kt`)**:
+    - ปรับรูปแบบการรายงานผลของ `executeSentiment` ให้ใช้ Markdown Table สำหรับ 4 เสาหลัก (`| เสาหลัก | น้ำหนัก | คะแนน | รายละเอียด |`) ซึ่งจะถูกเรนเดอร์ในบับเบิลแชทเป็นการ์ดตารางเลื่อนแนวนอนได้ (Horizontal Scrollable Table) สวยงาม อ่านง่าย เป็นระเบียบ
+  - **Tests & Verification**:
+    - รัน `testDebugUnitTest` ผ่านเรียบร้อย 100%
+    - ทำการบิลด์และติดตั้งลงบนเครื่องจริง Samsung Galaxy S22 Ultra (`SM-S908E`) สำเร็จสมบูรณ์ ไร้ข้อผิดพลาด
+
+- **User Request**: "ฉันต้องการรวม Sentiment ทั้งหมด ให้เป็นอันเดียว ได้มั้ย" (รวมศูนย์ทุกมิติ Sentiment ให้เป็น All-in-One Master Engine)
+- **Changes**:
+  - **Data Models (`MarketSentimentModels.kt`)**:
+    - เพิ่ม `SentimentPillar(name, score, weightPct, detail)`
+    - เพิ่ม `UnifiedCompositeSentiment` รวมคะแนนหลัก (0-100), Visual Meter Bar (`[████████░░]`), 5 Tiers (Extreme Fear, Fear, Neutral, Greed, Extreme Greed), เสาหลักทั้ง 4, Derivatives Positioning, Dual-Market F&G, ข่าว และ Contrarian Signal
+    - เพิ่ม helper `makeMeterBar(score, length)` และ `classifyScore(score)`
+  - **Data Pipeline (`TradingApiService.kt`)**:
+    - เพิ่ม `getUnifiedCompositeSentiment(rawSymbol)` ดึงข้อมูล 4 มิติแบบขนาน (`async`/`await`):
+      1. ข่าวสาร & กระแสสังคม (Google News, Yahoo, CoinDesk) - น้ำหนัก 30%
+      2. ดัชนีความกลัวและความโลภ (Alternative.me Crypto / CNN 7 Sub-indicators) - น้ำหนัก 25%
+      3. สถานะสัญญาอนุพันธ์ (Binance Futures Retail vs Top Traders Long/Short & Taker Ratio) - น้ำหนัก 30%
+      4. ฉันทามติอินดิเคเตอร์เทคนิค (TradingView 1D Technical Consensus) - น้ำหนัก 15%
+    - รองรับ **Global Macro Mode** (เมื่อไม่ระบุ symbol หรือส่ง "all"): คำนวณความเสี่ยงตลาดรวมโลกจาก CNN Stock F&G (60%) + Crypto F&G (40%)
+    - คำนวณสัญญาณเตือน **Contrarian Divergence & Squeeze** อัตโนมัติ (เช่น รายย่อย Short หนักแต่เจ้ามือ Long หนาแน่น $\rightarrow$ Short Squeeze)
+  - **Execution & Formatting (`MarketTechnicalToolHandler.kt`)**:
+    - อัปเกรด `executeSentiment`: รองรับ symbol แบบ optional ส่งคืนการ์ดรายงานผลสรุปเดียวพร้อม Visual Meter Bar, ตาราง breakdown 4 เสาหลัก และ Gemini AI Behavioral Economics Analysis
+  - **Definitions & Persona (`TradingToolDefinitions.kt` & `JarvisPersona.kt`)**:
+    - ปรับปรุง `trading_sentiment` ให้ symbol เป็น optional (`required = emptyList()`) และอัปเดตคำอธิบาย
+    - เพิ่มกฎใน `JarvisPersona.kt` กำหนดให้ `trading_sentiment` เป็น All-in-One Master Engine สำหรับคำถามเรื่อง Sentiment, อารมณ์ตลาด, ความกลัวความโลภ และ Long/Short
+  - **Tests & Verification**:
+    - เพิ่มยูนิตเทสต์ใน `MarketSentimentTest.kt` (Meter bar, Classify score, Composite data model)
+    - เพิ่มการทดสอบ Live Integration ใน `MarketSentimentLiveIntegrationTest.kt`
+
+## 2026-09-22 — Multi-Source Sentiment Intelligence Engine & CNN Fear & Greed Upgrade
+- **User Request**: ตรวจสอบว่ามี Tool วิเคราะห์ Sentiment หรือยัง และให้พัฒนาเพิ่ม พร้อมทดสอบว่าใช้งานได้จริงและได้ข้อมูลถูกต้อง
+- **Changes**:
+  - **Data Layer (`TradingApiService.kt` & `MarketSentimentModels.kt`)**:
+    - สร้าง `MarketSentimentModels.kt` กำหนด `BinancePositioningSentiment`, `CnnFearAndGreedData`, `CnnSubIndicator`, `AssetSentimentReport`
+    - เพิ่ม `getBinanceFuturesPositioning(symbol)` ดึงข้อมูล Binance Futures 3 ด้าน: `globalLongShortAccountRatio` (สัดส่วนบัญชีรายย่อย Long/Short), `topLongShortPositionRatio` (สัดส่วนพอร์ตเจ้ามือ/Top Traders), `takerlongshortRatio` (ปริมาณ Taker Buy vs Sell) พร้อมประเมินสัญญาณ Divergence / Contrarian Squeeze
+    - เพิ่ม `getCnnStockFearAndGreed()` ดึงดัชนีความกลัวและความโลภของตลาดหุ้นสหรัฐฯ (CNN Fear & Greed 0-100) พร้อม 7 ตัวชี้วัดย่อย (Market Momentum S&P 500, Stock Price Strength, Stock Price Breadth, Put/Call Options, VIX Volatility, Junk Bond Demand, Safe Haven Demand) และการเปรียบเทียบย้อนหลัง (Previous close, 1W, 1M, 1Y)
+    - ยกเลิกการขูด Reddit ตรงที่ติดปัญหา HTTP 403 ใน `getRedditSentiment(symbol)` โดยเปลี่ยนมาใช้ Multi-source Feed (Google News RSS targeted query + Binance Derivatives Positioning) ให้คะแนน Sentiment Score (-1.0 ถึง 1.0), นับข่าว Bullish/Bearish และส่งคืนฟิลด์ที่ backward-compatible
+  - **Intelligence & Execution Layer (`MarketTechnicalToolHandler.kt` & `ResearchToolHandler.kt`)**:
+    - อัปเกรด `executeSentiment`: รองรับ Crypto, หุ้นสหรัฐฯ, ทองคำ, Forex และหุ้นไทย ดึงข้อมูล Positioning และคะแนนดัชนี พร้อมส่งเข้า Gemini AI วิเคราะห์สภาวะจิตวิทยาฝูงชน (Crowd Psychology Phase: Euphoria, Complacency, Skepticism, Capitulation) และแจ้งเตือน Contrarian Trap / Opportunity
+    - อัปเกรด `executeFearGreed`: เพิ่มพารามิเตอร์ `market` เลือกระหว่าง `"crypto"` (alternative.me), `"stocks"` (CNN US Equities) หรือ `"all"` (ดูคู่กันทั้ง 2 ตลาดเพื่อวิเคราะห์ Macro Risk Appetite)
+    - อัปเกรด `executeCombined`: เชื่อมต่อ Sentiment Engine ใหม่และแสดงผล Positioning Divergence ร่วมกับการตัดสินใจ Confluence
+  - **Tool Definitions & Persona (`TradingToolDefinitions.kt`)**:
+    - ปรับปรุงคำอธิบาย `trading_sentiment` และเพิ่มพารามิเตอร์ `market` ใน `trading_fear_greed`
+  - **Testing & Verification**:
+    - สร้าง `MarketSentimentTest.kt`: ทดสอบตรรกะการคำนวณ Divergence และโครงสร้างข้อมูล
+    - สร้าง `MarketSentimentLiveIntegrationTest.kt`: ทดสอบดึงข้อมูลเครือข่ายจริงจาก Binance Futures API, CNN Fear & Greed API และ Google News RSS
+    - ผลทดสอบ: `BUILD SUCCESSFUL` ทั้งหมด 3/3 tests ผ่าน 100% ดึงข้อมูลจริงได้สมบูรณ์ (BTC Retail Long/Short 0.94, Top Trader 2.24, CNN F&G 37.4 fear พร้อม 7 sub-indicators)
+    - คอมไพล์และรัน `installDebug` ลงบนเครื่องจริง Samsung SM-S908E สำเร็จเรียบร้อย
+- **Documentation**:
+  - อัปเดต `.obsidian-wiki/07_Trading_Intelligence/05_Sentiment_Analysis_Logic.md`
+  - อัปเดต `.obsidian-wiki/03_Tools/catalogue.md`
+  - อัปเดต `README.md`
+
+## 2026-09-22 — Stock Fundamental Analysis & TradingView Financials Dashboard
+- **User Request**: ตรวจสอบและพัฒนา Tool วิเคราะห์หุ้น/สินทรัพย์ (ข้อมูลพื้นฐาน, งบดุล, งบการเงิน, การประเมินมูลค่า, สัดส่วนผู้ถือหุ้น) พร้อมการแสดงผลแบบ Visual ใน TradingView Dashboard คล้ายหน้า Financials ของ TradingView
+- **Changes**:
+  - **Data Layer (`TradingApiService.kt` & `StockFundamentalModels.kt`)**:
+    - สร้าง `StockFundamentalData` รองรับกว่า 50 ตัวชี้วัดสำคัญ (Key metrics, Ownership, Capital Structure, Financials, Valuation ratios, Consensus targets)
+    - เพิ่มฟังก์ชัน `getStockFundamentals(rawSymbol, requestedExchange)` ดึงข้อมูลจริงจาก TradingView Scanner API (`thailand`, `america`, `global`) รองรับทั้งหุ้นไทย (SET/MAI) และหุ้นสหรัฐฯ (NASDAQ/NYSE) พร้อมระบบ auto-detect ตลาดและ auto-resolve exchange
+  - **Intelligence Layer (`ResearchToolHandler.kt`)**:
+    - อัปเกรด `executeFundamentalAnalysis` ส่งข้อมูลตัวเลขทางการเงินและงบดุลจริงให้ Gemini วิเคราะห์เจาะลึก 6 มิติ (Valuation, Capital Structure & Debt, Profitability, Dividend Safety, Ownership Dynamics, Fundamental Health Score 0-100)
+    - ซิงค์สัญลักษณ์หุ้นเข้าสู่ `ChartStateManager.updateSymbol(fundamental.ticker)` อัตโนมัติเมื่อมีการวิเคราะห์หุ้น
+  - **Visual & UI Layer (`financials.html`, `TradingChartScreen.kt`, `ChartController.kt`, `App.kt`)**:
+    - สร้าง `financials.html` ใน `androidMain/assets/chart_widget/` และ `commonMain/resources/assets/chart_widget/` ฝังวิดเจ็ต `embed-widget-financials.js` ของ TradingView ในโหมด dark theme พร้อม JS bridge `window.jarvisFinancialsBridge`
+    - เพิ่มแคตตาล็อกหุ้นไทย `thaiSetStocks` ใน `toTvSymbol()` ทั้ง `index.html` และ `financials.html` ให้แมปชื่อย่อหุ้นไทย (เช่น `SCB`, `PTT`, `CPALL`) เข้ากับ `SET:...` โดยอัตโนมัติ
+    - เพิ่มโหมดแสดงผลที่ 3 `"financials"` (🏛️ การเงิน / งบดุล) ควบคู่กับ `"dashboard"` (LWC multi-pane) และ `"tradingview"` (TV advanced chart)
+    - เพิ่ม `FinancialsWebView` ใน `TradingChartScreen.kt` พร้อมปรับ `WidgetSettingsDialog` ให้สามารถพิมพ์เปลี่ยนสัญลักษณ์หุ้นหรือกดเลือก Preset หุ้นไทย/สหรัฐ/คริปโต/ทองคำได้ทันที
+    - อัปเดต `ToolRegistry.kt` ใน tool `chart_dashboard_control` รองรับ view parameter `financials` และอัปเดต `JarvisPersona.kt`
+- **Verify**: คอมไพล์ด้วย `./gradlew :composeApp:compileDebugKotlinAndroid` สำเร็จสมบูรณ์ (`BUILD SUCCESSFUL in 2m 49s`). ทดสอบบนอุปกรณ์ Android จริงผ่าน Gemini Live สั่งวิเคราะห์หุ้น SCB ได้ผลถูกต้องครบถ้วน
+
+## 2026-09-20 — Device Control เฟส B: เห็นภาพจริง ส่งข้อความได้ และท่าทางครบ
+- **User Request**: "ดำเนินการ เฟส ต่อไป" (เฟส B ใน [[Review_2026-09-19_Driving_Mode_Full_Device_Control]])
+- **Changes**:
+  - **tool ใหม่ `device_screenshot`**: `AccessibilityService.takeScreenshot()` (API 30+) → Bitmap → ย่อกว้าง ≤1080px → JPEG 75% base64 → ส่งเข้า Live session ผ่าน `ScreenVisionBridge` (commonMain) → `orchestrator.sendLiveCameraFrame` (ท่อเดียวกับกล้อง) — AI จึง "เห็น" แผนที่/รูป/กราฟ/WebView ได้จริง
+  - **tool ใหม่ `device_gesture`**: long_press (กดค้าง), swipe 4 ทิศ, drag — ทุกท่าใช้ `awaitGesture` มี timeout
+  - **`device_type_text(submit=true)`**: กด `ACTION_IME_ENTER` (API 30+) หลังพิมพ์ → ส่งข้อความ/ค้นหาได้จริง ไม่ค้างในช่องพิมพ์
+  - **`device_scroll`**: ใช้ `ACTION_SCROLL_FORWARD/BACKWARD` ใน node ที่เลื่อนได้ก่อน แล้วค่อย fallback ปัดกลางจอ (ไม่ไปโดนปุ่ม/pull-to-refresh)
+  - **`device_open_app`**: รอหน้าจอเปลี่ยนจริงสูงสุด 2.5 วิ แล้ว**แนบสรุปหน้าจอแรกมาในผลลัพธ์เลย** (เดิมคืนทันที → อ่านจอต่อได้หน้าเดิม); ถ้า package ที่ AI เดามาเปิดไม่ได้ จะ fallback ไปหาจากชื่อแอป
+  - **`resolveAppPackage`**: ใช้ `queryIntentActivities(ACTION_MAIN/LAUNCHER)` เป็นฐาน — mapping ชื่อยอดนิยมจะใช้ได้ต่อเมื่อ package นั้นมีจริงในเครื่อง ไม่งั้นค้นจาก label (ตรงเป๊ะ → ขึ้นต้น → มีคำนั้น) แก้ปัญหา `กล้อง → com.android.camera` ล้มบน Samsung
+  - **`JarvisPersona`**: เพิ่มกติกาลูปควบคุมแอป 7 ขั้น (open → read → tap/type → read ยืนยัน, retry ≤3, ใช้ screenshot เมื่ออ่านไม่ออก) + ข้อห้าม: ยืนยันด้วยเสียงก่อน action ย้อนกลับไม่ได้ และห้ามกดในแอปธนาคาร/หน้าจ่ายเงิน
+  - `ToolRegistry.DEVICE_CONTROL_TOOLS`: เพิ่ม `device_screenshot`, `device_gesture` (เปิดเฉพาะโหมดขับขี่เหมือนเดิม)
+- **Verify**: `testDebugUnitTest` ผ่านทั้งหมด; ติดตั้งลงเครื่องจริงแล้ว; `dumpsys accessibility` ยืนยัน `retrieveInteractiveWindows=true` และผู้ใช้เปิด Accessibility ของ JARVIS แล้ว (ต่างจากเมื่อวาน)
+- **ผลทดสอบเสียงจริงบนเครื่อง (09:57–10:00)**:
+  - ✅ `device_open_app({app_name=Facebook})` → เปิดได้ และผลลัพธ์แนบสรุปหน้าจอ Facebook พร้อมพิกัดกลับมาทันที (awaitAppReady ทำงาน)
+  - ✅ `device_read_screen` → JARVIS เล่าได้ว่าอยู่หน้าหลัก Facebook มีแถบสตอรี่ มีโพสต์อะไร
+  - ✅ `device_press_button(home)` และ `device_location` ปกติ
+  - ✅ tool count: DRIVE 136 / CONTROL 127 — tool ใหม่ถูกกรองตามโหมดถูกต้อง
+  - ❌ "เปิดแผนที่ให้หน่อย" → โมเดลถามกลับว่าจะไปไหน ไม่เรียก tool
+  - ❌ "เปิดกล้องหน่อย" → เรียก `vision_activate` (ตาของ JARVIS) ไม่ใช่แอปกล้อง แล้ว**วนลูปเรียกซ้ำ 4 รอบ** (2-turn pipeline กระตุ้นตัวเอง) ตอบช้าสุด 15 วินาที จบด้วย "มองไม่เห็นอะไร"
+  - ⚠️ `device_screenshot` ยังไม่ถูกเรียกเลย — โมเดลเลือก read_screen เสมอ
+- **แก้ตามผลทดสอบ (รอบเดียวกัน)**:
+  - `LiveToolBridge`: กัน `vision_activate` ซ้ำภายใน 40 วิ (ตอบ `EYES_ALREADY_OPEN` ให้ดูสตรีมแล้วตอบเลย) + ถ้าผู้ใช้พูดว่า "แอปกล้อง/กล้องถ่ายรูป/ถ่ายรูป" ให้ redirect ไป `device_open_app`
+  - `JarvisPersona`: "เปิดแผนที่" ไม่ระบุจุดหมาย → `device_open_app` ทันที ห้ามถามกลับ; เพิ่มกติกาเรียก `device_screenshot` เมื่อคำถามเกี่ยวกับภาพ/แผนที่/กราฟ หรือ read_screen ไม่มีข้อความที่สื่อความหมาย
+  - `AlwaysLiveManager`: ข้าม `startDriveMode()` ถ้า polling ทำงานอยู่แล้ว (เดิมรีสตาร์ท 3 รอบต่อการสลับโหมด 1 ครั้ง) และไม่ log `CancellationException` เป็น warning
+- **ทดสอบเสียงรอบ 2 (10:24–10:27) — แก้ผ่านหมด**:
+  - ✅ "เปิดแผนที่ให้หน่อย" → `device_open_app({app_name=Google Maps})` ทันที ไม่ถามกลับแล้ว
+  - ✅ "เปิดแอปกล้อง" → `device_open_app({app_name=กล้อง})` → เปิด `com.sec.android.app.camera` สำเร็จ (พิสูจน์ว่า resolve จาก launcher จริงแก้ปัญหา Samsung ได้)
+  - ✅ "เปิดกล้องหน่อย" → `vision_activate` **ครั้งเดียว** แล้วจบด้วย `vision_deactivate` (เดิมวน 4 รอบ)
+  - ✅ ไม่มี `Drive telemetry polling error` และขึ้น "ข้ามการเริ่มซ้ำ" ตามที่ตั้งใจ
+  - ⚠️ "ดูแผนที่ให้หน่อยว่าตรงนี้คือที่ไหน" → โมเดลเลือก `device_location` (ตอบถูกแต่ไม่ได้ทดสอบ screenshot) — `device_screenshot` **ยังไม่เคยถูกเรียกจริงสักครั้ง**
+  - 🔴 **พบบั๊กใหม่: กล้อง Live ไม่ส่งเฟรมเลยเมื่อแอปถูกย่อ** — ไม่มี log `📹 Video chunks streaming` ทั้ง 2 รอบ สาเหตุ: เฟรมถูกผลิตจาก `CameraPreviewView` ใน `DriveModeScreen.kt:236` / `PetModeScreen.kt:561` เท่านั้น เมื่อ `minimize()` ไป MINI_FLOATING composable ถูกถอด → ไม่มีเฟรม → JARVIS ตอบ "มองไม่เห็นอะไร" (ต้องย้ายการจับเฟรมไป foreground service ที่มี `FOREGROUND_SERVICE_CAMERA` — งานเฟส D)
+    หมายเหตุ: `device_screenshot` ไม่ได้ใช้เส้นทางนี้ (ยิงตรงผ่าน `ScreenVisionBridge`) จึงไม่ติดปัญหาเดียวกัน
+- **ทดสอบเสียงรอบ 3 (10:47–10:48)**:
+  - ✅ `device_screenshot` **ถูกเรียกจริงแล้ว** จากคำสั่ง "แคปหน้าจอให้หน่อยว่าบนแผนที่เห็นอะไรบ้าง" (คำใบ้ในคำอธิบาย tool ได้ผล)
+  - 🔴 แต่ล้มเหลวใน 21 มิลลิวินาที — **สาเหตุ: `accessibility_service_config.xml` ขาด `android:canTakeScreenshot="true"`** (เป็น attribute บังคับ ไม่ใช่แค่เรียก API ได้) แก้แล้ว: `dumpsys accessibility` ยืนยัน `capabilities` 33 → **161** (บิต 128 = CAPABILITY_CAN_TAKE_SCREENSHOT) โดยผู้ใช้ไม่ต้องปิด-เปิด Accessibility ใหม่
+  - ✅ อ่าน Maps เห็น `--- หน้าต่าง: หน้าต่างป๊อปอัป ---` — การอ่านหลายหน้าต่างทำงานบนเครื่องจริง
+  - ❌ `device_type_text({text=เพลงลูกทุ่ง, submit=true})` ใน YouTube ล้มเหลว "ไม่พบช่อง input" เพราะโมเดลพิมพ์ทันทีโดยไม่แตะช่องค้นหาก่อน → แก้: ข้อความ error บอกขั้นตอนถัดไป (read → tap ช่องค้นหา → พิมพ์ใหม่) + เพิ่มกฎในเพอร์โซนา
+  - ❌ "กลับไปหน้าแอปจาวิส" → `device_open_app({app_name=JARVIS})` → ไม่พบ เพราะ label จริงของแอปคือ "Personal AI Bot" → แก้: map ชื่อเรียกตัวเอง (jarvis/จาวิส/จาวิต/personal ai bot) เป็น package ตัวเอง และ `launchByPackage` กรณีเป็นตัวเองจะ `expandAlwaysLive()` กลับเป็นเต็มจอแทน startActivity
+- **ทดสอบเสียงรอบ 4 (11:56–11:58)**:
+  - ✅ **`device_screenshot` ทำงานสมบูรณ์** — log ขึ้น `📹 Video chunks streaming (#1, 495624 chars/frame)` และ JARVIS บรรยายหน้า Maps ได้ถูกต้อง ("โหมดดูแผนที่ทั่วไป เห็นตำแหน่งปัจจุบันและเส้นทางรอบๆ") → ยืนยันว่า `canTakeScreenshot` คือสาเหตุเดียวของรอบก่อน
+  - ✅ ลูปหลายขั้นทำงาน: open_app YouTube → `device_tap(x,y)` ที่ช่องค้นหา → read_screen → `device_type_text(submit=true)` → "พิมพ์และกดส่งเรียบร้อย"
+  - 🔴 **`device_scroll` รายงาน "สำเร็จ" แต่หน้าจอไม่ขยับ** — `scrollNode` เลือก node ที่เลื่อนได้ "ตัวแรกที่เจอ" ซึ่งมักเป็นแถบชิปแนวนอนด้านบน performAction คืน true แต่เนื้อหาหลักอยู่ที่เดิม
+    แก้: `findMainScrollable()` เลือก node ที่เลื่อนได้ซึ่ง**พื้นที่ใหญ่สุดและเป็นแนวตั้ง**, ตัดหน้าต่างของ JARVIS เองออกจาก `interactiveRoots()`, และ `executeScroll` เทียบ "ลายเซ็นหน้าจอ" ก่อน/หลัง — ถ้าไม่ขยับจริงจะตอบว่าไม่ขยับ (ห้ามบอกว่าสำเร็จ)
+  - 🔴 **โมเดลพิมพ์ค้นหาเองทั้งที่ผู้ใช้ไม่ได้สั่ง** — ผู้ใช้พูดแค่ "เปิด YouTube" แต่โมเดลไล่แตะช่องค้นหาแล้วพิมพ์ "เพลงลูกทุ่ง" (ข้อความค้างจากบทสนทนารอบก่อน) แล้วกดส่ง
+    แก้: `LiveIntentMatchers.hasTypingIntent()` + guard ใน `LiveToolBridge` บล็อก `device_type_text` เมื่อประโยคล่าสุดไม่มีเจตนาพิมพ์/ค้นหา + กฎ "ขอบเขตของคำสั่ง" ในเพอร์โซนา (ทำเฉพาะสิ่งที่สั่งในประโยคล่าสุด ห้ามสานงานค้างจากบทสนทนาก่อน) + เทสต์ `TypingIntentGuardTest`
+- **ทดสอบรอบ 5 (12:10) — ไม่ได้ทดสอบฟีเจอร์เลย เพราะ Live session โดนลิมิต**:
+  - log: `Session closed: INTERNAL_ERROR — You exceeded your current quota` → `🔄 Live quota → rotate credential 1/1 + model=gemini-3.8-live-extended-thinking`
+  - จากนั้น "เปิด YouTube" **ไม่มี tool call เลย** โมเดลสำรองตอบ "จาวิสไม่สามารถเปิดแอปพลิเคชันโดยตรงได้ค่ะ"
+  - ผู้ใช้ยืนยันว่าโควตารายวันไม่หมด — ตรงกับเอกสาร Gemini: ข้อความนี้เกิดจาก RPM/TPM (ลิมิตต่อนาที) ได้ด้วย และวิธีแก้คือ "wait and retry"
+  - **ต้นเหตุเชิงระบบ**: การสลับโหมด (CONTROL→DRIVE) ทำ teardown+reconnect ทันที → เปิด session 3 ครั้งใน ~13 วินาที → ชน RPM → โค้ดเดิม**สลับโมเดลทันที**ตกไปอยู่ extended-thinking ที่ไม่ยอมเรียก tool
+  - แก้ `LiveGeminiService`: เมื่อเจอ quota error ให้**รอ 2/4 วินาทีแล้วลองโมเดลเดิมซ้ำสูงสุด 2 ครั้งก่อน** ค่อยสลับโมเดล และถ้าต้องสลับจริงจะ `emitTextToChat` แจ้งผู้ใช้ว่าโมเดลสำรองอาจควบคุมเครื่องได้ไม่ครบ (เดิมเงียบสนิท ผู้ใช้เห็นแค่ "ทำไม่ได้")
+- **ทดสอบรอบ 6 (12:25–12:27)**:
+  - ✅ ไม่เจอ quota error แล้ว (อยู่กับ `gemini-3.8-live` ตลอด) — tool ทำงานครบ: `device_open_app(YouTube)`, `device_media_control(search_play)`, `device_scroll` ทั้งขึ้นและลง
+  - ✅ `device_scroll` ตอบ "เลื่อนหน้าจอขึ้นแล้ว/ลงแล้ว" ซึ่งเป็นข้อความที่ออกเฉพาะเมื่อ **ลายเซ็นหน้าจอเปลี่ยนจริง** (ถ้าไม่ขยับจะตอบอีกแบบ)
+  - ✅ typing guard ไม่ขวางงานจริง: "ค้นหาเพลงลูกทุ่ง" ผ่านปกติ
+  - 🔴 **โมเดลทักทายซ้ำแทนการรายงานผล** — หลัง tool response ทุกครั้งพูด "สวัสดีค่ะบอส จาวิสพร้อมคุยแล้วค่ะ มีอะไรให้จาวิสช่วยวันนี้ดีคะ" ทั้งที่ session ไม่ได้ต่อใหม่ (ไม่มี log reconnect/`⬆ Sent realtime text` คั่น)
+    สันนิษฐาน: กฎ "ขอบเขตของคำสั่ง" ที่เพิ่มรอบก่อนมีท่อนท้าย "ถ้าไม่แน่ใจให้ถามสั้นๆ 1 ประโยค" ทำให้โมเดลเลือกถามลอยๆ แทนรายงานผล
+    แก้: ตัดท่อนนั้นออก + เพิ่มกฎ "หลังเรียก tool เสร็จต้องรายงานผลจริง 1-2 ประโยค ห้ามทักทายซ้ำกลางบทสนทนา ห้ามถามลอยๆ แทนการรายงาน"
+- **แก้เพิ่มหลังรอบ 2**: `ScreenSnapshotFormatter` เติมบรรทัดเตือนท้ายผล read_screen เมื่อ element มีข้อความ &lt;25% (หน้าแบบแผนที่/กล้อง/เกม) ว่า "ให้เรียก device_screenshot ห้ามเดา" + เพิ่มวลีไทยใน description ของ `device_screenshot` (แคปหน้าจอ, ส่องหน้าจอ, บนแผนที่เห็นอะไร) + เทสต์ใหม่ 2 เคส
+
 ## 2026-09-19 — Device Control เฟส A: AI เห็นพิกัดปุ่มและกดได้จริง
 - **User Request**: รีวิวโหมดขับขี่ที่ควบคุมมือถือได้ 100% แล้วดำเนินการเฟส A (ดู [[Review_2026-09-19_Driving_Mode_Full_Device_Control]])
 - **Changes**:
@@ -3449,3 +3610,26 @@ active context window"* คิดทั้ง context สะสมใหม่�
 - **installDebug สร้างแอป 2 อัน**: `adb install` ติดตั้งให้ทุก user profile เครื่องเปิด Dual Messenger (user 95 = DUAL_APP)
   จึงได้ไอคอนโคลนทุกครั้ง → ตั้ง `installation { installOptions("--user", "0") }` ใน `composeApp/build.gradle.kts`
   และถอนของ user 95 ออกแล้ว (ยืนยัน: user 0 installed=true, user 95 installed=false)
+
+---
+
+## 2026-09-22 — ยกระดับ Tool วิเคราะห์ปัจจัยพื้นฐาน งบดุล งบการเงิน & AI Multi-Dimensional Analysis
+
+- **ปัญหาเดิม**: `trading_fundamental_analysis` ใน `ResearchToolHandler.kt` เป็นเพียง Mock / News Dummy ที่ดึงหัวข้อข่าว 10 ข่าวส่งให้ AI เดา ไม่มีตัวเลขจริง งบดุล (Balance Sheet), งบกำไรขาดทุน (Income Statement), โครงสร้างทุน (Capital Structure), หรือ Valuation Multiples
+- **สร้าง `StockFundamentalModels.kt`**: Model `StockFundamentalData` ครอบคลุม 50 ตัวชี้วัดสำคัญ พร้อมฟังก์ชัน Compact Formatting สำหรับมูลค่าเงินตรา, จำนวนหุ้น, อัตราส่วน และเปอร์เซ็นต์
+- **เพิ่ม Data Pipeline ใน `TradingApiService.kt`**:
+  - เมธอด `getStockFundamentals(rawSymbol, requestedExchange)` ยิง TradingView Scanner API (`thailand`, `america`, `global`) ดึงข้อมูลงบการเงินและอัตราส่วนจริง
+  - Auto-resolve ตลาดและ Ticker: รองรับหุ้นไทย (SET/MAI เช่น SCB, PTT, CPALL) และสหรัฐฯ/สากล (NASDAQ/NYSE เช่น AAPL, NVDA, TSLA)
+  - คำนวณค่าอนุพันธ์สำคัญ: Cash & Equivalents (`Total Debt - Net Debt`), Free Float % vs Closely Held %, Upside % จากราคาเป้าหมายเฉลี่ย
+- **ยกระดับ `ResearchToolHandler.kt`**:
+  - ปรับปรุง `executeFundamentalAnalysis` แสดงผลข้อมูลแบบครบวงจร 6 หมวดหมู่:
+    1. ข้อเท็จจริงที่มีนัยยะ (Market Cap, P/E, Basic EPS, P/S, P/B, Dividend Yield, DPS, 52W Range, Beta 1Y)
+    2. ความเป็นเจ้าของ (Total Shares, Free Float %, Closely Held %, Visual Float Bar)
+    3. โครงสร้างเงินทุน & สภาพคล่องงบดุล (Enterprise Value, Market Cap, Total Debt, Cash, Net Debt, Equity, Total Assets, D/E)
+    4. ผลการดำเนินงาน & ความสามารถทำกำไร (Revenue TTM/FQ/FY, Net Income TTM/FQ/FY, FCF, Margins, ROE, ROA, ROIC)
+    5. เป้าหมายนักวิเคราะห์ & โมเมนตัมราคา (Target Price Avg/High/Low, Upside %, YTD %)
+    6. บทวิเคราะห์ AI เชิงลึก 6 มิติ (Valuation, Solvency, Profitability, Dividend Safety, Ownership, Fundamental Health Score 0-100)
+- **อัปเดตคำอธิบายและพารามิเตอร์ใน `TradingToolDefinitions.kt`**: ระบุพารามิเตอร์ `symbol` และ `exchange` ชัดเจน
+- **อัปเดตสมองส่วนนอก**: `.obsidian-wiki/03_Tools/catalogue.md` และสร้างโน้ตใหม่ [[68_Stock_Fundamental_Financial_Engine]]
+- **การทดสอบ**: คอมไพล์ผ่าน `:composeApp:compileDebugKotlinAndroid` สำเร็จ 100% (BUILD SUCCESSFUL)
+

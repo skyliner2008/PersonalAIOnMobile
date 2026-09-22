@@ -771,6 +771,9 @@ class LiveGeminiService(
         liveModelIndex = liveModelChain.indexOf(liveModelName).takeIf { it >= 0 } ?: 0
         var attempt = 0
         var fallbackCount = 0
+        /** ลองโมเดลเดิมซ้ำกี่ครั้งเมื่อโดนโควตา/ลิมิตต่อนาที ก่อนยอมสลับไปโมเดลสำรอง */
+        val maxQuotaRetries = 2
+        var quotaRetryCount = 0
         while (attempt <= maxRetries) {
             isSetupComplete = false
             sessionWasReady = false
@@ -947,6 +950,7 @@ class LiveGeminiService(
                 if (userRequestedDisconnect) break
                 if (sessionWasReady) {
                     fallbackCount = 0
+                    quotaRetryCount = 0
                 }
                 if (terminalCloseReason != null) {
                     val normalizedTerminal = terminalCloseReason!!.lowercase()
@@ -986,7 +990,27 @@ class LiveGeminiService(
                         attempt = 0
                         continue
                     }
+                    // ข้อความ "exceeded your current quota" ครอบคลุมทั้งโควตารายวันหมด และลิมิตต่อนาที (RPM/TPM)
+                    // การสลับโมเดลทันทีทำให้ตกไปอยู่โมเดลสำรองที่เรียก tool ได้แย่กว่า ทั้งที่รออีก 2 วินาทีก็ผ่าน
+                    // (พบจริง 2026-09-20: สลับโหมดทำให้เปิด session 3 ครั้งใน 13 วินาที → โดนลิมิตต่อนาที
+                    //  แล้วตกไป extended-thinking ซึ่งตอบว่า "เปิดแอปไม่ได้")
+                    if (quotaError && quotaRetryCount < maxQuotaRetries) {
+                        quotaRetryCount++
+                        val waitMs = 2_000L * quotaRetryCount
+                        logDebug("LiveGemini", "⏳ Live quota/rate limit — รออีก ${waitMs}ms แล้วลอง $liveModelName ซ้ำ ($quotaRetryCount/$maxQuotaRetries)")
+                        delay(waitMs)
+                        attempt = 0
+                        continue
+                    }
                     if (quotaError && rotateLiveCredentialOnQuota()) {
+                        // แจ้งผู้ใช้ให้เห็นในแชท — เดิมเงียบสนิท ผู้ใช้เห็นแค่ JARVIS ตอบว่า "ทำไม่ได้"
+                        // โดยไม่รู้ว่าถูกสลับไปโมเดลสำรองแล้ว (พบจากทดสอบจริง 2026-09-20)
+                        emitTextToChat(
+                            "⚠️ Gemini ปฏิเสธด้วยเหตุผลโควตา/ลิมิตต่อนาที แม้ลองซ้ำแล้ว $maxQuotaRetries ครั้ง — " +
+                                "สลับไปโมเดลสำรอง `$liveModelName` ให้อัตโนมัติ\n" +
+                                "โมเดลสำรองอาจเรียกเครื่องมือควบคุมเครื่อง (เปิดแอป/แตะปุ่ม/อ่านจอ) ได้ไม่ครบเท่าเดิม " +
+                                "ถ้าสั่งงานแล้วจาวิสบอกว่าทำไม่ได้ ให้เว้นสักครู่แล้วเปิดโหมดใหม่อีกครั้ง"
+                        )
                         // Do not count a quota rotation as a transient reconnect retry.
                         // The next loop uses a different key/model and starts a fresh session.
                         attempt = 0
@@ -1589,13 +1613,11 @@ class LiveGeminiService(
         _textOutputFlow.emit(LiveTextUpdate(text, role = "model", append = false, isStatic = true))
 
         // --- Persistence to Knowledge Base & History ---
-        // ตัด tool dump ยาวๆ ออกก่อนเก็บลง Working Memory — ไม่งั้น history snapshot
-        // จะเต็มไปด้วยผลลัพธ์ tool ดิบ (token bloat เมื่อสะสม)
-        val stored = if (text.length > 2000) text.take(2000) + "\n...[truncated for memory]" else text
+        // บันทึกเนื้อหารายงานฉบับเต็มลง Working Memory เพื่อให้ผู้ใช้เปิดแอปใหม่แล้วอ่านย้อนหลังได้ครบถ้วน
         scope.launch {
             memoryManager?.storeMessage(
                 role = "model",
-                content = stored,
+                content = text,
                 metadata = "{\"mode\": \"live_voice_tool_result\"}"
             )
         }

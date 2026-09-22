@@ -242,28 +242,129 @@ internal class MarketTechnicalToolHandler(
     }
 
     internal suspend fun executeSentiment(args: Map<String, String>): String {
-        val symbol = args["symbol"] ?: return "Missing required argument: symbol"
-        val data = api.getRedditSentiment(symbol)
+        val rawSymbol = args["symbol"]?.trim()?.takeIf { it.isNotEmpty() }
+        val unified = api.getUnifiedCompositeSentiment(rawSymbol)
+        val targetName = if (unified.isGlobalMacro) "GLOBAL MACRO" else unified.target.uppercase()
 
-        @Suppress("UNCHECKED_CAST")
-        val topPosts = data["top_posts"] as? List<String> ?: emptyList()
+        // ส่งให้ AI Gemini สังเคราะห์มิติจิตวิทยาและ Contrarian Opportunity
+        val prompt = buildString {
+            appendLine("You are JARVIS Senior Market Sentiment & Behavioral Economics Specialist.")
+            appendLine("Analyze the market sentiment for $targetName based on live composite data:")
+            appendLine("- Composite Sentiment Score: ${"%.1f".format(unified.compositeScore)}/100 (${unified.compositeLabel} / ${unified.labelThai})")
+            appendLine("- Pillars Breakdown:")
+            unified.pillars.forEach { p ->
+                appendLine("  * ${p.name}: ${"%.1f".format(p.score)}/100 (Weight: ${p.weightPct}%) — ${p.detail}")
+            }
+            val binancePos = unified.binancePositioning
+            if (binancePos != null) {
+                appendLine("- Derivatives Retail vs Smart Money (Binance Futures):")
+                appendLine("  * Retail Accounts: Long ${"%.1f".format(binancePos.retailLongAccountPct)}% vs Short ${"%.1f".format(binancePos.retailShortAccountPct)}% (Ratio: ${"%.2f".format(binancePos.retailLongShortRatio)})")
+                appendLine("  * Top Traders (Whales): Long ${"%.1f".format(binancePos.topTraderLongPositionPct)}% vs Short ${"%.1f".format(binancePos.topTraderShortPositionPct)}% (Ratio: ${"%.2f".format(binancePos.topTraderLongShortRatio)})")
+                appendLine("  * Taker Buy/Sell Ratio: ${"%.2f".format(binancePos.takerBuySellRatio)}")
+                appendLine("  * Divergence Alert: ${binancePos.divergenceSignal}")
+            }
+            if (unified.contrarianAlert != null) {
+                appendLine("- Contrarian Signal Detected: ${unified.contrarianAlert}")
+            }
+            if (unified.topHeadlines.isNotEmpty()) {
+                appendLine("- Recent Market Narrative Headlines:")
+                unified.topHeadlines.take(4).forEach { appendLine("  * $it") }
+            }
+            appendLine("")
+            appendLine("Please generate a concise, professional Thai synthesis covering:")
+            appendLine("1. 🧠 สภาวะจิตวิทยาฝูงชน (Crowd Psychology Phase เช่น Euphoria, Complacency, Skepticism, Panic, Capitulation)")
+            if (!unified.isGlobalMacro && binancePos != null) {
+                appendLine("2. ⚖️ ความสอดคล้องหรือขัดแย้งระหว่างรายย่อยกับ Smart Money (Divergence / Positioning Analysis)")
+            }
+            appendLine("3. 🎯 สรุปกลยุทธ์ Contrarian หรือระดับความเสี่ยงของตลาดในปัจจุบัน (Actionable Takeaway)")
+            appendLine("Keep it focused, actionable, and formatted in clean markdown bullet points.")
+        }
+
+        val aiSynthesis = try {
+            geminiService.generateResponse(
+                prompt = prompt,
+                intentAddon = "You are a behavioral finance and market sentiment expert. Provide sharp, realistic insights in Thai."
+            )
+        } catch (_: Exception) { "ไม่สามารถประมวลผลบทวิเคราะห์ AI ได้ในขณะนี้" }
 
         return buildString {
-            appendLine("Reddit Sentiment - ${symbol.uppercase()}")
-            appendLine("-".repeat(35))
-            appendLine("Label: ${data["sentiment_label"]}")
-            appendLine("Score: ${data["sentiment_score"]}")
-            appendLine("Posts analyzed: ${data["posts_analyzed"]}")
-            appendLine("Bullish posts: ${data["bullish_posts"]} | Bearish: ${data["bearish_posts"]}")
-            if (topPosts.isNotEmpty()) {
-                appendLine("")
-                appendLine("Top Posts:")
-                topPosts.forEachIndexed { i, post -> appendLine("${i+1}. $post") }
+            appendLine("### 🗣️ JARVIS Unified Sentiment Index — $targetName")
+            appendLine("---")
+            appendLine("${unified.emoji} **`${unified.meterBar}` ${"%.1f".format(unified.compositeScore)}/100 — ${unified.labelThai} (${unified.compositeLabel})**")
+            appendLine("")
+
+            appendLine("### 🏛️ โครงสร้าง 4 เสาหลัก (4-Pillars)")
+            appendLine("| เสาหลัก | น้ำหนัก | คะแนน | รายละเอียด |")
+            appendLine("| :--- | :---: | :---: | :--- |")
+            unified.pillars.forEach { p ->
+                val shortName = when {
+                    p.name.contains("News") -> "📰 ข่าวสาร/โซเชียล"
+                    p.name.contains("Market F&G") || p.name.contains("CNN") -> "🌡️ สภาวะตลาดรวม"
+                    p.name.contains("Positioning") -> "🐋 สัญญาอนุพันธ์"
+                    p.name.contains("Technical") -> "📊 เทคนิคัลโมเมนตัม"
+                    else -> p.name
+                }
+                appendLine("| $shortName | ${p.weightPct}% | **${"%.1f".format(p.score)}** | ${p.detail} |")
             }
+            appendLine("")
+
+            val binancePos = unified.binancePositioning
+            if (binancePos != null) {
+                appendLine("### 🐋 สัดส่วนพอร์ตอนุพันธ์ (Derivatives Positioning)")
+                appendLine("- **รายย่อย (Retail):** Long ${"%.1f".format(binancePos.retailLongAccountPct)}% | Short ${"%.1f".format(binancePos.retailShortAccountPct)}% (Ratio: `${"%.2f".format(binancePos.retailLongShortRatio)}`)")
+                appendLine("- **สถาบัน/รายใหญ่ (Top Traders):** Long ${"%.1f".format(binancePos.topTraderLongPositionPct)}% | Short ${"%.1f".format(binancePos.topTraderShortPositionPct)}% (Ratio: `${"%.2f".format(binancePos.topTraderLongShortRatio)}`)")
+                appendLine("- **Taker Buy/Sell Ratio:** `${"%.2f".format(binancePos.takerBuySellRatio)}`")
+                appendLine("- **สัญญาณเตือน:** ${binancePos.divergenceSignal}")
+                appendLine("")
+            }
+
+            if (unified.contrarianAlert != null) {
+                appendLine("🚨 **${unified.contrarianAlert}**")
+                appendLine("")
+            }
+
+            if (unified.topHeadlines.isNotEmpty()) {
+                appendLine("### 📰 พาดหัวข่าวกระแสหลัก (Market Narratives)")
+                unified.topHeadlines.take(3).forEachIndexed { i, post -> appendLine("- **${i + 1}.** $post") }
+                appendLine("")
+            }
+
+            appendLine("### 🧠 บทวิเคราะห์ & Contrarian Intelligence")
+            appendLine(aiSynthesis.trim())
         }
     }
 
-    internal suspend fun executeFearGreed(@Suppress("UNUSED_PARAMETER") args: Map<String, String>): String {
+    internal suspend fun executeFearGreed(args: Map<String, String>): String {
+        val market = args["market"]?.trim()?.lowercase() ?: "crypto"
+        val isStocks = market in listOf("stock", "stocks", "cnn", "us", "sp500", "nasdaq")
+        val isAll = market in listOf("all", "both", "global", "macro")
+
+        if (isStocks) {
+            val cnn = api.getCnnStockFearAndGreed() ?: return "⚠️ ไม่สามารถดึงข้อมูล CNN Fear & Greed Index ได้ในขณะนี้"
+            return formatCnnFearGreed(cnn)
+        }
+
+        if (isAll) {
+            val cryptoFng = api.getFearGreedIndex(5)
+            val cnn = api.getCnnStockFearAndGreed()
+            return buildString {
+                appendLine("🌐 **Global Dual-Market Fear & Greed Overview (Macro Risk Appetite)**")
+                appendLine("=".repeat(55))
+                if (cryptoFng["error"] == null) {
+                    val v = cryptoFng["value"]?.toIntOrNull() ?: 0
+                    val cls = cryptoFng["classification"] ?: "Unknown"
+                    appendLine("🪙 **Crypto Market**: $v/100 — $cls")
+                }
+                if (cnn != null) {
+                    appendLine("🏛️ **US Stock Market (CNN)**: ${"%.1f".format(cnn.score)}/100 — ${cnn.ratingThai}")
+                }
+                appendLine("-".repeat(55))
+                if (cnn != null) {
+                    appendLine(formatCnnFearGreed(cnn, isCompact = true))
+                }
+            }
+        }
+
         val fng = api.getFearGreedIndex(7)
         fng["error"]?.let { return "⚠️ ดึง Fear & Greed Index ไม่สำเร็จ ($it)" }
 
@@ -297,6 +398,38 @@ internal class MarketTechnicalToolHandler(
                 }
                 appendLine("📊 อนุกรม ${trend.size} วัน (ใหม่→เก่า): ${trend.joinToString(", ")}")
                 appendLine("🧭 ทิศทาง: $dir ($oldest → $newest)")
+            }
+            appendLine("")
+            appendLine("💡 *Tip: สามารถเรียกดูดัชนีตลาดหุ้นสหรัฐฯ ได้โดยระบุ market='stocks' หรือดูภาพรวมทั้ง 2 ตลาดด้วย market='all'*")
+        }
+    }
+
+    private fun formatCnnFearGreed(cnn: CnnFearAndGreedData, isCompact: Boolean = false): String = buildString {
+        val emoji = when (cnn.rating.lowercase()) {
+            "extreme fear" -> "😱"
+            "fear" -> "😨"
+            "greed" -> "😃"
+            "extreme greed" -> "🤑"
+            else -> "😐"
+        }
+        if (!isCompact) {
+            appendLine("🏛️ **CNN Fear & Greed Index — ตลาดหุ้นสหรัฐฯ (Real-time)**")
+            appendLine("=".repeat(50))
+        }
+        appendLine("$emoji **คะแนนดัชนีรวม: ${"%.1f".format(cnn.score)}/100 — ${cnn.ratingThai}**")
+        appendLine("📅 ข้อมูลเปรียบเทียบ: ปิดวันก่อน: ${"%.1f".format(cnn.previousClose)} | 1 สัปดาห์ก่อน: ${"%.1f".format(cnn.previous1Week)} | 1 เดือนก่อน: ${"%.1f".format(cnn.previous1Month)}")
+        if (cnn.subIndicators.isNotEmpty()) {
+            appendLine("")
+            appendLine("🔍 **7 ตัวชี้วัดย่อย (Sub-indicators):**")
+            cnn.subIndicators.forEach { sub ->
+                val subEmoji = when (sub.rating.lowercase()) {
+                    "extreme fear" -> "😱"
+                    "fear" -> "😨"
+                    "greed" -> "😃"
+                    "extreme greed" -> "🤑"
+                    else -> "😐"
+                }
+                appendLine("- $subEmoji **${sub.labelThai}**: ${"%.1f".format(sub.score)}/100 (${sub.rating})")
             }
         }
     }

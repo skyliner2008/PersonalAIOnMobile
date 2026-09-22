@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
 
 /**
  * Phase-4 refactor: แยก Chat pipeline (messages, streaming, memory post-processing)
@@ -44,11 +45,12 @@ class ChatController(
     private val maxContextTurns = 10
 
     suspend fun loadHistory() {
-        val history = memoryManager.getRecentHistory(20).reversed()
-        // ซ่อนข้อความฝั่ง user ที่มาจาก live voice (transcription) — ตอนคุยสดไม่แสดง เปิดแอปใหม่ก็ไม่ควรโผล่
+        // โหลดเฉพาะประวัติข้อความที่ยังไม่ครบ 24 ชั่วโมง (< 24 ชม.) ตามเงื่อนไขเวลา
+        val cutoff = Clock.System.now().toEpochMilliseconds() - 24 * 60 * 60 * 1000L
+        val history = memoryManager.getHistoryAfter(cutoff)
         _messages.value = history
             .filterNot { it.role == "user" && it.metadata?.contains("live_voice") == true }
-            .map { Message(it.role, it.content, metadata = it.metadata) }
+            .map { Message(it.role, it.content, metadata = it.metadata, timestamp = it.timestamp) }
     }
 
     fun clearChat() {
@@ -186,7 +188,8 @@ class ChatController(
     private fun appendAssistantMessage(content: String) {
         val currentList = _messages.value.toMutableList()
         if (currentList.isNotEmpty()) {
-            currentList[currentList.lastIndex] = Message("model", content)
+            val last = currentList.last()
+            currentList[currentList.lastIndex] = last.copy(content = content)
             _messages.value = currentList
         } else {
             _messages.value = _messages.value + Message("model", content)

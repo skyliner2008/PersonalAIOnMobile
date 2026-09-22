@@ -220,6 +220,12 @@ class AlwaysLiveManager(private val context: Context) {
     private var drivePollingJob: Job? = null
 
     private fun startDriveMode() {
+        // setProfile ถูกเรียกซ้ำหลายรอบตอนสลับโหมด (DRIVE -> DRIVE) — เดิมรีสตาร์ท polling ทุกครั้ง
+        // ทำให้ job เก่าถูก cancel กลางคันและขึ้น warning ทั้งที่ไม่มีอะไรผิด
+        if (drivePollingJob?.isActive == true) {
+            Log.d(TAG, "🚗 Drive & Control Mode ทำงานอยู่แล้ว — ข้ามการเริ่มซ้ำ")
+            return
+        }
         Log.i(TAG, "🚗 Starting Drive & Control Mode")
         installDriveBridge()
         startDriveTelemetryPolling()
@@ -318,6 +324,8 @@ class AlwaysLiveManager(private val context: Context) {
                         )
                     }
                     refreshMediaState()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e // ปิดโหมด/สลับโปรไฟล์ ไม่ใช่ error
                 } catch (e: Exception) {
                     Log.w(TAG, "Drive telemetry polling error: ${e.message}")
                 }

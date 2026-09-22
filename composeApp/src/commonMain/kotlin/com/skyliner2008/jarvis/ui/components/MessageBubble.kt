@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +44,9 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /** config ของ chart card ที่ AI ฝังในแชท (```chart fence) */
 data class ChartCardConfig(
@@ -57,6 +61,18 @@ private fun chartCardKey(symbol: String, interval: String): String {
     val sym = symbol.trim().uppercase().replace(" ", "")
     val tf = interval.trim().lowercase().let { if (it == "d") "1d" else it }
     return "$sym/$tf"
+}
+
+/** แปลง epoch ms เป็นเวลาส่งข้อความในรูปแบบ HH:mm สำหรับแสดงผลมุมขวาล่างแบบ LINE */
+fun formatMessageTime(epochMs: Long): String {
+    if (epochMs <= 0L) return ""
+    return try {
+        val instant = Instant.fromEpochMilliseconds(epochMs)
+        val ldt = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+        val hour = ldt.hour.toString().padStart(2, '0')
+        val minute = ldt.minute.toString().padStart(2, '0')
+        "$hour:$minute"
+    } catch (_: Exception) { "" }
 }
 
 @Composable
@@ -93,7 +109,11 @@ fun MessageBubble(
                 bottomStart = 16.dp,
                 bottomEnd = 16.dp
             ),
-            modifier = Modifier.widthIn(max = 320.dp)
+            modifier = if (isUser) {
+                Modifier.widthIn(min = 40.dp, max = 340.dp)
+            } else {
+                Modifier.weight(1f, fill = false).widthIn(max = 640.dp)
+            }
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 if (!isUser) {
@@ -126,6 +146,20 @@ fun MessageBubble(
                         )
                     }
                 }
+
+                // LINE-style timestamp at bottom right corner (มุมขวา เป็นตัวเล็กๆ)
+                val timeStr = remember(message.timestamp) { formatMessageTime(message.timestamp) }
+                if (timeStr.isNotEmpty() && (message.content.isNotBlank() || alertCard != null)) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = timeStr,
+                        color = if (isUser) JarvisTheme.Cyan.copy(0.75f) else Color.White.copy(0.45f),
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Normal,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.align(Alignment.End)
+                    )
+                }
             }
         }
 
@@ -146,24 +180,29 @@ fun MessageBubble(
 // ─── Content parsing: text / markdown table / chart fence ────────────────────
 
 private sealed class MsgBlock {
-    data class TextBlock(val lines: List<String>) : MsgBlock()
+    data class HeaderBlock(val level: Int, val text: String) : MsgBlock()
+    object DividerBlock : MsgBlock()
+    object EmptyLineBlock : MsgBlock()
+    data class BulletBlock(val bullet: String, val text: String) : MsgBlock()
+    data class TextBlock(val text: String) : MsgBlock()
     data class TableBlock(val rows: List<List<String>>) : MsgBlock()
     data class ChartBlock(val config: ChartCardConfig) : MsgBlock()
 }
 
 private fun parseBlocks(content: String): List<MsgBlock> {
     val blocks = mutableListOf<MsgBlock>()
-    val textBuf = mutableListOf<String>()
     val tableBuf = mutableListOf<List<String>>()
     val lines = content.lines()
     var i = 0
 
-    fun flushText() {
-        if (textBuf.isNotEmpty()) { blocks.add(MsgBlock.TextBlock(textBuf.toList())); textBuf.clear() }
-    }
     fun flushTable() {
-        if (tableBuf.isNotEmpty()) { blocks.add(MsgBlock.TableBlock(tableBuf.toList())); tableBuf.clear() }
+        if (tableBuf.isNotEmpty()) {
+            blocks.add(MsgBlock.TableBlock(tableBuf.toList()))
+            tableBuf.clear()
+        }
     }
+
+    val numberBulletRegex = Regex("^(\\d+[.)])\\s+(.*)$")
 
     while (i < lines.size) {
         val line = lines[i]
@@ -171,30 +210,74 @@ private fun parseBlocks(content: String): List<MsgBlock> {
         when {
             // ```chart {json}``` fence
             trimmed.startsWith("```chart") -> {
-                flushText(); flushTable()
+                flushTable()
                 val jsonBuf = StringBuilder()
                 i++
                 while (i < lines.size && !lines[i].trim().startsWith("```")) {
                     jsonBuf.appendLine(lines[i]); i++
                 }
                 parseChartConfig(jsonBuf.toString())?.let { blocks.add(MsgBlock.ChartBlock(it)) }
-                    ?: run { textBuf.add("(chart block อ่านไม่สำเร็จ)") }
+                    ?: run { blocks.add(MsgBlock.TextBlock("(chart block อ่านไม่สำเร็จ)")) }
             }
             // markdown table row
             trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.count { it == '|' } >= 2 -> {
-                flushText()
                 val cells = trimmed.trim('|').split("|").map { it.trim() }
                 // ข้าม separator row (|---|---|)
                 if (!cells.all { it.matches(Regex(":?-{2,}:?")) }) tableBuf.add(cells)
             }
+            trimmed.isEmpty() -> {
+                flushTable()
+                // Avoid multiple consecutive empty lines
+                if (blocks.lastOrNull() !is MsgBlock.EmptyLineBlock) {
+                    blocks.add(MsgBlock.EmptyLineBlock)
+                }
+            }
+            // Horizontal dividers: ---, ===, ***, or long repeats like ========
+            trimmed.length >= 3 && (trimmed.all { it == '-' } || trimmed.all { it == '=' } || trimmed.all { it == '*' } || trimmed.all { it == '_' }) -> {
+                flushTable()
+                blocks.add(MsgBlock.DividerBlock)
+            }
+            // Markdown Headings
+            trimmed.startsWith("#### ") -> {
+                flushTable()
+                blocks.add(MsgBlock.HeaderBlock(4, trimmed.removePrefix("#### ").trim()))
+            }
+            trimmed.startsWith("### ") -> {
+                flushTable()
+                blocks.add(MsgBlock.HeaderBlock(3, trimmed.removePrefix("### ").trim()))
+            }
+            trimmed.startsWith("## ") -> {
+                flushTable()
+                blocks.add(MsgBlock.HeaderBlock(2, trimmed.removePrefix("## ").trim()))
+            }
+            trimmed.startsWith("# ") -> {
+                flushTable()
+                blocks.add(MsgBlock.HeaderBlock(1, trimmed.removePrefix("# ").trim()))
+            }
+            // Bullet list items
+            trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ") -> {
+                flushTable()
+                val bulletContent = when {
+                    trimmed.startsWith("- ") -> trimmed.removePrefix("- ").trim()
+                    trimmed.startsWith("* ") -> trimmed.removePrefix("* ").trim()
+                    else -> trimmed.removePrefix("• ").trim()
+                }
+                blocks.add(MsgBlock.BulletBlock("•", bulletContent))
+            }
+            // Numbered list items
+            numberBulletRegex.matches(trimmed) -> {
+                flushTable()
+                val match = numberBulletRegex.find(trimmed)!!
+                blocks.add(MsgBlock.BulletBlock(match.groupValues[1], match.groupValues[2]))
+            }
             else -> {
                 flushTable()
-                textBuf.add(line)
+                blocks.add(MsgBlock.TextBlock(line))
             }
         }
         i++
     }
-    flushText(); flushTable()
+    flushTable()
     return blocks
 }
 
@@ -217,12 +300,64 @@ fun RenderedMessage(
     chartCardCache: Map<String, Triple<List<Candle>, SmcAnalysisResult?, List<com.skyliner2008.jarvis.automation.SignalMarkerProvider.SignalMarker>>> = emptyMap(),
     onChartCardShown: ((ChartCardConfig) -> Unit)? = null
 ) {
-    val blocks = parseBlocks(content)
+    val blocks = remember(content) { parseBlocks(content) }
     Column {
         blocks.forEach { block ->
             when (block) {
-                is MsgBlock.TextBlock -> block.lines.forEach { line ->
-                    TextLine(line, color)
+                is MsgBlock.HeaderBlock -> {
+                    val (fontSize, fontWeight, headerColor) = when (block.level) {
+                        1 -> Triple(18.sp, FontWeight.Bold, JarvisTheme.Cyan)
+                        2 -> Triple(16.sp, FontWeight.Bold, JarvisTheme.Cyan)
+                        3 -> Triple(15.sp, FontWeight.SemiBold, Color.White)
+                        else -> Triple(14.sp, FontWeight.SemiBold, JarvisTheme.Cyan.copy(alpha = 0.9f))
+                    }
+                    Text(
+                        text = parseInlineMarkdown(block.text),
+                        color = headerColor,
+                        fontSize = fontSize,
+                        fontWeight = fontWeight,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+                    )
+                }
+                is MsgBlock.DividerBlock -> {
+                    HorizontalDivider(
+                        color = JarvisTheme.Cyan.copy(alpha = 0.25f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                is MsgBlock.EmptyLineBlock -> {
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+                is MsgBlock.BulletBlock -> {
+                    Row(
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = block.bullet,
+                            color = JarvisTheme.Cyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                        Text(
+                            text = parseInlineMarkdown(block.text),
+                            color = color,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+                }
+                is MsgBlock.TextBlock -> {
+                    Text(
+                        text = parseInlineMarkdown(block.text),
+                        color = color,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(vertical = 1.5.dp)
+                    )
                 }
                 is MsgBlock.TableBlock -> MarkdownTable(block.rows, color)
                 is MsgBlock.ChartBlock -> ChartCard(block.config, onOpenChart, chartCardCache, onChartCardShown)
@@ -231,34 +366,39 @@ fun RenderedMessage(
     }
 }
 
-@Composable
-private fun TextLine(line: String, color: Color) {
-    val annotatedString = buildAnnotatedString {
-        var current = line
-        while (current.contains("**")) {
-            val start = current.indexOf("**")
-            val end = current.indexOf("**", start + 2)
+private fun parseInlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    while (i < text.length) {
+        if (text.startsWith("**", i)) {
+            val end = text.indexOf("**", i + 2)
             if (end != -1) {
-                append(current.substring(0, start))
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    append(current.substring(start + 2, end))
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) {
+                    append(text.substring(i + 2, end))
                 }
-                current = current.substring(end + 2)
-            } else {
-                break
+                i = end + 2
+                continue
             }
         }
-        append(current)
+        if (text[i] == '`') {
+            val end = text.indexOf('`', i + 1)
+            if (end != -1) {
+                withStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        color = JarvisTheme.Cyan,
+                        background = Color.White.copy(alpha = 0.08f),
+                        fontSize = 13.sp
+                    )
+                ) {
+                    append(" " + text.substring(i + 1, end) + " ")
+                }
+                i = end + 1
+                continue
+            }
+        }
+        append(text[i])
+        i++
     }
-
-    Text(
-        text = annotatedString,
-        color = color,
-        fontSize = 14.sp,
-        fontFamily = FontFamily.Default,
-        lineHeight = 20.sp,
-        modifier = Modifier.padding(vertical = 1.dp)
-    )
 }
 
 /** ตาราง markdown → ตารางจริง (header เน้นสี, zebra rows, scroll แนวนอนได้บนจอแคบ) */

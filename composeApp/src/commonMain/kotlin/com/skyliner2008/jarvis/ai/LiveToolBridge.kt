@@ -48,6 +48,12 @@ class LiveToolBridge(
     private var collectionJob: Job? = null
     private var visionPromptJob: Job? = null
 
+    /** เวลาที่เปิดกล้องรอบล่าสุด — กันโมเดลเรียก vision_activate ซ้ำจนวนลูป (พบจาก log จริง 2026-09-20: เรียก 4 รอบ ตอบช้า 15 วินาที) */
+    private var visionActivatedAtMs: Long = 0L
+
+    /** ช่วงเวลาที่บล็อกการสั่งเปิดกล้องซ้ำ — ยาวกว่ารอบ 2-turn pipeline (รอ turn 15s + 20s) */
+    private val VISION_REACTIVATE_BLOCK_MS = 40_000L
+
     // Trading AI Profile guard: keep one analysis family per user turn and only M15/H1/H4 by default.
     // tool call รันขนานกันแล้ว → counter ต้องอยู่ใต้ mutex
     private val tradingProfileMutex = kotlinx.coroutines.sync.Mutex()
@@ -377,6 +383,35 @@ class LiveToolBridge(
         // Vision Activate Guard: Prevent camera opening if user did not ask to see/look
         if (event.name == "vision_activate") {
             val p = userPrompt.lowercase().trim()
+
+            // 1. ผู้ใช้หมายถึง "แอปกล้อง" ของเครื่อง ไม่ใช่ตาของ JARVIS → เปิดแอปแทน
+            val wantsCameraApp = listOf("แอปกล้อง", "แอพกล้อง", "กล้องถ่ายรูป", "camera app", "ถ่ายรูป", "ถ่ายภาพ")
+                .any { p.contains(it) }
+            if (wantsCameraApp) {
+                logDebug("LiveBridge", "🛡️ vision_activate → device_open_app (ผู้ใช้ขอแอปกล้อง): '$userPrompt'")
+                val result = try {
+                    ToolExecutor.execute(ToolCall("device_open_app", mapOf("app_name" to "กล้อง")), memoryContext)
+                } catch (e: Exception) {
+                    logError("LiveBridge", "Redirected open camera app failed", e)
+                    com.skyliner2008.jarvis.tools.ToolResult("device_open_app", "Error: ${e.message}", true)
+                }
+                respond(event, result.result + "\n\n[VOICE RULE - CAMERA APP] เปิดแอปกล้องของเครื่องให้แล้ว — ยืนยันสั้นๆ 1 ประโยค (ไม่ใช่การเปิดตาของจาวิสเอง)",
+                    deliverIfStale = true
+                )
+                _activeToolName.value = null
+                return
+            }
+
+            // 2. กล้องเปิดสตรีมอยู่แล้ว — สั่งซ้ำจะรีสตาร์ท 2-turn pipeline แล้ววนลูปไม่รู้จบ
+            val sinceActivated = System.currentTimeMillis() - visionActivatedAtMs
+            if (visionActivatedAtMs > 0L && sinceActivated < VISION_REACTIVATE_BLOCK_MS) {
+                logDebug("LiveBridge", "🛡️ Duplicate vision_activate blocked (${sinceActivated}ms ago)")
+                respond(event, "EYES_ALREADY_OPEN: กล้องเปิดและกำลังสตรีมภาพสดอยู่แล้ว ห้ามเรียก vision_activate ซ้ำ — " +
+                    "ให้ดูภาพวิดีโอสดล่าสุดที่เข้ามาแล้วตอบสิ่งที่เห็นจริงทันที 1-2 ประโยค ถ้ายังไม่ชัดให้บอกผู้ใช้ตรงๆ ว่ายังไม่ชัด แล้วเรียก vision_deactivate เมื่อตอบจบ"
+                )
+                _activeToolName.value = null
+                return
+            }
             val hasVisionIntent = listOf(
                 "ดู", "มอง", "เห็น", "กล้อง", "ตา", "ตรวจ", "ส่อง", "อ่าน", "เช็คภาพ", "ภาพ", "รูป",
                 "นิ้ว", "มือ", "ชู", "อันนี้", "อันไหน", "นี่", "นี้", "ตรงนี้", "คืออะไร", "อะไร",
@@ -389,6 +424,22 @@ class LiveToolBridge(
             if (userPrompt.isNotBlank() && !hasVisionIntent) {
                 logDebug("LiveBridge", "🛡️ Blocked hallucinated vision_activate — userPrompt='$userPrompt'")
                 respond(event, "EYES_NOT_NEEDED: ผู้ใช้ไม่ได้สั่งให้เปิดกล้องหรือมองดูสิ่งใด (คำพูดล่าสุด: \"$userPrompt\") — โปรดสนทนาหรือตอบคำถามของผู้ใช้ตามปกติโดยไม่ต้องเปิดกล้อง"
+                )
+                _activeToolName.value = null
+                return
+            }
+        }
+
+        // Typing Guard: กันโมเดล "พิมพ์+กดส่ง" เองทั้งที่ผู้ใช้ไม่ได้สั่ง
+        // พบจริง 2026-09-20: ผู้ใช้พูดแค่ "เปิด YouTube" แต่โมเดลไล่ไปแตะช่องค้นหาแล้วพิมพ์ "เพลงลูกทุ่ง"
+        // (ข้อความค้างจากบทสนทนาก่อนหน้า) แล้วกดค้นหาให้เอง
+        if (event.name == "device_type_text") {
+            val p = userPrompt.trim()
+            if (p.isNotBlank() && !LiveIntentMatchers.hasTypingIntent(p)) {
+                logDebug("LiveBridge", "🛡️ Blocked unrequested device_type_text — userPrompt='$userPrompt' text='${event.args["text"]}'")
+                respond(event, "TYPING_NOT_REQUESTED: ผู้ใช้ไม่ได้สั่งให้พิมพ์หรือค้นหาอะไร (คำพูดล่าสุด: \"$userPrompt\") — " +
+                    "ห้ามพิมพ์ข้อความเองเด็ดขาด โดยเฉพาะข้อความที่ค้างจากบทสนทนาก่อนหน้า " +
+                    "ให้ทำเฉพาะสิ่งที่ผู้ใช้สั่งในประโยคล่าสุดแล้วหยุด รายงานสั้นๆ ว่าทำอะไรไปแล้ว"
                 )
                 _activeToolName.value = null
                 return
@@ -535,6 +586,7 @@ class LiveToolBridge(
         when {
             event.name == "vision_activate" -> {
                 onAiVisionToggle?.invoke(true)
+                visionActivatedAtMs = System.currentTimeMillis()
                 com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(true)
 
                 respond(event, "OK_EYES_OPEN. กล้องกำลังเปิดและเริ่มสตรีมภาพสดเข้าสู่ระบบ... ในเทิร์นนี้โปรดพูดตอบรับสั้นๆ 1 ประโยคเท่านั้น เช่น 'ไหนขอน้องจาวิสดูก่อนนะฮับบอส ถือของไว้ใกล้ๆ กล้องนะฮับ' ห้ามเดาสุ่มหรือตอบสิ่งที่เห็นในเทิร์นนี้เด็ดขาด ให้รอรับภาพสดที่ชัดเจนในอีก 1-2 วินาทีข้างหน้า"
@@ -569,6 +621,7 @@ class LiveToolBridge(
                     // 4. Fallback: หากโมเดลลืมเรียก vision_deactivate หลังพูดตอบจบ ให้ปิดกล้องและพับตาลงอัตโนมัติ
                     kotlinx.coroutines.delay(1000L)
                     onAiVisionToggle?.invoke(false)
+                    visionActivatedAtMs = 0L
                     com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
                 }
 
@@ -577,6 +630,7 @@ class LiveToolBridge(
             }
             event.name == "vision_deactivate" -> {
                 visionPromptJob?.cancel()
+                visionActivatedAtMs = 0L
                 onAiVisionToggle?.invoke(false)
                 com.skyliner2008.jarvis.pet.PetVisionBridge.requestEyeOpen(false)
                 respond(event, "OK_EYES_CLOSED. กล้องปิดเรียบร้อยแล้ว"

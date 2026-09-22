@@ -70,8 +70,42 @@ class ScreenSnapshotFormatterTest {
     }
 
     @Test
+    fun graphicalScreenTellsAiToUseScreenshot() {
+        // หน้าแบบ Google Maps: ปุ่มไอคอนล้วน อ่าน a11y tree แล้วไม่รู้ว่าบนจอมีอะไร
+        val icons = (1..20).map { el(null, clickable = true, className = "android.widget.ImageView") }
+        val text = ScreenSnapshotFormatter.format("com.google.android.apps.maps", "MapsActivity", listOf(Window(null, "com.google.android.apps.maps", true, icons)))
+        assertTrue(text.contains("device_screenshot"))
+    }
+
+    @Test
+    fun textScreenDoesNotSuggestScreenshot() {
+        val rows = (1..20).map { el("ข้อความที่ $it") }
+        val text = ScreenSnapshotFormatter.format("com.app", "Main", listOf(Window(null, "com.app", true, rows)))
+        assertFalse(text.contains("device_screenshot"))
+    }
+
+    @Test
     fun emptyScreenReturnsLockedMessage() {
         val text = ScreenSnapshotFormatter.format(null, null, listOf(Window(null, null, true, emptyList())))
         assertTrue(text.startsWith("ไม่สามารถอ่านหน้าจอได้"))
+    }
+}
+
+class TypingIntentGuardTest {
+
+    @Test
+    fun plainOpenAppHasNoTypingIntent() {
+        // เคสจริง 2026-09-20: พูดแค่ "เปิด YouTube" แต่โมเดลพิมพ์คำค้นหาเก่าให้เอง
+        assertFalse(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("เปิด YouTube"))
+        assertFalse(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("เปิดแผนที่ให้หน่อย"))
+        assertFalse(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("เลื่อนหน้าจอลงมา"))
+    }
+
+    @Test
+    fun explicitTypingCommandsPassGuard() {
+        assertTrue(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("พิมพ์ในช่องค้นหาว่าเพลงลูกทุ่ง"))
+        assertTrue(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("เปิด YouTube แล้วค้นหาเพลงลูกทุ่ง"))
+        assertTrue(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("ตอบไลน์ว่ากำลังไป"))
+        assertTrue(com.skyliner2008.jarvis.ai.LiveIntentMatchers.hasTypingIntent("search for jazz music"))
     }
 }

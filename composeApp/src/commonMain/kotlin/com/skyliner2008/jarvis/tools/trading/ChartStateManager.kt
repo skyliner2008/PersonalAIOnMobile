@@ -26,4 +26,11 @@ object ChartStateManager {
         _currentCandles.value = candles
         _currentSmcResult.value = smc
     }
+
+    /**
+     * Update only the global active chart symbol (e.g. from fundamental analysis)
+     */
+    fun updateSymbol(symbol: String) {
+        _currentSymbol.value = symbol
+    }
 }

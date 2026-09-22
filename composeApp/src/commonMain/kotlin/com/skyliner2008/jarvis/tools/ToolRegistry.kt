@@ -306,7 +306,7 @@ object ToolRegistry {
                     "overlay" to ParameterProperty("STRING", "Indicator for set_overlay — supports ANY EMA/SMA period (e.g. ema8, ema14, ema20, ema50, ema200, sma50, sma200), bb, donchian, smc, signals"),
                     "overlays" to ParameterProperty("STRING", "Comma-separated overlays for open (e.g. 'ema8', 'ema14,ema50', 'ema20,bb,smc' — supports ANY EMA/SMA period; replaces all; omit = none)"),
                     "visible" to ParameterProperty("BOOLEAN", "true=show overlay, false=hide (set_overlay only, default true)"),
-                    "view" to ParameterProperty("STRING", "set_view: dashboard (offline multi-pane) or tradingview (online TV widget)", enum = listOf("dashboard", "tradingview"))
+                    "view" to ParameterProperty("STRING", "set_view: dashboard (offline multi-pane), tradingview (online TV chart widget), or financials (TradingView financials, balance sheet, valuation & ownership widget)", enum = listOf("dashboard", "tradingview", "financials"))
                 ),
                 required = listOf("action")
             )
@@ -503,7 +503,9 @@ object ToolRegistry {
      */
     val DEVICE_CONTROL_TOOLS = setOf(
         "device_read_screen",
+        "device_screenshot",
         "device_tap",
+        "device_gesture",
         "device_type_text",
         "device_scroll",
         "device_press_button",

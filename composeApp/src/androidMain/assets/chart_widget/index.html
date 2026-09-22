@@ -57,13 +57,22 @@
         hideSideToolbar: false
     };
 
+    const thaiSetStocks = new Set([
+        "SCB", "PTT", "CPALL", "KBANK", "AOT", "DELTA", "BDMS", "GULF", "ADVANC", "PTTEP",
+        "TRUE", "SCC", "CPN", "BBL", "KTB", "MINT", "CRC", "LH", "TOP", "BANPU",
+        "WHA", "HMPRO", "IVL", "GPSC", "BGRIM", "TIDLOR", "MTC", "SAWAD", "TCAP", "KKP",
+        "CBG", "OSP", "TU", "CPF", "BEM", "BTS", "CENTEL", "ERW", "MAJOR", "KCE", "HANA",
+        "JMT", "JMART", "SINGER", "COM7", "SPALI", "AP", "SIRI", "QH", "PSH", "STA", "STGT"
+    ]);
+
     function toTvSymbol(input) {
         const symbol = (input || "").trim().toUpperCase().replace(/\s+/g, "");
         if (!symbol) return "OANDA:XAUUSD";
         if (symbol.includes(":")) return symbol;
         if (symbol === "XAUUSD" || symbol === "GOLD") return "OANDA:XAUUSD";
         if (symbol.endsWith("USDT")) return `BINANCE:${symbol}`;
-        if (symbol.length === 6 && /^[A-Z]+$/.test(symbol)) return `OANDA:${symbol}`;
+        if (thaiSetStocks.has(symbol)) return `SET:${symbol}`;
+        if (symbol.length === 6 && /^[A-Z]+$/.test(symbol) && (symbol.startsWith("USD") || symbol.startsWith("EUR") || symbol.startsWith("GBP") || symbol.startsWith("AUD") || symbol.startsWith("NZD") || symbol.startsWith("CAD") || symbol.startsWith("CHF") || symbol.startsWith("JPY"))) return `OANDA:${symbol}`;
         return `NASDAQ:${symbol}`;
     }
 

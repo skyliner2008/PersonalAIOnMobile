@@ -98,7 +98,7 @@ class ChartController(
     suspend fun loadPersistedSettings() {
         _chartViewMode.value = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("chart_view_mode").executeAsOneOrNull()
-        }?.takeIf { it == "dashboard" || it == "tradingview" } ?: "dashboard"
+        }?.takeIf { it == "dashboard" || it == "tradingview" || it == "financials" } ?: "dashboard"
         _chartLayout.value = withContext(Dispatchers.IO) {
             database.jarvisDatabaseQueries.getSetting("chart_layout").executeAsOneOrNull()
         }?.takeIf { it in setOf("single", "rsi", "macd", "rsi_macd", "volume", "full") } ?: "rsi_macd"
@@ -156,7 +156,11 @@ class ChartController(
     // ─── Chart Dashboard controls ────────────────────────────────────────────
 
     fun setChartViewMode(mode: String) {
-        val normalized = if (mode == "tradingview") "tradingview" else "dashboard"
+        val normalized = when (mode.trim().lowercase()) {
+            "tradingview" -> "tradingview"
+            "financials" -> "financials"
+            else -> "dashboard"
+        }
         if (_chartViewMode.value == normalized) return
         _chartViewMode.value = normalized
         _chartRefreshToken.value = _chartRefreshToken.value + 1
@@ -314,6 +318,7 @@ class ChartController(
                         database.jarvisDatabaseQueries.insertSetting("chart_overlays", wantOverlays.joinToString(","))
                     }
                 }
+                args["view"]?.takeIf { it.isNotBlank() }?.let { setChartViewMode(it) }
                 // ไม่สลับหน้าจออัตโนมัติ — กราฟแสดงเป็นการ์ด mini-chart ในแชท ผู้ใช้แตะการ์ดเองถ้าต้องการเต็มจอ
                 _chartRefreshToken.value = _chartRefreshToken.value + 1
                 if ("smc" in wantOverlays) refreshChartCandles(force = true)
@@ -363,10 +368,15 @@ class ChartController(
                 "✅ ${if (visible) "เปิด" else "ปิด"}อินดิเคเตอร์ $name บนกราฟแล้ว (ที่เปิดอยู่: ${want.joinToString(", ").ifBlank { "ไม่มี" }})"
             }
             "set_view" -> {
-                val view = args["view"] ?: return "⚠️ ต้องระบุ view (dashboard/tradingview)"
+                val view = args["view"]?.trim()?.lowercase() ?: return "⚠️ ต้องระบุ view (dashboard/tradingview/financials)"
                 setChartViewMode(view)
                 if (view == "dashboard" && _chartCandles.value.isEmpty()) refreshChartCandles()
-                "✅ สลับโหมดกราฟเป็น ${if (view == "dashboard") "Dashboard (multi-pane)" else "TradingView"} แล้ว"
+                val label = when (view) {
+                    "financials" -> "TradingView Financials (งบดุลและข้อมูลการเงิน)"
+                    "tradingview" -> "TradingView Advanced Chart"
+                    else -> "Dashboard (multi-pane)"
+                }
+                "✅ สลับโหมดกราฟเป็น $label แล้ว"
             }
             else -> "⚠️ ไม่รู้จัก action '$action' — ใช้ open/close/set_layout/set_symbol/set_interval/set_overlay/set_view"
         }

@@ -316,15 +316,38 @@ object DeviceToolDefinitions {
         ),
         FunctionDeclaration(
             name = "device_type_text",
-            description = "พิมพ์ข้อความลงในช่อง input ที่เปิดอยู่บนหน้าจอ (ต้องเปิด Accessibility). ใช้เมื่อผู้ใช้สั่ง 'พิมพ์...', 'ใส่ข้อความ...', 'เขียน...'.",
+            description = "พิมพ์ข้อความลงในช่อง input ที่เปิดอยู่บนหน้าจอ (ต้องเปิด Accessibility). ใช้เมื่อผู้ใช้สั่ง 'พิมพ์...', 'ใส่ข้อความ...', 'เขียน...'. ถ้าผู้ใช้ต้องการให้ส่งหรือค้นหาทันที ให้ใส่ submit=true (กดปุ่ม Enter/ส่ง บนคีย์บอร์ด) ไม่งั้นข้อความจะค้างอยู่ในช่องพิมพ์เฉยๆ.",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "text" to ParameterProperty("STRING", "ข้อความที่ต้องการพิมพ์"),
-                    "clear" to ParameterProperty("BOOLEAN", "ล้างข้อความเดิมก่อนพิมพ์ (default: false)")
+                    "clear" to ParameterProperty("BOOLEAN", "ล้างข้อความเดิมก่อนพิมพ์ (default: false)"),
+                    "submit" to ParameterProperty("BOOLEAN", "กดปุ่มส่ง/ค้นหา/Enter บนคีย์บอร์ดหลังพิมพ์เสร็จ (default: false, ต้อง Android 11+)")
                 ),
                 required = listOf("text")
             )
+        ),
+        FunctionDeclaration(
+            name = "device_gesture",
+            description = "ท่าทางบนหน้าจอขั้นสูง (ต้องเปิด Accessibility): กดค้าง (long_press) เพื่อเปิดเมนูบริบท/เลือกข้อความ, ปัดซ้าย-ขวา-บน-ล่าง (swipe) เช่น เปลี่ยนแท็บ ปัดลบรายการ เลื่อนสตอรี่, และลากวัตถุ (drag). ใช้เมื่อผู้ใช้สั่ง 'กดค้างที่...', 'ปัดซ้าย', 'ปัดขวา', 'เลื่อนไปแท็บถัดไป', 'ลาก...ไป...'.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "ชนิดท่าทาง", enum = listOf("long_press", "swipe", "drag")),
+                    "direction" to ParameterProperty("STRING", "ทิศที่นิ้วลากไป (เฉพาะ action=swipe)", enum = listOf("up", "down", "left", "right")),
+                    "x" to ParameterProperty("NUMBER", "พิกัด X จุดเริ่ม (สำหรับ long_press และ drag) จาก @(x,y) ใน device_read_screen"),
+                    "y" to ParameterProperty("NUMBER", "พิกัด Y จุดเริ่ม (สำหรับ long_press และ drag)"),
+                    "to_x" to ParameterProperty("NUMBER", "พิกัด X ปลายทาง (เฉพาะ action=drag)"),
+                    "to_y" to ParameterProperty("NUMBER", "พิกัด Y ปลายทาง (เฉพาะ action=drag)"),
+                    "duration_ms" to ParameterProperty("NUMBER", "ระยะเวลาของท่าทาง (ms) — long_press default 800, swipe 350, drag 500")
+                ),
+                required = listOf("action")
+            )
+        ),
+        FunctionDeclaration(
+            name = "device_screenshot",
+            description = "จับภาพหน้าจอจริงส่งเข้ามาให้ 'ดูด้วยตา' (ต้องเปิด Accessibility + Android 11 ขึ้นไป). ใช้เมื่อ device_read_screen อ่านข้อความไม่ได้หรือไม่พอ เช่น แผนที่ Google Maps, รูปภาพ, วิดีโอ, กราฟ, เกม, WebView หรือเมื่อผู้ใช้สั่ง 'แคปหน้าจอดูหน่อย', 'ดูภาพบนหน้าจอ', 'บนจอมีรูปอะไร', 'ส่องหน้าจอดูซิ', 'ดูหน้าจอให้หน่อยว่าเป็นยังไง', 'บนแผนที่เห็นอะไรบ้าง', 'อ่านกราฟบนจอ'. ต่างจาก vision_activate ที่เปิดกล้องมองโลกภายนอก — tool นี้ดู 'หน้าจอมือถือ' ที่ผู้ใช้กำลังเห็น. หลังเรียกแล้วให้ดูภาพล่าสุดที่เข้ามาแล้วตอบสิ่งที่เห็นจริง ห้ามเดา. หากต้องการพิกัดปุ่มเพื่อกดต่อ ให้ใช้ device_read_screen (ภาพไม่ให้พิกัด).",
+            parameters = null
         ),
         FunctionDeclaration(
             name = "device_scroll",

@@ -37,12 +37,11 @@
 - `trading_bollinger_scan` - สแกน Bollinger squeeze
 - `trading_oversold_scan` - สแกน RSI oversold
 - `trading_overbought_scan` - สแกน RSI overbought
-- `trading_volume_breakout` - สแกน volume breakout
-- `trading_sentiment` - วิเคราะห์ sentiment จาก community
-- `trading_news` - ข่าวการเงินและข่าวรายสัญลักษณ์
-- `trading_combined` - รวม TA + sentiment + news
-- `trading_fundamental_analysis` - วิเคราะห์ปัจจัยพื้นฐาน
-- `trading_fear_greed` - Crypto fear and greed
+- `trading_sentiment` - รวมศูนย์ Sentiment ทุกมิติเป็นหนึ่งเดียว (JARVIS Master All-in-One Sentiment Engine: คำนวณ Composite Sentiment Index 0–100 พร้อม Visual Meter Bar, 4 เสาหลัก News, Market F&G, Binance Derivatives Positioning, Technical Consensus และ AI Contrarian Squeeze Signal รองรับทั้งภาพรวมโลก Global Macro และเจาะจงรายสินทรัพย์)
+- `trading_news` - ข่าวการเงินและข่าวรายสัญลักษณ์ พร้อม AI Sentiment Bias Score (-10 ถึง 10)
+- `trading_combined` - รวม Confluence ทุกมิติ: TA + Multi-Source Sentiment + Positioning + Financial News
+- `trading_fundamental_analysis` - วิเคราะห์ปัจจัยพื้นฐาน, งบดุล (Balance Sheet), งบการเงิน และมัลติเปิลประเมินมูลค่า (P/E, P/S, P/B, EV, Debt, Cash, Free Float) พร้อมบทวิเคราะห์ AI เชิงลึก 6 มิติ รองรับหุ้นไทย (SET/MAI) และสากล (US/Global)
+- `trading_fear_greed` - ดัชนีความกลัวและความโลภ (Dual-Market: Crypto alternative.me และ CNN US Stock Market พร้อม 7 Sub-indicators เช่น VIX, Put/Call)
 - `trading_macro_calendar` - ปฏิทินเศรษฐกิจ
 - `trading_correlation_matrix` - ความสัมพันธ์ระหว่างสินทรัพย์
 - `trading_position_sizing` - คำนวณขนาด position

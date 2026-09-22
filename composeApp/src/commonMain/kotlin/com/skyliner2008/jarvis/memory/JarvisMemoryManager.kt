@@ -41,6 +41,10 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
         database.jarvisDatabaseQueries.getRecentHistory(limit).executeAsList()
     }
 
+    suspend fun getHistoryAfter(since: Long) = withContext(Dispatchers.IO) {
+        database.jarvisDatabaseQueries.getHistoryAfter(since).executeAsList()
+    }
+
     /** จำนวนข้อความทั้งหมดใน Working Memory — ใช้ตัดสิน auto sleep cycle */
     suspend fun getMessageCount(): Long = withContext(Dispatchers.IO) {
         database.jarvisDatabaseQueries.countMessages().executeAsOne()

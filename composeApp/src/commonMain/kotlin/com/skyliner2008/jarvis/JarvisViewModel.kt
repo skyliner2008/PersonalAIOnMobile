@@ -58,10 +58,17 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.datetime.Clock
 import kotlinx.serialization.json.put
 import kotlin.random.Random
 
-data class Message(val role: String, val content: String, val isStatic: Boolean = false, val metadata: String? = null)
+data class Message(
+    val role: String,
+    val content: String,
+    val isStatic: Boolean = false,
+    val metadata: String? = null,
+    val timestamp: Long = Clock.System.now().toEpochMilliseconds()
+)
 
 // Phase-1 refactor: ย้ายไป controller/Mt5Controller.kt — typealias คง import เดิมของ UI ไว้
 typealias Mt5ClientRuntimeInfo = com.skyliner2008.jarvis.controller.Mt5ClientRuntimeInfo
@@ -898,6 +905,11 @@ class JarvisViewModel(
         orchestrator.setAiVisionToggle(applyAiVisionToggle)
         com.skyliner2008.jarvis.pet.PetVisionBridge.onAiVisionStreamToggle = applyAiVisionToggle
 
+        // --- Screenshot → Gemini Live (device_screenshot ใช้ pipeline เดียวกับเฟรมกล้อง) ---
+        com.skyliner2008.jarvis.tools.device.ScreenVisionBridge.sendFrame = { jpegBase64 ->
+            orchestrator.sendLiveCameraFrame(jpegBase64)
+        }
+
         // --- AI-Controlled Voice Change ---
         orchestrator.setVoiceChangeHandler { newVoice ->
             viewModelScope.launch {
@@ -1256,6 +1268,7 @@ class JarvisViewModel(
         com.skyliner2008.jarvis.ai.LiveSessionBridge.unregister()
         mt5.shutdown()
         com.skyliner2008.jarvis.pet.PetVisionBridge.onAiVisionStreamToggle = null
+        com.skyliner2008.jarvis.tools.device.ScreenVisionBridge.sendFrame = null
         stopCameraAnalysis()
         cameraService.release()
         voice.shutdown()

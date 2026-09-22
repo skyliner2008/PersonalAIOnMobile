@@ -70,7 +70,9 @@ import com.skyliner2008.jarvis.ui.screen.TradingChartScreen
 import com.skyliner2008.jarvis.ui.screen.TradingTerminalScreen
 import com.skyliner2008.jarvis.ui.theme.JarvisTheme
 import com.skyliner2008.jarvis.voice.VoiceManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 @Composable
 fun App(
@@ -102,6 +104,18 @@ fun App(
     }
 
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    // กรองเฉพาะข้อความแชทที่ยังไม่ครบ 24 ชั่วโมง (< 24 ชม.) ตามเงื่อนไขเวลา
+    var currentTimeMs by remember { mutableLongStateOf(Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L) // อัปเดตทุก 1 นาที เพื่อตัดข้อความที่ครบ 24 ชม. ออกจากหน้าแชทแบบอัตโนมัติ
+            currentTimeMs = Clock.System.now().toEpochMilliseconds()
+        }
+    }
+    val visibleMessages = remember(messages, currentTimeMs) {
+        val cutoff = currentTimeMs - 24 * 60 * 60 * 1000L
+        messages.filter { it.timestamp >= cutoff }
+    }
     val isTyping by viewModel.isTyping.collectAsStateWithLifecycle()
     val isListening by viewModel.isListening.collectAsStateWithLifecycle()
     val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
@@ -190,7 +204,11 @@ fun App(
         showTradingTerminal -> "MT5 Terminal"
         showBacktest -> "Backtest Lab"
         showSettings -> "Settings"
-        showChart -> "TradingView"
+        showChart -> when (chartViewMode) {
+            "financials" -> "Company Financials ($chartSymbol)"
+            "tradingview" -> "TradingView ($chartSymbol)"
+            else -> "Trading Dashboard ($chartSymbol)"
+        }
         else -> null
     }
     val hasOverlayScreen = currentOverlayTitle != null
@@ -626,6 +644,7 @@ fun App(
                             onToggleOverlay = { viewModel.toggleChartOverlay(it) },
                             onSetLocale = { viewModel.updateChartLocale(it) },
                             onSetHideSideToolbar = { viewModel.setChartHideSideToolbar(it) },
+                            onSetSymbol = { viewModel.updateChartSymbol(it) },
                             onClose = { viewModel.closeChart() }
                         )
                     }
@@ -645,7 +664,7 @@ fun App(
                                 reverseLayout = true,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(messages.asReversed()) { message ->
+                                items(visibleMessages.asReversed()) { message ->
                                     MessageBubble(
                                         message = message,
                                         onOpenChart = { cfg -> viewModel.openChartWithConfig(cfg.symbol, cfg.interval, cfg.layout, cfg.overlays) },
@@ -654,7 +673,7 @@ fun App(
                                     )
                                 }
 
-                                if (messages.isEmpty()) {
+                                if (visibleMessages.isEmpty()) {
                                     item {
                                         Surface(
                                             modifier = Modifier

@@ -470,47 +470,209 @@ internal class ResearchToolHandler(
     }
 
     internal suspend fun executeFundamentalAnalysis(args: Map<String, String>): String {
-        val symbol = args["symbol"]?.trim()
-        val limit = args["limit"]?.toIntOrNull() ?: 10
+        val rawSymbol = (args["symbol"] ?: args["ticker"])?.trim()
+        val exchange = args["exchange"]?.trim()
+
+        if (rawSymbol.isNullOrBlank()) {
+            return "⚠️ โปรดระบุชื่อหุ้นหรือสินทรัพย์ที่ต้องการวิเคราะห์ เช่น SCB, PTT, CPALL, AAPL, NVDA"
+        }
 
         return try {
-            val data = api.getFinancialNews(symbol, limit) as? Map<String, Any> ?: emptyMap()
-            @Suppress("UNCHECKED_CAST")
-            val items = data["news"] as? List<Map<String, String>> ?: emptyList()
+            val fundamental = api.getStockFundamentals(rawSymbol, exchange)
 
-            if (items.isEmpty()) return "No fundamental data found for ${symbol ?: "global market"}."
+            if (fundamental == null) {
+                // Fallback กรณีหาหุ้นไม่พบใน Scanner (เช่น อาจเป็นเหรียญ Crypto หรือดัชนี)
+                val data = api.getFinancialNews(rawSymbol, 8) as? Map<String, Any> ?: emptyMap()
+                @Suppress("UNCHECKED_CAST")
+                val items = data["news"] as? List<Map<String, String>> ?: emptyList()
 
-            val newsText = items.joinToString("\n") { "- ${it["title"]}: ${it["description"]}" }
+                if (items.isEmpty()) {
+                    return "❌ ไม่พบข้อมูลปัจจัยพื้นฐานหรือข้อมูลงบการเงินของสัญลักษณ์ \"$rawSymbol\" (รองรับหุ้นไทย SET/MAI และหุ้นสหรัฐฯ NASDAQ/NYSE)"
+                }
+
+                val newsText = items.joinToString("\n") { "- ${it["title"]}: ${it["description"]}" }
+                val fallbackPrompt = """
+                    Analyze the following financial context for $rawSymbol:
+                    $newsText
+                    
+                    Please evaluate:
+                    1. Core drivers and current financial position
+                    2. Bullish and Bearish factors
+                    3. Fundamental Health Score (0-100)
+                """.trimIndent()
+
+                val aiText = runCatching {
+                    geminiService.generateResponse(
+                        prompt = fallbackPrompt,
+                        intentAddon = "You are a senior equity research analyst."
+                    )
+                }.getOrElse { "AI analysis unavailable." }
+
+                return buildString {
+                    appendLine("🏛️ **วิเคราะห์ปัจจัยพื้นฐาน - ${rawSymbol.uppercase()}**")
+                    appendLine("⚠️ *ไม่พบข้อมูลงบการเงินแบบตารางของ $rawSymbol (แสดงบทวิเคราะห์จากข่าวสารการเงิน)*")
+                    appendLine("=".repeat(40))
+                    appendLine(aiText)
+                }
+            }
+
+            // ซิงค์สัญลักษณ์หุ้นเข้าสู่ระบบกราฟและแดชบอร์ด
+            ChartStateManager.updateSymbol(fundamental.ticker)
+
+            // จัดเตรียมข้อเท็จจริงและตัวเลขทางการเงิน
+            val cur = fundamental.currency.ifBlank { "THB" }
+            val priceStr = fundamental.closePrice?.let { "%.2f".format(it) } ?: "N/A"
+            val changeStr = fundamental.changePrice?.let { "%+.2f".format(it) } ?: "0.00"
+            val changePctStr = fundamental.changePct?.let { "%+.2f%%".format(it) } ?: "0.00%"
+
+            val capStr = StockFundamentalData.formatMoneyCompact(fundamental.marketCap, cur)
+            val evStr = StockFundamentalData.formatMoneyCompact(fundamental.enterpriseValue, cur)
+            val debtStr = StockFundamentalData.formatMoneyCompact(fundamental.totalDebt, cur)
+            val cashStr = StockFundamentalData.formatMoneyCompact(fundamental.cashAndEquivalents, cur)
+            val netDebtStr = StockFundamentalData.formatMoneyCompact(fundamental.netDebt, cur)
+            val equityStr = StockFundamentalData.formatMoneyCompact(fundamental.totalEquity, cur)
+            val assetsStr = StockFundamentalData.formatMoneyCompact(fundamental.totalAssets, cur)
+            val liabStr = StockFundamentalData.formatMoneyCompact(fundamental.totalLiabilities, cur)
+
+            val revTtmStr = StockFundamentalData.formatMoneyCompact(fundamental.totalRevenueTtm, cur)
+            val revFyStr = StockFundamentalData.formatMoneyCompact(fundamental.totalRevenueFy, cur)
+            val revFqStr = StockFundamentalData.formatMoneyCompact(fundamental.totalRevenueFq, cur)
+            val niTtmStr = StockFundamentalData.formatMoneyCompact(fundamental.netIncomeTtm, cur)
+            val niFyStr = StockFundamentalData.formatMoneyCompact(fundamental.netIncomeFy, cur)
+            val niFqStr = StockFundamentalData.formatMoneyCompact(fundamental.netIncomeFq, cur)
+            val fcfStr = StockFundamentalData.formatMoneyCompact(fundamental.freeCashFlowTtm, cur)
+
+            val peStr = StockFundamentalData.formatRatio(fundamental.peTtm)
+            val psStr = StockFundamentalData.formatRatio(fundamental.psCurrent)
+            val pbStr = StockFundamentalData.formatRatio(fundamental.pbFq)
+            val pfcfStr = StockFundamentalData.formatRatio(fundamental.pfcfTtm)
+            val evRevStr = StockFundamentalData.formatRatio(fundamental.evToRevenueTtm)
+            val deStr = StockFundamentalData.formatRatio(fundamental.debtToEquity)
+
+            val epsStr = fundamental.epsBasicTtm?.let { "${"%.2f".format(it)} $cur" } ?: "N/A"
+            val divYieldStr = StockFundamentalData.formatPercent(fundamental.dividendYieldCurrent)
+            val dpsStr = fundamental.dpsFy?.let { "${"%.2f".format(it)} $cur" } ?: "N/A"
+
+            val totalSharesStr = StockFundamentalData.formatSharesCompact(fundamental.totalShares)
+            val floatSharesStr = StockFundamentalData.formatSharesCompact(fundamental.floatShares)
+            val floatPctStr = StockFundamentalData.formatPercent(fundamental.floatPct)
+            val closeSharesStr = StockFundamentalData.formatSharesCompact(fundamental.closelyHeldShares)
+            val closePctStr = StockFundamentalData.formatPercent(fundamental.closelyHeldPct)
+
+            val opMarginStr = StockFundamentalData.formatPercent(fundamental.operatingMarginTtm)
+            val netMarginStr = StockFundamentalData.formatPercent(fundamental.netMarginTtm)
+            val roeStr = StockFundamentalData.formatPercent(fundamental.returnOnEquity)
+            val roaStr = StockFundamentalData.formatPercent(fundamental.returnOnAssets)
+            val roicStr = StockFundamentalData.formatPercent(fundamental.returnOnInvestedCapital)
+
+            val ptAvgStr = fundamental.targetPriceAvg?.let { "${"%.2f".format(it)} $cur" } ?: "N/A"
+            val ptHighStr = fundamental.targetPriceHigh?.let { "${"%.2f".format(it)} $cur" } ?: "N/A"
+            val ptLowStr = fundamental.targetPriceLow?.let { "${"%.2f".format(it)} $cur" } ?: "N/A"
+            val upsideStr = fundamental.upsidePct?.let { "%+.2f%%".format(it) } ?: "N/A"
+
             val prompt = """
-                Analyze the following financial and fundamental news for ${symbol ?: "the global market"}.
-                1. Identify the core macroeconomic or fundamental drivers.
-                2. Evaluate the impact on long-term valuation vs. short-term sentiment.
-                3. Provide a 'Fundamental Health Score' (0-100).
-                4. Summary of Bullish/Bearish fundamental factors.
+                คุณคือ Senior Fundamental & Equity Research Analyst ที่เชี่ยวชาญการวิเคราะห์งบการเงินและการประเมินมูลค่าหุ้น
+                โปรดวิเคราะห์ข้อมูลปัจจัยพื้นฐานและงบการเงินเชิงลึกของหุ้น ${fundamental.name} (${fundamental.ticker}):
 
-                Data:
-                $newsText
+                【ข้อมูลทางการเงินจริง】
+                - ราคาปัจจุบัน: $priceStr $cur ($changeStr, $changePctStr) | 52W: ${fundamental.low52w ?: "N/A"} - ${fundamental.high52w ?: "N/A"}
+                - ภาคธุรกิจ/อุตสาหกรรม: ${fundamental.sector} / ${fundamental.industry} (${fundamental.country})
+                - มูลค่าตลาด (Market Cap): $capStr | มูลค่ากิจการ (EV): $evStr
+                - อัตราส่วนมูลค่า: P/E TTM = $peStr, P/S = $psStr, P/B = $pbStr, P/FCF = $pfcfStr, EV/Revenue = $evRevStr
+                - กำไรและปันผล: EPS TTM = $epsStr, Dividend Yield = $divYieldStr, เงินปันผลต่อหุ้นล่าสุด = $dpsStr
+                - สัดส่วนผู้ถือหุ้น: หุ้นทั้งหมด $totalSharesStr, รายย่อย (Free Float) = $floatSharesStr ($floatPctStr), ผู้ถือหุ้นใหญ่/กลุ่มเฉพาะ = $closeSharesStr ($closePctStr)
+                - โครงสร้างทุนและงบดุล: หนี้สินรวม = $debtStr, เงินสด = $cashStr, หนี้สินสุทธิ = $netDebtStr, ส่วนผู้ถือหุ้น = $equityStr, สินทรัพย์รวม = $assetsStr, หนี้สิน/ทุน (D/E) = $deStr
+                - ผลการดำเนินงาน: รายได้รวม TTM = $revTtmStr (FQ: $revFqStr, FY: $revFyStr), กำไรสุทธิ TTM = $niTtmStr (FQ: $niFqStr, FY: $niFyStr), Free Cash Flow = $fcfStr
+                - ประสิทธิภาพและผลตอบแทน: Operating Margin = $opMarginStr, Net Margin = $netMarginStr, ROE = $roeStr, ROA = $roaStr, ROIC = $roicStr
+                - เป้าหมายนักวิเคราะห์: Target Price เฉลี่ย = $ptAvgStr (Upside: $upsideStr, กรอบ: $ptLowStr - $ptHighStr)
+
+                โปรดทำการวิเคราะห์เชิงลึกโดยแบ่งหัวข้ออย่างชัดเจนดังนี้:
+                1. 📊 **การประเมินมูลค่า (Valuation & Price Attractiveness)**: วิเคราะห์ระดับราคาเมื่อเทียบกับ P/E, P/B, P/S และ EV/Revenue เทียบกับธรรมชาติกลุ่มอุตสาหกรรม และ Upside จากเป้าหมายนักวิเคราะห์
+                2. 🏛️ **โครงสร้างเงินทุนและสุขภาพงบดุล (Capital Structure & Solvency)**: วิเคราะห์ระดับหนี้สิน สภาพคล่องเงินสด ความปลอดภัยของ D/E และความเสี่ยงทางการเงิน
+                3. 💰 **คุณภาพกำไรและประสิทธิภาพการดำเนินงาน (Profitability & Cash Flow)**: วิเคราะห์ Margins, ROE, ROA และความสามารถในการแปลงกำไรเป็นกระแสเงินสดอิสระ (FCF)
+                4. 🎁 **ความยั่งยืนของเงินปันผล (Dividend Quality & Safety)**: วิเคราะห์ Yield เทียบกับ FCF และกำไรต่อหุ้น มีโอกาสรักษาหรือเพิ่มเงินปันผลได้หรือไม่
+                5. 👥 **โครงสร้างการถือหุ้นและจิตวิทยาตลาด (Ownership & Float Dynamics)**: วิเคราะห์สัดส่วน Free Float ต่อสภาพคล่องและความผันผวน
+                6. 🎯 **บทสรุปคะแนนพื้นฐานและคำแนะนำเชิงกลยุทธ์ (Fundamental Health Score & Strategic Outlook)**:
+                   - ระบุ **Fundamental Health Score: [0-100]/100**
+                   - สรุป **Bullish Factors (จุดเด่น)** และ **Bearish Risks (ความเสี่ยงที่ต้องระวัง)**
+                   - สรุปคำแนะนำเชิงกลยุทธ์สำหรับนักลงทุน
+
+                ตอบด้วยภาษาไทยที่กระชับ ตรงประเด็น อ้างอิงตัวเลขจริง และเป็นกลางอย่างมืออาชีพ
             """.trimIndent()
 
             val aiAnalysis = try {
                 geminiService.generateResponse(
                     prompt = prompt,
-                    intentAddon = "You are a senior fundamental analyst. Focus on structural drivers, not just technical noise."
+                    intentAddon = "You are a professional equity research analyst. Deliver deep, data-driven financial insights with clear markdown formatting."
                 )
-            } catch (_: Exception) { "AI Synthesis unavailable." }
+            } catch (_: Exception) {
+                "⚠️ การสังเคราะห์บทวิเคราะห์ AI ขัดข้องชั่วคราว (แสดงข้อมูลตัวเลขทางการเงินครบถ้วนด้านล่าง)"
+            }
 
             buildString {
-                appendLine("🏛️ **Fundamental Analysis - ${symbol?.uppercase() ?: "Global"}**")
-                appendLine("=".repeat(40))
-                appendLine(aiAnalysis)
+                appendLine("🏛️ **${fundamental.name} (${fundamental.ticker})** • ข้อมูลพื้นฐาน & งบการเงิน")
+                appendLine("หมวดธุรกิจ: **${fundamental.sector}** | อุตสาหกรรม: **${fundamental.industry}** | ประเทศ: **${fundamental.country}**")
+                appendLine("ราคาล่าสุด: **$priceStr $cur** ($changeStr, $changePctStr) | 52W กรอบ: ${fundamental.low52w ?: "-"} - ${fundamental.high52w ?: "-"}")
                 appendLine()
-                appendLine("🔍 **Source Data Context:**")
-                items.take(3).forEach { item ->
-                    appendLine("- ${item["title"]}")
-                }
+
+                appendLine("### 📌 ข้อเท็จจริงที่มีนัยยะ (Key Metrics)")
+                appendLine("| ตัวชี้วัดสำคัญ | ค่า | ตัวชี้วัดสำคัญ | ค่า |")
+                appendLine("|---|---|---|---|")
+                appendLine("| มูลค่าตามราคาตลาด (Market Cap) | $capStr | อัตราผลตอบแทนเงินปันผล (Yield) | $divYieldStr |")
+                appendLine("| อัตราส่วนราคาต่อกำไร (P/E TTM) | $peStr | กำไรต่อหุ้น (Basic EPS TTM) | $epsStr |")
+                appendLine("| Price to Sales (P/S) | $psStr | Price to Book (P/B) | $pbStr |")
+                appendLine("| Price to Free Cash Flow (P/FCF) | $pfcfStr | เงินปันผลต่อหุ้นล่าสุด (DPS) | $dpsStr |")
+                appendLine("| Beta (ความผันผวน 1 ปี) | ${fundamental.beta1y?.let { "%.2f".format(it) } ?: "N/A"} | ผลตอบแทนย้อนหลัง 1 ปี | ${StockFundamentalData.formatPercent(fundamental.perf1y)} |")
+                appendLine()
+
+                appendLine("### 👥 ความเป็นเจ้าของ & สัดส่วนผู้ถือหุ้น (Ownership)")
+                appendLine("- **จำนวนหุ้นทั้งหมด**: $totalSharesStr")
+                appendLine("- **หุ้นกระจายสู่รายย่อย (Free Float)**: $floatSharesStr (**$floatPctStr**)")
+                appendLine("- **หุ้นถือเฉพาะกลุ่ม / ผู้ถือหุ้นใหญ่**: $closeSharesStr (**$closePctStr**)")
+                val floatPctVal = fundamental.floatPct ?: 50.0
+                val floatBarRatio = (floatPctVal.coerceIn(0.0, 100.0) / 10).toInt()
+                val barStr = "█".repeat(floatBarRatio) + "░".repeat(10 - floatBarRatio)
+                appendLine("  `[$barStr]` รายย่อย $floatPctStr | ผู้ถือหุ้นใหญ่ $closePctStr")
+                appendLine()
+
+                appendLine("### 🏛️ โครงสร้างเงินทุน & สภาพคล่องงบดุล (Capital Structure)")
+                appendLine("| รายการโครงสร้างทุน / งบดุล | มูลค่า ($cur) | คำอธิบาย |")
+                appendLine("|---|---|---|")
+                appendLine("| มูลค่ากิจการ (Enterprise Value) | $evStr | Market Cap + หนี้สินสุทธิ |")
+                appendLine("| มูลค่าตามราคาตลาด (Market Cap) | $capStr | มูลค่าหุ้นทั้งหมดในตลาด |")
+                appendLine("| หนี้สินรวม (Total Debt) | $debtStr | ภาระหนี้สินทางการเงินทั้งหมด |")
+                appendLine("| เงินสดและรายการเทียบเท่า (Cash) | $cashStr | สภาพคล่องเงินสดในมือ |")
+                appendLine("| หนี้สินสุทธิ (Net Debt) | $netDebtStr | หนี้สินรวมหักเงินสด |")
+                appendLine("| ส่วนของผู้ถือหุ้น (Total Equity) | $equityStr | ทุนของบริษัท |")
+                appendLine("| สินทรัพย์รวม (Total Assets) | $assetsStr | ขนาดงบดุลรวม |")
+                appendLine("| หนี้สินต่อทุน (Debt to Equity) | $deStr | อัตราส่วนความเสี่ยงหนี้สิน |")
+                appendLine()
+
+                appendLine("### 💰 ผลการดำเนินงาน & ความสามารถทำกำไร (Financials)")
+                appendLine("| ตัวชี้วัดงบการเงิน | ล่าสุด (TTM / FQ) | รอบปีงบประมาณ (FY) |")
+                appendLine("|---|---|---|")
+                appendLine("| รายได้รวม (Total Revenue) | TTM: $revTtmStr (FQ: $revFqStr) | $revFyStr |")
+                appendLine("| กำไรสุทธิ (Net Income) | TTM: $niTtmStr (FQ: $niFqStr) | $niFyStr |")
+                appendLine("| กระแสเงินสดอิสระ (Free Cash Flow) | TTM: $fcfStr | - |")
+                appendLine("| อัตรากำไรดำเนินงาน (Operating Margin) | $opMarginStr | อัตรากำไรจากธุรกิจหลัก |")
+                appendLine("| อัตรากำไรสุทธิ (Net Profit Margin) | $netMarginStr | อัตรากำไรสุทธิบรรทัดสุดท้าย |")
+                appendLine("| ผลตอบแทนต่อส่วนผู้ถือหุ้น (ROE) | $roeStr | ประสิทธิภาพสร้างกำไรจากทุน |")
+                appendLine("| ผลตอบแทนต่อสินทรัพย์ (ROA) | $roaStr | ประสิทธิภาพใช้สินทรัพย์ |")
+                appendLine("| ผลตอบแทนเงินลงทุน (ROIC) | $roicStr | ผลตอบแทนจากเงินลงทุนรวม |")
+                appendLine()
+
+                appendLine("### 🎯 เป้าหมายนักวิเคราะห์ & โมเมนตัมราคา (Consensus)")
+                appendLine("- **ราคาเป้าหมายเฉลี่ย (Target Price)**: **$ptAvgStr** (Upside: **$upsideStr**)")
+                appendLine("- **กรอบราคาเป้าหมาย**: ต่ำสุด $ptLowStr — สูงสุด $ptHighStr")
+                appendLine("- **ผลตอบแทน YTD**: ${StockFundamentalData.formatPercent(fundamental.perfYtd)}")
+                appendLine()
+
+                appendLine("---")
+                appendLine("### 🤖 บทวิเคราะห์ปัจจัยพื้นฐานรอบด้านโดย AI (Multi-Dimensional Analysis)")
+                appendLine(aiAnalysis)
             }
         } catch (e: Exception) {
-            "Fundamental analysis error: ${e.message}"
+            "❌ เกิดข้อผิดพลาดในการวิเคราะห์ปัจจัยพื้นฐาน: ${e.message}"
         }
     }
 
@@ -600,6 +762,9 @@ internal class ResearchToolHandler(
             appendLine("")
             appendLine("Sentiment: $sentLabel (${sentiment["sentiment_score"]})")
             appendLine("  ${sentiment["posts_analyzed"]} posts - Bull: ${sentiment["bullish_posts"]} Bear: ${sentiment["bearish_posts"]}")
+            if (sentiment.containsKey("positioning_divergence") && sentiment["positioning_divergence"] != "N/A") {
+                appendLine("  Positioning: ${sentiment["positioning_divergence"]}")
+            }
             appendLine("")
             appendLine("Latest News:")
             newsItems.take(3).forEach { item ->

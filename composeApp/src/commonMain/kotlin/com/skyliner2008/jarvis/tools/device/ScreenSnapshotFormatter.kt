@@ -61,7 +61,12 @@ object ScreenSnapshotFormatter {
             }
             if (total > index) {
                 appendLine()
-                append("…และอีก ${total - index} รายการที่ไม่ได้แสดง — ใช้ device_scroll แล้วอ่านใหม่ หากหาไม่เจอ")
+                appendLine("…และอีก ${total - index} รายการที่ไม่ได้แสดง — ใช้ device_scroll แล้วอ่านใหม่ หากหาไม่เจอ")
+            }
+            if (isMostlyGraphical(nonEmpty)) {
+                appendLine()
+                append("⚠️ หน้านี้เป็นภาพ/กราฟิกเป็นหลัก (element ส่วนใหญ่ไม่มีข้อความ) — " +
+                    "ถ้าต้องการรู้ว่าบนจอแสดงอะไรจริงๆ ให้เรียก device_screenshot เพื่อดูภาพ ห้ามเดาจากรายการข้างบน")
             }
         }.trimEnd()
     }
@@ -79,6 +84,17 @@ object ScreenSnapshotFormatter {
         element.isChecked?.let { append(if (it) " [✓]" else " [☐]") }
         append(" @(${element.centerX},${element.centerY})")
         shortViewId(element.viewId)?.let { append(" id:$it") }
+    }
+
+    /**
+     * หน้าจอที่ a11y tree อ่านแล้วแทบไม่มีข้อความ (แผนที่, กล้อง, เกม, วิดีโอ, WebView บางตัว)
+     * — AI ควรดูภาพจริงแทนการเดาจากรายชื่อ element
+     */
+    private fun isMostlyGraphical(windows: List<Window>): Boolean {
+        val all = windows.flatMap { it.elements }
+        if (all.size < 3) return true
+        val labeled = all.count { !it.label.isNullOrBlank() }
+        return labeled * 4 < all.size // มีข้อความน้อยกว่า 25%
     }
 
     private fun windowHeader(window: Window, windowCount: Int): String {
