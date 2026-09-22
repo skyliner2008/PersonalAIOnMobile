@@ -1360,6 +1360,10 @@ class LiveGeminiService(
                             "🏁 Turn Complete (audio: $audioBytesThisTurn bytes) | user=\"${userText?.take(120) ?: "-"}\" | jarvis=\"${modelText?.take(160) ?: "-"}\""
                         )
                     }
+                    // มีคำถามจากผู้ใช้แต่ AI ขึ้นต้นด้วยคำทักทายเปิดเซสชัน = ทักทายซ้ำ (log ไว้วัดผลการแก้ 2026-09-23)
+                    if (!userText.isNullOrBlank() && modelText != null && LiveProtocol.startsWithSessionGreeting(modelText)) {
+                        logDebug("LiveGemini", "⚠️ ทักทายซ้ำกลางบทสนทนา (model=$liveModelName) — user=\"${userText.take(60)}\"")
+                    }
 
                     rememberTurn("user", userText)
                     rememberTurn("model", modelText)
@@ -1524,10 +1528,10 @@ class LiveGeminiService(
             askedFor.isBlank() -> result
             askedFor != lastUserText.trim() ->
                 "[PENDING QUESTION] ผลนี้เป็นคำตอบของคำถามก่อนหน้าที่ผู้ใช้ถามว่า: " + askedFor +
-                    " — คำถามนี้ยังไม่ได้ตอบ ต้องพูดตอบให้ครบด้วย ห้ามข้ามไปตอบเฉพาะคำถามล่าสุด" + "\n\n" + result
+                    " — คำถามนี้ยังไม่ได้ตอบ ต้องพูดตอบให้ครบด้วย ห้ามข้ามไปตอบเฉพาะคำถามล่าสุด" + LiveProtocol.NO_GREETING_NOTE + "\n\n" + result
             else ->
                 "[ANSWER FOR] ผลนี้เป็นคำตอบของคำถามที่ผู้ใช้ถามว่า: " + askedFor +
-                    " — ต้องพูดตอบคำถามนี้ให้ครบทันที ห้ามเงียบหรือรอให้ผู้ใช้ถามซ้ำ" + "\n\n" + result
+                    " — ต้องพูดตอบคำถามนี้ให้ครบทันที ห้ามเงียบหรือรอให้ผู้ใช้ถามซ้ำ" + LiveProtocol.NO_GREETING_NOTE + "\n\n" + result
         }
         val sent = sendIfReady {
             val responseObj = buildJsonObject { put("result", taggedResult) }

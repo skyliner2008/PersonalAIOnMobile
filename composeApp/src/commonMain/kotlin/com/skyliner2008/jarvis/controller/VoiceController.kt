@@ -160,19 +160,21 @@ class VoiceController(
                 val historySnapshot = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
                     ""
                 } else {
-                    messages.value
+                    // ตัดข้อความสถานะ, ผล tool ดิบ (markdown ยาว — คำตอบที่พูดจริงอยู่ข้อความถัดไปแล้ว)
+                    // และคำทักทายเปิดเซสชันของทั้งสองฝั่ง (ดู LiveProtocol.buildSessionHistory)
+                    val turns = messages.value
                         .filter { msg ->
                             val c = msg.content.trim()
-                            !c.contains("พร้อมคุยไหม") &&
+                            !msg.isStatic &&
+                            msg.metadata?.contains("live_voice_tool_result") != true &&
                             !c.contains("LIVE READY") &&
                             !c.contains("กำลังเชื่อมต่อ Live session") &&
                             !c.contains("โหมดสัตว์เลี้ยง") &&
                             !c.contains("โหมดควบคุม") &&
                             !c.contains("โหมดขับขี่")
                         }
-                        .takeLast(8).joinToString("\n") {
-                            "${if (it.role == "user") "ผู้ใช้" else "จาวิส"}: ${it.content}"
-                        }
+                        .map { it.role to it.content }
+                    com.skyliner2008.jarvis.data.LiveProtocol.buildSessionHistory(turns)
                 }
 
                 // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)
