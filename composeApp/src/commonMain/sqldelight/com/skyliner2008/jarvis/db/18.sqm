@@ -1,0 +1,5 @@
+-- P18: index เวลาให้ ChatMessage
+--
+-- หน้าแชทโหลดเฉพาะข้อความ 24 ชม. ล่าสุด (getHistoryAfter) และการ์ดระบบปลุก AI ถูกบันทึกลงตารางนี้ด้วย
+-- ไม่มี index → ทุกครั้งที่เปิดแอปต้องสแกนทั้งตาราง
+CREATE INDEX IF NOT EXISTS idx_chat_message_ts ON ChatMessage(timestamp);

@@ -1,0 +1,20 @@
+-- P17: ยุบแถวการเรียนรู้ที่วัดผลแล้วเป็นสถิติสะสม
+--
+-- ตั้งแต่ P16 ปัจจัยถูกประเมินบน 5 TF ทุกนาที → ~6,000 แถว/วัน/สินทรัพย์ (วัดจริงบนมือถือ)
+-- เก็บดิบ 365 วันจะกลายเป็น ~2 ล้านแถว (หลายร้อย MB) บนมือถือ
+-- ตารางนี้เก็บผลรวมต่อ (ปัจจัย × TF × ทิศ × บริบท) ไว้ถาวร แล้วลบแถวดิบที่ยุบแล้วทิ้ง
+-- แถวที่ปลุก AI จริง (woke=1 หรือมี ai_decision) ยังเก็บดิบไว้ตามเดิม — ใช้ตรวจย้อนหลังและวัดความแม่นของ AI
+CREATE TABLE IF NOT EXISTS AnticipationFactorStat (
+    factor_id TEXT NOT NULL,
+    factor_tf TEXT NOT NULL,
+    side TEXT NOT NULL,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    sum_r REAL NOT NULL,
+    sum_abs REAL NOT NULL,
+    wins INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (factor_id, factor_tf, side, mtf_align, adx_bucket, session)
+);

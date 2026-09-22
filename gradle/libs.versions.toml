@@ -22,6 +22,7 @@ camerax = "1.4.1"
 webview = "1.9.40"
 firebaseBom = "33.10.0"
 google-services = "4.4.2"
+rive-android = "11.12.0"
 # File analysis is now handled natively via Gemini API
 
 [libraries]
@@ -64,6 +65,7 @@ camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax"
 multiplatform-webview = { module = "io.github.kevinnzou:compose-webview-multiplatform", version.ref = "webview" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-vertexai = { module = "com.google.firebase:firebase-vertexai" }
+rive-android = { module = "app.rive:rive-android", version.ref = "rive-android" }
 # Native Gemini processing used instead
 
 [plugins]

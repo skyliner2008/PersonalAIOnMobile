@@ -1,0 +1,16 @@
+package com.skyliner2008.jarvis.tools.trading
+
+import io.ktor.client.HttpClient
+import com.skyliner2008.jarvis.data.GeminiService
+
+/** Stable public facade for trading tools; implementation is isolated in TradingToolExecutionBackend. */
+class TradingToolExecutor(client: HttpClient, geminiService: GeminiService) {
+    private val backend = TradingToolExecutionBackend(client, geminiService)
+
+    suspend fun execute(toolName: String, args: Map<String, String>): String =
+        backend.execute(toolName, args)
+
+    /** สแกนระบบปลุก AI ทันที สำหรับ "SYMBOL@TF" */
+    suspend fun anticipationScan(rawSymbol: String): Map<String, String> =
+        backend.anticipationScan(rawSymbol)
+}

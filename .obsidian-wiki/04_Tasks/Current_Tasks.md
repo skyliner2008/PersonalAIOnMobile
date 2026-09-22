@@ -21,6 +21,35 @@
 
 ## ✅ Recently Completed (สิงหาคม – กันยายน 2026)
 
+### 2026-09-16: Free Tier Model Policy, Live Modes & Agent Multi-Session
+- [x] **แชทใช้ flash-lite เท่านั้น** (3.5-lite → 3.1-lite = 1,000 req/วัน) + migrate ค่าเดิม + กันโมเดลที่โควตารายวันหมด
+- [x] **Live เลือกโมเดลเองจาก ListModels** (seed: 3.8-live, 3.1-flash-live-preview, 3.8-live-extended-thinking, native audio dialog) และกันรุ่นเฉพาะทาง (transcribe/translate) ออกจากสายผู้ช่วย
+- [x] **โหมด = บทบาท**: ผู้ช่วย/ขับรถ/สัตว์เลี้ยง ใช้ tool เหมือนกันหมด ยกเว้นการควบคุมเครื่องเต็มรูปแบบที่เปิดเฉพาะโหมดขับรถ (กัน 2 ชั้น)
+- [x] **Live = เอเจนต์หลัก**: `agent_task_start/list/status/cancel` → chat session ทำเบื้องหลัง แล้วรายงานกลับเข้า Live (สูงสุด 3 งานพร้อมกัน)
+- [x] **โหมดประชุม / โหมดแปลภาษา**: ทำครบแล้ว — คนละหน้าจอ คนละ session มีปุ่มเข้าใช้งานเอง (ดู [[Meeting_And_Translate_Modes]])
+- [ ] **Diarization "ใครพูดอะไร"**: ต้องทำ pass ที่สองจากไฟล์เสียงด้วย `gemini-3.5-transcribe` (โหมดสดไม่รองรับ)
+- [x] **ทดสอบบนเครื่องจริงรอบแรก**: chain/tools/resumption/cancellation ผ่าน — แก้เพิ่ม: Thai transcript มีช่องว่าง, ไม่ส่งผลของ call ที่ถูกยกเลิก, timeframe อ่าน `interval`, one-time upgrade ไป gemini-3.8-live
+- [ ] **ทดสอบ agent flow จริง** และดูว่าต้องกันสัดส่วนโควตาระหว่างแชทกับงานเบื้องหลังไหม
+- [x] **Wiki**: `[[Changelog_2026-09-16_Free_Tier_Model_Policy_And_Agent_Tasks]]`, `[[Model_Policy_Free_Tier]]`
+
+### 2026-09-16: Live Voice System Review & Fixes (Mobile)
+- [x] **คำสั่งลัดทำงานจากประโยคที่พูดจบ** (`userTurnFinalFlow`, `LiveLocalCommandParser`) — เลิกยิงซ้ำ/ส่ง LINE เป็นท่อนๆ; แก้ "เปิดโหมด/เปิดกล้อง" ถูกตีความเป็นปิด
+- [x] **Quota key rotation ใช้ key ใหม่จริง** (`LiveProtocol.buildUrl` ต่อ attempt)
+- [x] **Barge-in ทิ้งเสียงค้าง** (`LiveAudioChunk.epoch`), tool call ขนาน + `toolCallCancellation`, args array/object ไม่ทำเฟรมหาย
+- [x] **Session resumption เปิดตั้งแต่ setup แรก + self-healing**, reconnect ใช้ `recentTurns`, restart ไม่ race กับ socket เก่า
+- [x] **Alert พูดผ่าน Live session หลัก** (`LiveSessionBridge`), HotwordDetector ไม่แย่งไมค์กับ Live
+- [x] **Pet persona คงอยู่หลัง minimize/screen-off** (`stopPetSensors` vs `stopPetMode`)
+- [x] **Guards**: คำถามราคาไม่ถูก redirect ไปนำทาง, อนุญาต D1 เมื่อผู้ใช้ขอ (`LiveIntentMatchers`)
+- [x] **ชุด tool ตามโหมด**: (ปรับใหม่ในรอบถัดมา — ทุกโหมดใช้ tool เหมือนกัน ยกเว้นการควบคุมเครื่องที่เปิดเฉพาะโหมดขับรถ)
+- [x] **สลับ persona / เปลี่ยนเสียง restart session จริง** (system prompt + tool set + voice มีผลทันที ไม่ต้อง delay เดา)
+- [x] **คำปลุกตรวจคำจริง**: `HotwordVerifier` + `WakeWordMatcher` (fallback เป็นพฤติกรรมเดิมถ้าเครื่องถอดเสียงไม่ได้)
+- [x] **Context window compression (sliding window)** พร้อม self-heal ปิดเองถ้า server ปฏิเสธ
+- [x] **Session ตาย → ปล่อยไมค์ + แจ้งในแชท**, แจ้งเตือนรอ Live 5 วิก่อนตกไป TTS, log เฟรมวิดีโอเป็นช่วง, log latency เสียงแรกต่อ turn
+- [x] **Unit tests**: `LiveSessionReviewFixesTest` 24 tests ผ่าน (ทั้งชุด 359/360 — `PetModeTest` persona prompt ตกอยู่ก่อนแล้ว)
+- [ ] **ทดสอบบนเครื่องจริง**: barge-in, GoAway → resume, สลับโหมดกลางบทสนทนา, alert ระหว่างคุย, pet minimize/expand, mute + audioStreamEnd, คำปลุก
+- [ ] **ตั้ง `thinking_level`**: รอดู log `⏱️ First audio …ms after user turn` จากการใช้งานจริงก่อน
+- [x] **Wiki**: `[[Changelog_2026-09-16_Live_Voice_Review_Fixes]]`
+
 ### 2026-09-09: Gemini 3.1 Flash Live Primary Model & Automatic Model Switch Fix
 - [x] **Set `gemini-3.1-flash-live-preview` as Default Primary Live Model (`ModelConfig.kt`)**: กำหนด `DEFAULT_LIVE_MODEL = "gemini-3.1-flash-live-preview"` พร้อมจัดอันดับให้อยู่ลำดับ 1 ใน `SEED_LIVE_MODELS` และ `liveCandidates` เพื่อความเร็วการเชื่อมต่อ (~835ms), ความเป็นธรรมชาติของเสียงพูดภาษาไทย, และความแม่นยำในการเรียก Native Tools
 - [x] **Remove from `deprecatedLiveModels` & Add Old Model Auto-Migration (`SettingsController.kt`)**: ลบ `"gemini-3.1-flash-live-preview"` ออกจากลิสต์โมเดลที่ถูกมองว่าตกยุค และใส่ `"gemini-2.5-flash-native-audio-preview-09-2025"` แทน เพื่อ auto-migrate อุปกรณ์ที่เคยถูกบังคับเซฟโมเดลเก่าไว้ใน SQLite ให้กลับมาใช้ 3.1 ทันทีเมื่อเปิดแอป

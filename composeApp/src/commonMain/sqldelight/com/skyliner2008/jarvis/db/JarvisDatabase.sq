@@ -1,0 +1,1278 @@
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 1: Working Memory — บทสนทนา
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ChatMessage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_message_ts ON ChatMessage(timestamp);
+
+-- ═══════════════════════════════════════════════════════════════
+-- App Settings
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AppSetting (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 1: Core Memory — ข้อมูลผู้ใช้ที่สำคัญ (always in context)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS CoreMemory (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 3: Archival Memory — ข้อมูลระยะยาว + Embedding vector
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ArchivalMemory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    embedding_json TEXT,         -- JSON array of floats (Gemini embedding)
+    source_role TEXT NOT NULL,   -- "user" | "model" | "system"
+    importance REAL NOT NULL DEFAULT 0.5,
+    timestamp INTEGER NOT NULL,
+    access_count INTEGER NOT NULL DEFAULT 0
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 4: GraphRAG — Knowledge Graph nodes
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS KnowledgeNode (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    node_type TEXT NOT NULL,     -- "person" | "place" | "concept" | "event" | "preference"
+    properties TEXT,             -- JSON
+    weight REAL NOT NULL DEFAULT 1.0,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 4: GraphRAG — Knowledge Graph edges (relations)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS KnowledgeEdge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL REFERENCES KnowledgeNode(id),
+    target_id INTEGER NOT NULL REFERENCES KnowledgeNode(id),
+    relation TEXT NOT NULL,      -- "likes" | "knows" | "works_at" | "dislikes" | etc.
+    weight REAL NOT NULL DEFAULT 1.0,
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- User Profile — Jarvis รู้จักผู้ใช้
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS UserProfile (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field TEXT NOT NULL UNIQUE,  -- "name" | "language" | "occupation" | "interest" | ...
+    value TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.8,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Layer 6: Automation & Cron Jobs — ระบบงานเบิ้องหลัง
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AlertJob (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    exchange TEXT,
+    tool_name TEXT NOT NULL,     -- e.g. "trading_price", "trading_technical_analysis"
+    condition_json TEXT NOT NULL, -- JSON rules: { "field": "RSI", "op": "LT", "value": 30 }
+    interval_minutes INTEGER NOT NULL DEFAULT 15,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_triggered INTEGER NOT NULL DEFAULT 0,
+    last_run_at INTEGER NOT NULL DEFAULT 0,
+    last_value TEXT,
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- AutoTrading Journal — บันทึกรายการที่ engine ทำทั้งหมด (paper+live)
+--   ใช้สำหรับ Phase "เรียนรู้" — คำนวณว่า analyzer/strategy ไหนกำไร/ขาดทุน
+--   และช่วยผู้ใช้ review ว่ากำไรเพราะอะไร/ขาดทุนเพราะอะไร
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AutoTradeJournal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    decision_id TEXT NOT NULL UNIQUE,     -- UUID per decision
+    symbol TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    side TEXT NOT NULL,                    -- BUY | SELL | SKIP
+    strategy TEXT NOT NULL,                -- Scalp | Swing | Grid | Trailing | TrendFollow | MeanRev | Breakout | Range
+    analyzers_used TEXT NOT NULL,          -- CSV: "TA,PA,SMC,Trend"
+    signals_json TEXT NOT NULL,            -- JSON of {analyzer: [signal1, signal2], ...}
+    confluence_score REAL NOT NULL,
+    entry REAL,
+    sl REAL,
+    tp REAL,
+    volume REAL,
+    risk_pct REAL,
+    rrr REAL,
+    regime TEXT,                           -- trending | ranging | volatile | quiet
+    market_snapshot TEXT,                  -- JSON extract of key indicators
+    was_executed INTEGER NOT NULL DEFAULT 0,
+    mt5_ticket INTEGER,
+    close_reason TEXT,                     -- TP | SL | BE-close | manual | timeout
+    close_price REAL,
+    close_at INTEGER,
+    profit REAL,
+    profit_r REAL,                         -- in R-multiple (+2R means 2× initial risk)
+    outcome TEXT,                          -- WIN | LOSS | BE | OPEN | PAPER
+    ai_review TEXT,                        -- บันทึกเหตุผลกำไร/ขาดทุนจาก Learn phase
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ChatMessage
+-- ═══════════════════════════════════════════════════════════════
+insertMessage:
+INSERT INTO ChatMessage(role, content, timestamp, metadata)
+VALUES (?, ?, ?, ?);
+
+getRecentHistory:
+SELECT * FROM ChatMessage ORDER BY timestamp DESC LIMIT :limit;
+
+-- ข้อความหลัง :since แต่ไม่เกิน :limit รายการล่าสุด (เรียงเก่า→ใหม่)
+getHistoryAfter:
+SELECT * FROM (
+    SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp DESC LIMIT :limit
+) ORDER BY timestamp ASC;
+
+getOldMessages:
+SELECT * FROM ChatMessage ORDER BY timestamp ASC LIMIT :limit;
+
+deleteMessagesByIds:
+DELETE FROM ChatMessage WHERE id IN ?;
+
+deleteAllMessages:
+DELETE FROM ChatMessage;
+
+countMessages:
+SELECT COUNT(*) FROM ChatMessage;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: AppSetting
+-- ═══════════════════════════════════════════════════════════════
+getSetting:
+SELECT value FROM AppSetting WHERE key = ?;
+
+insertSetting:
+INSERT OR REPLACE INTO AppSetting(key, value)
+VALUES (?, ?);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: CoreMemory
+-- ═══════════════════════════════════════════════════════════════
+upsertCoreMemory:
+INSERT OR REPLACE INTO CoreMemory(key, value, updated_at)
+VALUES (?, ?, ?);
+
+getCoreMemory:
+SELECT * FROM CoreMemory ORDER BY updated_at DESC;
+
+getCoreMemoryByKey:
+SELECT value FROM CoreMemory WHERE key = ?;
+
+deleteCoreMemory:
+DELETE FROM CoreMemory WHERE key = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ArchivalMemory
+-- ═══════════════════════════════════════════════════════════════
+insertArchival:
+INSERT INTO ArchivalMemory(content, embedding_json, source_role, importance, timestamp)
+VALUES (?, ?, ?, ?, ?);
+
+getArchivalRecent:
+SELECT * FROM ArchivalMemory ORDER BY timestamp DESC LIMIT :limit;
+
+getArchivalByImportance:
+SELECT * FROM ArchivalMemory ORDER BY importance DESC LIMIT :limit;
+
+updateArchivalAccess:
+UPDATE ArchivalMemory SET access_count = access_count + 1 WHERE id = ?;
+
+getArchivalWithEmbeddings:
+SELECT * FROM ArchivalMemory WHERE embedding_json IS NOT NULL ORDER BY importance DESC;
+
+updateArchivalEmbedding:
+UPDATE ArchivalMemory SET embedding_json = ? WHERE id = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: KnowledgeNode
+-- ═══════════════════════════════════════════════════════════════
+insertKnowledgeNode:
+INSERT OR IGNORE INTO KnowledgeNode(name, node_type, properties, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?);
+
+getNodeByName:
+SELECT * FROM KnowledgeNode WHERE name = ? LIMIT 1;
+
+updateKnowledgeNodeWeight:
+UPDATE KnowledgeNode SET weight = weight + :weightDelta, access_count = access_count + 1, updated_at = :updatedAt WHERE id = :id;
+
+getAllNodes:
+SELECT * FROM KnowledgeNode ORDER BY updated_at DESC LIMIT :limit;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: KnowledgeEdge
+-- ═══════════════════════════════════════════════════════════════
+insertKnowledgeEdge:
+INSERT OR IGNORE INTO KnowledgeEdge(source_id, target_id, relation, weight, created_at)
+VALUES (?, ?, ?, ?, ?);
+
+getEdgesFrom:
+SELECT ke.*, kn.name AS target_name, kn.node_type AS target_type
+FROM KnowledgeEdge ke
+JOIN KnowledgeNode kn ON ke.target_id = kn.id
+WHERE ke.source_id = ?;
+
+updateKnowledgeEdgeWeight:
+UPDATE KnowledgeEdge SET weight = weight + :weightDelta WHERE source_id = :sourceId AND target_id = :targetId;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: UserProfile
+-- ═══════════════════════════════════════════════════════════════
+upsertUserProfile:
+INSERT OR REPLACE INTO UserProfile(field, value, confidence, updated_at)
+VALUES (?, ?, ?, ?);
+
+getAllUserProfile:
+SELECT * FROM UserProfile ORDER BY field ASC;
+
+getUserProfileField:
+SELECT value FROM UserProfile WHERE field = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: AlertJob
+-- ═══════════════════════════════════════════════════════════════
+insertAlertJob:
+INSERT INTO AlertJob(name, symbol, exchange, tool_name, condition_json, interval_minutes, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+getAllActiveJobs:
+SELECT * FROM AlertJob WHERE is_active = 1;
+
+-- สำหรับ loop เช็กเงื่อนไขของ AutomationService เท่านั้น — ตัด job ที่ TRIGGERED ค้างออก
+-- (รอผู้ใช้เลือก ลบ/ซ้ำ จาก notification หรือปุ่ม 🔁 ในหน้า list) ยกเว้น signal alert
+-- ที่ re-arm อัตโนมัติเมื่อแท่งสัญญาณผ่านไป — UI list ยังใช้ getAllActiveJobs เห็นครบทุก job
+-- job แบบ edge-trigger (signal alert / ระบบปลุก AI) ต้องถูกสแกนต่อแม้ TRIGGERED อยู่
+-- เพราะรีเซ็ตตัวเองเมื่อสแกนรอบถัดไป — ถ้าตัดออก job จะค้าง TRIGGERED และไม่ถูกสแกนอีกเลย
+getRunnableJobs:
+SELECT * FROM AlertJob WHERE is_active = 1
+  AND (is_triggered = 0 OR tool_name IN ('trading_signal_alert', 'trading_anticipation'));
+
+updateAlertJobStatus:
+UPDATE AlertJob SET is_active = ?, is_triggered = 0, last_value = NULL WHERE id = ?;
+
+updateAlertJobTriggerState:
+UPDATE AlertJob SET is_triggered = ?, last_value = ?, last_run_at = ? WHERE id = ?;
+
+updateAlertJobInterval:
+UPDATE AlertJob SET interval_minutes = ? WHERE id = ?;
+
+updateAlertJobCheckResult:
+UPDATE AlertJob SET last_value = ?, last_run_at = ? WHERE id = ?;
+
+-- บันทึกเวลาที่เช็ก job โดยไม่แตะ last_value (job แบบ edge-trigger ใช้ last_value เก็บ id ของเหตุการณ์)
+touchAlertJobRun:
+UPDATE AlertJob SET last_run_at = ? WHERE id = ?;
+
+
+
+
+-- แก้ไขเงื่อนไข (เช่น ค่าราคาเป้าหมาย) และรีเซ็ตสถานะ trigger ให้เริ่มเฝ้าดูใหม่
+updateAlertJobCondition:
+UPDATE AlertJob SET condition_json = ?, is_triggered = 0, last_value = NULL WHERE id = ?;
+
+-- เปลี่ยนชื่อ job (ชื่อนี้ถูกใช้ในหัว notification และบริบทที่ AI พูด)
+updateAlertJobName:
+UPDATE AlertJob SET name = ? WHERE id = ?;
+
+deleteAlertJob:
+DELETE FROM AlertJob WHERE id = ?;
+
+-- TV OHLCV candles — persistent store (ไม่ใช่ cache ชั่วคราว)
+-- ซีรีส์หนึ่ง = (symbol, interval, source) ห้ามให้หลาย source ปนกันในซีรีส์เดียว
+CREATE TABLE IF NOT EXISTS TvCandle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    open REAL NOT NULL,
+    high REAL NOT NULL,
+    low REAL NOT NULL,
+    close REAL NOT NULL,
+    volume REAL NOT NULL DEFAULT 0,
+    -- 1 = แท่งปิดแล้ว (ใช้คำนวณอินดิเคเตอร์ได้), 0 = ยังก่อตัวอยู่
+    is_closed INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, source, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tv_candle_series_ts
+ON TvCandle(symbol, interval, source, ts);
+
+upsertTvCandle:
+INSERT OR REPLACE INTO TvCandle(
+    symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- แท่งล่าสุดของซีรีส์เดียว (ทั้งปิดและยังก่อตัว) — ใช้กับ path ที่ต้องการราคาสด
+getRecentTvCandles:
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ?
+ORDER BY ts DESC
+LIMIT ?;
+
+-- แท่งที่ปิดแล้วเท่านั้น — เป็น input มาตรฐานของการคำนวณอินดิเคเตอร์ (กัน repainting)
+getRecentClosedTvCandles:
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ? AND is_closed = 1
+ORDER BY ts DESC
+LIMIT ?;
+
+-- แท่งที่ปิดแล้วซึ่งเก่ากว่า ts ที่ระบุ — ใช้ไล่ backfill ย้อนหลังทีละ chunk
+getClosedTvCandlesBefore:
+SELECT symbol, interval, source, ts, open, high, low, close, volume, is_closed, updated_at
+FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ? AND is_closed = 1 AND ts < ?
+ORDER BY ts DESC
+LIMIT ?;
+
+-- สรุปว่าแต่ละ source มีกี่แท่งและสดแค่ไหน — ใช้เลือกซีรีส์ที่ดีที่สุดเมื่อ source หลักดึงไม่ได้
+summarizeTvCandleSources:
+SELECT source, COUNT(*) AS bars, MIN(ts) AS oldest_ts, MAX(ts) AS latest_ts
+FROM TvCandle
+WHERE symbol = ? AND interval = ?
+GROUP BY source;
+
+countTvCandles:
+SELECT COUNT(*) FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ?;
+
+deleteTvCandlesBefore:
+DELETE FROM TvCandle
+WHERE symbol = ? AND interval = ? AND source = ? AND ts < ?;
+
+-- MT5 account snapshots
+CREATE TABLE IF NOT EXISTS Mt5AccountSnapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT,
+    account_name TEXT,
+    server TEXT,
+    currency TEXT,
+    leverage INTEGER,
+    balance REAL,
+    equity REAL,
+    margin REAL,
+    free_margin REAL,
+    payload_json TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+insertMt5AccountSnapshot:
+INSERT INTO Mt5AccountSnapshot(
+    login, account_name, server, currency, leverage, balance, equity, margin, free_margin, payload_json, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getLatestMt5Account:
+SELECT * FROM Mt5AccountSnapshot
+ORDER BY updated_at DESC
+LIMIT 1;
+
+-- MT5 symbols catalog
+CREATE TABLE IF NOT EXISTS Mt5SymbolCatalog (
+    symbol TEXT PRIMARY KEY,
+    description TEXT,
+    digits INTEGER,
+    point REAL,
+    trade_mode TEXT,
+    bid REAL,
+    ask REAL,
+    spread REAL,
+    payload_json TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+upsertMt5Symbol:
+INSERT OR REPLACE INTO Mt5SymbolCatalog(
+    symbol, description, digits, point, trade_mode, bid, ask, spread, payload_json, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getMt5Symbols:
+SELECT * FROM Mt5SymbolCatalog
+ORDER BY symbol ASC;
+
+-- MT5 trade records (positions / orders / deals)
+CREATE TABLE IF NOT EXISTS Mt5TradeRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_type TEXT NOT NULL, -- POSITION | ORDER | DEAL
+    ticket TEXT NOT NULL,
+    position_ticket TEXT,
+    symbol TEXT NOT NULL,
+    side TEXT,
+    volume REAL,
+    price_open REAL,
+    price_current REAL,
+    profit REAL,
+    swap REAL,
+    commission REAL,
+    sl REAL,
+    tp REAL,
+    state TEXT,
+    comment TEXT,
+    event_time INTEGER,
+    payload_json TEXT,
+    synced_at INTEGER NOT NULL,
+    UNIQUE(record_type, ticket, event_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mt5_trade_type_time
+ON Mt5TradeRecord(record_type, event_time DESC);
+
+upsertMt5TradeRecord:
+INSERT OR REPLACE INTO Mt5TradeRecord(
+    record_type, ticket, position_ticket, symbol, side, volume, price_open, price_current, profit,
+    swap, commission, sl, tp, state, comment, event_time, payload_json, synced_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getRecentMt5TradeRecordsByType:
+SELECT * FROM Mt5TradeRecord
+WHERE record_type = ?
+ORDER BY event_time DESC, synced_at DESC
+LIMIT ?;
+
+-- Raw synchronization snapshots (for audit / analysis / debug)
+CREATE TABLE IF NOT EXISTS TradeSyncSnapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL, -- account | symbols | positions | orders | history
+    payload_json TEXT NOT NULL,
+    synced_at INTEGER NOT NULL
+);
+
+insertTradeSyncSnapshot:
+INSERT INTO TradeSyncSnapshot(source, payload_json, synced_at)
+VALUES (?, ?, ?);
+
+getRecentTradeSyncSnapshots:
+SELECT * FROM TradeSyncSnapshot
+ORDER BY synced_at DESC
+LIMIT ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: AutoTradeJournal
+-- ═══════════════════════════════════════════════════════════════
+insertAutoTradeJournal:
+INSERT OR REPLACE INTO AutoTradeJournal(
+    decision_id, symbol, timeframe, side, strategy, analyzers_used,
+    signals_json, confluence_score, entry, sl, tp, volume, risk_pct, rrr,
+    regime, market_snapshot, was_executed, mt5_ticket,
+    close_reason, close_price, close_at, profit, profit_r, outcome, ai_review,
+    created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateAutoTradeJournalOutcome:
+UPDATE AutoTradeJournal
+SET close_reason = ?, close_price = ?, close_at = ?, profit = ?, profit_r = ?, outcome = ?, ai_review = ?, updated_at = ?
+WHERE decision_id = ?;
+
+getOpenAutoTrades:
+SELECT * FROM AutoTradeJournal
+WHERE outcome = 'OPEN'
+ORDER BY created_at DESC;
+
+getRecentAutoTrades:
+SELECT * FROM AutoTradeJournal
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradesByStrategy:
+SELECT * FROM AutoTradeJournal
+WHERE strategy = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradesBySymbol:
+SELECT * FROM AutoTradeJournal
+WHERE symbol = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAutoTradeStatsByStrategy:
+SELECT
+    strategy,
+    COUNT(*) AS total,
+    SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+    SUM(COALESCE(profit, 0)) AS total_profit,
+    AVG(COALESCE(profit_r, 0)) AS avg_r
+FROM AutoTradeJournal
+WHERE outcome IN ('WIN','LOSS','BE')
+GROUP BY strategy;
+
+getAutoTradeStatsByAnalyzer:
+SELECT analyzers_used, COUNT(*) AS total,
+    SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
+    SUM(COALESCE(profit, 0)) AS total_profit
+FROM AutoTradeJournal
+WHERE outcome IN ('WIN','LOSS','BE')
+GROUP BY analyzers_used;
+
+deleteOldAutoTrades:
+DELETE FROM AutoTradeJournal WHERE created_at < ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- ScheduledTask — งานตามเวลา (one-shot / daily) ที่ AI agent จัดการ
+--   one_time: ยิงครั้งเดียวเมื่อ run_at ถึง แล้วปิดตัวเอง
+--   daily:    ยิงทุกวันเมื่อถึงเวลา time_hhmm (กันยิงซ้ำด้วย last_fired_date)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS ScheduledTask (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,            -- คำสั่งที่จะส่งให้ AI ประมวลผลเมื่อถึงเวลา
+    schedule_type TEXT NOT NULL,     -- "one_time" | "daily"
+    run_at INTEGER NOT NULL DEFAULT 0, -- epoch millis (one_time)
+    time_hhmm TEXT,                  -- "08:30" (daily, เวลาท้องถิ่น)
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_fired_date TEXT,            -- "2026-07-30" กัน daily ยิงซ้ำในวันเดียว
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: ScheduledTask
+-- ═══════════════════════════════════════════════════════════════
+insertScheduledTask:
+INSERT INTO ScheduledTask(name, prompt, schedule_type, run_at, time_hhmm, created_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+getAllActiveScheduledTasks:
+SELECT * FROM ScheduledTask WHERE is_active = 1;
+
+deleteScheduledTask:
+DELETE FROM ScheduledTask WHERE id = ?;
+
+deactivateScheduledTask:
+UPDATE ScheduledTask SET is_active = 0 WHERE id = ?;
+
+markScheduledTaskFired:
+UPDATE ScheduledTask SET last_fired_date = ? WHERE id = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- Index: กัน KnowledgeEdge ซ้ำ — ทำให้ INSERT OR IGNORE dedupe ได้จริง
+-- (fresh install ได้จากไฟล์นี้โดยตรง; install เก่าได้จาก migration 2.sqm)
+-- ═══════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledgeedge_unique
+ON KnowledgeEdge(source_id, target_id, relation);
+
+-- ═══════════════════════════════════════════════════════════════
+-- SignalAlertRecord — บันทึกทุก signal ที่ alert ยิงออกไป (trading_signal_alert)
+--   ใช้เก็บสถิติจริง: tracker ใน AutomationService เช็กทุก cycle ว่าโดน TP/SL หรือยัง
+--   outcome: OPEN (กำลังวิ่ง) | TP (ชนะ) | SL (แพ้)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS SignalAlertRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,          -- เช่น "XAUUSD@15M"
+    side TEXT NOT NULL,            -- BUY | SELL
+    strategy TEXT NOT NULL,        -- เช่น "UT Bot + Donchian Breakout"
+    reason TEXT,
+    entry REAL NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    rr REAL,
+    bar_time INTEGER NOT NULL,     -- timestamp(ms) ของแท่งที่เกิดสัญญาณ
+    delivery TEXT NOT NULL DEFAULT 'ai',
+    outcome TEXT NOT NULL DEFAULT 'OPEN',  -- OPEN | TP | SL
+    hit_at INTEGER,
+    hit_price REAL,
+    result_r REAL,                 -- +RR ถ้าชน TP, -1 ถ้าชน SL
+    created_at INTEGER NOT NULL
+);
+
+-- ═══════════════════════════════════════════════════════════════
+-- Queries: SignalAlertRecord
+-- ═══════════════════════════════════════════════════════════════
+insertSignalAlert:
+INSERT INTO SignalAlertRecord(job_id, symbol, side, strategy, reason, entry, sl, tp, rr, bar_time, delivery, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getSignalAlertByJobBar:
+SELECT * FROM SignalAlertRecord WHERE job_id = :jobId AND bar_time = :barTime;
+
+getOpenSignalAlerts:
+SELECT * FROM SignalAlertRecord WHERE outcome = 'OPEN';
+
+closeSignalAlert:
+UPDATE SignalAlertRecord SET outcome = :outcome, hit_at = :hitAt, hit_price = :hitPrice, result_r = :resultR WHERE id = :id;
+
+getSignalAlertsSince:
+SELECT * FROM SignalAlertRecord WHERE created_at >= :since ORDER BY created_at DESC;
+
+getRecentSignalAlerts:
+SELECT * FROM SignalAlertRecord ORDER BY created_at DESC LIMIT :limit;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- StrategyTuning: params SL/TP ที่ backtest tune แล้วต่อ symbol/tf/กลยุทธ์
+-- (SignalAlertProvider ใช้แทนค่า default เมื่อมี tuning ที่ไม่ overfit)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS StrategyTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT/3BR
+    sl_mult REAL NOT NULL,
+    tp_mult REAL NOT NULL,
+    score REAL,                      -- overfitting % หรือ evolved gain
+    grade TEXT,                      -- healthy | moderate | overfit
+    source TEXT NOT NULL DEFAULT 'evolve',  -- evolve only: production promotion owner
+    risk_gate_eligible INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertStrategyTuning:
+INSERT OR REPLACE INTO StrategyTuning(symbol, interval, kind, sl_mult, tp_mult, score, grade, source, risk_gate_eligible, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getStrategyTuning:
+SELECT * FROM StrategyTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getStrategyTunings:
+SELECT * FROM StrategyTuning WHERE symbol = ? AND interval = ?;
+
+getAllStrategyTunings:
+SELECT * FROM StrategyTuning ORDER BY updated_at DESC;
+
+deleteStrategyTuning:
+DELETE FROM StrategyTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- OptimizationTrial: ความจำการจูน params (Adaptive Optimize learning memory)
+-- บันทึกทุกครั้งที่ลอง params → ระบบเรียนรู้ว่าปรับทิศไหนแล้วดี/แย่
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS OptimizationTrial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    sl_mult REAL NOT NULL,
+    tp_mult REAL NOT NULL,
+    score REAL NOT NULL,            -- composite score ที่วัดได้จริง
+    expectancy_r REAL,
+    profit_factor REAL,
+    trades INTEGER,
+    delta_vs_baseline REAL,         -- score - baseline score (บวก = ดีกว่าค่าเดิม)
+    applied INTEGER NOT NULL DEFAULT 0,  -- 1 = params นี้ถูกเลือกใช้จริง
+    source TEXT NOT NULL DEFAULT 'adaptive',  -- grid | evolve | adaptive
+    created_at INTEGER NOT NULL
+);
+
+insertOptimizationTrial:
+INSERT INTO OptimizationTrial(symbol, interval, kind, sl_mult, tp_mult, score, expectancy_r, profit_factor, trades, delta_vs_baseline, applied, source, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getOptimizationTrials:
+SELECT * FROM OptimizationTrial
+WHERE symbol = ? AND interval = ? AND kind = ?
+ORDER BY created_at DESC LIMIT :limit;
+
+setOptimizationTrialApplied:
+UPDATE OptimizationTrial SET applied = 1 WHERE id = ?;
+
+deleteOldOptimizationTrials:
+DELETE FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? AND id NOT IN (
+    SELECT id FROM OptimizationTrial WHERE symbol = ? AND interval = ? AND kind = ? ORDER BY created_at DESC LIMIT 200
+);
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- StrategyHealth: ผล backtest ล่าสุดต่อ symbol/tf/กลยุทธ์ (Per-TF Strategy Gate)
+-- SignalAlertProvider เช็กก่อนยิง alert — กลยุทธ์ที่ PF < 1.0 ใน TF นั้นจะถูกบล็อก
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS StrategyHealth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT/3BR/SMC/MIX
+    profit_factor REAL NOT NULL,
+    avg_r REAL NOT NULL,
+    win_rate REAL NOT NULL,
+    trades INTEGER NOT NULL,
+    bars INTEGER NOT NULL,           -- จำนวนแท่งที่ backtest (บอกความสด/ความน่าเชื่อถือของตัวเลข)
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertStrategyHealth:
+INSERT OR REPLACE INTO StrategyHealth(symbol, interval, kind, profit_factor, avg_r, win_rate, trades, bars, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getStrategyHealth:
+SELECT * FROM StrategyHealth WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getStrategyHealths:
+SELECT * FROM StrategyHealth WHERE symbol = ? AND interval = ?;
+
+deleteStrategyHealth:
+DELETE FROM StrategyHealth WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- EntryTuning: params "จุดเข้า" ที่จูนแล้วต่อ symbol/tf/กลยุทธ์ (optimize scope=entry/both)
+-- SignalMarkerProvider/StrategySignalProvider ใช้แทนค่า default เมื่อมี tuning ที่ไม่ overfit
+-- params_json รูปแบบ "k=v;k=v" เฉพาะ field ที่ kind นั้นใช้ (ดู EntryParams.serialize)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS EntryTuning (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,            -- เช่น "XAUUSD" (uppercase)
+    interval TEXT NOT NULL,          -- เช่น "15m" (lowercase)
+    kind TEXT NOT NULL,              -- MOM/TR/REV/DC/52H/E/UT (3BR ไม่มี params)
+    params_json TEXT NOT NULL,       -- เช่น "dcPeriod=30" หรือ "utKey=2.5;utAtrPeriod=10"
+    score REAL,                      -- composite score ของ params นี้ (Sharpe×PF×WinRate)
+    expectancy_r REAL,               -- expectancy (R) บนข้อมูลเต็ม ณ ตอนจูน
+    profit_factor REAL,
+    trades INTEGER,
+    grade TEXT,                      -- healthy | moderate | overfit (null = ยังไม่ validate)
+    source TEXT NOT NULL DEFAULT 'evolve',
+    risk_gate_eligible INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(symbol, interval, kind)
+);
+
+upsertEntryTuning:
+INSERT OR REPLACE INTO EntryTuning(symbol, interval, kind, params_json, score, expectancy_r, profit_factor, trades, grade, source, risk_gate_eligible, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getEntryTuning:
+SELECT * FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+getEntryTunings:
+SELECT * FROM EntryTuning WHERE symbol = ? AND interval = ?;
+
+getAllEntryTunings:
+SELECT * FROM EntryTuning ORDER BY updated_at DESC;
+
+deleteEntryTuning:
+DELETE FROM EntryTuning WHERE symbol = ? AND interval = ? AND kind = ?;
+
+
+-- P6.2b/c: Mobile Demo Broker
+CREATE TABLE IF NOT EXISTS DemoAccount (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    initial_balance REAL NOT NULL,
+    balance REAL NOT NULL,
+    leverage REAL NOT NULL DEFAULT 100.0,
+    max_daily_loss_pct REAL NOT NULL DEFAULT 5.0,
+    max_drawdown_pct REAL NOT NULL DEFAULT 10.0,
+    spread_mode TEXT NOT NULL DEFAULT 'FIXED',
+    spread_price REAL NOT NULL DEFAULT 0.20,
+    commission_per_lot_round_turn REAL NOT NULL DEFAULT 0.0,
+    commission_pct_per_side REAL NOT NULL DEFAULT 0.0,
+    rebate_per_lot_round_turn REAL NOT NULL DEFAULT 0.0,
+    swap_long_per_lot_per_day REAL NOT NULL DEFAULT 0.0,
+    swap_short_per_lot_per_day REAL NOT NULL DEFAULT 0.0,
+    contract_size REAL NOT NULL DEFAULT 1.0,
+    tick_size REAL NOT NULL DEFAULT 0.01,
+    tick_value_per_lot REAL NOT NULL DEFAULT 0.01,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoPosition (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES DemoAccount(id),
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    volume REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    current_price REAL NOT NULL,
+    stop_loss REAL,
+    take_profit REAL,
+    opened_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS DemoDeal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL REFERENCES DemoAccount(id),
+    position_id TEXT,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    volume REAL NOT NULL,
+    price REAL NOT NULL,
+    gross_pnl REAL NOT NULL DEFAULT 0.0,
+    spread_cost REAL NOT NULL DEFAULT 0.0,
+    commission REAL NOT NULL DEFAULT 0.0,
+    rebate REAL NOT NULL DEFAULT 0.0,
+    swap REAL NOT NULL DEFAULT 0.0,
+    net_pnl REAL NOT NULL DEFAULT 0.0,
+    timestamp INTEGER NOT NULL
+);
+
+selectDemoAccount:
+SELECT * FROM DemoAccount WHERE id = ?;
+selectDemoAccounts:
+SELECT * FROM DemoAccount ORDER BY updated_at DESC;
+selectDemoBalance:
+SELECT balance FROM DemoAccount WHERE id = ?;
+upsertDemoAccount:
+INSERT OR REPLACE INTO DemoAccount (id,name,currency,initial_balance,balance,leverage,max_daily_loss_pct,max_drawdown_pct,spread_mode,spread_price,commission_per_lot_round_turn,commission_pct_per_side,rebate_per_lot_round_turn,swap_long_per_lot_per_day,swap_short_per_lot_per_day,contract_size,tick_size,tick_value_per_lot,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+updateDemoBalance:
+UPDATE DemoAccount SET balance = ?, updated_at = ? WHERE id = ?;
+selectDemoPositions:
+SELECT * FROM DemoPosition WHERE account_id = ? ORDER BY opened_at ASC;
+upsertDemoPosition:
+INSERT OR REPLACE INTO DemoPosition (id,account_id,symbol,side,volume,entry_price,current_price,stop_loss,take_profit,opened_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?);
+deleteDemoPosition:
+DELETE FROM DemoPosition WHERE id = ?;
+insertDemoDeal:
+INSERT INTO DemoDeal (account_id,position_id,symbol,side,volume,price,gross_pnl,spread_cost,commission,rebate,swap,net_pnl,timestamp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);
+selectDemoDeals:
+SELECT * FROM DemoDeal WHERE account_id = ? ORDER BY timestamp ASC;
+deleteDemoPositions:
+DELETE FROM DemoPosition WHERE account_id = ?;
+deleteDemoDeals:
+DELETE FROM DemoDeal WHERE account_id = ?;
+
+-- ═══════════════════════════════════════════════════════════════
+-- SignalTrackingRecord: บันทึกและติดตามผลลัพธ์ของ Signal Alerts (Closed-Loop Learning)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS SignalTrackingRecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id TEXT NOT NULL UNIQUE,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    side TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    stop_loss REAL NOT NULL,
+    take_profit REAL NOT NULL,
+    rr REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN', -- OPEN | WIN | LOSS | BE | EXPIRED
+    mfe REAL NOT NULL DEFAULT 0.0,
+    mae REAL NOT NULL DEFAULT 0.0,
+    exit_price REAL,
+    pnl_r REAL,
+    bars_held INTEGER NOT NULL DEFAULT 0,
+    features_json TEXT,
+    created_at INTEGER NOT NULL,
+    closed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_tracking_symbol_status
+ON SignalTrackingRecord(symbol, status);
+
+CREATE INDEX IF NOT EXISTS idx_signal_tracking_strategy
+ON SignalTrackingRecord(strategy, status);
+
+insertSignalTrackingRecord:
+INSERT OR IGNORE INTO SignalTrackingRecord(
+    signal_id, symbol, interval, strategy, side, entry_price, stop_loss, take_profit, rr,
+    status, mfe, mae, exit_price, pnl_r, bars_held, features_json, created_at, closed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getSignalTrackingRecordById:
+SELECT * FROM SignalTrackingRecord WHERE signal_id = ?;
+
+getOpenSignalTrackingRecords:
+SELECT * FROM SignalTrackingRecord WHERE status = 'OPEN' ORDER BY created_at ASC;
+
+getOpenSignalTrackingRecordsBySymbol:
+SELECT * FROM SignalTrackingRecord WHERE symbol = ? AND status = 'OPEN' ORDER BY created_at ASC;
+
+getPendingSignalTrackingRecordsBySymbol:
+SELECT * FROM SignalTrackingRecord WHERE symbol = ? AND status IN ('OPEN', 'ANTICIPATING') ORDER BY created_at ASC;
+
+updateSignalTrackingOutcome:
+UPDATE SignalTrackingRecord
+SET status = :status, mfe = :mfe, mae = :mae, exit_price = :exitPrice, pnl_r = :pnlR, bars_held = :barsHeld, closed_at = :closedAt
+WHERE signal_id = :signalId;
+
+getSignalTrackingPerformance:
+SELECT strategy,
+       COUNT(*) AS total_signals,
+       SUM(CASE WHEN status = 'WIN' THEN 1 ELSE 0 END) AS wins,
+       SUM(CASE WHEN status = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+       AVG(pnl_r) AS avg_r,
+       AVG(mfe) AS avg_mfe,
+       AVG(mae) AS avg_mae
+FROM SignalTrackingRecord
+WHERE status IN ('WIN', 'LOSS', 'BE')
+GROUP BY strategy;
+
+getRecentResolvedSignals:
+SELECT * FROM SignalTrackingRecord
+WHERE status NOT IN ('OPEN', 'ANTICIPATING')
+ORDER BY closed_at DESC
+LIMIT :limit;
+
+getAllSignalTrackingRecords:
+SELECT * FROM SignalTrackingRecord
+ORDER BY created_at DESC;
+
+getAllAnticipationTrackingRecords:
+SELECT * FROM SignalTrackingRecord
+WHERE strategy LIKE 'ANTICIPATION_%'
+ORDER BY created_at DESC
+LIMIT :limit;
+
+
+
+-- ═══════════════════════════════════════════════════════════════════
+-- ระบบปลุก AI — การเรียนรู้แบบมีเงื่อนไข (P13)
+-- 1 รอบสแกน → N แถว (แถวละ trigger) พร้อม context bucket + ผลการตัดสินใจของ AI
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AnticipationFactorOutcome (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id TEXT NOT NULL,
+    factor_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    side TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref_price REAL NOT NULL,
+    ref_atr REAL NOT NULL,
+    woke INTEGER NOT NULL DEFAULT 0,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    vol_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    ai_decision TEXT,
+    ai_bias TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    forward_r REAL,
+    mfe_r REAL,
+    mae_r REAL,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    -- เหตุผลและความมั่นใจของ AI (ทั้ง NOTIFY และ SKIP) — เพิ่มใน 14.sqm จึงอยู่ท้ายตาราง
+    ai_confidence INTEGER,
+    ai_reason TEXT,
+    -- TF ที่ปัจจัยเกิด (P16) — ปัจจัยเดียวถูกประเมินบน M1/M5/M15/H1/H4 จึงเกิดได้หลายแถวต่อการสแกน
+    -- วัดผลด้วยแท่ง/ATR ของ TF นี้ ([FORWARD_HORIZON_BARS] แท่งของ TF นี้)
+    factor_tf TEXT NOT NULL DEFAULT '',
+    UNIQUE(signal_id, factor_id, factor_tf)
+);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_lookup
+ON AnticipationFactorOutcome(factor_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_context
+ON AnticipationFactorOutcome(factor_id, mtf_align, adx_bucket, session);
+
+CREATE INDEX IF NOT EXISTS idx_anticipation_factor_pending
+ON AnticipationFactorOutcome(status, symbol, interval, created_at);
+
+insertFactorOutcome:
+INSERT OR IGNORE INTO AnticipationFactorOutcome(
+    signal_id, factor_id, symbol, interval, side, kind, ref_price, ref_atr, woke,
+    mtf_align, adx_bucket, vol_bucket, session,
+    ai_decision, ai_bias, status, forward_r, mfe_r, mae_r, created_at, resolved_at,
+    ai_confidence, ai_reason, factor_tf
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- keys = "FACTOR@tf"
+markFactorOutcomesWoke:
+UPDATE AnticipationFactorOutcome SET woke = 1 WHERE signal_id = ? AND (factor_id || '@' || factor_tf) IN ?;
+
+-- เฉพาะแถวที่ปลุก AI จริง — แถวของปัจจัย/TF ที่แค่เก็บสถิติในรอบเดียวกันไม่ใช่สิ่งที่ AI เห็น
+-- (และถ้าติด ai_decision ไปด้วย จะยุบเป็นสถิติสะสมไม่ได้ ตาราง AnticipationFactorOutcome จะบวมเร็วมาก)
+setFactorOutcomeAiDecision:
+UPDATE AnticipationFactorOutcome
+SET ai_decision = ?, ai_bias = ?, ai_confidence = ?, ai_reason = ?
+WHERE signal_id = ? AND woke = 1;
+
+getPendingFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+WHERE status = 'PENDING' AND symbol = ? AND interval = ?
+ORDER BY created_at ASC
+LIMIT 500;
+
+resolveFactorOutcomeById:
+UPDATE AnticipationFactorOutcome
+SET status = 'RESOLVED', forward_r = ?, mfe_r = ?, mae_r = ?, resolved_at = ?
+WHERE id = ?;
+
+-- สรุปรวมรายปัจจัย×สภาพแวดล้อม — ดึงครั้งเดียวแล้วแคช (ไม่ query ทุกรอบสแกน)
+getFactorAggregates:
+SELECT factor_id, factor_tf, side, mtf_align, adx_bucket, session,
+       COUNT(*) AS n,
+       SUM(forward_r) AS sum_r,
+       SUM(ABS(forward_r)) AS sum_abs,
+       SUM(CASE WHEN forward_r > 0 THEN 1 ELSE 0 END) AS wins
+FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED'
+GROUP BY factor_id, factor_tf, side, mtf_align, adx_bucket, session;
+
+-- ความแม่นของ AI หลังถูกปลุก — วัด "ตามทิศที่ AI มอง" ต่อ 1 การปลุก (signal_id)
+-- up_r = การเคลื่อนที่ขึ้นหน่วย ATR: แถว BUY เก็บตามทิศขึ้น, SELL กลับเครื่องหมาย, NEUTRAL เก็บแบบมีเครื่องหมาย
+-- ทุกแถวของ signal เดียวกันมี ref/หน้าต่างเดียวกัน จึงเฉลี่ยรวมได้
+-- (เดิม AVG(forward_r) วัดตามทิศของ "ปัจจัย" ไม่ใช่ของ AI และนับซ้ำทุกแถวของการปลุกเดียวกัน)
+getAiDecisionAccuracy:
+SELECT ai_decision, ai_bias,
+       COUNT(*) AS n,
+       COUNT(ai_r) AS measured,
+       AVG(ai_r) AS avg_r,
+       SUM(CASE WHEN ai_r > 0 THEN 1 ELSE 0 END) AS wins,
+       AVG(ABS(up_r)) AS avg_move
+FROM (
+    SELECT signal_id,
+           MAX(ai_decision) AS ai_decision,
+           MAX(ai_bias) AS ai_bias,
+           AVG(CASE side WHEN 'SELL' THEN -forward_r ELSE forward_r END) AS up_r,
+           AVG(CASE side WHEN 'SELL' THEN -forward_r ELSE forward_r END) *
+               (CASE MAX(ai_bias) WHEN 'BUY' THEN 1.0 WHEN 'SELL' THEN -1.0 ELSE NULL END) AS ai_r
+    FROM AnticipationFactorOutcome
+    WHERE status = 'RESOLVED' AND ai_decision IS NOT NULL AND factor_tf = interval
+    GROUP BY signal_id
+)
+GROUP BY ai_decision, ai_bias;
+
+expireFactorOutcomeById:
+UPDATE AnticipationFactorOutcome SET status = 'EXPIRED', resolved_at = ? WHERE id = ?;
+
+-- แถวที่รอผลนานเกินไป (job ถูกลบ / ไม่มีใครสแกน symbol นั้นแล้ว) — ปิดเป็น EXPIRED
+expireStalePendingFactorOutcomes:
+UPDATE AnticipationFactorOutcome SET status = 'EXPIRED', resolved_at = ? WHERE status = 'PENDING' AND created_at < ?;
+
+getRecentFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+WHERE symbol = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+getAllFactorOutcomes:
+SELECT * FROM AnticipationFactorOutcome
+ORDER BY created_at ASC;
+
+countFactorOutcomes:
+SELECT COUNT(*) FROM AnticipationFactorOutcome;
+
+deleteFactorOutcomesBefore:
+DELETE FROM AnticipationFactorOutcome WHERE created_at < ?;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- สถิติสะสมของปัจจัย (P17) — ยุบแถวที่วัดผลแล้วและไม่ได้ปลุก AI
+-- 5 TF × ทุกนาที = ~6,000 แถว/วัน/สินทรัพย์ เก็บดิบ 365 วันไม่ไหวบนมือถือ
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AnticipationFactorStat (
+    factor_id TEXT NOT NULL,
+    factor_tf TEXT NOT NULL,
+    side TEXT NOT NULL,
+    mtf_align TEXT NOT NULL,
+    adx_bucket TEXT NOT NULL,
+    session TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    sum_r REAL NOT NULL,
+    sum_abs REAL NOT NULL,
+    wins INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (factor_id, factor_tf, side, mtf_align, adx_bucket, session)
+);
+
+-- รวมแถวดิบที่วัดผลแล้ว (ไม่ได้ปลุก AI) เข้าสถิติสะสม — ต้องรันคู่กับ deleteFoldedFactorOutcomes ใน transaction เดียว
+foldResolvedFactorOutcomes:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+SELECT o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session,
+       COALESCE(s.n, 0) + COUNT(*),
+       COALESCE(s.sum_r, 0) + SUM(o.forward_r),
+       COALESCE(s.sum_abs, 0) + SUM(ABS(o.forward_r)),
+       COALESCE(s.wins, 0) + SUM(CASE WHEN o.forward_r > 0 THEN 1 ELSE 0 END),
+       ?
+FROM AnticipationFactorOutcome o
+LEFT JOIN AnticipationFactorStat s
+  ON s.factor_id = o.factor_id AND s.factor_tf = o.factor_tf AND s.side = o.side
+ AND s.mtf_align = o.mtf_align AND s.adx_bucket = o.adx_bucket AND s.session = o.session
+WHERE o.status = 'RESOLVED' AND o.woke = 0 AND o.ai_decision IS NULL AND o.created_at < ?
+GROUP BY o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session;
+countFoldableFactorOutcomes:
+SELECT COUNT(*) FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED' AND woke = 0 AND ai_decision IS NULL AND created_at < ?;
+
+deleteFoldedFactorOutcomes:
+DELETE FROM AnticipationFactorOutcome
+WHERE status = 'RESOLVED' AND woke = 0 AND ai_decision IS NULL AND created_at < ?;
+
+-- ยุบทุกแถวที่วัดผลแล้วก่อนถึงเวลาลบทิ้ง (รวมแถวที่ปลุก AI) — สถิติการเรียนรู้ต้องไม่หายไปกับการลบ
+foldAllResolvedFactorOutcomes:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+SELECT o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session,
+       COALESCE(s.n, 0) + COUNT(*),
+       COALESCE(s.sum_r, 0) + SUM(o.forward_r),
+       COALESCE(s.sum_abs, 0) + SUM(ABS(o.forward_r)),
+       COALESCE(s.wins, 0) + SUM(CASE WHEN o.forward_r > 0 THEN 1 ELSE 0 END),
+       ?
+FROM AnticipationFactorOutcome o
+LEFT JOIN AnticipationFactorStat s
+  ON s.factor_id = o.factor_id AND s.factor_tf = o.factor_tf AND s.side = o.side
+ AND s.mtf_align = o.mtf_align AND s.adx_bucket = o.adx_bucket AND s.session = o.session
+WHERE o.status = 'RESOLVED' AND o.created_at < ?
+GROUP BY o.factor_id, o.factor_tf, o.side, o.mtf_align, o.adx_bucket, o.session;
+getFactorStats:
+SELECT factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins FROM AnticipationFactorStat;
+
+getAllFactorStats:
+SELECT * FROM AnticipationFactorStat;
+
+-- นำเข้าจากไฟล์การเรียนรู้ (ไม่ทับสถิติที่เครื่องนี้สะสมเอง)
+insertFactorStatIfAbsent:
+INSERT OR IGNORE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertFactorStat:
+INSERT OR REPLACE INTO AnticipationFactorStat(factor_id, factor_tf, side, mtf_align, adx_bucket, session, n, sum_r, sum_abs, wins, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+countFactorStats:
+SELECT COUNT(*) FROM AnticipationFactorStat;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- OHLCV series access — ลบซีรีส์ที่ไม่ได้ใช้นาน คุมขนาดฐานข้อมูล (P13)
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS TvSeriesAccess (
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    source TEXT NOT NULL,
+    last_read_at INTEGER NOT NULL,
+    PRIMARY KEY(symbol, interval, source)
+);
+
+touchTvSeries:
+INSERT OR REPLACE INTO TvSeriesAccess(symbol, interval, source, last_read_at) VALUES (?, ?, ?, ?);
+
+-- ทุกซีรีส์ที่มีใน TvCandle พร้อมจำนวนแท่งและเวลาอ่านล่าสุด (ซีรีส์ที่ไม่เคยถูก track ใช้ updated_at แทน)
+getTvSeriesUsage:
+SELECT c.symbol, c.interval, c.source,
+       COUNT(*) AS bars,
+       COALESCE(a.last_read_at, MAX(c.updated_at)) AS last_used
+FROM TvCandle c
+LEFT JOIN TvSeriesAccess a
+  ON a.symbol = c.symbol AND a.interval = c.interval AND a.source = c.source
+GROUP BY c.symbol, c.interval, c.source;
+
+deleteTvSeries:
+DELETE FROM TvCandle WHERE symbol = ? AND interval = ? AND source = ?;
+
+deleteTvSeriesAccess:
+DELETE FROM TvSeriesAccess WHERE symbol = ? AND interval = ? AND source = ?;
+
+countAllTvCandles:
+SELECT COUNT(*) FROM TvCandle;
+
+-- งานคาดการณ์ที่ยังอยู่ในสถานะเฝ้า — ใช้กันลบซีรีส์ที่ยังถูกใช้
+getActiveAlertSymbols:
+SELECT DISTINCT symbol FROM AlertJob WHERE is_active = 1;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- AiWakeView — ติดตามผลมุมมองของ AI หลังถูกปลุก (P15)
+-- ═══════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS AiWakeView (
+    -- 1 แถวต่อการปลุก 1 ครั้ง (signal_id เดียวกับ AnticipationFactorOutcome)
+    signal_id TEXT NOT NULL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    decision TEXT NOT NULL,              -- NOTIFY | SKIP
+    bias TEXT NOT NULL,                  -- BUY | SELL | NEUTRAL
+    confidence INTEGER,
+    reason TEXT,
+    price REAL NOT NULL,                 -- ราคา ณ ตอนที่ AI ให้มุมมอง
+    atr REAL NOT NULL,
+    level_sl REAL,
+    level_tp REAL,
+    created_at INTEGER NOT NULL,
+    -- OPEN = กำลังติดตาม | TP / SL = ชนระดับก่อน | EXPIRED = ครบเวลาไม่ชนระดับ | CLOSED = วัดครบกรอบ (ไม่มีระดับ/SKIP)
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    result_r REAL,                       -- มีระดับ: +RR (TP) / −1 (SL) / ผลตอนหมดเวลา — หน่วย R
+    move_atr REAL,                       -- ราคาเคลื่อนไปตามทิศมุมมองเท่าไร (ATR) — SKIP/NEUTRAL: ขนาดการเคลื่อนที่
+    mfe_atr REAL,
+    mae_atr REAL,
+    bars INTEGER,
+    resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_view_open ON AiWakeView(status, symbol, interval);
+CREATE INDEX IF NOT EXISTS idx_ai_view_recent ON AiWakeView(symbol, created_at);
+
+upsertAiView:
+INSERT OR REPLACE INTO AiWakeView(
+    signal_id, symbol, interval, decision, bias, confidence, reason, price, atr, level_sl, level_tp, created_at, status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN');
+
+-- นำเข้าจากไฟล์การเรียนรู้ (ไม่ทับของเดิม)
+insertAiViewIfAbsent:
+INSERT OR IGNORE INTO AiWakeView(
+    signal_id, symbol, interval, decision, bias, confidence, reason, price, atr, level_sl, level_tp, created_at,
+    status, result_r, move_atr, mfe_atr, mae_atr, bars, resolved_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+getOpenAiViews:
+SELECT * FROM AiWakeView WHERE status = 'OPEN' AND symbol = ? AND interval = ? ORDER BY created_at ASC LIMIT 200;
+
+closeAiView:
+UPDATE AiWakeView
+SET status = ?, result_r = ?, move_atr = ?, mfe_atr = ?, mae_atr = ?, bars = ?, resolved_at = ?
+WHERE signal_id = ?;
+
+getRecentAiViews:
+SELECT * FROM AiWakeView WHERE symbol = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?;
+
+-- สรุปผลมุมมองที่ปิดแล้ว แยกตามการตัดสิน/ทิศ/ผล
+getAiViewStats:
+SELECT decision, bias, status,
+       COUNT(*) AS n,
+       AVG(result_r) AS avg_r,
+       AVG(move_atr) AS avg_move,
+       AVG(mfe_atr) AS avg_mfe
+FROM AiWakeView
+WHERE status != 'OPEN'
+GROUP BY decision, bias, status;
+
+getAllAiViews:
+SELECT * FROM AiWakeView ORDER BY created_at ASC;
+
+expireStaleOpenAiViews:
+UPDATE AiWakeView SET status = 'EXPIRED', resolved_at = ? WHERE status = 'OPEN' AND created_at < ?;
+
+deleteAiViewsBefore:
+DELETE FROM AiWakeView WHERE created_at < ?;
+
+-- มุมมอง SKIP เก่ากว่าหน้าต่างสถิติ (30 วัน) ไม่ได้ใช้แล้ว — ปลุกได้ทุกนาทีจึงมีวันละหลายร้อยแถว
+deleteOldSkipAiViews:
+DELETE FROM AiWakeView WHERE decision = 'SKIP' AND created_at < ?;
+
+-- ย้อนเติมมุมมองที่ AI ตัดสินไปก่อนมีตาราง AiWakeView (ครั้งเดียว)
+getAiDecisionsForBackfill:
+SELECT signal_id, symbol, interval,
+       MAX(ai_decision) AS decision, MAX(ai_bias) AS bias, MAX(ai_confidence) AS confidence, MAX(ai_reason) AS reason,
+       MAX(CASE WHEN woke = 1 THEN ref_price END) AS price, MAX(CASE WHEN woke = 1 THEN ref_atr END) AS atr,
+       MIN(created_at) AS created_at
+FROM AnticipationFactorOutcome
+WHERE ai_decision IS NOT NULL
+GROUP BY signal_id;
+
+getWakeAiCards:
+SELECT timestamp, content, metadata FROM ChatMessage WHERE metadata LIKE '%"type":"wake_ai"%' ORDER BY timestamp;
+

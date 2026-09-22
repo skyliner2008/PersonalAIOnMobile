@@ -1,0 +1,1677 @@
+package com.skyliner2008.jarvis.tools.trading
+
+import com.skyliner2008.jarvis.data.GeminiService
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.plugins.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import kotlinx.serialization.json.*
+import kotlinx.datetime.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+
+/**
+ * TradingApiService — HTTP layer สำหรับดึงข้อมูลการเทรดแบบ Real-time
+ */
+class TradingApiService(private val client: HttpClient) {
+
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private val smcApi = SmcApiService(client)
+    private val modernApi = ModernTechnicalApiService(smcApi)
+
+    /**
+     * Resolve the best exchange for a given symbol if not specified by the user.
+     * Maps Forex to OANDA/FX_IDC and Commodities to TVC/COMEX.
+     */
+    fun resolveExchange(symbol: String, requestedExchange: String?): String {
+        if (!requestedExchange.isNullOrBlank() && requestedExchange != "BINANCE") return requestedExchange
+        
+        val s = symbol.uppercase()
+        return when {
+            // Gold, Silver, Oil
+            s == "XAUUSD" || s == "GOLD" -> "TVC"
+            s == "XAGUSD" || s == "SILVER" -> "TVC"
+            s == "USOIL" || s == "WTI" || s == "CL=F" -> "TVC"
+            
+            // Forex: usually 6 chars (EURUSD, USDJPY, etc.)
+            s.length == 6 && s.all { it.isLetter() } -> "OANDA"
+            s.endsWith("=X") -> "FX_IDC"
+            
+            // Stocks: if user requests common stocks but doesn't specify exchange
+            s in listOf("AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA") -> "NASDAQ"
+            
+            // Default to BINANCE for crypto-like symbols or if nothing matches
+            else -> requestedExchange ?: "BINANCE"
+        }
+    }
+
+    // ─── Yahoo Finance ────────────────────────────────────────────────────────
+
+    suspend fun getYahooPrice(symbol: String): Map<String, String> {
+        val raw = symbol.uppercase().replace("/", "").replace("-", "")
+        val yahooSymbol = when {
+            raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD=X"
+            raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD=X"
+            raw.length == 6 && raw.all { it.isLetter() } -> "${raw}=X"
+            else -> symbol.uppercase()
+        }
+
+        return try {
+            val url = "https://query1.finance.yahoo.com/v8/finance/chart/$yahooSymbol"
+            val response = client.get(url) {
+                parameter("interval", "1d")
+                parameter("range", "1d")
+                header("User-Agent", "Mozilla/5.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!response.status.isSuccess()) return getYahooQuoteFallback(yahooSymbol)
+
+            val body = response.bodyAsText()
+            val root = json.parseToJsonElement(body).jsonObject
+            val meta = root["chart"]?.jsonObject?.get("result")?.jsonArray
+                ?.firstOrNull()?.jsonObject?.get("meta")?.jsonObject
+                ?: return getYahooQuoteFallback(yahooSymbol)
+
+            fun metaStr(key: String) = meta[key]?.jsonPrimitive?.contentOrNull ?: "N/A"
+            fun metaDbl(key: String) = meta[key]?.jsonPrimitive?.doubleOrNull
+
+            val price       = metaDbl("regularMarketPrice") ?: 0.0
+            val prevClose   = metaDbl("chartPreviousClose") ?: metaDbl("previousClose") ?: price
+            val change      = price - prevClose
+            val changePct   = if (prevClose != 0.0) (change / prevClose * 100) else 0.0
+            val high52w     = metaDbl("fiftyTwoWeekHigh") ?: 0.0
+            val low52w      = metaDbl("fiftyTwoWeekLow") ?: 0.0
+            val currency    = metaStr("currency")
+            val marketState = metaStr("marketState")
+
+            mapOf(
+                "symbol"       to yahooSymbol,
+                "price"        to "%.4f".format(price),
+                "change"       to "%.4f".format(change),
+                "change_pct"   to "%.2f%%".format(changePct),
+                "prev_close"   to "%.4f".format(prevClose),
+                "high_52w"     to "%.4f".format(high52w),
+                "low_52w"      to "%.4f".format(low52w),
+                "currency"     to currency,
+                "market_state" to "$marketState | YAHOO_CHART",
+                "direction"    to if (change >= 0) "UP" else "DOWN",
+                "source"       to "YAHOO_CHART"
+            )
+        } catch (e: Exception) {
+            getYahooQuoteFallback(yahooSymbol)
+        }
+    }
+
+    suspend fun getBestEffortPrice(symbol: String): Map<String, String> {
+        val raw = symbol.uppercase().replace("/", "").replace("-", "")
+        val canonical = when {
+            raw.contains("XAU") || raw.contains("GOLD") || raw == "GC=F" || raw == "GCF" -> "XAUUSD"
+            raw.contains("XAG") || raw.contains("SILVER") -> "XAGUSD"
+            raw.endsWith("=X") -> raw.removeSuffix("=X")
+            else -> raw
+        }
+
+        // Detect Yahoo-style crypto (e.g. BTCUSD from BTC-USD) and create proper Binance symbol
+        val cryptoCanonical = when {
+            canonical.endsWith("USDT") || canonical.endsWith("BTC") || canonical.endsWith("ETH") -> canonical
+            canonical.endsWith("USD") && canonical.length > 3 -> {
+                val base = canonical.removeSuffix("USD")
+                // Check if it's a Forex pair (base is a known fiat currency)
+                val fiatCurrencies = setOf("EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "CNY", "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "INR", "THB")
+                if (base.length == 3 && base in fiatCurrencies) canonical  // It's Forex, keep as-is
+                else "${base}USDT"  // It's crypto (BTC-USD → BTCUSDT)
+            }
+            else -> canonical
+        }
+
+        val exchanges = when {
+            canonical == "XAUUSD" || canonical == "XAGUSD" -> listOf("OANDA", "FX_IDC", "TVC")
+            canonical.length == 6 && canonical.all { it.isLetter() } && !cryptoCanonical.endsWith("USDT") -> listOf("OANDA", "FX_IDC")
+            cryptoCanonical.endsWith("USDT") -> listOf("BINANCE")
+            else -> listOf(resolveExchange(cryptoCanonical, null))
+        }
+
+        for (ex in exchanges.distinct()) {
+            val tvSymbol = if (ex == "BINANCE") cryptoCanonical else canonical
+            val ta = getTechnicalAnalysis(tvSymbol, ex, "1m")
+            val close = ta["close"]?.toDoubleOrNull()
+            if (close != null && close > 0.0) {
+                // [สำคัญ] column "change" ของ TradingView scanner เป็น **เปอร์เซ็นต์** ไม่ใช่ราคา
+                // ยืนยันได้จากการใช้งานในไฟล์นี้เอง: getTopGainers เรียงด้วย "change"
+                // และ getVolumeBreakout กรอง change > 3.0 ซึ่งหมายถึง +3%
+                //
+                // เดิมโค้ดนี้ตีความเป็นราคา จึงได้
+                //   change     = เปอร์เซ็นต์ แต่ติดป้ายว่าเป็นจุดราคา
+                //   prev_close = close − เปอร์เซ็นต์ (ทองปิด 4085.20 ลบ 0.31 = 4084.89
+                //                ทั้งที่ค่าจริง ≈ 4072.5 — คลาดเคลื่อนเกือบทั้งวัน)
+                // และหน่วยไม่ตรงกับสาขา Yahoo/SMC ที่คำนวณถูกอยู่แล้ว
+                val changePct = ta["change"]?.toDoubleOrNull() ?: 0.0
+                val prevClose = if (changePct != -100.0) close / (1.0 + changePct / 100.0) else close
+                val changeAbs = close - prevClose
+                return mapOf(
+                    "symbol" to symbol.uppercase(),
+                    "canonical_symbol" to canonical,
+                    "price" to "%.4f".format(close),
+                    "change" to "%.4f".format(changeAbs),
+                    "change_pct" to "%.2f%%".format(changePct),
+                    "prev_close" to "%.4f".format(prevClose),
+                    "high_52w" to "N/A",
+                    "low_52w" to "N/A",
+                    "currency" to "USD",
+                    "market_state" to "LIVE | TV:$ex",
+                    "direction" to if (changePct >= 0.0) "UP" else "DOWN",
+                    "source" to "TV:$ex"
+                )
+            }
+        }
+
+        val requestedSymbol = symbol.uppercase()
+        val yahoo = getYahooPrice(symbol).toMutableMap()
+        if (!yahoo.containsKey("error")) {
+            val resolvedSymbol = yahoo["symbol"] ?: canonical
+            yahoo["canonical_symbol"] = resolvedSymbol
+            yahoo["symbol"] = requestedSymbol
+            return yahoo
+        }
+
+        getSmcPriceFallback(cryptoCanonical, requestedSymbol)?.let { return it }
+        return yahoo
+    }
+
+    private suspend fun getSmcPriceFallback(canonical: String, requestedSymbol: String): Map<String, String>? {
+        for (tf in listOf("1m", "5m", "15m")) {
+            val fetch = smcApi.fetchCandlesWithSource(canonical, tf, 120)
+            val candles = fetch.candles
+            if (fetch.source == "NONE" || candles.size < 2) continue
+
+            val last = candles.last()
+            val prev = candles[candles.lastIndex - 1]
+            val change = last.close - prev.close
+            val changePct = if (prev.close != 0.0) (change / prev.close) * 100.0 else 0.0
+
+            return mapOf(
+                "symbol" to requestedSymbol,
+                "canonical_symbol" to canonical,
+                "price" to "%.4f".format(last.close),
+                "change" to "%.4f".format(change),
+                "change_pct" to "%.2f%%".format(changePct),
+                "prev_close" to "%.4f".format(prev.close),
+                "high_52w" to "N/A",
+                "low_52w" to "N/A",
+                "currency" to "USD",
+                "market_state" to "LIVE | ${fetch.source} | TF:$tf",
+                "direction" to if (change >= 0.0) "UP" else "DOWN",
+                "source" to "SMC_FALLBACK:${fetch.source}"
+            )
+        }
+        return null
+    }
+
+    private suspend fun getYahooQuoteFallback(yahooSymbol: String): Map<String, String> {
+        return try {
+            val response = client.get("https://query1.finance.yahoo.com/v7/finance/quote") {
+                parameter("symbols", yahooSymbol)
+                header("User-Agent", "Mozilla/5.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!response.status.isSuccess()) return mapOf("error" to "HTTP ${response.status.value}")
+
+            val body = response.bodyAsText()
+            val root = json.parseToJsonElement(body).jsonObject
+            val quote = root["quoteResponse"]?.jsonObject?.get("result")?.jsonArray
+                ?.firstOrNull()?.jsonObject
+                ?: return mapOf("error" to "No quote for symbol: $yahooSymbol")
+
+            fun qStr(key: String) = quote[key]?.jsonPrimitive?.contentOrNull ?: "N/A"
+            fun qDbl(key: String) = quote[key]?.jsonPrimitive?.doubleOrNull
+
+            val price = qDbl("regularMarketPrice") ?: 0.0
+            val prevClose = qDbl("regularMarketPreviousClose") ?: qDbl("regularMarketOpen") ?: price
+            val change = price - prevClose
+            val changePct = if (prevClose != 0.0) (change / prevClose * 100) else 0.0
+
+            mapOf(
+                "symbol" to (qStr("symbol").takeIf { it.isNotBlank() && it != "N/A" } ?: yahooSymbol),
+                "price" to "%.4f".format(price),
+                "change" to "%.4f".format(change),
+                "change_pct" to "%.2f%%".format(changePct),
+                "prev_close" to "%.4f".format(prevClose),
+                "high_52w" to "%.4f".format(qDbl("fiftyTwoWeekHigh") ?: 0.0),
+                "low_52w" to "%.4f".format(qDbl("fiftyTwoWeekLow") ?: 0.0),
+                "currency" to qStr("currency"),
+                "market_state" to "${qStr("marketState")} | YAHOO_QUOTE",
+                "direction" to if (change >= 0) "UP" else "DOWN",
+                "source" to "YAHOO_QUOTE"
+            )
+        } catch (e: Exception) {
+            mapOf("error" to "Yahoo Finance error: ${e.message}")
+        }
+    }
+
+    // ─── AI Sector Resolver ───────────────────────────────────────────────────
+
+    val TV_US_SECTORS = listOf(
+        "Technology Services", "Electronic Technology", "Finance", "Health Technology", 
+        "Retail Trade", "Producer Manufacturing", "Energy Minerals", "Consumer Non-Durables", 
+        "Utilities", "Consumer Durables", "Non-Energy Minerals", "Consumer Services", 
+        "Industrial Services", "Transportation", "Process Industries", "Commercial Services", 
+        "Communications", "Health Services", "Distribution Services", "Miscellaneous"
+    )
+
+    val TV_TH_SECTORS = listOf(
+        "Agro & Food Industry", "Consumer Products", "Financials", "Industrials", 
+        "Property & Construction", "Resources", "Services", "Technology",
+        "Banking", "Energy & Utilities", "Commerce", "Health Care Services", 
+        "Information & Communication Technology", "Food & Beverage", "Finance & Securities",
+        "Property Development", "Construction Materials", "Automotive", "Petrochemicals & Chemicals",
+        "Transportation & Logistics", "Media & Publishing", "Professional Services", "Tourism & Leisure"
+    )
+
+    suspend fun resolveSectorsWithAI(
+        geminiService: GeminiService,
+        userInput: String,
+        market: String
+    ): List<String> {
+        // Step 1: Priority check using static aliases (fast & verified)
+        val staticAliases = getSectorAliases(userInput, market)
+        if (staticAliases.size > 1 || (staticAliases.isNotEmpty() && !staticAliases[0].equals(userInput, ignoreCase = true))) {
+            return staticAliases
+        }
+
+        // Step 2: Fallback to AI for unrecognized terms
+        val prompt = """
+            Map the user's intent "$userInput" to the most relevant TradingView market sectors for the $market market.
+            Authorized sectors: [Commercial & Professional Services, Communications, Consumer Durables, Consumer Non-Durables, Consumer Services, Distribution Services, Electronic Technology, Energy Minerals, Finance, Health Services, Health Technology, Industrial Services, Miscellaneous, Non-Energy Minerals, Process Industries, Producer Manufacturing, Retail Trade, Technology Services, Transportation, Utilities]
+            
+            Return ONLY a comma-separated list of matches from the authorized list.
+            Return exact strings. If no good match, return 'Finance' as a safe default for business/property or 'Technology Services' for tech.
+        """.trimIndent()
+
+        return try {
+            val response = geminiService.generateResponse(
+                prompt = prompt,
+                intentAddon = """
+                    You are a specialized financial sector mapper for TradingView Scanner.
+                    Respond ONLY with a comma-separated list of exact sector names from this authorized list:
+                    [Commercial & Professional Services, Communications, Consumer Durables, Consumer Non-Durables, Consumer Services, Distribution Services, Electronic Technology, Energy Minerals, Finance, Health Services, Health Technology, Industrial Services, Miscellaneous, Non-Energy Minerals, Process Industries, Producer Manufacturing, Retail Trade, Technology Services, Transportation, Utilities]
+                    
+                    Rules:
+                    1. For Banks/Finance/Insurance, use 'Finance'.
+                    2. For Tech/Electronics, use 'Electronic Technology, Technology Services'.
+                    3. For Energy/Power, use 'Energy Minerals, Utilities'.
+                    4. For Property/Real Estate, use 'Finance'.
+                    5. For Healthcare, use 'Health Services, Health Technology'.
+                    
+                    Return ONLY the names, no extra text.
+                """.trimIndent()
+            ).trim()
+            if (response.isBlank() || response.contains("error", ignoreCase = true)) listOf(userInput)
+            else response.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        } catch (_: Exception) { listOf(userInput) }
+    }
+
+    suspend fun getMarketSnapshot(
+        sector: String? = null,
+        market: String? = null,
+        limit: Int = 10,
+        resolvedAliases: List<String>? = null
+    ): Any {
+        if (!sector.isNullOrBlank()) {
+            return getSectorSnapshot(sector, market ?: "US", limit, resolvedAliases)
+        }
+        if (market?.uppercase() == "TH") return getSectorSnapshot("All", "TH", limit)
+        if (market?.uppercase() == "CRYPTO") return getTopGainers("BINANCE", limit)
+        
+        // Forex Snapshot
+        if (market?.uppercase() == "FOREX" || market?.uppercase() == "FX") {
+            val fxPairs = listOf("EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X")
+            return fxPairs.associateWith { try { getYahooPrice(it) } catch (_: Exception) { mapOf("error" to "N/A") } }
+        }
+        
+        // Commodities Snapshot
+        if (market?.uppercase() == "GOLD" || market?.uppercase() == "COMMODITY") {
+            val comms = mapOf("Gold" to "GC=F", "Silver" to "SI=F", "Oil (WTI)" to "CL=F", "Oil (Brent)" to "BZ=F", "Copper" to "HG=F")
+            return comms.mapValues { try { getYahooPrice(it.value) } catch (_: Exception) { mapOf("error" to "N/A") } }
+        }
+
+        val symbols = mapOf(
+            "S&P500" to "^GSPC", "NASDAQ" to "^IXIC", "DOW" to "^DJI", "VIX" to "^VIX",
+            "BTC" to "BTC-USD", "ETH" to "ETH-USD", "SOL" to "SOL-USD", "Gold" to "GC=F", "Oil" to "CL=F"
+        )
+        return symbols.mapValues { (_, sym) ->
+            try { getYahooPrice(sym) } catch (_: Exception) { mapOf("error" to "unavailable") }
+        }
+    }
+
+    private suspend fun getSectorSnapshot(
+        sector: String,
+        market: String,
+        limit: Int,
+        resolvedAliases: List<String>? = null
+    ): List<Map<String, String>> {
+        val isTh = market.uppercase() == "TH"
+        val mkt = if (isTh) "thailand" else "america"
+        val aliases = resolvedAliases ?: getSectorAliases(sector, market)
+        
+        val filters = mutableListOf<JsonObject>()
+        
+        // Exchange filter
+        if (isTh) {
+            filters.add(buildJsonObject {
+                put("left", "exchange")
+                put("operation", "in_range")
+                put("right", buildJsonArray { add("SET"); add("MAI") })
+            })
+        } else {
+            filters.add(buildJsonObject {
+                put("left", "exchange")
+                put("operation", "equal")
+                put("right", "NASDAQ") // Default to NASDAQ for US snapshot if not specified
+            })
+        }
+
+        // Sector filter
+        if (!sector.equals("All", ignoreCase = true)) {
+            filters.add(buildJsonObject {
+                put("left", "sector")
+                if (aliases.size == 1) {
+                    put("operation", "equal"); put("right", aliases[0])
+                } else {
+                    put("operation", "in_range")
+                    put("right", buildJsonArray { aliases.forEach { add(it) } })
+                }
+            })
+        }
+        
+        return scanTradingViewByMarket(mkt, extraFilters = filters, sortBy = "market_cap_basic", limit = 20)
+    }
+
+    private fun getSectorAliases(sector: String, market: String): List<String> {
+        val s = sector.lowercase()
+        val isTh = market.uppercase() == "TH"
+        return when {
+            s.contains("energy") || s.contains("oil") || s.contains("gas") ->
+                listOf("Energy Minerals", "Utilities")
+            s.contains("tech") || s.contains("ai") || s.contains("semiconductor") ->
+                listOf("Electronic Technology", "Technology Services")
+            s.contains("finance") || s.contains("bank") || s.contains("property") || s.contains("estate") ->
+                listOf("Finance")
+            s.contains("retail") || s.contains("commerce") || s.contains("consumer") ->
+                listOf("Retail Trade", "Consumer Services")
+            s.contains("health") || s.contains("hospital") || s.contains("medical") ->
+                listOf("Health Services", "Health Technology")
+            s.contains("transport") || s.contains("logistics") ->
+                listOf("Transportation", "Industrial Services")
+            s.contains("industrial") || s.contains("manufactur") ->
+                listOf("Producer Manufacturing", "Industrial Services", "Process Industries")
+            else -> listOf(sector)
+        }
+    }
+
+    private val defaultColumns = listOf("name", "description", "market_cap_basic", "close", "change", "change_abs", "volume", "RSI", "MACD.macd", "MACD.signal", "BB.upper", "BB.lower", "BB.basis", "ATR", "ADX", "EMA20", "EMA50", "Stoch.K", "Stoch.D", "Recommend.All")
+
+    private fun buildScannerBody(exchange: String, sortBy: String = "change", sortOrder: String = "desc", filters: List<JsonObject> = emptyList(), columns: List<String> = defaultColumns, limit: Int = 50): JsonObject = buildJsonObject {
+        put("filter", buildJsonArray {
+            if (!exchange.isNullOrBlank()) {
+                add(buildJsonObject { put("left", "exchange"); put("operation", "equal"); put("right", exchange.uppercase()) })
+            }
+            add(buildJsonObject { put("left", "volume"); put("operation", "greater"); put("right", 0) })
+            filters.forEach { add(it) }
+        })
+        put("columns", buildJsonArray { columns.forEach { add(it) } })
+        put("sort", buildJsonObject { put("sortBy", sortBy); put("sortOrder", sortOrder) })
+        put("range", buildJsonArray { add(0); add(limit) })
+    }
+
+    suspend fun getTopGainers(exchange: String, limit: Int = 25) = scanTradingView(exchange, sortBy = "change", sortOrder = "desc", limit = limit)
+    suspend fun getTopLosers(exchange: String, limit: Int = 25) = scanTradingView(exchange, sortBy = "change", sortOrder = "asc", limit = limit)
+    suspend fun getBollingerSqueeze(exchange: String, limit: Int = 50) = scanTradingView(exchange, sortBy = "BB.width", sortOrder = "asc", extraFilters = listOf(buildJsonObject { put("left", "BB.width"); put("operation", "less"); put("right", 0.04) }), columns = defaultColumns + "BB.width", limit = limit)
+    suspend fun getOversoldSymbols(exchange: String, limit: Int = 30) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "RSI"); put("operation", "less"); put("right", 30) }), sortBy = "RSI", sortOrder = "asc", limit = limit)
+    suspend fun getOverboughtSymbols(exchange: String, limit: Int = 30) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "RSI"); put("operation", "greater"); put("right", 70) }), sortBy = "RSI", sortOrder = "desc", limit = limit)
+    suspend fun getVolumeBreakout(exchange: String, limit: Int = 25) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "change"); put("operation", "greater"); put("right", 3.0) }, buildJsonObject { put("left", "volume"); put("operation", "greater"); put("right", 100000) }), sortBy = "relative_volume_10d_calc", sortOrder = "desc", columns = defaultColumns + "relative_volume_10d_calc", limit = limit)
+
+    private suspend fun scanTradingViewByMarket(marketPath: String, exchange: String? = null, sortBy: String = "change", sortOrder: String = "desc", extraFilters: List<JsonObject> = emptyList(), columns: List<String> = defaultColumns, limit: Int = 50): List<Map<String, String>> {
+        return try {
+            val url = "https://scanner.tradingview.com/$marketPath/scan"
+            val body = buildScannerBody(exchange ?: "", sortBy, sortOrder, extraFilters, columns, limit)
+            val resp = client.post(url) { contentType(ContentType.Application.Json); setBody(body.toString()); header("User-Agent", "Mozilla/5.0"); timeout { requestTimeoutMillis = 20_000 } }
+            if (!resp.status.isSuccess()) return listOf(mapOf("error" to "HTTP ${resp.status.value}"))
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val data = root["data"]?.jsonArray ?: return emptyList()
+            
+            val results = data.map { node ->
+                val d = node.jsonObject
+                val name = d["s"]?.jsonPrimitive?.content ?: "Unknown"
+                val vals = d["d"]?.jsonArray ?: return@map emptyMap<String, String>()
+                
+                val map = mutableMapOf<String, String>()
+                map["symbol"] = name.substringAfter(":")
+                columns.forEachIndexed { i, col ->
+                    val v = vals.getOrNull(i)
+                    map[col] = when {
+                        v == null || v is JsonNull -> "N/A"
+                        v.jsonPrimitive.isString -> v.jsonPrimitive.content
+                        col == "market_cap_basic" -> formatMarketCap(v.jsonPrimitive.doubleOrNull ?: 0.0)
+                        else -> v.jsonPrimitive.doubleOrNull?.let { "%.4f".format(it).trimEnd('0').trimEnd('.') } ?: v.jsonPrimitive.content
+                    }
+                }
+                map
+            }.filter { it.isNotEmpty() }
+
+            if (marketPath == "thailand") {
+                results.filter { !(it["symbol"] ?: "").contains(".") }
+            } else {
+                results
+            }
+        } catch (e: Exception) { listOf(mapOf("error" to "Scanner error: ${e.message}")) }
+    }
+
+    private fun formatMarketCap(cap: Double): String {
+        return when {
+            cap >= 1_000_000_000_000 -> "${"%.2f".format(cap / 1_000_000_000_000)}T"
+            cap >= 1_000_000_000 -> "${"%.2f".format(cap / 1_000_000_000)}B"
+            cap >= 1_000_000 -> "${"%.2f".format(cap / 1_000_000)}M"
+            else -> "%.2f".format(cap)
+        }
+    }
+
+    suspend fun scanTradingView(
+        exchange: String, sortBy: String = "market_cap_basic", sortOrder: String = "desc", extraFilters: List<JsonObject> = emptyList(), columns: List<String> = defaultColumns, limit: Int = 50): List<Map<String, String>> {
+        val market = exchangeToMarket(exchange)
+        return scanTradingViewByMarket(market, exchange, sortBy, sortOrder, extraFilters, columns, limit)
+    }
+
+    private val fundamentalColumns = listOf(
+        "name", "description", "close", "change", "change_abs", "currency", "sector", "industry", "country",
+        "market_cap_basic", "price_earnings_ttm", "price_sales_current", "price_book_fq", "price_free_cash_flow_ttm",
+        "enterprise_value_fq", "enterprise_value_to_revenue_ttm",
+        "earnings_per_share_basic_ttm", "earnings_per_share_diluted_ttm", "earnings_per_share_basic_fy",
+        "dividends_yield_current", "dps_common_stock_prim_issue_fy",
+        "total_shares_outstanding_fundamental", "float_shares_outstanding",
+        "total_debt_fq", "net_debt_fq", "total_assets_fq", "total_liabilities_fq", "total_equity_fq", "debt_to_equity_fq",
+        "total_revenue_ttm", "total_revenue_fy", "total_revenue_fq",
+        "net_income_ttm", "net_income_fy", "net_income_fq",
+        "operating_margin_ttm", "net_margin_ttm", "free_cash_flow_ttm",
+        "return_on_equity_fq", "return_on_assets_fq", "return_on_invested_capital_fq",
+        "price_target_average", "price_target_high", "price_target_low",
+        "Recommend.All", "beta_1_year", "price_52_week_high", "price_52_week_low", "Perf.Y", "Perf.YTD"
+    )
+
+    /**
+     * ดึงข้อมูลพื้นฐาน งบดุล งบการเงิน และมัลติเปิลประเมินมูลค่า (Fundamental Overview)
+     * รองรับหุ้นไทย (SET/MAI) และหุ้นต่างประเทศ (NASDAQ, NYSE, etc.)
+     */
+    suspend fun getStockFundamentals(rawSymbol: String, requestedExchange: String? = null): StockFundamentalData? {
+        val s = rawSymbol.trim().uppercase()
+        val (detectedExchange, cleanSymbol) = when {
+            ":" in s -> s.substringBefore(":") to s.substringAfter(":")
+            s.endsWith(".BK") -> "SET" to s.removeSuffix(".BK")
+            !requestedExchange.isNullOrBlank() -> requestedExchange.uppercase() to s
+            else -> null to s
+        }
+
+        val attempts = mutableListOf<Pair<String, List<String>>>()
+        if (detectedExchange != null) {
+            val market = exchangeToMarket(detectedExchange)
+            attempts.add(market to listOf("$detectedExchange:$cleanSymbol"))
+        } else {
+            // ลองตลาดไทยก่อน (SET, MAI) แล้วตามด้วยตลาดสหรัฐ (NASDAQ, NYSE, AMEX)
+            attempts.add("thailand" to listOf("SET:$cleanSymbol", "MAI:$cleanSymbol"))
+            attempts.add("america" to listOf("NASDAQ:$cleanSymbol", "NYSE:$cleanSymbol", "AMEX:$cleanSymbol"))
+            attempts.add("global" to listOf(cleanSymbol))
+        }
+
+        for ((marketPath, tickers) in attempts) {
+            try {
+                val url = "https://scanner.tradingview.com/$marketPath/scan"
+                val payload = buildJsonObject {
+                    put("symbols", buildJsonObject {
+                        put("tickers", buildJsonArray { tickers.forEach { add(it) } })
+                    })
+                    put("columns", buildJsonArray { fundamentalColumns.forEach { add(it) } })
+                }
+                val resp = client.post(url) {
+                    contentType(ContentType.Application.Json)
+                    setBody(payload.toString())
+                    header("User-Agent", "Mozilla/5.0")
+                    timeout { requestTimeoutMillis = 15_000 }
+                }
+                if (!resp.status.isSuccess()) continue
+                val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+                val data = root["data"]?.jsonArray ?: continue
+                for (item in data) {
+                    val node = item.jsonObject
+                    val fullTicker = node["s"]?.jsonPrimitive?.content ?: continue
+                    val vals = node["d"]?.jsonArray ?: continue
+                    if (vals.isEmpty() || vals[0] is JsonNull) continue
+
+                    fun dbl(idx: Int): Double? {
+                        val el = vals.getOrNull(idx) ?: return null
+                        if (el is JsonNull) return null
+                        return el.jsonPrimitive.doubleOrNull
+                    }
+
+                    fun str(idx: Int): String {
+                        val el = vals.getOrNull(idx) ?: return ""
+                        if (el is JsonNull) return ""
+                        return el.jsonPrimitive.contentOrNull ?: ""
+                    }
+
+                    val name = str(0)
+                    val description = str(1)
+                    val close = dbl(2)
+                    val change = dbl(3)
+                    val changeAbs = dbl(4)
+                    val currency = str(5)
+                    val sector = str(6)
+                    val industry = str(7)
+                    val country = str(8)
+                    val marketCap = dbl(9)
+                    val peTtm = dbl(10)
+                    val psCurrent = dbl(11)
+                    val pbFq = dbl(12)
+                    val pfcfTtm = dbl(13)
+                    val evFq = dbl(14)
+                    val evToRev = dbl(15)
+                    val epsBasicTtm = dbl(16)
+                    val epsDilutedTtm = dbl(17)
+                    val epsBasicFy = dbl(18)
+                    val divYield = dbl(19)
+                    val dpsFy = dbl(20)
+                    val totalShares = dbl(21)
+                    val floatShares = dbl(22)
+                    val totalDebt = dbl(23)
+                    val netDebt = dbl(24)
+                    val totalAssets = dbl(25)
+                    val totalLiabilities = dbl(26)
+                    val totalEquity = dbl(27)
+                    val debtToEquity = dbl(28)
+                    val revTtm = dbl(29)
+                    val revFy = dbl(30)
+                    val revFq = dbl(31)
+                    val niTtm = dbl(32)
+                    val niFy = dbl(33)
+                    val niFq = dbl(34)
+                    val opMargin = dbl(35)
+                    val netMargin = dbl(36)
+                    val fcf = dbl(37)
+                    val roe = dbl(38)
+                    val roa = dbl(39)
+                    val roic = dbl(40)
+                    val ptAvg = dbl(41)
+                    val ptHigh = dbl(42)
+                    val ptLow = dbl(43)
+                    val recScore = dbl(44)
+                    val beta = dbl(45)
+                    val high52 = dbl(46)
+                    val low52 = dbl(47)
+                    val perfY = dbl(48)
+                    val perfYtd = dbl(49)
+
+                    // คำนวณอนุพันธ์
+                    val cashAndEquiv = if (totalDebt != null && netDebt != null) {
+                        kotlin.math.max(0.0, totalDebt - netDebt)
+                    } else null
+
+                    val closelyHeldShares = if (totalShares != null && floatShares != null) {
+                        kotlin.math.max(0.0, totalShares - floatShares)
+                    } else null
+
+                    val floatPct = if (totalShares != null && totalShares > 0.0 && floatShares != null) {
+                        (floatShares / totalShares) * 100.0
+                    } else null
+
+                    val closelyHeldPct = if (totalShares != null && totalShares > 0.0 && closelyHeldShares != null) {
+                        (closelyHeldShares / totalShares) * 100.0
+                    } else null
+
+                    val upsidePct = if (close != null && close > 0.0 && ptAvg != null) {
+                        ((ptAvg - close) / close) * 100.0
+                    } else null
+
+                    val resolvedEx = fullTicker.substringBefore(":", detectedExchange ?: "SET")
+
+                    return StockFundamentalData(
+                        symbol = cleanSymbol,
+                        ticker = fullTicker,
+                        name = if (name.isNotBlank()) name else cleanSymbol,
+                        description = if (description.isNotBlank()) description else cleanSymbol,
+                        exchange = resolvedEx,
+                        currency = currency,
+                        sector = sector,
+                        industry = industry,
+                        country = country,
+                        closePrice = close,
+                        changePrice = change,
+                        changePct = changeAbs,
+                        high52w = high52,
+                        low52w = low52,
+                        beta1y = beta,
+                        perf1y = perfY,
+                        perfYtd = perfYtd,
+                        marketCap = marketCap,
+                        peTtm = peTtm,
+                        psCurrent = psCurrent,
+                        pbFq = pbFq,
+                        pfcfTtm = pfcfTtm,
+                        enterpriseValue = evFq,
+                        evToRevenueTtm = evToRev,
+                        epsBasicTtm = epsBasicTtm,
+                        epsDilutedTtm = epsDilutedTtm,
+                        epsBasicFy = epsBasicFy,
+                        dividendYieldCurrent = divYield,
+                        dpsFy = dpsFy,
+                        totalShares = totalShares,
+                        floatShares = floatShares,
+                        floatPct = floatPct,
+                        closelyHeldShares = closelyHeldShares,
+                        closelyHeldPct = closelyHeldPct,
+                        totalDebt = totalDebt,
+                        netDebt = netDebt,
+                        cashAndEquivalents = cashAndEquiv,
+                        totalAssets = totalAssets,
+                        totalLiabilities = totalLiabilities,
+                        totalEquity = totalEquity,
+                        debtToEquity = debtToEquity,
+                        totalRevenueTtm = revTtm,
+                        totalRevenueFy = revFy,
+                        totalRevenueFq = revFq,
+                        netIncomeTtm = niTtm,
+                        netIncomeFy = niFy,
+                        netIncomeFq = niFq,
+                        freeCashFlowTtm = fcf,
+                        operatingMarginTtm = opMargin,
+                        netMarginTtm = netMargin,
+                        returnOnEquity = roe,
+                        returnOnAssets = roa,
+                        returnOnInvestedCapital = roic,
+                        targetPriceAvg = ptAvg,
+                        targetPriceHigh = ptHigh,
+                        targetPriceLow = ptLow,
+                        upsidePct = upsidePct,
+                        recommendationScore = recScore
+                    )
+                }
+            } catch (_: Exception) {
+                // ข้ามไปลอง attempt ถัดไป
+            }
+        }
+        return null
+    }
+
+
+    suspend fun getTechnicalAnalysis(symbol: String, exchange: String, interval: String = "1h"): Map<String, String> {
+        return try {
+            val fullSymbol = if (":" in symbol) symbol else "${exchange.uppercase()}:${symbol.uppercase()}"
+            val normalized = TaIndicators.normalizeTimeframe(interval)
+            val tfSuffix = when (normalized) {
+                "1m" -> "|1"
+                "3m" -> "|3"
+                "5m" -> "|5"
+                "15m" -> "|15"
+                "30m" -> "|30"
+                "4h" -> "|240"
+                "1D" -> "|1D"
+                "1W" -> "|1W"
+                else -> "" // 1h is default / plain
+            }
+            val requestCols = taColumns.map { it + tfSuffix }
+            val url = "https://scanner.tradingview.com/symbol"
+            val resp = client.get(url) { parameter("symbol", fullSymbol); parameter("fields", requestCols.joinToString(",")); header("User-Agent", "Mozilla/5.0"); timeout { requestTimeoutMillis = 15_000 } }
+            if (!resp.status.isSuccess()) return mapOf("error" to "HTTP ${resp.status.value}")
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val res = mutableMapOf("symbol" to symbol.uppercase())
+            taColumns.forEach { col ->
+                val v = root[col + tfSuffix]
+                res[col] = when {
+                    v == null || v is JsonNull -> "N/A"
+                    v.jsonPrimitive.isString -> v.jsonPrimitive.content
+                    else -> v.jsonPrimitive.doubleOrNull?.let { "%.4f".format(it).trimEnd('0').trimEnd('.') } ?: v.jsonPrimitive.content
+                }
+            }
+            val rec = root["Recommend.All$tfSuffix"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+            res["signal"] = when { rec >= 0.5 -> "STRONG BUY"; rec >= 0.1 -> "BUY"; rec >= -0.1 -> "HOLD"; rec >= -0.5 -> "SELL"; else -> "STRONG SELL" }
+            res["recommend_score"] = "%.3f".format(rec)
+            res
+        } catch (e: Exception) { mapOf("error" to "TA error: ${e.message}") }
+    }
+
+    suspend fun getMultiTimeframeAnalysis(symbol: String, exchange: String): Map<String, Map<String, String>> {
+        return listOf("1W", "1D", "4h", "1h", "15m").associateWith { try { getTechnicalAnalysis(symbol, exchange, it) } catch (_: Exception) { mapOf("error" to "N/A") } }
+    }
+
+    private val taColumns = listOf("close", "change", "volume", "RSI", "MACD.macd", "MACD.signal", "BB.basis", "BB.width", "ATR", "ADX", "Recommend.All", "buy_signals", "sell_signals", "neutral_signals")
+
+    suspend fun getBinanceFuturesPositioning(symbol: String): BinancePositioningSentiment? = coroutineScope {
+        val raw = symbol.uppercase().trim()
+            .removePrefix("BINANCE:")
+            .removePrefix("BYBIT:")
+            .removePrefix("OKX:")
+            .removeSuffix("-USD")
+            .removeSuffix("/USDT")
+            .removeSuffix("USD")
+            .removeSuffix(".P")
+        val pair = if (raw.endsWith("USDT")) raw else "${raw}USDT"
+
+        try {
+            val globalJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val topJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/topLongShortPositionRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val takerJob = async {
+                try {
+                    val resp = client.get("https://fapi.binance.com/futures/data/takerlongshortRatio") {
+                        parameter("symbol", pair)
+                        parameter("period", "1h")
+                        parameter("limit", 1)
+                        timeout { requestTimeoutMillis = 6_000 }
+                    }
+                    if (resp.status.isSuccess()) json.parseToJsonElement(resp.bodyAsText()).jsonArray.firstOrNull()?.jsonObject else null
+                } catch (_: Exception) { null }
+            }
+
+            val global = globalJob.await() ?: return@coroutineScope null
+            val top = topJob.await()
+            val taker = takerJob.await()
+
+            val retailLong = (global["longAccount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val retailShort = (global["shortAccount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val retailRatio = global["longShortRatio"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+
+            val topLong = (top?.get("longAccount")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val topShort = (top?.get("shortAccount")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.5) * 100.0
+            val topRatio = top?.get("longShortRatio")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+
+            val takerRatio = taker?.get("buySellRatio")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 1.0
+            val takerBuy = taker?.get("buyVol")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+            val takerSell = taker?.get("sellVol")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+
+            val divSignal = when {
+                retailRatio < 0.95 && topRatio > 1.3 -> "🟢 Contrarian Bullish (รายย่อย Short หนัก / Smart Money ถือ Long ได้เปรียบ Short Squeeze)"
+                retailRatio > 1.4 && topRatio < 0.9 -> "🔴 Contrarian Bearish (รายย่อยไล่ Long สูง / Smart Money ดัก Short เสี่ยงโดนทุบ Long Squeeze)"
+                retailRatio > 1.2 && topRatio > 1.2 -> "📈 Strong Trend Following (ทั้งรายย่อยและเจ้ามือเปิด Long สอดคล้องกัน)"
+                retailRatio < 0.85 && topRatio < 0.85 -> "📉 Strong Bearish Trend (ทั้งตลาดมองลงสอดคล้องกัน)"
+                takerRatio > 1.2 -> "⚡ Taker Aggression: แรงเคาะขวานำตลาด (Aggressive Buying)"
+                takerRatio < 0.8 -> "⚡ Taker Aggression: แรงเทขายเคาะซ้ายกดตลาด (Aggressive Selling)"
+                else -> "⚖️ Balanced Positioning (สถานะทั้งสองฝั่งใกล้เคียงกัน)"
+            }
+
+            BinancePositioningSentiment(
+                symbol = pair,
+                retailLongAccountPct = retailLong,
+                retailShortAccountPct = retailShort,
+                retailLongShortRatio = retailRatio,
+                topTraderLongPositionPct = topLong,
+                topTraderShortPositionPct = topShort,
+                topTraderLongShortRatio = topRatio,
+                takerBuySellRatio = takerRatio,
+                takerBuyVol = takerBuy,
+                takerSellVol = takerSell,
+                divergenceSignal = divSignal
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "Binance positioning error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun getCnnStockFearAndGreed(): CnnFearAndGreedData? {
+        return try {
+            val resp = client.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata") {
+                header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                header("Referer", "https://www.cnn.com/markets/fear-and-greed")
+                header("Origin", "https://www.cnn.com")
+                header("Accept", "application/json")
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val fng = root["fear_and_greed"]?.jsonObject ?: return null
+
+            val score = fng["score"]?.jsonPrimitive?.doubleOrNull ?: 50.0
+            val rating = fng["rating"]?.jsonPrimitive?.contentOrNull ?: "neutral"
+            val prevClose = fng["previous_close"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1W = fng["previous_1_week"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1M = fng["previous_1_month"]?.jsonPrimitive?.doubleOrNull ?: score
+            val prev1Y = fng["previous_1_year"]?.jsonPrimitive?.doubleOrNull ?: score
+
+            val ratingThai = when (rating.lowercase()) {
+                "extreme fear" -> "หวาดกลัวสุดขีด (Extreme Fear)"
+                "fear" -> "วิตกกังวล (Fear)"
+                "greed" -> "เริ่มโลภ (Greed)"
+                "extreme greed" -> "โลภสุดขีด (Extreme Greed)"
+                else -> "เป็นกลาง (Neutral)"
+            }
+
+            val indicatorMeta = listOf(
+                Pair("market_momentum_sp500", "โมเมนตัมตลาด (S&P 500 vs 125-day MA)"),
+                Pair("stock_price_strength", "ความแข็งแกร่งราคา (หุ้นทำ New 52W High vs Low)"),
+                Pair("stock_price_breadth", "ปริมาณการซื้อขายหนุนตลาด (McClellan Volume)"),
+                Pair("put_call_options", "อัตราส่วน Put/Call Options (CBOE)"),
+                Pair("market_volatility_vix", "ดัชนีความผันผวน (VIX vs 50-day MA)"),
+                Pair("junk_bond_demand", "ความต้องการถือ Junk Bond (Credit Spread)"),
+                Pair("safe_haven_demand", "ความต้องการสินทรัพย์ปลอดภัย (Stocks vs Bonds)")
+            )
+
+            val subs = indicatorMeta.mapNotNull { (key, labelTh) ->
+                val obj = root[key]?.jsonObject ?: return@mapNotNull null
+                val subScore = obj["score"]?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+                val subRating = obj["rating"]?.jsonPrimitive?.contentOrNull ?: "neutral"
+                CnnSubIndicator(
+                    name = key,
+                    labelThai = labelTh,
+                    score = subScore,
+                    rating = subRating
+                )
+            }
+
+            CnnFearAndGreedData(
+                score = score,
+                rating = rating,
+                ratingThai = ratingThai,
+                previousClose = prevClose,
+                previous1Week = prev1W,
+                previous1Month = prev1M,
+                previous1Year = prev1Y,
+                subIndicators = subs
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "CNN Fear & Greed error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun getRedditSentiment(symbol: String): Map<String, Any> {
+        val query = symbol.uppercase().removeSuffix("-USD").removeSuffix("USDT").removeSuffix("/USDT")
+
+        // 1) เช็ค Binance Futures Positioning ถ้าเป็นคริปโต
+        val binancePos = getBinanceFuturesPositioning(query)
+
+        // 2) ดึงข่าวและพาดหัวข่าวเจาะจง Sentiment ผ่าน Google News RSS
+        val qAsset = getAssetQuery(query)
+        val q = "$qAsset market sentiment".encodeURLParameter()
+        val newsItems = try {
+            fetchFeed("Google News Sentiment", "https://news.google.com/rss/search?q=$q&hl=en-US&gl=US&ceid=US:en") { xml ->
+                parseRssItems(xml, "Google News", null)
+            }
+        } catch (_: Exception) { emptyList() }
+
+        var bull = 0
+        var bear = 0
+        val topPosts = mutableListOf<String>()
+
+        newsItems.take(15).forEach { item ->
+            val title = item["title"].orEmpty()
+            val text = (title + " " + item["description"].orEmpty()).lowercase()
+            topPosts.add(title)
+            val isBull = listOf("surge", "bull", "jump", "rally", "gain", "high", "positive", "boom", "buy", "upward", "breakout", "ath").any { text.contains(it) }
+            val isBear = listOf("fall", "drop", "bear", "crash", "loss", "low", "negative", "slump", "sell", "plunge", "risk", "warning", "caution", "dip").any { text.contains(it) }
+            if (isBull && !isBear) bull++
+            if (isBear && !isBull) bear++
+            if (isBull && isBear) { bull++; bear++ }
+        }
+
+        val total = newsItems.size
+        var score = if (bull + bear > 0) (bull - bear).toDouble() / (bull + bear) else 0.0
+
+        // ถ่วงน้ำหนักด้วย Positioning ของ Smart Money ถ้ามีข้อมูล
+        if (binancePos != null) {
+            val ratioBias = (binancePos.topTraderLongShortRatio - 1.0).coerceIn(-1.0, 1.0) * 0.4
+            score = (score * 0.6 + ratioBias).coerceIn(-1.0, 1.0)
+        }
+
+        val label = when {
+            score >= 0.2 -> "Bullish"
+            score <= -0.2 -> "Bearish"
+            else -> "Neutral"
+        }
+
+        val out = mutableMapOf<String, Any>(
+            "symbol" to query,
+            "sentiment_score" to "%.2f".format(score),
+            "sentiment_label" to label,
+            "posts_analyzed" to (total.takeIf { it > 0 } ?: (bull + bear).coerceAtLeast(1)),
+            "bullish_posts" to bull,
+            "bearish_posts" to bear,
+            "top_posts" to topPosts.take(5),
+            "source" to "Multi-Source Intelligence"
+        )
+        if (binancePos != null) {
+            out["positioning_divergence"] = binancePos.divergenceSignal
+            out["retail_long_short_ratio"] = binancePos.retailLongShortRatio
+            out["top_trader_long_short_ratio"] = binancePos.topTraderLongShortRatio
+            out["taker_buy_sell_ratio"] = binancePos.takerBuySellRatio
+        }
+        return out
+    }
+
+    suspend fun getUnifiedCompositeSentiment(rawSymbol: String? = null): UnifiedCompositeSentiment = coroutineScope {
+        val s = rawSymbol?.trim()?.uppercase()
+        val isGlobal = s.isNullOrBlank() || s in listOf("ALL", "MARKET", "GLOBAL", "MACRO", "TOTAL")
+
+        if (isGlobal) {
+            val cryptoJob = async { getFearGreedIndex(5) }
+            val cnnJob = async { getCnnStockFearAndGreed() }
+
+            val cryptoFng = cryptoJob.await()
+            val cnnData = cnnJob.await()
+
+            val cryptoScore = cryptoFng["value"]?.toDoubleOrNull() ?: 50.0
+            val cnnScore = cnnData?.score ?: 50.0
+
+            val compositeScore = when {
+                cryptoFng["error"] == null && cnnData != null -> (cnnScore * 0.60) + (cryptoScore * 0.40)
+                cnnData != null -> cnnScore
+                cryptoFng["error"] == null -> cryptoScore
+                else -> 50.0
+            }
+
+            val (label, labelTh, emoji) = UnifiedCompositeSentiment.classifyScore(compositeScore)
+            val meter = UnifiedCompositeSentiment.makeMeterBar(compositeScore)
+
+            val pillars = mutableListOf<SentimentPillar>()
+            if (cnnData != null) {
+                pillars.add(SentimentPillar("ตลาดหุ้นสหรัฐฯ (CNN Fear & Greed)", cnnScore, 60, "${cnnData.ratingThai} (${"%.1f".format(cnnScore)}/100)"))
+            }
+            if (cryptoFng["error"] == null) {
+                pillars.add(SentimentPillar("ตลาดคริปโต (Crypto Fear & Greed)", cryptoScore, 40, "${cryptoFng["classification"]} (${"%.0f".format(cryptoScore)}/100)"))
+            }
+
+            val contrarian = when {
+                compositeScore <= 24.0 -> "🟢 Contrarian Macro Signal: ตลาดโลกอยู่ในจุด Extreme Fear (หวาดกลัวสุดขีด) มักเป็นจุดสะสมสินทรัพย์เสี่ยงรอบใหญ่"
+                compositeScore >= 76.0 -> "🔴 Contrarian Macro Signal: ตลาดโลกอยู่ในจุด Extreme Greed (โลภสุดขีด) ความผันผวนต่ำเกินไป ระวังแรงขายทำกำไรฉับพลัน"
+                else -> null
+            }
+
+            return@coroutineScope UnifiedCompositeSentiment(
+                target = "GLOBAL_MACRO",
+                isGlobalMacro = true,
+                compositeScore = compositeScore,
+                compositeLabel = label,
+                labelThai = labelTh,
+                emoji = emoji,
+                meterBar = meter,
+                pillars = pillars,
+                cnnFearGreed = cnnData,
+                cryptoFearGreed = if (cryptoFng["error"] == null) cryptoFng else null,
+                contrarianAlert = contrarian
+            )
+        }
+
+        val cleanSym = s.removePrefix("BINANCE:").removePrefix("SET:").removeSuffix("-USD").removeSuffix("USDT").removeSuffix("/USDT")
+        val isCrypto = cleanSym in listOf("BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "SUI", "PEPE", "SHIB", "NEAR", "APT", "DOT", "MATIC")
+            || s.contains("USDT") || s.contains("BTC") || s.contains("ETH")
+        val isUsStock = cleanSym in listOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "SPY", "QQQ", "DIA", "IWM")
+
+        val newsJob = async { getRedditSentiment(s) }
+        val positioningJob = async { if (isCrypto) getBinanceFuturesPositioning(cleanSym) else null }
+        val cnnJob = async { if (isUsStock || cleanSym in listOf("SPX", "NDX", "US30", "XAUUSD", "GOLD")) getCnnStockFearAndGreed() else null }
+        val cryptoFngJob = async { if (isCrypto) getFearGreedIndex(3) else null }
+        val taJob = async {
+            val ex = resolveExchange(s, null)
+            runCatching { getTechnicalAnalysis(s, ex, "1D") }.getOrDefault(emptyMap())
+        }
+
+        val newsData = newsJob.await()
+        val binancePos = positioningJob.await()
+        val cnnData = cnnJob.await()
+        val cryptoFng = cryptoFngJob.await()
+        val taData = taJob.await()
+
+        val newsBias = newsData["sentiment_score"]?.toString()?.toDoubleOrNull() ?: 0.0
+        val newsScore = ((newsBias + 1.0) * 50.0).coerceIn(0.0, 100.0)
+
+        val marketFgScore = when {
+            isCrypto && cryptoFng?.get("error") == null -> cryptoFng?.get("value")?.toDoubleOrNull() ?: 50.0
+            cnnData != null -> cnnData.score
+            else -> 50.0
+        }
+
+        val (posScore, posDetail) = when {
+            binancePos != null -> {
+                val ratioScore = when {
+                    binancePos.topTraderLongShortRatio > 1.8 -> 85.0
+                    binancePos.topTraderLongShortRatio > 1.3 -> 70.0
+                    binancePos.topTraderLongShortRatio < 0.7 -> 25.0
+                    binancePos.topTraderLongShortRatio < 0.9 -> 35.0
+                    else -> 50.0
+                }
+                val takerBonus = (binancePos.takerBuySellRatio - 1.0) * 20.0
+                val calculated = (ratioScore + takerBonus).coerceIn(5.0, 95.0)
+                Pair(calculated, "Smart Money Long: ${"%.1f".format(binancePos.topTraderLongPositionPct)}% (Ratio ${"%.2f".format(binancePos.topTraderLongShortRatio)}) | ${binancePos.divergenceSignal}")
+            }
+            cnnData != null -> {
+                val putCall = cnnData.subIndicators.firstOrNull { it.name == "put_call_options" }?.score ?: 50.0
+                Pair(putCall, "CBOE Options Sentiment: ${"%.1f".format(putCall)}/100")
+            }
+            else -> Pair(50.0, "ไม่มีข้อมูลสัญญาอนุพันธ์เฉพาะตัว")
+        }
+
+        val recAll = taData["recommend_score"]?.toDoubleOrNull() ?: 0.0
+        val taScore = ((recAll + 1.0) * 50.0).coerceIn(0.0, 100.0)
+
+        val compositeScore = (newsScore * 0.30) + (marketFgScore * 0.25) + (posScore * 0.30) + (taScore * 0.15)
+        val (label, labelTh, emoji) = UnifiedCompositeSentiment.classifyScore(compositeScore)
+        val meter = UnifiedCompositeSentiment.makeMeterBar(compositeScore)
+
+        val pillars = listOf(
+            SentimentPillar("ข่าวสาร & กระแสสังคม (News & Social)", newsScore, 30, "Bias: $newsBias (${newsData["bullish_posts"]} บวก / ${newsData["bearish_posts"]} ลบ)"),
+            SentimentPillar("ดัชนีอารมณ์ตลาดรวม (Market F&G)", marketFgScore, 25, if (isCrypto) "Crypto F&G: ${"%.0f".format(marketFgScore)}/100" else "CNN Stock F&G: ${"%.1f".format(marketFgScore)}/100"),
+            SentimentPillar("สถานะการถือครองสัญญา (Positioning)", posScore, 30, posDetail),
+            SentimentPillar("ความเห็นอินดิเคเตอร์เทคนิค (Technical)", taScore, 15, "สัญญาณ: ${taData["signal"] ?: "HOLD"} (Score ${taData["recommend_score"] ?: "0"})")
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val headlines = newsData["top_posts"] as? List<String> ?: emptyList()
+
+        val contrarian = when {
+            binancePos != null && binancePos.retailLongShortRatio < 0.95 && binancePos.topTraderLongShortRatio > 1.3 ->
+                "🟢 Contrarian Alert: เกิดสัญญาณ Short Squeeze! รายย่อยแห่เปิด Short แต่ Smart Money ถือ Long หนาแน่น ลุ้นดีดกิน SL ฝั่ง Short"
+            binancePos != null && binancePos.retailLongShortRatio > 1.4 && binancePos.topTraderLongShortRatio < 0.9 ->
+                "🔴 Contrarian Alert: เกิดสัญญาณ Long Squeeze / Bull Trap! รายย่อยไล่ Long หนาแน่น แต่เจ้ามือเริ่มสะสม Short ระวังโดนทุบ"
+            compositeScore <= 24.0 ->
+                "🟢 Contrarian Opportunity: อารมณ์ตลาดอยู่ในจุด Extreme Fear (หวาดกลัวสุดขีด) มักเป็นช่วงปลายของการเทขาย (Capitulation) และจุดสะสมของ Smart Money"
+            compositeScore >= 76.0 ->
+                "🔴 Contrarian Warning: อารมณ์ตลาดอยู่ในจุด Extreme Greed (โลภสุดขีด) ฝูงชนตื่นเต้นเกินเหตุ (Euphoria) เพิ่มความระวังการแจกจ่ายของ (Distribution)"
+            else -> null
+        }
+
+        UnifiedCompositeSentiment(
+            target = s,
+            isGlobalMacro = false,
+            compositeScore = compositeScore,
+            compositeLabel = label,
+            labelThai = labelTh,
+            emoji = emoji,
+            meterBar = meter,
+            pillars = pillars,
+            binancePositioning = binancePos,
+            cnnFearGreed = cnnData,
+            cryptoFearGreed = if (cryptoFng?.get("error") == null) cryptoFng else null,
+            topHeadlines = headlines,
+            contrarianAlert = contrarian
+        )
+    }
+
+    suspend fun getFinancialNews(symbol: String? = null, limit: Int = 10): Map<String, Any> = coroutineScope {
+        val all = mutableListOf<Map<String, String>>()
+
+        // 1) Symbol-specific: Google News RSS (ค้นตรงสินทรัพย์ฝั่ง server ฟรี ไม่ต้อง API key)
+        if (!symbol.isNullOrBlank()) {
+            val q = getAssetQuery(symbol).encodeURLParameter()
+            all.addAll(fetchFeed("Google News",
+                "https://news.google.com/rss/search?q=$q&hl=en-US&gl=US&ceid=US:en") { xml ->
+                parseRssItems(xml, "Google News", null)
+            })
+        }
+
+        // 2) General feeds หลายแหล่ง (กรอง keyword ถ้ามี symbol) — ดึงขนานกัน
+        val feeds = mapOf(
+            "Yahoo" to "https://finance.yahoo.com/news/rssindex",
+            "CNBC" to "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+            "MarketWatch" to "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+            "Investing.com" to "https://www.investing.com/rss/news.rss",
+            "Cointelegraph" to "https://cointelegraph.com/rss"
+        )
+        feeds.map { (src, url) ->
+            async { fetchFeed(src, url) { xml -> parseRssItems(xml, src, symbol) } }
+        }.forEach { all.addAll(it.await()) }
+
+        // กรองข่าวซ้ำและจำกัดจำนวน
+        val uniqueNews = all.distinctBy { it["title"]?.lowercase() }
+        return@coroutineScope mapOf("news" to uniqueNews.take(limit))
+    }
+
+    /** ดึง RSS feed เดียวแบบปลอดภัย (timeout 10 วิ, ล้มเหลวคืน list ว่าง) */
+    private suspend fun fetchFeed(src: String, url: String, parse: (String) -> List<Map<String, String>>): List<Map<String, String>> {
+        return try {
+            val resp = client.get(url) {
+                header("User-Agent", "Mozilla/5.0")
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (resp.status.isSuccess()) parse(resp.bodyAsText()) else {
+                com.skyliner2008.jarvis.logDebug("TradingApi", "Feed $src failed: HTTP ${resp.status.value}")
+                emptyList()
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    /** สร้าง search query สำหรับ Google News ตามประเภทสินทรัพย์ */
+    private fun getAssetQuery(symbol: String): String {
+        val s = symbol.uppercase().trim()
+        return when {
+            s.contains("XAU") || s == "GOLD" -> "gold price OR XAUUSD OR bullion"
+            s.contains("XAG") || s == "SILVER" -> "silver price OR XAGUSD"
+            s in listOf("USOIL", "WTI", "CL=F") -> "crude oil price OR WTI"
+            s.contains("BTC") -> "bitcoin price OR BTC"
+            s.contains("ETH") -> "ethereum price"
+            s.endsWith("=F") -> "${s.removeSuffix("=F")} futures price"
+            s.endsWith("=X") -> "${s.removeSuffix("=X")} exchange rate"
+            s.length == 6 && s.all { it.isLetter() } -> "${s.take(3)}/${s.takeLast(3)} forex OR ${s.take(3)} exchange rate"
+            else -> "$s stock"
+        }
+    }
+
+    /**
+     * ดึงปฏิทินเศรษฐกิจจาก ForexFactory
+     * - Primary: ff_calendar_thisweek.json (มี timezone offset ชัดเจนใน ISO-8601 เช่น 2026-09-03T10:00:00-04:00)
+     * - Fallback: ff_calendar_thisweek.xml (เวลาใน feed เป็น UTC — แปลงเป็นเวลาไทย Asia/Bangkok ได้ถูกต้อง)
+     * - รองรับการระบุ filter: "upcoming" (เฉพาะที่ยังไม่ประกาศ), "today" (เฉพาะวันนี้), "all" (ทั้งหมด)
+     * - รองรับการกรองตาม currency เช่น "USD", "EUR", "GBP"
+     */
+    suspend fun getEconomicCalendar(
+        limit: Int = 15,
+        filter: String? = null,
+        currency: String? = null
+    ): List<Map<String, String>> {
+        val rawEvents = fetchCalendarEventsJson() ?: fetchCalendarEventsXml()
+        if (rawEvents.isEmpty()) return emptyList()
+
+        val now = Clock.System.now()
+        val requestedCurrency = currency?.trim()?.uppercase()
+        val filterMode = filter?.trim()?.lowercase()
+
+        val filtered = rawEvents.filter { e ->
+            if (!requestedCurrency.isNullOrBlank() && requestedCurrency != "ALL") {
+                val c = e.country.uppercase()
+                if (c != requestedCurrency && c != "ALL") return@filter false
+            }
+            // ไม่เอา Low / Holiday ยกเว้นผู้ใช้ขอ limit มากเป็นพิเศษ
+            if (limit <= 20 && (e.impact.equals("Low", ignoreCase = true) || e.impact.equals("Holiday", ignoreCase = true))) {
+                return@filter false
+            }
+            true
+        }
+
+        // Partition into upcoming and passed (ให้ buffer 15 นาที สำหรับข่าวที่เพิ่งออก)
+        val (upcoming, passed) = filtered.partition { it.epochSeconds >= now.epochSeconds - 900 }
+
+        // Upcoming: เรียงตามเวลาจากใกล้สุดไปไกลสุด (เหตุการณ์ที่จะเกิดขึ้นก่อนขึ้นก่อน)
+        val sortedUpcoming = upcoming.sortedWith(
+            compareBy<CalendarItem> { it.epochSeconds }
+                .thenByDescending { it.impactScore }
+        )
+        // Passed: เรียงจากเพิ่งผ่านมาล่าสุด ย้อนหลังไป
+        val sortedPassed = passed.sortedWith(
+            compareByDescending<CalendarItem> { it.epochSeconds }
+                .thenByDescending { it.impactScore }
+        )
+
+        val resultList = when (filterMode) {
+            "today" -> {
+                val todayDate = now.toLocalDateTime(TimeZone.of("Asia/Bangkok")).date
+                filtered.filter { it.bkkDate == todayDate }
+                    .sortedBy { it.epochSeconds }
+            }
+            "upcoming" -> {
+                sortedUpcoming.take(limit)
+            }
+            "all" -> {
+                (sortedUpcoming + sortedPassed).take(limit)
+            }
+            else -> {
+                // Default: ให้ความสำคัญกับข่าวที่กำลังจะมาถึง (Upcoming) ก่อนเสมอ
+                // ถ้าข่าวที่เหลือในสัปดาห์มีน้อยกว่า limit ให้เติมข่าวสำคัญที่เพิ่งผ่านมาให้ครบ
+                if (sortedUpcoming.size >= limit) {
+                    sortedUpcoming.take(limit)
+                } else {
+                    val remainingSlots = limit - sortedUpcoming.size
+                    sortedUpcoming + sortedPassed.take(remainingSlots)
+                }
+            }
+        }
+
+        return resultList.map { it.toMap() }
+    }
+
+    private data class CalendarItem(
+        val title: String,
+        val country: String,
+        val impact: String,
+        val forecast: String,
+        val previous: String,
+        val epochSeconds: Long,
+        val bkkDate: LocalDate,
+        val dateTimeFormatted: String,
+        val status: String,
+        val impactScore: Int
+    ) {
+        fun toMap(): Map<String, String> = mapOf(
+            "title" to title,
+            "country" to country,
+            "impact" to impact,
+            "date_time" to dateTimeFormatted,
+            "status" to status,
+            "actual" to "-",
+            "forecast" to forecast.ifBlank { "-" },
+            "previous" to previous.ifBlank { "-" },
+            "impact_score" to impactScore.toString()
+        )
+    }
+
+    private suspend fun fetchCalendarEventsJson(): List<CalendarItem>? {
+        return try {
+            val resp = client.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val body = resp.bodyAsText()
+            val jsonArray = json.parseToJsonElement(body).jsonArray
+            val now = Clock.System.now()
+
+            jsonArray.mapNotNull { el ->
+                val obj = el.jsonObject
+                val title = obj["title"]?.jsonPrimitive?.contentOrNull?.trim() ?: return@mapNotNull null
+                if (title.isBlank()) return@mapNotNull null
+                val country = obj["country"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+                val impact = obj["impact"]?.jsonPrimitive?.contentOrNull?.trim() ?: "Low"
+                val forecast = obj["forecast"]?.jsonPrimitive?.contentOrNull?.trim() ?: "-"
+                val previous = obj["previous"]?.jsonPrimitive?.contentOrNull?.trim() ?: "-"
+                val dateStr = obj["date"]?.jsonPrimitive?.contentOrNull?.trim() ?: return@mapNotNull null
+
+                val instant = try {
+                    Instant.parse(dateStr)
+                } catch (_: Exception) { return@mapNotNull null }
+
+                val (formatted, bkkDate) = formatBkkDateTime(instant)
+                val isPassed = instant < now
+                val impactScore = when (impact.lowercase()) {
+                    "high" -> 3; "medium" -> 2; "low" -> 1; else -> 0
+                }
+
+                CalendarItem(
+                    title = title,
+                    country = country,
+                    impact = impact,
+                    forecast = forecast,
+                    previous = previous,
+                    epochSeconds = instant.epochSeconds,
+                    bkkDate = bkkDate,
+                    dateTimeFormatted = formatted,
+                    status = if (isPassed) "PASSED" else "UPCOMING",
+                    impactScore = impactScore
+                )
+            }
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "FF calendar JSON error: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun fetchCalendarEventsXml(): List<CalendarItem> {
+        return try {
+            val resp = client.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) return emptyList()
+            val xml = resp.bodyAsText()
+            val now = Clock.System.now()
+
+            Regex("<event>(.*?)</event>", RegexOption.DOT_MATCHES_ALL)
+                .findAll(xml).mapNotNull { block ->
+                    val c = block.groupValues[1]
+                    fun tag(name: String): String {
+                        val m = Regex(
+                            "<$name>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$name>",
+                            RegexOption.DOT_MATCHES_ALL
+                        ).find(c) ?: return ""
+                        return m.groupValues[1].trim()
+                    }
+                    val title = tag("title")
+                    if (title.isBlank()) return@mapNotNull null
+                    val impact = tag("impact")
+                    val date = tag("date")
+                    val time = tag("time")
+
+                    val instant = parseXmlDateTimeToInstant(date, time) ?: return@mapNotNull null
+                    val (formatted, bkkDate) = formatBkkDateTime(instant)
+                    val isPassed = instant < now
+                    val impactScore = when (impact.lowercase()) {
+                        "high" -> 3; "medium" -> 2; "low" -> 1; else -> 0
+                    }
+
+                    CalendarItem(
+                        title = title,
+                        country = tag("country"),
+                        impact = impact,
+                        forecast = tag("forecast").ifBlank { "-" },
+                        previous = tag("previous").ifBlank { "-" },
+                        epochSeconds = instant.epochSeconds,
+                        bkkDate = bkkDate,
+                        dateTimeFormatted = formatted,
+                        status = if (isPassed) "PASSED" else "UPCOMING",
+                        impactScore = impactScore
+                    )
+                }.toList()
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "FF calendar XML error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * แปลง Instant จาก ForexFactory เป็นเวลาไทย พร้อมระบุวันในสัปดาห์ (จ., อ., พ., พฤ., ศ., ส., อา.)
+     * ตัวอย่างผลลัพธ์: "พฤ. 03 ก.ย. 21:00 น. (ไทย) | 10:00 ET"
+     */
+    private fun formatBkkDateTime(instant: Instant): Pair<String, LocalDate> {
+        val bkk = instant.toLocalDateTime(TimeZone.of("Asia/Bangkok"))
+        val dayShort = when (bkk.dayOfWeek) {
+            DayOfWeek.MONDAY -> "จ."
+            DayOfWeek.TUESDAY -> "อ."
+            DayOfWeek.WEDNESDAY -> "พ."
+            DayOfWeek.THURSDAY -> "พฤ."
+            DayOfWeek.FRIDAY -> "ศ."
+            DayOfWeek.SATURDAY -> "ส."
+            DayOfWeek.SUNDAY -> "อา."
+        }
+        val monthTh = when (bkk.monthNumber) {
+            1 -> "ม.ค."; 2 -> "ก.พ."; 3 -> "มี.ค."; 4 -> "เม.ย."
+            5 -> "พ.ค."; 6 -> "มิ.ย."; 7 -> "ก.ค."; 8 -> "ส.ค."
+            9 -> "ก.ย."; 10 -> "ต.ค."; 11 -> "พ.ย."; 12 -> "ธ.ค."
+            else -> ""
+        }
+        val timeStr = "${bkk.hour.toString().padStart(2, '0')}:${bkk.minute.toString().padStart(2, '0')} น."
+        val usEt = instant.toLocalDateTime(TimeZone.of("America/New_York"))
+        val usEtStr = "${usEt.hour.toString().padStart(2, '0')}:${usEt.minute.toString().padStart(2, '0')} ET"
+        val formatted = "$dayShort ${bkk.dayOfMonth.toString().padStart(2, '0')} $monthTh $timeStr (ไทย) | $usEtStr"
+        return formatted to bkk.date
+    }
+
+    /**
+     * แปลง date และ time ของ feed XML (ForexFactory feed เวลาเป็น UTC) เข้าสู่ Instant
+     * input: date "MM-dd-yyyy", time "h:mmam/pm" (UTC)
+     */
+    private fun parseXmlDateTimeToInstant(date: String, time: String): Instant? {
+        return try {
+            val dp = date.split("-")
+            if (dp.size != 3) return null
+            val iso = "${dp[2]}-${dp[0]}-${dp[1]}"
+            val t = time.lowercase().trim()
+            val m = Regex("(\\d+):(\\d+)(am|pm)").find(t)
+            val h = if (m != null) {
+                var hour = m.groupValues[1].toInt()
+                if (m.groupValues[3] == "pm" && hour != 12) hour += 12
+                if (m.groupValues[3] == "am" && hour == 12) hour = 0
+                hour
+            } else 0
+            val min = m?.groupValues?.get(2) ?: "00"
+            val ldt = LocalDateTime.parse("${iso}T${h.toString().padStart(2, '0')}:$min:00")
+            // เวลาใน XML feed ของ ForexFactory คือ UTC
+            ldt.toInstant(TimeZone.UTC)
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * ดึงข้อมูลอนุกรมเวลาเศรษฐกิจสหรัฐฯ จาก FRED (Federal Reserve Economic Data)
+     * - ไม่มี API Key → ใช้ endpoint สาธารณะ fredgraph.csv (ฟรี ไม่ต้องสมัคร)
+     * - มี API Key → ใช้ FRED JSON API (api.stlouisfed.org)
+     * @return list of (date, value) เรียงจากเก่า→ใหม่ หรือ null ถ้าดึงไม่สำเร็จ
+     */
+    suspend fun getFredSeriesObservations(seriesId: String, apiKey: String? = null): List<Pair<String, Double>>? {
+        if (!apiKey.isNullOrBlank()) {
+            getFredViaJsonApi(seriesId, apiKey)?.let { return it }
+        }
+        return getFredViaCsv(seriesId)
+    }
+
+    private suspend fun getFredViaCsv(seriesId: String): List<Pair<String, Double>>? {
+        return try {
+            val resp = client.get("https://fred.stlouisfed.org/graph/fredgraph.csv") {
+                parameter("id", seriesId.uppercase())
+                // CDN ของ FRED กรอง User-Agent: browser UA ถูก stall, ไม่มี UA ถูกปฏิเสธ
+                // ผ่านเฉพาะ UA แบบ curl (ทดสอบแล้ว: curl/8.0 → 200 OK)
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                com.skyliner2008.jarvis.logDebug("TradingApi", "FRED CSV $seriesId failed: HTTP ${resp.status.value}")
+                return null
+            }
+            resp.bodyAsText().lines().drop(1).mapNotNull { line ->
+                val parts = line.split(",")
+                if (parts.size < 2) return@mapNotNull null
+                // FRED ใช้ "." แทนค่าที่ไม่มีข้อมูล
+                val v = parts[1].trim().toDoubleOrNull() ?: return@mapNotNull null
+                parts[0].trim() to v
+            }.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "FRED CSV $seriesId error: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun getFredViaJsonApi(seriesId: String, apiKey: String): List<Pair<String, Double>>? {
+        return try {
+            val resp = client.get("https://api.stlouisfed.org/fred/series/observations") {
+                parameter("series_id", seriesId.uppercase())
+                parameter("api_key", apiKey)
+                parameter("file_type", "json")
+                parameter("sort_order", "asc")
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 15_000 }
+            }
+            if (!resp.status.isSuccess()) return null
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            root["observations"]?.jsonArray?.mapNotNull { obs ->
+                val date = obs.jsonObject["date"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val v = obs.jsonObject["value"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    ?: return@mapNotNull null
+                date to v
+            }?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * API สำหรับเรียกใช้ Modern Technical Analysis
+     */
+    suspend fun getModernTechnicalAnalysis(symbol: String, interval: String): ModernAnalysisResult? {
+        val fetch = smcApi.fetchCandlesWithSource(symbol, interval, 300)
+        if (fetch.candles.size < 150) return null
+        
+        // ดึง SMC มาเป็นตัวช่วยกรอง Confluence
+        val smc = smcApi.getSmcAnalysis(symbol, interval)
+        
+        return modernApi.analyze(fetch.candles, symbol, interval, smc)
+    }
+
+    private fun parseRssItems(xml: String, src: String, sym: String?): List<Map<String, String>> {
+        val keywords = if (!sym.isNullOrBlank()) getAssetKeywords(sym) else emptyList()
+
+        fun tag(content: String, name: String): String =
+            Regex("<$name>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$name>", RegexOption.DOT_MATCHES_ALL)
+                .find(content)?.groupValues?.get(1)?.trim() ?: ""
+
+        fun clean(html: String): String = html
+            // unescape ก่อน (Google News เข้ารหัส HTML ไว้) แล้วค่อย strip tag 2 รอบ
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ").trim()
+
+        return Regex("<item>(.*?)</item>", RegexOption.DOT_MATCHES_ALL).findAll(xml).mapNotNull { block ->
+            val content = block.groupValues[1]
+            var title = clean(tag(content, "title"))
+            if (title.isBlank()) return@mapNotNull null
+            val desc = clean(tag(content, "description"))
+            val link = tag(content, "link")
+
+            // Google News ต่อท้าย title ด้วย " - SourceName" → แยกเป็น source จริง
+            var source = src
+            if (src == "Google News" && title.contains(" - ")) {
+                val idx = title.lastIndexOf(" - ")
+                source = title.substring(idx + 3)
+                title = title.substring(0, idx)
+            }
+
+            // กรองด้วย keyword เฉพาะ general feeds เมื่อมี symbol (Google News ค้นฝั่ง server แล้ว)
+            if (keywords.isNotEmpty()) {
+                val fullText = (title + desc).lowercase()
+                if (keywords.none { fullText.contains(it) }) return@mapNotNull null
+            }
+
+            // Google News ใส่ description = "title + source" ซ้ำกัน → ลบทิ้งถ้าไม่มีเนื้อหาเพิ่ม
+            val cleanDesc = if (desc.isBlank() || desc.removeSuffix(source).trim() == title) "" else desc
+
+            mapOf(
+                "title" to title,
+                "description" to (cleanDesc.take(200) + if (cleanDesc.length > 200) "..." else ""),
+                "link" to link,
+                "source" to source
+            )
+        }.toList()
+    }
+
+    private fun getAssetKeywords(symbol: String): List<String> {
+        val s = symbol.lowercase()
+        return when {
+            s.contains("xau") || s.contains("gold") -> listOf("gold", "xau", "fed", "inflation", "bullion", "treasury")
+            s.contains("btc") || s.contains("bitcoin") -> listOf("bitcoin", "btc", "crypto", "etf", "halving", "satoshi")
+            s.contains("eth") || s.contains("ether") -> listOf("ethereum", "eth", "vitalik", "layer 2", "staking")
+            s.length == 6 && !s.contains("usdt") -> listOf(s.substring(0, 3), s.substring(3), s, "forex", "central bank") // FX Pairs
+            else -> listOf(s, s.replace("usdt", ""), s.replace("usd", ""))
+        }.filter { it.isNotBlank() }
+    }
+
+    private fun exchangeToMarket(ex: String) = if (ex.uppercase() in listOf("NASDAQ", "NYSE")) "america" else if (ex.uppercase() in listOf("SET", "MAI")) "thailand" else "crypto"
+    private fun mapInterval(i: String) = i.uppercase()
+
+    // ─── Fear & Greed Index (alternative.me — ฟรี ไม่ต้องใช้ API Key) ────────
+
+    /**
+     * ดึง Crypto Fear & Greed Index ตัวจริงจาก alternative.me
+     * คืน map: value (0-100), classification, trend (ค่าย้อนหลัง N วัน "newest,…,oldest")
+     */
+    /** เหตุการณ์เศรษฐกิจพร้อมเวลาแบบ epoch — ใช้กับระบบปลุก AI ที่ต้องเทียบเวลาได้แม่น */
+    data class MacroEvent(
+        val title: String,
+        val country: String,
+        val impact: String,
+        val epochSeconds: Long,
+        val forecast: String,
+        val previous: String
+    ) {
+        val isHighImpact: Boolean get() = impact.equals("High", ignoreCase = true)
+    }
+
+    /**
+     * ปฏิทินเศรษฐกิจแบบดิบ (ไม่กรอง) พร้อม epoch seconds
+     * `getEconomicCalendar` คืนเวลาเป็นข้อความที่จัดรูปแบบแล้ว ซึ่งเอาไปคำนวณต่อไม่ได้
+     */
+    suspend fun getMacroEvents(): List<MacroEvent> {
+        val raw = fetchCalendarEventsJson() ?: fetchCalendarEventsXml()
+        return raw.map { MacroEvent(it.title, it.country, it.impact, it.epochSeconds, it.forecast, it.previous) }
+    }
+
+    suspend fun getFearGreedIndex(limit: Int = 7): Map<String, String> {
+        return try {
+            val resp = client.get("https://api.alternative.me/fng/?limit=$limit&format=json") {
+                timeout { requestTimeoutMillis = 10_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                return mapOf("error" to "HTTP ${resp.status.value}")
+            }
+            val root = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val data = root["data"]?.jsonArray ?: return mapOf("error" to "no data")
+            if (data.isEmpty()) return mapOf("error" to "no data")
+            val latest = data[0].jsonObject
+            val trend = data.mapNotNull { it.jsonObject["value"]?.jsonPrimitive?.contentOrNull }
+                .joinToString(",")
+            mapOf(
+                "value" to (latest["value"]?.jsonPrimitive?.contentOrNull ?: "0"),
+                "classification" to (latest["value_classification"]?.jsonPrimitive?.contentOrNull ?: "Unknown"),
+                "trend" to trend
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "FearGreed error: ${e.message}")
+            mapOf("error" to (e.message ?: "unknown"))
+        }
+    }
+
+    // ─── CoinGecko (ฟรี ไม่ต้องใช้ API Key) ──────────────────────────────────
+
+    /**
+     * ภาพรวมตลาดคริปโตจาก CoinGecko /global — market cap รวม, BTC/ETH dominance,
+     * volume 24h, % เปลี่ยนแปลง market cap, จำนวนเหรียญ/ตลาดที่ active
+     */
+    suspend fun getCryptoGlobal(): Map<String, String> {
+        return try {
+            val resp = client.get("https://api.coingecko.com/api/v3/global") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 12_000 }
+            }
+            if (!resp.status.isSuccess()) {
+                return mapOf("error" to "HTTP ${resp.status.value}")
+            }
+            val data = json.parseToJsonElement(resp.bodyAsText())
+                .jsonObject["data"]?.jsonObject ?: return mapOf("error" to "no data")
+            fun num(path: JsonObject?, key: String) =
+                path?.get(key)?.jsonPrimitive?.contentOrNull ?: "-"
+            val totalMcap = data["total_market_cap"]?.jsonObject
+            val totalVol  = data["total_volume"]?.jsonObject
+            val dom       = data["market_cap_percentage"]?.jsonObject
+            mapOf(
+                "total_market_cap_usd" to num(totalMcap, "usd"),
+                "total_volume_24h_usd" to num(totalVol, "usd"),
+                "btc_dominance" to num(dom, "btc"),
+                "eth_dominance" to num(dom, "eth"),
+                "market_cap_change_24h" to num(data, "market_cap_change_percentage_24h_usd"),
+                "active_cryptocurrencies" to num(data, "active_cryptocurrencies"),
+                "markets" to num(data, "markets")
+            )
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "CoinGecko global error: ${e.message}")
+            mapOf("error" to (e.message ?: "unknown"))
+        }
+    }
+
+    /**
+     * เหรียญที่กำลัง trending บน CoinGecko (24h ที่คนค้นหามากสุด)
+     * คืน list ของ map: name, symbol, market_cap_rank, price_btc
+     */
+    suspend fun getCryptoTrending(): List<Map<String, String>> {
+        return try {
+            val resp = client.get("https://api.coingecko.com/api/v3/search/trending") {
+                header("User-Agent", "curl/8.0")
+                timeout { requestTimeoutMillis = 12_000 }
+            }
+            if (!resp.status.isSuccess()) return emptyList()
+            val coins = json.parseToJsonElement(resp.bodyAsText())
+                .jsonObject["coins"]?.jsonArray ?: return emptyList()
+            coins.mapNotNull { c ->
+                val item = c.jsonObject["item"]?.jsonObject ?: return@mapNotNull null
+                mapOf(
+                    "name" to (item["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null),
+                    "symbol" to (item["symbol"]?.jsonPrimitive?.contentOrNull ?: ""),
+                    "market_cap_rank" to (item["market_cap_rank"]?.jsonPrimitive?.contentOrNull ?: "-")
+                )
+            }
+        } catch (e: Exception) {
+            com.skyliner2008.jarvis.logDebug("TradingApi", "CoinGecko trending error: ${e.message}")
+            emptyList()
+        }
+    }
+}

@@ -1,0 +1,399 @@
+<Rive version="1" kind="fragment">
+    <Artboard defaultStateMachineId="0:7" clip="true" width="500" height="500" styleId="0:5" name="RobotFace" id="0:2">
+        <Fill name="Background">
+            <SolidColor colorValue="FF0C0D12" name="Color"/>
+        </Fill>
+        <LayoutComponentStyle name="Artboard Style" id="0:5"/>
+
+        <!-- Visor Bezel / Outer Rim -->
+        <Shape x="250" y="250" name="VisorRim" id="0:15">
+            <Rectangle width="460" height="460" cornerRadiusTL="48" originX="0.5" originY="0.5" name="RimPath"/>
+            <Stroke thickness="3" name="RimStroke">
+                <SolidColor colorValue="FF1E2333" name="RimColor"/>
+            </Stroke>
+        </Shape>
+
+        <!-- Left Eye Hierarchy -->
+        <Node x="175" y="230" name="LeftEyeContainer" id="0:20">
+            <Node name="LeftEyeScaleNode" id="0:26">
+                <!-- Outer Eye Squircle -->
+                <!-- Pupil with Parallax Container (declared first to draw ON TOP) -->
+                <Node name="LeftPupilContainer" id="0:27">
+                    <Node name="LeftPupilNode" id="0:22">
+                        <!-- Specular Highlight Glint (on top of pupil) -->
+                        <Shape x="-10" y="-10" name="LeftHighlight" id="0:24">
+                            <Ellipse width="14" height="10" originX="0.5" originY="0.5" name="HlPath"/>
+                            <Fill name="HlFill">
+                                <SolidColor colorValue="EEFFFFFF" name="WhiteHl"/>
+                            </Fill>
+                        </Shape>
+                        <!-- Dark Pupil Core -->
+                        <Shape name="LeftPupilShape" id="0:23">
+                            <Ellipse width="36" height="36" originX="0.5" originY="0.5" name="LeftPupilPath"/>
+                            <Fill name="LeftPupilFill">
+                                <SolidColor colorValue="FF0A1931" name="PupilColor"/>
+                            </Fill>
+                        </Shape>
+                    </Node>
+                </Node>
+
+                <!-- Outer Eye Squircle (background of the eye) -->
+                <Shape name="LeftEyeShape" id="0:21">
+                    <Rectangle width="96" height="96" cornerRadiusTL="32" originX="0.5" originY="0.5" name="LeftEyeRect" id="0:101"/>
+                    <Fill name="LeftEyeFill" id="0:102">
+                        <LinearGradient startX="0" startY="-48" endX="0" endY="48" name="CyanGrad">
+                            <GradientStop colorValue="FF00F5FF" position="0"/>
+                            <GradientStop colorValue="FF008899" position="1"/>
+                        </LinearGradient>
+                    </Fill>
+                    <Stroke thickness="2.5" name="LeftEyeGlow" id="0:103">
+                        <SolidColor colorValue="FF00F5FF" name="GlowColor"/>
+                    </Stroke>
+                </Shape>
+            </Node>
+        </Node>
+
+        <!-- Right Eye Hierarchy -->
+        <Node x="325" y="230" name="RightEyeContainer" id="0:30">
+            <Node name="RightEyeScaleNode" id="0:28">
+                <!-- Pupil with Parallax Container (declared first to draw ON TOP) -->
+                <Node name="RightPupilContainer" id="0:29">
+                    <Node name="RightPupilNode" id="0:32">
+                        <!-- Specular Highlight Glint (on top of pupil) -->
+                        <Shape x="-10" y="-10" name="RightHighlight" id="0:34">
+                            <Ellipse width="14" height="10" originX="0.5" originY="0.5" name="HlPathR"/>
+                            <Fill name="HlFill">
+                                <SolidColor colorValue="EEFFFFFF" name="WhiteHlR"/>
+                            </Fill>
+                        </Shape>
+                        <!-- Dark Pupil Core -->
+                        <Shape name="RightPupilShape" id="0:33">
+                            <Ellipse width="36" height="36" originX="0.5" originY="0.5" name="RightPupilPath"/>
+                            <Fill name="RightPupilFill">
+                                <SolidColor colorValue="FF0A1931" name="PupilColorR"/>
+                            </Fill>
+                        </Shape>
+                    </Node>
+                </Node>
+
+                <!-- Outer Eye Squircle (background of the eye) -->
+                <Shape name="RightEyeShape" id="0:31">
+                    <Rectangle width="96" height="96" cornerRadiusTL="32" originX="0.5" originY="0.5" name="RightEyeRect" id="0:104"/>
+                    <Fill name="RightEyeFill" id="0:105">
+                        <LinearGradient startX="0" startY="-48" endX="0" endY="48" name="CyanGradR">
+                            <GradientStop colorValue="FF00F5FF" position="0"/>
+                            <GradientStop colorValue="FF008899" position="1"/>
+                        </LinearGradient>
+                    </Fill>
+                    <Stroke thickness="2.5" name="RightEyeGlow" id="0:106">
+                        <SolidColor colorValue="FF00F5FF" name="GlowColorR"/>
+                    </Stroke>
+                </Shape>
+            </Node>
+        </Node>
+
+        <!-- Robot Mouth Hierarchy -->
+        <Node x="250" y="360" name="MouthContainerNode" id="0:37">
+            <Node name="MouthNode" id="0:35">
+                <Shape name="MouthShape" id="0:36">
+                    <Rectangle width="42" height="12" cornerRadiusTL="6" originX="0.5" originY="0.5" name="MouthPath"/>
+                    <Fill name="MouthFill">
+                        <SolidColor colorValue="FF00F5FF" name="MouthColor"/>
+                    </Fill>
+                </Shape>
+            </Node>
+        </Node>
+
+        <!-- ============================================================= -->
+        <!-- ANIMATIONS (Looping Living Timelines & Blend Poses)            -->
+        <!-- ============================================================= -->
+
+        <!-- 1. Natural Looping Blink Cycle (Every ~3.5s / 210 frames) -->
+        <LinearAnimation loopValue="1" duration="210" fps="60" name="AnimBlink" id="0:61">
+            <KeyedObject objectId="0:26">
+                <KeyedProperty propertyKey="17">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="linear"/>
+                    <KeyFrameDouble value="1" frame="180" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.08" frame="190" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.08" frame="196" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="204" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="210" interpolationType="linear"/>
+                </KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:28">
+                <KeyedProperty propertyKey="17">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="linear"/>
+                    <KeyFrameDouble value="1" frame="180" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.08" frame="190" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.08" frame="196" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="204" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="210" interpolationType="linear"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- 2. Continuous Cyber-Breathing Loop (2s / 120 frames) -->
+        <LinearAnimation loopValue="1" duration="120" fps="60" name="AnimBreathe" id="0:62">
+            <KeyedObject objectId="0:37">
+                <KeyedProperty propertyKey="17">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.35" frame="60" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="120" interpolationType="cubic"/>
+                </KeyedProperty>
+                <KeyedProperty propertyKey="16">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.1" frame="60" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="120" interpolationType="cubic"/>
+                </KeyedProperty>
+                <KeyedProperty propertyKey="14">
+                    <KeyFrameDouble value="360" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="357" frame="60" interpolationType="cubic"/>
+                    <KeyFrameDouble value="360" frame="120" interpolationType="cubic"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- 3. Micro-Saccade Subtle Eye Jitter (3s / 180 frames) -->
+        <LinearAnimation loopValue="1" duration="180" fps="60" name="AnimMicroSaccade" id="0:63">
+            <KeyedObject objectId="0:22">
+                <KeyedProperty propertyKey="13">
+                    <KeyFrameDouble value="0" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="2.5" frame="45" interpolationType="cubic"/>
+                    <KeyFrameDouble value="-2.0" frame="90" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.5" frame="135" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0" frame="180" interpolationType="cubic"/>
+                </KeyedProperty>
+                <KeyedProperty propertyKey="14">
+                    <KeyFrameDouble value="0" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="-1.5" frame="45" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.5" frame="90" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.8" frame="135" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0" frame="180" interpolationType="cubic"/>
+                </KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:32">
+                <KeyedProperty propertyKey="13">
+                    <KeyFrameDouble value="0" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="2.5" frame="45" interpolationType="cubic"/>
+                    <KeyFrameDouble value="-2.0" frame="90" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.5" frame="135" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0" frame="180" interpolationType="cubic"/>
+                </KeyedProperty>
+                <KeyedProperty propertyKey="14">
+                    <KeyFrameDouble value="0" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="-1.5" frame="45" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.5" frame="90" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.8" frame="135" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0" frame="180" interpolationType="cubic"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- 4. Gaze Horizontal Blend Poses (0=Left, 50=Center, 100=Right) -->
+        <LinearAnimation duration="1" fps="60" name="LookLeft" id="0:71">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="-18"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="-18"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="160"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="310"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation duration="1" fps="60" name="LookCenterH" id="0:72">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="0"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="0"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="175"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="325"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation duration="1" fps="60" name="LookRight" id="0:73">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="18"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="18"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="190"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="13"><KeyFrameDouble value="340"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- 5. Gaze Vertical Blend Poses (0=Up, 50=Center, 100=Down) -->
+        <LinearAnimation duration="1" fps="60" name="LookUp" id="0:74">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="-14"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="-14"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="218"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="218"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation duration="1" fps="60" name="LookCenterV" id="0:75">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="0"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="0"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="230"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="230"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation duration="1" fps="60" name="LookDown" id="0:76">
+            <KeyedObject objectId="0:27">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="14"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:29">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="14"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:20">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="242"/></KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="0:30">
+                <KeyedProperty propertyKey="14"><KeyFrameDouble value="242"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- 6. Speech Animations -->
+        <LinearAnimation duration="1" fps="60" name="MouthRest" id="0:78">
+            <KeyedObject objectId="0:35">
+                <KeyedProperty propertyKey="17"><KeyFrameDouble value="1"/></KeyedProperty>
+                <KeyedProperty propertyKey="16"><KeyFrameDouble value="1"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation loopValue="1" duration="30" fps="60" name="Talking" id="0:77">
+            <KeyedObject objectId="0:35">
+                <KeyedProperty propertyKey="17">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="2.6" frame="7" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.1" frame="15" interpolationType="cubic"/>
+                    <KeyFrameDouble value="2.2" frame="22" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="30" interpolationType="cubic"/>
+                </KeyedProperty>
+                <KeyedProperty propertyKey="16">
+                    <KeyFrameDouble value="1" frame="0" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.2" frame="7" interpolationType="cubic"/>
+                    <KeyFrameDouble value="0.95" frame="15" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1.15" frame="22" interpolationType="cubic"/>
+                    <KeyFrameDouble value="1" frame="30" interpolationType="cubic"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <!-- ============================================================= -->
+        <!-- STATE MACHINE (6 Parallel Blended Layers)                     -->
+        <!-- ============================================================= -->
+        <StateMachine name="State Machine 1" id="0:7">
+            <StateMachineNumber name="gazeX" value="50" id="0:90"/>
+            <StateMachineNumber name="gazeY" value="50" id="0:91"/>
+            <StateMachineNumber name="emotion" value="0" id="0:92"/>
+            <StateMachineBool name="isSpeaking" value="false" id="0:93"/>
+            <StateMachineNumber name="mouthOpen" value="0" id="0:94"/>
+
+            <!-- Layer 1: Automatic Procedural Eye Blink -->
+            <StateMachineLayer name="Blink" id="0:81">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:111"/>
+                </EntryState>
+                <AnimationState animationId="0:61" id="0:111"/>
+            </StateMachineLayer>
+
+            <!-- Layer 2: Automatic Cyber-Breathing -->
+            <StateMachineLayer name="Breathe" id="0:82">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:112"/>
+                </EntryState>
+                <AnimationState animationId="0:62" id="0:112"/>
+            </StateMachineLayer>
+
+            <!-- Layer 3: Micro-Saccades Living Drift -->
+            <StateMachineLayer name="MicroSaccades" id="0:83">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:113"/>
+                </EntryState>
+                <AnimationState animationId="0:63" id="0:113"/>
+            </StateMachineLayer>
+
+            <!-- Layer 4: Interactive Horizontal Gaze Blend -->
+            <StateMachineLayer name="GazeHorizontal" id="0:84">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:114"/>
+                </EntryState>
+                <BlendState1DInput inputId="0:90" id="0:114">
+                    <BlendAnimation1D animationId="0:71" value="0"/>
+                    <BlendAnimation1D animationId="0:72" value="50"/>
+                    <BlendAnimation1D animationId="0:73" value="100"/>
+                </BlendState1DInput>
+            </StateMachineLayer>
+
+            <!-- Layer 5: Interactive Vertical Gaze Blend -->
+            <StateMachineLayer name="GazeVertical" id="0:85">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:115"/>
+                </EntryState>
+                <BlendState1DInput inputId="0:91" id="0:115">
+                    <BlendAnimation1D animationId="0:74" value="0"/>
+                    <BlendAnimation1D animationId="0:75" value="50"/>
+                    <BlendAnimation1D animationId="0:76" value="100"/>
+                </BlendState1DInput>
+            </StateMachineLayer>
+
+            <!-- Layer 6: Reactive Speech Talking Mouth -->
+            <StateMachineLayer name="Speech" id="0:86">
+                <AnyState x="200" y="-120"/>
+                <ExitState x="400" y="-120"/>
+                <EntryState>
+                    <StateTransition stateToId="0:116"/>
+                </EntryState>
+                <AnimationState animationId="0:78" id="0:116">
+                    <StateTransition stateToId="0:117" duration="80">
+                        <TransitionBoolCondition inputId="0:93" opValue="equal"/>
+                    </StateTransition>
+                </AnimationState>
+                <AnimationState animationId="0:77" id="0:117">
+                    <StateTransition stateToId="0:116" duration="100">
+                        <TransitionBoolCondition inputId="0:93" opValue="notEqual"/>
+                    </StateTransition>
+                </AnimationState>
+            </StateMachineLayer>
+        </StateMachine>
+    </Artboard>
+</Rive>

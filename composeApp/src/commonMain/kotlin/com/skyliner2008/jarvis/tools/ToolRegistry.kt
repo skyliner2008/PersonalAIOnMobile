@@ -1,0 +1,715 @@
+package com.skyliner2008.jarvis.tools
+
+import com.skyliner2008.jarvis.tools.trading.TradingToolDefinitions
+import com.skyliner2008.jarvis.tools.trading.SmcToolDefinitions
+import com.skyliner2008.jarvis.tools.file.FileToolDefinitions
+import com.skyliner2008.jarvis.tools.strategy.StrategyToolDefinitions
+import com.skyliner2008.jarvis.tools.device.DeviceToolDefinitions
+import kotlinx.serialization.json.*
+
+object ToolRegistry {
+    private const val STRICT_TV_ONLY_TRADING_MODE = false
+
+    val tvOnlyTradingFunctionNames = setOf(
+        "trading_price",
+        "trading_market_snapshot",
+        "trading_top_gainers",
+        "trading_top_losers",
+        "trading_technical_analysis",
+        "trading_multi_timeframe",
+        "trading_bollinger_scan",
+        "trading_oversold_scan",
+        "trading_overbought_scan",
+        "trading_volume_breakout",
+        "trading_sentiment",
+        "trading_news",
+        "trading_combined",
+        "trading_fundamental_analysis",
+        "trading_fear_greed",
+        "trading_macro_calendar",
+        "trading_correlation_matrix",
+        "trading_position_sizing",
+        "automation_manage_alerts",
+        // 3 ตัวนี้เคยตกหล่นจาก allowlist ทั้ง tvOnly และ mt5Only
+        // → TradingToolPolicy.isToolAllowed คืน false ทุกกรณี (trading context ก็ไม่ผ่าน
+        //   non-trading context ก็ไม่ผ่านเพราะ allowedTradingToolNames เป็น null)
+        // ผลคือถาม "ภาพรวมคริปโต" (เข้าเงื่อนไข trading prompt เพราะมีคำว่า คริปโต)
+        // แล้ว AI ไม่มี tool ให้เรียกเลย ทั้งที่ handler พร้อมใช้งาน
+        "trading_crypto_overview",
+        "trading_economic_data",
+        "automation_manage_schedule",
+        "trading_deep_analysis_suite",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis",
+        "trading_smc_analysis",
+        "trading_smc_sweeps",
+        "trading_smc_liquidity",
+        "trading_smc_orderblocks",
+        "trading_smc_structure",
+        "trading_smc_flow",
+        "trading_strategy_signal",
+        "trading_signal_alert",
+        "trading_signal_anticipation",
+        "trading_signal_stats",
+        "trading_signal_data_export",
+        "trading_signal_config_import",
+        "trading_backtest",
+        "trading_backtest_optimize",
+        "trading_backtest_evolve",
+        "trading_mix_config"
+    )
+
+    val mt5OnlyTradingFunctionNames = setOf(
+        "trading_mt5_account_info",
+        "trading_mt5_list_positions",
+        "trading_mt5_list_orders",
+        "trading_mt5_list_history",
+        "trading_mt5_candles",
+        "trading_mt5_analyze",
+        "trading_mt5_symbol_info",
+        "trading_mt5_symbol_search",
+        "trading_mt5_snapshot",
+        "trading_mt5_trade_actions",
+        "trading_mt5_market_scanner",
+        "trading_mt5_correlation_radar",
+        "trading_mt5_sentiment_gauge",
+        "trading_mt5_institutional_flow",
+        "trading_mt5_economic_radar",
+        "trading_mt5_trade_journal",
+        "trading_mt5_order",
+        "trading_mt5_close_position",
+        "trading_mt5_modify_position",
+        "trading_mt5_close_all",
+        "trading_mt5_break_even_all"
+    )
+
+    private val _builtinTools: Map<String, FunctionDeclaration> = buildMap {
+        put("get_current_datetime", FunctionDeclaration(
+            name = "get_current_datetime",
+            description = "Gets the current date and time.",
+            parameters = null
+        ))
+        // ── Agent multi-session: Live เป็นเอเจนต์หลัก มอบงานให้ chat session ทำเบื้องหลัง ──
+        put("agent_task_start", FunctionDeclaration(
+            name = "agent_task_start",
+            description = "มอบงานที่ใช้เวลานานหรือหลายขั้นตอนให้ทำเบื้องหลัง (เช่น รวบรวมข้อมูลหลายแหล่ง วิเคราะห์หลายสินทรัพย์ สรุปเอกสารยาว) " +
+                "แล้วคุยกับผู้ใช้ต่อได้ทันทีโดยไม่ต้องรอ เมื่อเสร็จระบบจะส่งผลกลับมาให้รายงานเอง " +
+                "ห้ามใช้กับงานที่ตอบได้ทันทีในเทิร์นเดียว",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "title" to ParameterProperty("STRING", "ชื่อสั้นๆ ของงาน เช่น 'สรุปข่าวทองวันนี้'"),
+                    "instruction" to ParameterProperty("STRING", "คำสั่งเต็มที่ให้ผู้ช่วยเบื้องหลังทำ ระบุให้ชัดว่าต้องการผลลัพธ์อะไร")
+                ),
+                required = listOf("instruction")
+            )
+        ))
+        put("agent_task_list", FunctionDeclaration(
+            name = "agent_task_list",
+            description = "ดูรายการงานเบื้องหลังที่กำลังทำอยู่ทั้งหมด",
+            parameters = null
+        ))
+        put("agent_task_status", FunctionDeclaration(
+            name = "agent_task_status",
+            description = "เช็คสถานะงานเบื้องหลังตาม task_id",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf("task_id" to ParameterProperty("STRING", "id ของงานที่ได้จาก agent_task_start")),
+                required = listOf("task_id")
+            )
+        ))
+        put("agent_task_cancel", FunctionDeclaration(
+            name = "agent_task_cancel",
+            description = "ยกเลิกงานเบื้องหลังที่กำลังทำอยู่",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf("task_id" to ParameterProperty("STRING", "id ของงานที่ต้องการยกเลิก")),
+                required = listOf("task_id")
+            )
+        ))
+        put("calculate", FunctionDeclaration(
+            name = "calculate",
+            description = "Calculates a mathematical expression.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "expression" to ParameterProperty(type = "STRING", description = "The mathematical expression to evaluate.")
+                ),
+                required = listOf("expression")
+            )
+        ))
+        put("remember_fact", FunctionDeclaration(
+            name = "remember_fact",
+            description = "Saves an important piece of information to long-term memory.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "key"   to ParameterProperty("STRING", "The topic of the fact to remember."),
+                    "value" to ParameterProperty("STRING", "The content of the fact to save."),
+                    "importance" to ParameterProperty("STRING", "Importance level: low, medium, high")
+                ),
+                required = listOf("key", "value")
+            )
+        ))
+        put("recall_memory", FunctionDeclaration(
+            name = "recall_memory",
+            description = "Retrieves information from long-term memory.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "query" to ParameterProperty("STRING", "The topic to search for in memory.")
+                ),
+                required = listOf("query")
+            )
+        ))
+        put("convert_units", FunctionDeclaration(
+            name = "convert_units",
+            description = "Converts a value from one unit to another (e.g., meters to feet, Celsius to Fahrenheit).",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "value"     to ParameterProperty("NUMBER", "The numerical value to convert."),
+                    "from_unit" to ParameterProperty("STRING", "The source unit (e.g., km, celsius, kg)."),
+                    "to_unit"   to ParameterProperty("STRING", "The target unit (e.g., miles, fahrenheit, pounds).")
+                ),
+                required = listOf("value", "from_unit", "to_unit")
+            )
+        ))
+        put("set_reminder", FunctionDeclaration(
+            name = "set_reminder",
+            description = "Sets a reminder or TODO for the user.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "title"   to ParameterProperty("STRING", "The title of the reminder."),
+                    "detail"  to ParameterProperty("STRING", "Additional details for the reminder."),
+                    "when"    to ParameterProperty("STRING", "When to remind (e.g., 'tomorrow at 5pm', 'in 1 hour').")
+                ),
+                required = listOf("title")
+            )
+        ))
+        put("translate_text", FunctionDeclaration(
+            name = "translate_text",
+            description = "Translates text from one language to another.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "text"          to ParameterProperty("STRING", "The text to translate."),
+                    "target_lang"   to ParameterProperty("STRING", "The target language (e.g., 'Thai', 'English', 'Japanese').")
+                ),
+                required = listOf("text", "target_lang")
+            )
+        ))
+        put("summarize_text", FunctionDeclaration(
+            name = "summarize_text",
+            description = "Summarizes a long piece of text.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "text"   to ParameterProperty("STRING", "The text to summarize."),
+                    "length" to ParameterProperty("STRING", "Desired length: 'short', 'medium', or 'detailed'.",
+                        enum = listOf("short", "medium", "detailed"))
+                ),
+                required = listOf("text")
+            )
+        ))
+        put("search_web", FunctionDeclaration(
+            name = "search_web",
+            description = "Searches the internet for up-to-date or real-time information.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "query" to ParameterProperty("STRING", "The search query or question.")
+                ),
+                required = listOf("query")
+            )
+        ))
+        put("identity_update", FunctionDeclaration(
+            name = "identity_update",
+            description = """Updates the AI agent's or user's identity profile. Use when the user asks to change your name/personality/style or how you address them (e.g., 'เปลี่ยนชื่อเป็น...', 'เรียกฉันว่าบอส', 'พูดตลกๆ หน่อย', 'เป็นเพศหญิง').
+                |agent fields: name (ชื่อ AI), creature (บทบาท/สายพันธุ์), vibe (บุคลิก/น้ำเสียง), gender (เพศ)
+                |user fields: name (ชื่อจริงผู้ใช้), call_name (การเรียกผู้ใช้), notes (หมายเหตุ เช่น ภาษาที่ใช้)""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "target" to ParameterProperty("STRING", "Whose identity to update", enum = listOf("agent", "user")),
+                    "field"  to ParameterProperty("STRING", "Field to update — agent: name, creature, vibe, gender | user: name, call_name, notes"),
+                    "value"  to ParameterProperty("STRING", "New value for the field")
+                ),
+                required = listOf("target", "field", "value")
+            )
+        ))
+        put("system_create_agent_tool", FunctionDeclaration(
+            name = "system_create_agent_tool",
+            description = """สร้าง custom tool / skill ใหม่ให้กับ Agent แบบยืดหยุ่น ไร้ขีดจำกัด
+                |สามารถกำหนดชื่อ tool, คำอธิบาย, trigger keywords, parameters (JSON schema หรือชื่อคั่นด้วย comma),
+                |executionType (prompt: ทำตามขั้นตอนและใช้ tool อื่นประกอบได้, formula: คำนวณสูตรคณิตศาสตร์, chain: เรียกหลาย tool ต่อเนื่อง),
+                |และ logic การทำงาน (systemPromptAddon รองรับ placeholder {{param}} อัตโนมัติ)
+                |Tool ที่สร้างจะถูกบันทึกและพร้อมใช้งานทันทีในแอปพลิเคชัน""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "ชื่อเฉพาะของ tool เช่น 'custom_fibonacci_pivot', 'risk_calculator', 'gold_scalp_radar'"),
+                    "description" to ParameterProperty("STRING", "คำอธิบายว่าเครื่องมือนี้ทำอะไรและควรเรียกใช้เมื่อใด"),
+                    "triggerKeywords" to ParameterProperty("STRING", "คำสำคัญที่ใช้เรียก tool คั่นด้วย comma เช่น 'fibonacci, pivot, คำนวณจุดกลับตัว'"),
+                    "systemPromptAddon" to ParameterProperty("STRING", "ตรรกะ/ขั้นตอน/สูตรคำนวณ รองรับการแทนที่ค่าพารามิเตอร์ผ่าน {{ชื่อพารามิเตอร์}}"),
+                    "parameters" to ParameterProperty("STRING", "พารามิเตอร์ที่เครื่องมือนี้รับ (JSON schema หรือชื่อพารามิเตอร์คั่นด้วย comma เช่น 'symbol, timeframe, risk_percent')"),
+                    "executionType" to ParameterProperty("STRING", "ประเภทการทำงาน: 'prompt' (คำแนะนำ/กลยุทธ์), 'formula' (คำนวณตัวเลข/สูตรคณิตศาสตร์), 'chain' (ร้อยเรียงหลายเครื่องมือ)", enum = listOf("prompt", "formula", "chain"))
+                ),
+                required = listOf("name", "description", "systemPromptAddon")
+            )
+        ))
+        put("system_list_agent_tools", FunctionDeclaration(
+            name = "system_list_agent_tools",
+            description = "Lists all custom tools/skills the Agent has previously created (name, description, trigger keywords, and internal logic). Use when the user asks what custom tools exist or wants to review/edit one.",
+            parameters = null
+        ))
+        put("system_delete_agent_tool", FunctionDeclaration(
+            name = "system_delete_agent_tool",
+            description = "Permanently deletes a custom tool created by the Agent — removes both the file and its registry entry. Use when the user asks to remove a custom tool. To EDIT a tool, call system_create_agent_tool again with the same name to overwrite it.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "The custom tool name to delete (with or without 'custom_' prefix).")
+                ),
+                required = listOf("name")
+            )
+        ))
+        put("system_run_diagnostics", FunctionDeclaration(
+            name = "system_run_diagnostics",
+            description = "Runs a comprehensive system health check and generates a diagnostic report. Use this to troubleshoot price discrepancies, connection issues, or automation failures.",
+            parameters = null
+        ))
+        put("system_check_connectivity", FunctionDeclaration(
+            name = "system_check_connectivity",
+            description = "Checks the internet connection and connectivity to key financial APIs (Yahoo, TradingView).",
+            parameters = null
+        ))
+        put("system_self_review", FunctionDeclaration(
+            name = "system_self_review",
+            description = "Returns the bundled self-review document of JARVIS/PersonalAIBot (identity, 8 core capabilities, key numbers, roadmap). Use when the user asks you to review yourself, introduce your capabilities, or read/summarize the project README aloud (e.g. 'รีวิวตัวเองให้ฟังหน่อย', 'แนะนำตัวเอง'). NARRATION MODE: the user wants to HEAR the full review — narrate it aloud in natural spoken Thai, section by section, with NO length limit. Do NOT use analyze_and_display_report for this. Do NOT cut it short.",
+            parameters = null
+        ))
+        put("chart_dashboard_control", FunctionDeclaration(
+            name = "chart_dashboard_control",
+            description = """Controls the on-screen chart dashboard (Lightweight Charts multi-pane). Use when the user asks to open/show/close a chart, change chart symbol or timeframe, change the pane layout, or toggle indicators — e.g. 'เปิดกราฟทองคำ', 'เปลี่ยนเป็น 4h', 'เพิ่ม RSI กับ MACD', 'เปิด EMA8 หรือ EMA200', 'เอา Bollinger Bands ออก', 'สลับไปกราฟ TradingView'.
+                |Layouts: single (chart only), rsi, macd, rsi_macd, volume, full (volume+rsi+macd subpanes).
+                |Overlays on main pane: รองรับ EMA และ SMA ทุกคาบตามที่ผู้ใช้ต้องการ (เช่น ema8, ema9, ema12, ema14, ema20, ema21, ema50, ema60, ema89, ema100, ema200, sma20, sma50, sma200), bb (Bollinger Bands), donchian, smc (SMC zones: Order Block / FVG / Liquidity / Premium-Discount — เปิดเมื่อผู้ใช้ขอ SMC เท่านั้น ไม่เปิดอัตโนมัติ), signals (ลูกศร BUY/SELL).
+                |open จะรีเซ็ต overlay ทั้งหมดตามพารามิเตอร์ overlays (ไม่ระบุ = ปิดทั้งหมด).""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "What to do", enum = listOf("open", "close", "set_layout", "set_symbol", "set_interval", "set_overlay", "set_view")),
+                    "symbol" to ParameterProperty("STRING", "Symbol for set_symbol/open, e.g. XAUUSD, BTCUSDT, EURUSD"),
+                    "interval" to ParameterProperty("STRING", "Timeframe for set_interval/open: 1m 5m 15m 30m 1h 4h 1d (or m1, m5, m15, h1, h4, d1, w1)"),
+                    "layout" to ParameterProperty("STRING", "Layout for set_layout", enum = listOf("single", "rsi", "macd", "rsi_macd", "volume", "full")),
+                    "overlay" to ParameterProperty("STRING", "Indicator for set_overlay — supports ANY EMA/SMA period (e.g. ema8, ema14, ema20, ema50, ema200, sma50, sma200), bb, donchian, smc, signals"),
+                    "overlays" to ParameterProperty("STRING", "Comma-separated overlays for open (e.g. 'ema8', 'ema14,ema50', 'ema20,bb,smc' — supports ANY EMA/SMA period; replaces all; omit = none)"),
+                    "visible" to ParameterProperty("BOOLEAN", "true=show overlay, false=hide (set_overlay only, default true)"),
+                    "view" to ParameterProperty("STRING", "set_view: dashboard (offline multi-pane), tradingview (online TV chart widget), or financials (TradingView financials, balance sheet, valuation & ownership widget)", enum = listOf("dashboard", "tradingview", "financials"))
+                ),
+                required = listOf("action")
+            )
+        ))
+        put("analyze_and_display_report", FunctionDeclaration(
+            name = "analyze_and_display_report",
+            description = """Displays a detailed markdown report in the chat UI while you continue speaking a short voice summary.
+                |IMPORTANT for Live Voice mode: whenever the answer requires long details, tables, or many numbers, call this tool with the full markdown report, then SPEAK the voice_summary you wrote. Never read tables aloud, never read markdown aloud.
+                |Use after gathering data from other tools (trading analysis, SMC, news, etc.).""".trimMargin(),
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "detailed_markdown" to ParameterProperty("STRING", "The full markdown report to display in the chat (tables, headers, bullet points allowed here)."),
+                    "voice_summary" to ParameterProperty("STRING", "The spoken Thai answer, 6-10 conversational sentences (this is exactly what you say aloud, so make it complete): (1) the main conclusion/direction, (2) 3-5 key numbers explained in words, e.g. 'RSI อยู่ที่ 45 แสดงว่าโมเมนตัมยังอ่อนแอ', (3) what to watch out for. Do NOT compress it to 2-3 sentences and do NOT use markdown.")
+                ),
+                required = listOf("detailed_markdown", "voice_summary")
+            )
+        ))
+        put("mt5_place_order", FunctionDeclaration(
+            name = "mt5_place_order",
+            description = "Sends a live BUY/SELL order command to an MT5 bridge service.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "action" to ParameterProperty("STRING", "BUY or SELL", enum = listOf("BUY", "SELL")),
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD, EURUSD, BTCUSD"),
+                    "volume" to ParameterProperty("NUMBER", "Lot size, e.g., 0.01"),
+                    "sl" to ParameterProperty("NUMBER", "Stop loss price (optional)"),
+                    "tp" to ParameterProperty("NUMBER", "Take profit price (optional)"),
+                    "comment" to ParameterProperty("STRING", "Optional order comment"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = listOf("action", "symbol", "volume")
+            )
+        ))
+        put("mt5_close_position", FunctionDeclaration(
+            name = "mt5_close_position",
+            description = "Sends a close-position command to an MT5 bridge service.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "symbol" to ParameterProperty("STRING", "Trading symbol, e.g., XAUUSD"),
+                    "ticket" to ParameterProperty("STRING", "Optional position ticket to close"),
+                    "endpoint" to ParameterProperty("STRING", "Optional bridge URL override")
+                ),
+                required = emptyList()
+            )
+        ))
+    }
+
+    // Copy-on-write immutable maps — mutation เกิดเฉพาะตอน register (เหตุการณ์หายาก)
+    // ผู้อ่านจะไม่เห็น map ที่ถูกแก้ครึ่งทาง แม้ถูกเรียกจากหลาย coroutine พร้อมกัน
+    // @Volatile กัน reader thread เห็น reference เก่าค้าง (visibility guarantee)
+    @Volatile
+    private var _customTools: Map<String, FunctionDeclaration> = emptyMap()
+    @Volatile
+    private var _skills: Map<String, SkillDescriptor> = emptyMap()
+
+    // ─── Trading Tools (Real-time, TA, Sentiment, News) ──────────────────────
+    private val supportedTradingToolNames = setOf(
+        "trading_price",
+        "trading_market_snapshot",
+        "trading_top_gainers",
+        "trading_top_losers",
+        "trading_technical_analysis",
+        "trading_multi_timeframe",
+        "trading_bollinger_scan",
+        "trading_oversold_scan",
+        "trading_overbought_scan",
+        "trading_volume_breakout",
+        "trading_sentiment",
+        "trading_news",
+        "trading_combined",
+        // V16.0 Advanced Suite
+        "trading_fundamental_analysis",
+        "trading_fear_greed",
+        "trading_crypto_overview",
+        "trading_macro_calendar",
+        "trading_economic_data",
+        "trading_correlation_matrix",
+        "trading_position_sizing",
+        "automation_manage_alerts",
+        "automation_manage_schedule",
+        "trading_deep_analysis_suite",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis",
+        "trading_smc_flow",
+        "trading_strategy_signal",
+        "trading_signal_alert",
+        "trading_signal_anticipation",
+        "trading_signal_stats",
+        "trading_signal_data_export",
+        "trading_signal_config_import",
+        "trading_backtest",
+        "trading_backtest_optimize",
+        "trading_backtest_evolve",
+        "trading_mix_config"
+    )
+
+    private val tvOnlyTradingToolNames = setOf(
+        "trading_price",
+        "trading_news",
+        "trading_macro_calendar",
+        "trading_harmonic_scan",
+        "trading_elliot_modern_analysis"
+    )
+
+    private val activeTradingToolNames: Set<String> =
+        if (STRICT_TV_ONLY_TRADING_MODE) tvOnlyTradingToolNames else supportedTradingToolNames
+
+    private val _tradingTools: Map<String, FunctionDeclaration> =
+        TradingToolDefinitions.allDefinitions
+            .filter { it.name in activeTradingToolNames }
+            .associateBy { it.name }
+
+    // ─── MT5 Bridge Tools (separate category) ────────────────────────────────
+    private val supportedMt5ToolNames = setOf(
+        // MT5 Core Actions
+        "trading_mt5_order",
+        "trading_mt5_close_position",
+        "trading_mt5_modify_position",
+        // MT5 Core Agent (Query)
+        "trading_mt5_account_info",
+        "trading_mt5_list_positions",
+        "trading_mt5_list_orders",
+        "trading_mt5_list_history",
+        "trading_mt5_candles",
+        "trading_mt5_analyze",
+        "trading_mt5_symbol_info",
+        "trading_mt5_symbol_search",
+        "trading_mt5_close_all",
+        "trading_mt5_break_even_all",
+        "trading_mt5_snapshot",
+        "trading_mt5_trade_actions",
+        // MT5 Advanced Intelligence
+        "trading_mt5_market_scanner",
+        "trading_mt5_correlation_radar",
+        "trading_mt5_sentiment_gauge",
+        "trading_mt5_institutional_flow",
+        "trading_mt5_economic_radar",
+        "trading_mt5_trade_journal"
+    )
+
+    private val _mt5Tools: Map<String, FunctionDeclaration> =
+        TradingToolDefinitions.allDefinitions
+            .filter { it.name in supportedMt5ToolNames }
+            .associateBy { it.name }
+
+    // ─── SMC (Smart Money Concepts) Tools ────────────────────────────────────
+    private val _smcTools: Map<String, FunctionDeclaration> =
+        SmcToolDefinitions.allDefinitions.associateBy { it.name }
+
+    // ─── File Management Tools ───────────────────────────────────────────────
+    private val _fileTools: Map<String, FunctionDeclaration> =
+        FileToolDefinitions.allDefinitions.associateBy { it.name }
+
+    // ─── Strategy Library (Quantpedia knowledge base) ────────────────────────
+    private val _strategyTools: Map<String, FunctionDeclaration> =
+        StrategyToolDefinitions.allDefinitions.associateBy { it.name }
+
+    // ─── Device Control Tools (Hardware / App Launcher / Accessibility) ────
+    private val _deviceTools: Map<String, FunctionDeclaration> =
+        DeviceToolDefinitions.allDefinitions.associateBy { it.name }
+
+    fun getGeminiTool(): GeminiTool = GeminiTool(
+        functionDeclarations = _builtinTools.values.toList() +
+                               _tradingTools.values.toList() +
+                               _mt5Tools.values.toList() +
+                               _smcTools.values.toList() +
+                               _fileTools.values.toList() +
+                               _strategyTools.values.toList() +
+                               _cameraTools.values.toList() +
+                               _deviceTools.values.toList() +
+                               _customTools.values.toList() +
+                               skillDeclarations()
+    )
+
+    // skill ทุกตัวมี custom tool คู่กันอยู่แล้ว (register คู่กัน) —
+    // ส่งเฉพาะ skill ที่ไม่มี custom tool ชื่อซ้ำ กัน Gemini 400 "Duplicate function declaration"
+    private fun skillDeclarations(): List<FunctionDeclaration> =
+        _skills.values.filter { it.name !in _customTools }.map { skill ->
+            FunctionDeclaration(
+                name        = skill.name,
+                description = skill.description,
+                parameters  = null
+            )
+        }
+
+    /**
+     * เครื่องมือที่ "ควบคุมเครื่องแบบเต็มรูปแบบ" (Accessibility: อ่านจอ/แตะ/พิมพ์/เลื่อน/ปุ่ม/เปิดแอป/ปลุก-พักจอ)
+     *
+     * อนุญาตเฉพาะโหมดขับรถ — โหมดอื่น (ผู้ช่วยส่วนตัว / สัตว์เลี้ยง) ทำงานเบื้องหลังได้ตามปกติ
+     * แต่ต้องไม่เข้าไปกดหน้าจอหรือปลุก/พักจอแทนผู้ใช้
+     */
+    val DEVICE_CONTROL_TOOLS = setOf(
+        "device_read_screen",
+        "device_screenshot",
+        "device_tap",
+        "device_gesture",
+        "device_type_text",
+        "device_scroll",
+        "device_press_button",
+        "device_open_app",
+        "device_get_app_info"
+    )
+
+    /**
+     * ชุดเครื่องมือสำหรับ Live session ตามโหมด
+     *
+     * ทุกโหมดคือผู้ช่วยตัวเดียวกันและใช้เครื่องมือได้เหมือนกันหมด — ต่างกันแค่บทบาท/น้ำเสียง
+     * ยกเว้นกลุ่มควบคุมเครื่องเต็มรูปแบบที่เปิดเฉพาะโหมดขับรถ (2026-09-16)
+     */
+    fun getLiveGeminiTool(profile: com.skyliner2008.jarvis.pet.AlwaysLiveProfile): GeminiTool {
+        val all = getGeminiTool().functionDeclarations
+        if (profile == com.skyliner2008.jarvis.pet.AlwaysLiveProfile.DRIVE) return GeminiTool(all)
+        return GeminiTool(all.filter { it.name !in DEVICE_CONTROL_TOOLS })
+    }
+
+    fun allToolNames(): Set<String> =
+        _builtinTools.keys + _tradingTools.keys + _mt5Tools.keys + _smcTools.keys + _fileTools.keys + _strategyTools.keys + _cameraTools.keys + _deviceTools.keys + _customTools.keys + _skills.keys
+
+    fun isTradingTool(name: String): Boolean =
+        name in _tradingTools || name in _smcTools || name in _mt5Tools
+
+    fun isMt5Tool(name: String): Boolean =
+        name in _mt5Tools
+
+    fun isFileTool(name: String): Boolean =
+        name in _fileTools
+
+    fun isStrategyTool(name: String): Boolean =
+        name in _strategyTools
+
+    fun isCameraTool(name: String): Boolean =
+        name in _cameraTools
+
+    fun isSystemTool(name: String): Boolean =
+        name.startsWith("system_")
+
+    fun isDeviceTool(name: String): Boolean =
+        name in _deviceTools
+
+    fun registerCustomTool(decl: FunctionDeclaration) {
+        _customTools = _customTools + (decl.name to decl)
+    }
+
+    fun registerSkill(skill: SkillDescriptor) {
+        _skills = _skills + (skill.name to skill)
+    }
+
+    /** ลบ custom tool/skill ออกจาก registry (ใช้คู่กับลบไฟล์ใน custom_agent_tools/) */
+    fun unregisterCustomTool(name: String) {
+        _customTools = _customTools - name
+        _skills = _skills - name
+    }
+
+    /** รายการ custom tool ที่ลงทะเบียนอยู่ (name → description) */
+    fun listCustomTools(): Map<String, String> =
+        _customTools.mapValues { it.value.description }
+
+    fun getSkill(name: String): SkillDescriptor? = _skills[name]
+
+    fun toJsonSchema(params: FunctionParameters?): String {
+        if (params == null) return """{"type":"object","properties":{}}"""
+        return buildJsonObject {
+            put("type", "object")
+            putJsonObject("properties") {
+                params.properties.forEach { (name, prop) ->
+                    putJsonObject(name) {
+                        put("type", prop.type.lowercase())
+                        put("description", prop.description)
+                        prop.enum?.let { enumList ->
+                            putJsonArray("enum") {
+                                enumList.forEach { add(it) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (params.required.isNotEmpty()) {
+                putJsonArray("required") {
+                    params.required.forEach { add(it) }
+                }
+            }
+        }.toString()
+    }
+
+    // ─── Camera / Vision Tools ──────────────────────────────────────────────
+    private val _cameraTools: Map<String, FunctionDeclaration> = buildMap {
+        put("vision_activate", FunctionDeclaration(
+            name = "vision_activate",
+            description = "Turns ON the AI's eyes for real-time video analysis. IMPORTANT: Once active, you will receive a continuous live video stream. DO NOT call 'camera_analyze_scene' or any other camera tools while this is active, as you already have the visual data in your multimodal input.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "duration_seconds" to ParameterProperty("NUMBER", "How long to keep the eyes open (default 10s).")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("vision_deactivate", FunctionDeclaration(
+            name = "vision_deactivate",
+            description = "Turns OFF the AI's eyes. Call this immediately after you have gathered enough visual information to save the user's tokens.",
+            parameters = null
+        ))
+        put("camera_analyze_scene", FunctionDeclaration(
+            name = "camera_analyze_scene",
+            description = "Analyzes a single camera frame (Snapshot mode). ONLY use this if 'vision_activate' is NOT active. If you are already in Live Vision mode, ignore this tool and use your live video input instead.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "prompt" to ParameterProperty("STRING", "Optional custom prompt to guide the analysis (e.g., 'read the text on the sign').")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("camera_detect_objects", FunctionDeclaration(
+            name = "camera_detect_objects",
+            description = "Detects and locates objects in the camera view with bounding boxes and confidence scores.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "target" to ParameterProperty("STRING", "Optional specific object to look for (e.g., 'cat', 'license plate').")
+                ),
+                required = emptyList()
+            )
+        ))
+        put("camera_read_text", FunctionDeclaration(
+            name = "camera_read_text",
+            description = "Reads and extracts text (OCR) from the camera view — signs, documents, screens, labels.",
+            parameters = null
+        ))
+        put("camera_switch_provider", FunctionDeclaration(
+            name = "camera_switch_provider",
+            description = "Switches the active AI vision provider for camera analysis.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "provider" to ParameterProperty(
+                        "STRING",
+                        "The provider to switch to.",
+                        enum = listOf("gemini_live", "gemini_flash", "openai_gpt4o", "openai_gpt41", "claude_sonnet", "claude_opus")
+                    )
+                ),
+                required = listOf("provider")
+            )
+        ))
+        put("camera_switch_mode", FunctionDeclaration(
+            name = "camera_switch_mode",
+            description = "Changes the camera operating mode.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "mode" to ParameterProperty(
+                        "STRING",
+                        "The mode to switch to.",
+                        enum = listOf("live_stream", "snapshot", "object_detect", "ar_overlay")
+                    )
+                ),
+                required = listOf("mode")
+            )
+        ))
+
+        // --- Voice / Persona Tools ---
+        put("voice_get_profiles", FunctionDeclaration(
+            name = "voice_get_profiles",
+            description = "Returns a list of all 30 available Gemini Live voice profiles with their gender and tone descriptions.",
+            parameters = null
+        ))
+        put("voice_set_profile", FunctionDeclaration(
+            name = "voice_set_profile",
+            description = "Changes the current assistant voice profile. You MUST call this tool whenever the user asks to change/try a voice — NEVER claim the voice has changed without calling this tool. The session reconnects briefly (~2s) and the new voice applies after reconnect.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "name" to ParameterProperty("STRING", "The name of the voice profile to switch to (e.g., 'Puck', 'Kore', 'Aoede').")
+                ),
+                required = listOf("name")
+            )
+        ))
+    }
+
+    // ─── Tool Catalogue (for ToolListDialog) ────────────────────────────────
+
+    data class ToolCategory(
+        val name: String,
+        val icon: String,
+        val tools: List<FunctionDeclaration>
+    )
+
+    fun getToolCategories(): List<ToolCategory> = listOf(
+        ToolCategory("🧠 Built-in Tools", "🧠", _builtinTools.values.toList()),
+        ToolCategory("📊 Trading Tools", "📊", _tradingTools.values.toList()),
+        ToolCategory("🔗 MT5 Bridge", "🔗", _mt5Tools.values.toList()),
+        ToolCategory("📈 SMC Tools", "📈", _smcTools.values.toList()),
+        ToolCategory("📚 Strategy Library", "📚", _strategyTools.values.toList()),
+        ToolCategory("📁 File Management", "📁", _fileTools.values.toList()),
+        ToolCategory("📷 Camera & Vision", "📷", _cameraTools.values.toList()),
+        ToolCategory("📱 Device Control", "📱", _deviceTools.values.toList()),
+        ToolCategory("🛠️ System Tools", "🛠️", _builtinTools.filter { it.key.startsWith("system_") }.values.toList()),
+        ToolCategory("🛠 Custom Tools", "🛠", _customTools.values.toList())
+    )
+
+    fun totalToolCount(): Int =
+        _builtinTools.size + _tradingTools.size + _mt5Tools.size + _smcTools.size + _fileTools.size + _strategyTools.size + _cameraTools.size + _deviceTools.size + _customTools.size
+}

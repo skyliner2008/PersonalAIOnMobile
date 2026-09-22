@@ -11,6 +11,9 @@ plugins {
     alias(libs.plugins.googleServices)
 }
 
+// iOS target is temporarily disabled — re-enable with: ./gradlew build -PenableIos=true
+val enableIos = project.findProperty("enableIos") == "true"
+
 kotlin {
     androidTarget {
         compilerOptions {
@@ -19,14 +22,16 @@ kotlin {
         }
     }
     
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
-            baseName = "ComposeApp"
-            isStatic = true
-            freeCompilerArgs += "-Xexpect-actual-classes"
+    if (enableIos) {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64()
+        ).forEach { iosTarget ->
+            iosTarget.binaries.framework {
+                baseName = "ComposeApp"
+                isStatic = true
+                freeCompilerArgs += "-Xexpect-actual-classes"
+            }
         }
     }
     
@@ -46,6 +51,10 @@ kotlin {
             implementation(libs.camerax.camera2)
             implementation(libs.camerax.lifecycle)
             implementation(libs.camerax.view)
+
+            // ML Kit Face & Object Detection (Gaze tracking, Desk Sentry, Copycat, Object & Hand detection)
+            implementation("com.google.android.gms:play-services-mlkit-face-detection:17.1.0")
+            implementation("com.google.mlkit:object-detection:17.0.2")
             
             // ONNX Runtime for Local Embeddings (Android only)
             // Upgraded from 1.19.2 → 1.23.0 for 16 KB page size alignment (Google Play requirement Nov 2025)
@@ -57,6 +66,9 @@ kotlin {
             // Firebase
             implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.firebase.vertexai.get().toString())
+
+            // Rive Runtime for Android (State Machine & Vector Animation)
+            implementation(libs.rive.android)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -81,9 +93,11 @@ kotlin {
             implementation(libs.multiplatform.webview)
             implementation(kotlin("reflect"))
         }
-        iosMain.dependencies {
-            implementation(libs.sqldelight.native.driver)
-            implementation(libs.ktor.client.darwin)
+        if (enableIos) {
+            iosMain.dependencies {
+                implementation(libs.sqldelight.native.driver)
+                implementation(libs.ktor.client.darwin)
+            }
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -92,11 +106,11 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.personalaibot"
+    namespace = "com.skyliner2008.jarvis"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.example.personalaibot"
+        applicationId = "com.skyliner2008.jarvis"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 2
@@ -106,6 +120,11 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+    // ติดตั้งเฉพาะผู้ใช้หลัก — `adb install` ปกติติดตั้งให้ทุก user profile
+    // เครื่องที่เปิด Dual Messenger ของซัมซุง (user 95 = DUAL_APP) จึงได้ไอคอนแอปโคลนเพิ่มมาทุกครั้งที่ installDebug
+    installation {
+        installOptions("--user", "0")
     }
     buildTypes {
         getByName("release") {
@@ -129,11 +148,17 @@ android {
     }
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("androidx.core:core:1.15.0")
+        force("androidx.core:core-ktx:1.15.0")
+    }
+}
 
 sqldelight {
     databases {
         create("JarvisDatabase") {
-            packageName.set("com.example.personalaibot.db")
+            packageName.set("com.skyliner2008.jarvis.db")
         }
     }
 }

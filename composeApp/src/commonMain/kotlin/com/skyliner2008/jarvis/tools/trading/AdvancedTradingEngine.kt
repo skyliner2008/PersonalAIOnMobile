@@ -1,0 +1,316 @@
+package com.skyliner2008.jarvis.tools.trading
+
+import kotlin.math.*
+
+/**
+ * AdvancedTradingEngine — เครื่องมือประมวลผลกลยุทธ์การเทรดระดับสูง
+ * โดย "แกะสูตร" จากหน้าเทรดระดับสถาบัน (LSD, Orderflow, Fibo Strength)
+ */
+class AdvancedTradingEngine(private val smcApi: SmcApiService) {
+
+    companion object {
+        /** LSD baseline ใช้ HMA 55 */
+        private const val LSD_HMA_LENGTH = 55
+
+        /**
+         * แท่งขั้นต่ำสำหรับ analyze()
+         *
+         * HMA(n) ต้องการ WMA(n) ก่อน แล้วจึง WMA(√n) บน raw series ที่ยาว (size - n + 1)
+         * ดังนั้นต้องมีอย่างน้อย n + √n - 1 = 55 + 7 - 1 = 61 แท่ง
+         * เดิมใช้ 60 ซึ่งต่ำกว่าเกณฑ์ 1 แท่งพอดี → HMA ตกไป fallback `data.last()` เสมอ
+         * เผื่อ buffer เป็น 80 เพื่อให้ ATR(55) ลู่เข้าด้วย
+         */
+        private const val MIN_BARS = 80
+    }
+
+    // ─── Data Models ─────────────────────────────────────────────────────────
+
+    data class AdvancedAnalysisResult(
+        val symbol: String,
+        val interval: String,
+        val currentPrice: Double,
+        val lsdTrend: LsdTrendResult,
+        val orderflow: OrderflowResult,
+        val fiboStrength: List<FiboStrengthResult>,
+        val momentum: MomentumResult,
+        val summaryScore: Int // 0-100
+    )
+
+    data class LsdTrendResult(
+        val state: String, // "BULLISH", "BEARISH", "NEUTRAL"
+        val baseline: Double,
+        val upperBand: Double,
+        val lowerBand: Double,
+        val confluenceTF: Int // 1-4
+    )
+
+    data class OrderflowResult(
+        val lastDelta: Double,
+        val cumulativeDelta: Double,
+        val deltaLabel: String, // "STRONG BUYING", "SELLING PRESSURE", etc.
+        val poc: Double,        // Point of Control (Highest Volume Level)
+        val valueAreaTop: Double,
+        val valueAreaBottom: Double
+    )
+
+    data class FiboStrengthResult(
+        val level: Double,
+        val label: String,
+        val score: Int,         // 1-10
+        val touches: Int,
+        val isHot: Boolean      // Strong confluence
+    )
+
+    data class MomentumResult(
+        val isSqueeze: Boolean,
+        val aoValue: Double,
+        val aoDirection: Int,   // 1 (Up), -1 (Down)
+        val signal: String      // "EXPANSION", "SQUEEZE", "REVERSAL"
+    )
+
+    // ─── Core Calculations ────────────────────────────────────────────────────
+
+    /**
+     * ดำเนินการวิเคราะห์เชิงลึกแบบ 5 มิติ
+     */
+    suspend fun analyze(
+        symbol: String, 
+        interval: String, 
+        overridePrice: Double? = null
+    ): AdvancedAnalysisResult? {
+        val candles = smcApi.fetchCandles(symbol, interval, 300)
+        if (candles.size < MIN_BARS) return null
+
+        val currentPrice = overridePrice ?: candles.last().close
+        val atr = smcApi.calcATR(candles, 14)
+
+        // 1. LSD Trend Architecture (HMA 55 + ATR 1.5)
+        // แท่งไม่พอสำหรับ HMA55 → คืน null ทั้งชุด ดีกว่าส่ง baseline ปลอมให้ AI
+        val lsdTrend = calculateLsdTrend(candles) ?: return null
+
+        // 2. Orderflow Delta Approximation & POC
+        val orderflow = calculateOrderflow(candles)
+
+        // 3. Fibo Weighted Strength Scoring
+        val fiboStrength = calculateFiboStrength(candles, atr)
+
+        // 4. Momentum Guard (Bollinger Squeeze + AO)
+        val momentum = calculateMomentum(candles)
+
+        // 5. Calculate Final Confluence Score
+        val summaryScore = calculateSummaryScore(lsdTrend, orderflow, momentum, currentPrice, fiboStrength)
+
+        return AdvancedAnalysisResult(
+            symbol = symbol,
+            interval = interval,
+            currentPrice = currentPrice,
+            lsdTrend = lsdTrend,
+            orderflow = orderflow,
+            fiboStrength = fiboStrength,
+            momentum = momentum,
+            summaryScore = summaryScore
+        )
+    }
+
+    private fun calculateLsdTrend(candles: List<Candle>): LsdTrendResult? {
+        val length = LSD_HMA_LENGTH
+        val mult = 1.5
+        val closes = candles.map { it.close }
+
+        // LSD ใช้ HMA เป็น baseline — คำนวณไม่ได้เมื่อแท่งไม่พอ จึงคืน null ไม่ใช่ราคาปิด
+        val hma = calculateHMA(closes, length) ?: return null
+        val atr = smcApi.calcATR(candles, length)
+
+        val upper = hma + (atr * mult)
+        val lower = hma - (atr * mult)
+        val currentClose = closes.last()
+        
+        val state = when {
+            currentClose > upper -> "BULLISH"
+            currentClose < lower -> "BEARISH"
+            else -> "NEUTRAL"
+        }
+
+        return LsdTrendResult(state, hma, upper, lower, 1) // Base TF confluence
+    }
+
+    private fun calculateOrderflow(candles: List<Candle>): OrderflowResult {
+        // Delta Approximation Logic:
+        // Delta = Volume * ((Close - Open) / (High - Low))
+        val deltas = candles.map { c ->
+            val range = maxOf(c.high - c.low, 0.00000001)
+            val body = c.close - c.open
+            c.volume * (body / range)
+        }
+        
+        val lastDelta = deltas.last()
+        val cumulativeDelta = deltas.takeLast(20).sum()
+        
+        val label = when {
+            cumulativeDelta > 0 && lastDelta > 0 -> "STRONG BUYING PRESSURE"
+            cumulativeDelta < 0 && lastDelta < 0 -> "STRONG SELLING PRESSURE"
+            lastDelta > 0 -> "BUYING EFFORT"
+            lastDelta < 0 -> "SELLING EFFORT"
+            else -> "NEUTRAL"
+        }
+
+        // Calculate POC (Point of Control) using simple binning
+        val bins = 20
+        val minPrice = candles.takeLast(50).minOf { it.low }
+        val maxPrice = candles.takeLast(50).maxOf { it.high }
+        val binWidth = (maxPrice - minPrice) / bins
+        
+        val volumeProfile = DoubleArray(bins)
+        candles.takeLast(50).forEach { c ->
+            val binIdx = ((c.close - minPrice) / binWidth).toInt().coerceIn(0, bins - 1)
+            volumeProfile[binIdx] += c.volume
+        }
+        
+        val maxBinIdx = volumeProfile.indices.maxByOrNull { volumeProfile[it] } ?: 0
+        val poc = minPrice + (maxBinIdx * binWidth) + (binWidth / 2)
+
+        return OrderflowResult(lastDelta, cumulativeDelta, label, poc, poc + binWidth, poc - binWidth)
+    }
+
+    private fun calculateFiboStrength(candles: List<Candle>, atr: Double): List<FiboStrengthResult> {
+        val last50 = candles.takeLast(50)
+        val high = last50.maxOf { it.high }
+        val low = last50.minOf { it.low }
+        val diff = high - low
+        
+        val levels = mapOf(
+            "0.0" to low,
+            "0.382" to low + diff * 0.382,
+            "0.5" to low + diff * 0.5,
+            "0.618" to low + diff * 0.618,
+            "1.0" to high
+        )
+
+        return levels.map { (label, price) ->
+            // Scoring Touches: count how many times price was within 0.1 ATR of the level
+            val touches = candles.takeLast(100).count { c ->
+                abs(c.high - price) < atr * 0.1 || abs(c.low - price) < atr * 0.1
+            }
+            val score = (touches * 2).coerceAtMost(10)
+            FiboStrengthResult(price, label, score, touches, score >= 6)
+        }
+    }
+
+    private fun calculateMomentum(candles: List<Candle>): MomentumResult {
+        val window = 20
+        val closes = candles.takeLast(window + 1).map { it.close }
+        
+        // Bollinger Bands
+        val sma = closes.average()
+        val stdev = sqrt(closes.map { (it - sma).pow(2) }.average())
+        val bbWidth = (stdev * 2 * 2) / sma // Standard BB Width %
+        
+        // Squeeze Detection (Percentile: BB Width ≤ 20th percentile of last 50 bars)
+        val historicalWidths = candles.windowed(window).map { win ->
+            val winCloses = win.map { it.close }
+            val winSma = winCloses.average()
+            val winStdev = sqrt(winCloses.map { (it - winSma).pow(2) }.average())
+            (winStdev * 4) / winSma
+        }
+        val recentWidths = historicalWidths.takeLast(50).sorted()
+        val p20Index = (recentWidths.size * 0.20).toInt().coerceIn(0, recentWidths.size - 1)
+        val squeezeThreshold = if (recentWidths.isNotEmpty()) recentWidths[p20Index] else 0.0
+        val isSqueeze = bbWidth <= squeezeThreshold
+
+        // Awesome Oscillator Approximation
+        // AO = SMA5(hl2) - SMA34(hl2)
+        val hl2 = candles.map { (it.high + it.low) / 2 }
+        val ao5 = if (hl2.size >= 5) hl2.takeLast(5).average() else 0.0
+        val ao34 = if (hl2.size >= 34) hl2.takeLast(34).average() else 0.0
+        val ao = ao5 - ao34
+        
+        val prevAo5 = if (hl2.size >= 6) hl2.dropLast(1).takeLast(5).average() else 0.0
+        val prevAo34 = if (hl2.size >= 35) hl2.dropLast(1).takeLast(34).average() else 0.0
+        val prevAo = prevAo5 - prevAo34
+
+        val direction = if (ao > prevAo) 1 else -1
+        val signal = when {
+            isSqueeze -> "SQUEEZE"
+            abs(ao) > abs(prevAo) -> "EXPANSION"
+            else -> "REVERSAL"
+        }
+
+        return MomentumResult(isSqueeze, ao, direction, signal)
+    }
+
+    private fun calculateSummaryScore(
+        lsd: LsdTrendResult,
+        of: OrderflowResult,
+        mom: MomentumResult,
+        price: Double,
+        fibos: List<FiboStrengthResult>
+    ): Int {
+        var score = 0
+        if (lsd.state != "NEUTRAL") score += 30
+        if (of.cumulativeDelta > 0 && lsd.state == "BULLISH") score += 20
+        if (of.cumulativeDelta < 0 && lsd.state == "BEARISH") score += 20
+        if (mom.signal == "EXPANSION") score += 20
+        
+        // Near strong Fibo
+        if (fibos.any { it.isHot && abs(it.level - price) / price < 0.005 }) score += 30
+        
+        return score.coerceIn(0, 100)
+    }
+
+    // ─── Math Utilities ──────────────────────────────────────────────────────
+
+    private fun calculateWMAseries(data: List<Double>, period: Int): List<Double?> {
+        val result = arrayOfNulls<Double>(data.size)
+        if (data.size >= period) {
+            val weightSum = period * (period + 1) / 2.0
+            for (i in period - 1 until data.size) {
+                var sum = 0.0
+                for (j in 0 until period) {
+                    val weight = period - j
+                    sum += data[i - j] * weight
+                }
+                result[i] = sum / weightSum
+            }
+        }
+        return result.toList()
+    }
+
+    private fun calculateWMAforLast(data: List<Double>, period: Int): Double? {
+        if (period <= 0 || data.size < period) return null
+        val weightSum = period * (period + 1) / 2.0
+        val start = data.size - period
+        var sum = 0.0
+        for (j in 0 until period) {
+            val weight = period - j
+            sum += data[start + j] * weight
+        }
+        return sum / weightSum
+    }
+
+    /** Hull Moving Average — คืน null เมื่อแท่งไม่พอ (ห้ามคืนราคาปิดแทน) */
+    private fun calculateHMA(data: List<Double>, period: Int): Double? {
+        if (period <= 0 || data.size < period) return null
+        val n = period
+        val halfPeriod = n / 2
+        val sqrtPeriod = max(1, sqrt(n.toDouble()).toInt())
+
+        // Calculate WMA series for full and half periods
+        val wmaFullList = calculateWMAseries(data, n)
+        val wmaHalfList = calculateWMAseries(data, halfPeriod)
+
+        // Build raw series where both WMAs are available (chronological)
+        val rawValues = mutableListOf<Double>()
+        for (i in 0 until data.size) {
+            val wmaFull = wmaFullList[i]
+            val wmaHalf = wmaHalfList[i]
+            if (wmaFull != null && wmaHalf != null) {
+                rawValues.add(2 * wmaHalf - wmaFull)
+            }
+        }
+
+        if (rawValues.size < sqrtPeriod) return null
+
+        // Calculate WMA on rawValues with sqrtPeriod to get final HMA
+        return calculateWMAforLast(rawValues, sqrtPeriod)
+    }
+}

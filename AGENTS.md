@@ -1,11 +1,6 @@
-— ระบบ มือถือ (PersonalAIBot)
-— ระบบ server  (mt5-core-server)
-— Skill (mt5-core-server\Script) สำหรับทำ Analytics
-แบบที่ 1: วิเคราะห์แบบระบุวันที่เฉพาะเจาะจง (เช่น วันนี้)
-        npm run analyze 2026-05-15
-แบบที่ 2: วิเคราะห์ภาพรวมทั้งหมด (All Time)
-        npm run analyze
-แบบอื่นๆ สคิปตรวจสอบ อื่นๆ เช่น advanced_analytics
+มุ่งพัฒนาในส่วนของ app มือถือ เป็นหลัก
+— ระบบ มือถือ (composeApp) รองรับ Android / ios
 **สร้าง skill ,tool ,Script เพิ่มเติม หากจำเป็น   
 — ระบบ "สมองส่วนนอก" ที่ คุณ  และ User จัดการร่วมกันผ่าน Markdown (.obsidian-wiki) ที่ใช้เป็น สารบัญ อ้างอิงในการแก้ไข ปรับปรุงโปรเจค 
 **ปรับปรุง .obsidian-wiki และ README.md หากมีการปรับปรุงแก้ไข โปรเจค
+**ปรับปรุง log.md(.obsidian-wiki\00_System) เสมอ

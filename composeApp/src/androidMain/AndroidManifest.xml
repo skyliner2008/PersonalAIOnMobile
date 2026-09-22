@@ -54,6 +54,9 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Wake Lock for Always Live background listening -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Location permissions (GPS / Location context for Driving & Navigation) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="false"
@@ -114,6 +117,18 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- NotificationListenerService — ดักอ่านแจ้งเตือน LINE/SMS และอ่านสถานะ MediaSession ตอนขับขี่
+             ผู้ใช้ต้องเปิดใน Settings > Notification Access > JARVIS -->
+        <service
+            android:name=".service.JarvisNotificationListener"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- Alert action buttons — ปุ่ม หยุด/แจ้งซ้ำ บน notification
              manifest-declared เพื่อให้ทำงานได้แม้ service/แอปถูกฆ่า -->
         <receiver
@@ -121,8 +136,8 @@
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.example.personalaibot.action.ALERT_STOP" />
-                <action android:name="com.example.personalaibot.action.ALERT_REPEAT" />
+                <action android:name="com.skyliner2008.jarvis.action.ALERT_STOP" />
+                <action android:name="com.skyliner2008.jarvis.action.ALERT_REPEAT" />
             </intent-filter>
         </receiver>
 

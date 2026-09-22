@@ -1,0 +1,137 @@
+package com.skyliner2008.jarvis.data.providers
+
+import com.skyliner2008.jarvis.data.ConversationTurn
+import com.skyliner2008.jarvis.data.GeminiModel
+import com.skyliner2008.jarvis.data.GeminiService
+import com.skyliner2008.jarvis.logDebug
+import com.skyliner2008.jarvis.logError
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.request.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+/**
+ * GeminiLlmProvider — Wrapper ที่ delegate ไปยัง GeminiService เดิม
+ *
+ * เราใช้ GeminiService เดิมเป็น implementation เพราะมันมี logic ที่ซับซ้อน
+ * (SSE parsing, function calling, grounding, Live Voice) ที่ไม่ควร rewrite
+ *
+ * Provider นี้ทำให้ Gemini เข้ากับ LlmProvider interface ได้
+ * สำหรับ model listing และ basic generation
+ *
+ * @since 2026-04-29
+ */
+class GeminiLlmProvider(
+    private val geminiService: GeminiService,
+    private val client: HttpClient
+) : LlmProvider {
+
+    override val providerId = "gemini"
+    override val displayName = "Gemini (Google)"
+    override val supportsStreaming = true
+    override val supportsFunctionCalling = true
+
+    override fun generateStream(
+        messages: List<LlmMessage>,
+        options: LlmOptions
+    ): Flow<LlmChunk> {
+        // Convert LlmMessages to ConversationTurns for GeminiService
+        val history = messages.dropLast(1).map { msg ->
+            ConversationTurn(
+                role = if (msg.role == "assistant") "model" else msg.role,
+                content = msg.content
+            )
+        }
+        val lastMessage = messages.lastOrNull()?.content ?: ""
+
+        return geminiService.generateResponseFlow(
+            prompt = lastMessage,
+            history = history,
+            intentAddon = options.systemPrompt ?: "",
+            coreContext = ""
+        ).map { chunk -> LlmChunk(text = chunk) }
+    }
+
+    override suspend fun generate(
+        messages: List<LlmMessage>,
+        options: LlmOptions
+    ): LlmResult {
+        val history = messages.dropLast(1).map { msg ->
+            ConversationTurn(
+                role = if (msg.role == "assistant") "model" else msg.role,
+                content = msg.content
+            )
+        }
+        val lastMessage = messages.lastOrNull()?.content ?: ""
+
+        val text = geminiService.generateResponse(
+            prompt = lastMessage,
+            history = history,
+            intentAddon = options.systemPrompt ?: "",
+            coreContext = ""
+        )
+        return LlmResult(text = text, modelUsed = "gemini")
+    }
+
+    /**
+     * ดึงรายการ Gemini models — ใช้ apiKey ที่ส่งเข้ามาตรงๆ (ไม่ผ่าน GeminiService)
+     * เพื่อให้ Settings UI สามารถ list models ก่อนกด Save ได้
+     */
+    override suspend fun listModels(apiKey: String): List<LlmModelInfo> {
+        val keyToUse = apiKey.ifBlank { return emptyList() }
+        return try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$keyToUse"
+            val response = client.get(url)
+            val respText: String = response.body()
+            val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            val modelList = json.decodeFromString<com.skyliner2008.jarvis.data.ModelListResponse>(respText)
+            // ซิงก์ registry กลางแบบ dynamic ตามโมเดลจริงที่มีใน API ทันที
+            com.skyliner2008.jarvis.data.ModelConfig.updateAvailableModels(modelList.models)
+
+            val mappedList = modelList.models.filter {
+                val cleanId = it.name.removePrefix("models/")
+                !com.skyliner2008.jarvis.data.ModelConfig.isModelDead(cleanId) &&
+                // รวม models ที่รองรับ generateContent (chat ปกติ) หรือ bidiGenerateContent (live)
+                (it.supportedGenerationMethods ?: emptyList()).let { methods ->
+                    methods.contains("generateContent") || methods.contains("bidiGenerateContent")
+                }
+            }.map { model ->
+                val methods = model.supportedGenerationMethods ?: emptyList()
+                val nameLC = model.name.lowercase().removePrefix("models/")
+                // ตรวจ live capability: ใช้ API field เป็นหลัก + fallback keyword
+                val isLive = methods.contains("bidiGenerateContent")
+                    || nameLC.contains("live")
+                    || nameLC.contains("native-audio")
+                    || nameLC.contains("realtime")
+                LlmModelInfo(
+                    id = model.name.removePrefix("models/"),
+                    displayName = model.displayName ?: model.name,
+                    contextLength = model.inputTokenLimit ?: 0,
+                    supportsFunctions = com.skyliner2008.jarvis.data.ModelConfig.supportsNativeTools(model.name),
+                    supportsVision = nameLC.contains("vision") || nameLC.contains("pro") || nameLC.contains("flash"),
+                    supportsLive = isLive
+                )
+            }
+            
+            // Inject Preview Models ที่ /v1beta/models มักไม่คืนมา (กรองเฉพาะตัวที่ยังไม่ตาย)
+            // 2026-09-16: อิงลิสต์กลางของ ModelConfig แทนการ hardcode — โมเดล Live ที่ Google เพิ่มใหม่
+            // (เช่น 3.8 Live) จะโผล่มาจาก ListModels เองอยู่แล้ว ตรงนี้เหลือไว้เฉพาะตัวที่ API มักไม่คืนมา
+            val knownPreviews = com.skyliner2008.jarvis.data.ModelConfig.SEED_LIVE_MODELS.map { id ->
+                LlmModelInfo(
+                    id = id,
+                    displayName = com.skyliner2008.jarvis.data.ModelConfig.displayNameFor(id),
+                    supportsVision = true,
+                    supportsLive = true
+                )
+            }.filter { !com.skyliner2008.jarvis.data.ModelConfig.isModelDead(it.id) }
+            val existingIds = mappedList.map { it.id }.toSet()
+            mappedList + knownPreviews.filter { it.id !in existingIds }
+        } catch (e: Exception) {
+            logError("GeminiLlm", "Failed to list models: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    override suspend fun isAvailable(): Boolean = true // Gemini is always registered with a key
+}
