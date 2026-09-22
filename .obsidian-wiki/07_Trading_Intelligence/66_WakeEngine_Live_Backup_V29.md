@@ -1,6 +1,6 @@
 # Wake Engine Live + Backup/Restore V29 (2026-09-18)
 
-**Links**: [[67_Device_Wake_Alert_Audit]] (ตรวจบนมือถือจริง) | [[58_WakeTrigger_Architecture_V28]] | [[57_OHLCV_Indicator_Foundation_V27]] | [[Trading_Intelligence_MOC]] | [[../03_Tools/catalogue]]
+**Links**: [[67_Device_Wake_Alert_Audit]] (ตรวจบนมือถือจริง) | [[70_WakeTrigger_Architecture_V28]] | [[69_OHLCV_Indicator_Foundation_V27]] | [[Trading_Intelligence_MOC]] | [[../03_Tools/catalogue]]
 
 > ต่อจาก V28 (สร้าง engine + ปัจจัย ~115 ตัว) — รอบนี้ **ต่อสายเข้าระบบแจ้งเตือนจริงบนมือถือ**,
 > เพิ่มการดูแลขนาด OHLCV store และระบบ **สำรอง/กู้คืน** (การเรียนรู้ + ฐานข้อมูลทั้งหมด, ไฟล์ + Google Drive)

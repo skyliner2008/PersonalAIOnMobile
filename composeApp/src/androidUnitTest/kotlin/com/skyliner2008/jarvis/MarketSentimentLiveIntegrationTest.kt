@@ -7,12 +7,23 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import org.junit.Assume
+import org.junit.Before
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
+/**
+ * ยิง API จริง (Binance Futures, CNN, Google News) — ไม่รันในชุดเทสต์ปกติ
+ * เพราะผลขึ้นกับเน็ตและ rate limit ภายนอก; รันเองด้วย RUN_LIVE_TESTS=1
+ */
 class MarketSentimentLiveIntegrationTest {
+
+    @Before
+    fun requireLiveFlag() {
+        Assume.assumeTrue("ตั้ง RUN_LIVE_TESTS=1 เพื่อรันเทสต์ที่ใช้เครือข่ายจริง", System.getenv("RUN_LIVE_TESTS") == "1")
+    }
 
     private val client = HttpClient {
         install(ContentNegotiation) {

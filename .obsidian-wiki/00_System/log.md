@@ -1,3 +1,24 @@
+## 2026-09-23 — ตรวจ log 09-17 → 09-23 และแก้จุดที่พบ
+- **User Request**: "ตรวจสอบ การปรับปรุงพัฒนาโปรเจค จาก log.md ตั้งแต่ 2026-09-17 ถึงปัจจุบัน" → "ดำเนินการทั้งหมด หลังจากนั้นค่อย push"
+- **ผลตรวจ**: รายการใน log ตรงกับ commit `9f9a178` → `8b0b9b3` และไฟล์ที่อ้างถึงมีอยู่จริงทั้งหมด; เทสต์ก่อนแก้ 515/515
+- **แก้โค้ด**:
+  - ประวัติแชท 24 ชม. ไม่มีเพดาน — `getHistoryAfter` โหลดทุกแถว และการ์ดระบบปลุก AI (`wake_ai`) ถูกบันทึกลง `ChatMessage` ด้วย (ปลุกได้ถึง 40 ครั้ง/ชม.)
+    → query จำกัด `:limit` รายการล่าสุด (ค่าเริ่มต้น 300) + index `idx_chat_message_ts` (migration `18.sqm`, schema 18 → 19)
+    ตรวจด้วย SQLite: ได้ 300 แถวล่าสุดเรียงเก่า→ใหม่ และ query plan ใช้ index
+  - `MarketSentimentLiveIntegrationTest` ยิง API จริงอยู่ใน `commonTest` → ชุดเทสต์ปกติล้มเมื่อไม่มีเน็ต/ติด rate limit
+    → ย้ายไป `androidUnitTest` และข้ามอัตโนมัติ ยกเว้นตั้ง `RUN_LIVE_TESTS=1`
+  - โฟลเดอร์ `rive-interactive/` ที่ root ถูก commit ติดมาใน `8b0b9b3` — เป็นสำเนาเดียวกับ `.agent/skills/rive-interactive/` (ถูก ignore อยู่แล้ว)
+    → เลิก track ใน git + เพิ่มใน `.gitignore` (ไฟล์ในเครื่องยังอยู่)
+- **จัดระเบียบ wiki**:
+  - log.md: รายการที่ถูกต่อท้ายไฟล์ (09-05, 09-18 → 09-22) ย้ายเข้าตำแหน่งตามวันที่ — ทั้งไฟล์เรียงใหม่→เก่า
+    **รายการใหม่ให้เพิ่มที่หัวไฟล์เท่านั้น**
+  - รวมรายการ Stock Fundamental 09-22 ที่บันทึกซ้ำ 2 ครั้ง, เติมหัวข้อ "Unified Composite Sentiment" ที่ขาดไป,
+    หมายเหตุว่า "โหลด 100 ข้อความ" ถูกแทนที่ด้วยตัวกรอง 24 ชม., แก้ชื่อเทสต์ `TypingIntentGuardTest` (ไม่มีจริง) เป็น `ScreenSnapshotFormatterTest`
+  - เลขโน้ตซ้ำใน `07_Trading_Intelligence`: `57_OHLCV_Indicator_Foundation_V27` → **`69_`**, `58_WakeTrigger_Architecture_V28` → **`70_`** (แก้ลิงก์ครบทุกไฟล์)
+  - README: เพิ่มเพดาน 300 ข้อความ/index และหมายเหตุว่าการโหลด 100 ข้อความถูกแทนที่แล้ว
+- **ยังไม่ทำ (ตั้งใจ)**: งาน MT5 (พักไว้ตามคำสั่งผู้ใช้), กล้อง Live ตอนย่อแอป (เฟส D), อารมณ์สัตว์เลี้ยง 21–40
+- **Verify**: `:composeApp:testDebugUnitTest` ผ่าน 510 ข้าม 5 (รวม 515) · `RUN_LIVE_TESTS=1` รันเทสต์เครือข่ายจริงผ่าน 5/5
+
 ## 2026-09-23 — Chat Message Timestamp (LINE Style) & 24-Hour Active History Retention Filter
 - **User Request**: "เพิ่มอีกนิดนึง ข้อความ ไม่มีตัวแสดงเวลา เอาแบบคล้ายๆ line ที่จะมี ตัวแสดงเวลา การส่งข้อความที่ มุมขวา เป็นตัวเล็กๆ ส่วนประวัติแชท ให้มี ที่แสดง ในช่องแชท ให้ใช้เวลา เป็นตัวกำหนด จะแสดงประวัติที่ยังไม่ครบ 24 ชั่วโมง เท่านั้น เมื่อครบ 24 ชั่ว จะไม่แสดงในช่องแชท"
 - **Changes**:
@@ -21,6 +42,7 @@
   - **Message Persistence & History Layer (`LiveGeminiService.kt` & `ChatController.kt`)**:
     - แก้ปัญหาข้อความถูกตัดขาดเมื่อปิดเปิดแอปใหม่: ยกเลิกการตัดทอนข้อความ `text.take(2000)` ใน `LiveGeminiService.emitTextToChat` ทำให้รายงานผลวิเคราะห์, ตารางการเงิน และข้อมูลขนาดยาวถูกบันทึกลงฐานข้อมูล SQLite (`ChatMessage`) ครบถ้วน 100% ไม่ถูกตัดข้อความทิ้ง
     - แก้ปัญหาข้อความเก่าหายไปเมื่อเปิดแอปใหม่: ปรับปรุง `ChatController.loadHistory()` จากเดิมโหลดเพียง 20 ข้อความล่าสุด (`getRecentHistory(20)`) เพิ่มเป็น 100 ข้อความ (`getRecentHistory(100)`) ป้องกันไม่ให้ประวัติแชทเก่าถูกกลืนหายหลังมีการคุยเสียงสั้นๆ หรือการทำงานของ Live Voice
+    - _หมายเหตุ (ตรวจ 2026-09-23)_: ถูกแทนที่แล้วด้วยตัวกรอง 24 ชม. ในรายการ "Chat Message Timestamp" — ปัจจุบันใช้ `getHistoryAfter(since, limit = 300)`
   - **UI & Markdown Rendering Engine (`MessageBubble.kt`)**:
     - **ขยายพื้นที่แสดงผลตอบสนองหน้าจอมือถือ**: ปรับบับเบิลข้อความฝั่งผู้ช่วย (AI Assistant) จากเดิมที่จำกัดความกว้างตายตัว `Modifier.widthIn(max = 320.dp)` ให้ใช้ `Modifier.weight(1f, fill = false).widthIn(max = 640.dp)` ทำให้การ์ดข้อความขยายเต็มความกว้างหน้าจอมือถือ (เช่น Galaxy S22 Ultra กว้าง 412dp) ใช้นาฬิกา/พื้นที่หน้าจอได้อย่างเต็มที่ ไม่เบียดตัวหนังสือจนตัดคำบ่อย
     - **ระบบแยกบล็อก Markdown สวยงาม (Rich Block Parser)**:
@@ -35,6 +57,7 @@
     - รัน `testDebugUnitTest` ผ่านเรียบร้อย 100%
     - ทำการบิลด์และติดตั้งลงบนเครื่องจริง Samsung Galaxy S22 Ultra (`SM-S908E`) สำเร็จสมบูรณ์ ไร้ข้อผิดพลาด
 
+## 2026-09-22 — Unified Composite Sentiment: รวม Sentiment ทุกมิติเป็นดัชนีเดียว
 - **User Request**: "ฉันต้องการรวม Sentiment ทั้งหมด ให้เป็นอันเดียว ได้มั้ย" (รวมศูนย์ทุกมิติ Sentiment ให้เป็น All-in-One Master Engine)
 - **Changes**:
   - **Data Models (`MarketSentimentModels.kt`)**:
@@ -98,6 +121,24 @@
     - เพิ่ม `FinancialsWebView` ใน `TradingChartScreen.kt` พร้อมปรับ `WidgetSettingsDialog` ให้สามารถพิมพ์เปลี่ยนสัญลักษณ์หุ้นหรือกดเลือก Preset หุ้นไทย/สหรัฐ/คริปโต/ทองคำได้ทันที
     - อัปเดต `ToolRegistry.kt` ใน tool `chart_dashboard_control` รองรับ view parameter `financials` และอัปเดต `JarvisPersona.kt`
 - **Verify**: คอมไพล์ด้วย `./gradlew :composeApp:compileDebugKotlinAndroid` สำเร็จสมบูรณ์ (`BUILD SUCCESSFUL in 2m 49s`). ทดสอบบนอุปกรณ์ Android จริงผ่าน Gemini Live สั่งวิเคราะห์หุ้น SCB ได้ผลถูกต้องครบถ้วน
+- **รายละเอียด `trading_fundamental_analysis`** (เดิมบันทึกแยกไว้ท้ายไฟล์ — รวมเข้ามาที่นี่ 2026-09-23):
+  - **ปัญหาเดิม**: `trading_fundamental_analysis` ใน `ResearchToolHandler.kt` เป็นเพียง Mock / News Dummy ที่ดึงหัวข้อข่าว 10 ข่าวส่งให้ AI เดา ไม่มีตัวเลขจริง งบดุล (Balance Sheet), งบกำไรขาดทุน (Income Statement), โครงสร้างทุน (Capital Structure), หรือ Valuation Multiples
+  - **สร้าง `StockFundamentalModels.kt`**: Model `StockFundamentalData` ครอบคลุม 50 ตัวชี้วัดสำคัญ พร้อมฟังก์ชัน Compact Formatting สำหรับมูลค่าเงินตรา, จำนวนหุ้น, อัตราส่วน และเปอร์เซ็นต์
+  - **เพิ่ม Data Pipeline ใน `TradingApiService.kt`**:
+    - เมธอด `getStockFundamentals(rawSymbol, requestedExchange)` ยิง TradingView Scanner API (`thailand`, `america`, `global`) ดึงข้อมูลงบการเงินและอัตราส่วนจริง
+    - Auto-resolve ตลาดและ Ticker: รองรับหุ้นไทย (SET/MAI เช่น SCB, PTT, CPALL) และสหรัฐฯ/สากล (NASDAQ/NYSE เช่น AAPL, NVDA, TSLA)
+    - คำนวณค่าอนุพันธ์สำคัญ: Cash & Equivalents (`Total Debt - Net Debt`), Free Float % vs Closely Held %, Upside % จากราคาเป้าหมายเฉลี่ย
+  - **ยกระดับ `ResearchToolHandler.kt`**:
+    - ปรับปรุง `executeFundamentalAnalysis` แสดงผลข้อมูลแบบครบวงจร 6 หมวดหมู่:
+      1. ข้อเท็จจริงที่มีนัยยะ (Market Cap, P/E, Basic EPS, P/S, P/B, Dividend Yield, DPS, 52W Range, Beta 1Y)
+      2. ความเป็นเจ้าของ (Total Shares, Free Float %, Closely Held %, Visual Float Bar)
+      3. โครงสร้างเงินทุน & สภาพคล่องงบดุล (Enterprise Value, Market Cap, Total Debt, Cash, Net Debt, Equity, Total Assets, D/E)
+      4. ผลการดำเนินงาน & ความสามารถทำกำไร (Revenue TTM/FQ/FY, Net Income TTM/FQ/FY, FCF, Margins, ROE, ROA, ROIC)
+      5. เป้าหมายนักวิเคราะห์ & โมเมนตัมราคา (Target Price Avg/High/Low, Upside %, YTD %)
+      6. บทวิเคราะห์ AI เชิงลึก 6 มิติ (Valuation, Solvency, Profitability, Dividend Safety, Ownership, Fundamental Health Score 0-100)
+  - **อัปเดตคำอธิบายและพารามิเตอร์ใน `TradingToolDefinitions.kt`**: ระบุพารามิเตอร์ `symbol` และ `exchange` ชัดเจน
+  - **อัปเดตสมองส่วนนอก**: `.obsidian-wiki/03_Tools/catalogue.md` และสร้างโน้ตใหม่ [[68_Stock_Fundamental_Financial_Engine]]
+  - **การทดสอบ**: คอมไพล์ผ่าน `:composeApp:compileDebugKotlinAndroid` สำเร็จ 100% (BUILD SUCCESSFUL)
 
 ## 2026-09-20 — Device Control เฟส B: เห็นภาพจริง ส่งข้อความได้ และท่าทางครบ
 - **User Request**: "ดำเนินการ เฟส ต่อไป" (เฟส B ใน [[Review_2026-09-19_Driving_Mode_Full_Device_Control]])
@@ -143,7 +184,7 @@
   - 🔴 **`device_scroll` รายงาน "สำเร็จ" แต่หน้าจอไม่ขยับ** — `scrollNode` เลือก node ที่เลื่อนได้ "ตัวแรกที่เจอ" ซึ่งมักเป็นแถบชิปแนวนอนด้านบน performAction คืน true แต่เนื้อหาหลักอยู่ที่เดิม
     แก้: `findMainScrollable()` เลือก node ที่เลื่อนได้ซึ่ง**พื้นที่ใหญ่สุดและเป็นแนวตั้ง**, ตัดหน้าต่างของ JARVIS เองออกจาก `interactiveRoots()`, และ `executeScroll` เทียบ "ลายเซ็นหน้าจอ" ก่อน/หลัง — ถ้าไม่ขยับจริงจะตอบว่าไม่ขยับ (ห้ามบอกว่าสำเร็จ)
   - 🔴 **โมเดลพิมพ์ค้นหาเองทั้งที่ผู้ใช้ไม่ได้สั่ง** — ผู้ใช้พูดแค่ "เปิด YouTube" แต่โมเดลไล่แตะช่องค้นหาแล้วพิมพ์ "เพลงลูกทุ่ง" (ข้อความค้างจากบทสนทนารอบก่อน) แล้วกดส่ง
-    แก้: `LiveIntentMatchers.hasTypingIntent()` + guard ใน `LiveToolBridge` บล็อก `device_type_text` เมื่อประโยคล่าสุดไม่มีเจตนาพิมพ์/ค้นหา + กฎ "ขอบเขตของคำสั่ง" ในเพอร์โซนา (ทำเฉพาะสิ่งที่สั่งในประโยคล่าสุด ห้ามสานงานค้างจากบทสนทนาก่อน) + เทสต์ `TypingIntentGuardTest`
+    แก้: `LiveIntentMatchers.hasTypingIntent()` + guard ใน `LiveToolBridge` บล็อก `device_type_text` เมื่อประโยคล่าสุดไม่มีเจตนาพิมพ์/ค้นหา + กฎ "ขอบเขตของคำสั่ง" ในเพอร์โซนา (ทำเฉพาะสิ่งที่สั่งในประโยคล่าสุด ห้ามสานงานค้างจากบทสนทนาก่อน) + เทสต์ `hasTypingIntent` (อยู่ใน `ScreenSnapshotFormatterTest`)
 - **ทดสอบรอบ 5 (12:10) — ไม่ได้ทดสอบฟีเจอร์เลย เพราะ Live session โดนลิมิต**:
   - log: `Session closed: INTERNAL_ERROR — You exceeded your current quota` → `🔄 Live quota → rotate credential 1/1 + model=gemini-3.8-live-extended-thinking`
   - จากนั้น "เปิด YouTube" **ไม่มี tool call เลย** โมเดลสำรองตอบ "จาวิสไม่สามารถเปิดแอปพลิเคชันโดยตรงได้ค่ะ"
@@ -159,6 +200,74 @@
     แก้: ตัดท่อนนั้นออก + เพิ่มกฎ "หลังเรียก tool เสร็จต้องรายงานผลจริง 1-2 ประโยค ห้ามทักทายซ้ำกลางบทสนทนา ห้ามถามลอยๆ แทนการรายงาน"
 - **แก้เพิ่มหลังรอบ 2**: `ScreenSnapshotFormatter` เติมบรรทัดเตือนท้ายผล read_screen เมื่อ element มีข้อความ &lt;25% (หน้าแบบแผนที่/กล้อง/เกม) ว่า "ให้เรียก device_screenshot ห้ามเดา" + เพิ่มวลีไทยใน description ของ `device_screenshot` (แคปหน้าจอ, ส่องหน้าจอ, บนแผนที่เห็นอะไร) + เทสต์ใหม่ 2 เคส
 
+## 2026-09-20 — แก้บั๊ก FVG/OB ใน SmcEngine (Order Block ไม่เคยทำงานเลย) + installDebug สร้างแอปโคลน
+
+- **บั๊ก 1 หน้าต่างค้นหาไม่ตรงกัน**: `FvgDetection` หา FVG 30 แท่งท้าย แต่ `OrderBlockDetection` ค้น swing ทั้ง 300 แท่ง
+  และรับ OB เฉพาะที่มี FVG ห่าง ≤5 แท่ง → บน BTC จริง OB = 0 อันเสมอ
+  แก้ใน `SmcEngine`: ส่ง FVG ที่ค้นทั้งหน้าต่างให้ OB (`activeFvgs` ของฝั่งเข้าเทรดยังเป็น 30 แท่งท้าย ไม่เปลี่ยนพฤติกรรม)
+- **บั๊ก 2 นับ mitigation ตั้งแต่แท่งถัดจาก OB** ซึ่งคือ impulse ที่สร้าง OB เอง → OB ถูกตีว่า "ถูกแตะแล้ว" ทันทีที่เกิด
+  แก้: เริ่มนับหลัง `breakIndex` (แท่งทะลุโครงสร้าง) — เพิ่มฟิลด์ `SmcOrderBlock.breakIndex`
+- ผลบนแท่งจริง: OB ที่ยัง active จาก 1/24 หน้าต่าง → **17/24**; ระดับ Supply/Demand OB เข้าภาพตลาดของ AI แล้ว
+  (เล่นซ้ำ 200 จุด เจอระดับ OB 9 ครั้ง) และฝั่งสัญญาณได้ OB setup / กำแพง OB / คะแนน confluence กลับมา
+- เทสต์ใหม่ `SmcOrderBlockTest` 3 เคส (หน้าต่าง FVG, mitigation หลัง break, snapshot) — รวม 496/496
+- **installDebug สร้างแอป 2 อัน**: `adb install` ติดตั้งให้ทุก user profile เครื่องเปิด Dual Messenger (user 95 = DUAL_APP)
+  จึงได้ไอคอนโคลนทุกครั้ง → ตั้ง `installation { installOptions("--user", "0") }` ใน `composeApp/build.gradle.kts`
+  และถอนของ user 95 ออกแล้ว (ยืนยัน: user 0 installed=true, user 95 installed=false)
+
+## 2026-09-20 — review ระบบคาดการณ์ล่วงหน้าทั้งระบบ (หลัง P16) + แก้ 6 จุด
+
+ตรวจตั้งแต่ engine → governor → การเรียนรู้ → prompt → การ์ด → ฐานข้อมูล → เครื่องมือ พบและแก้:
+
+1. **ข้อมูลโตเกินเครื่อง** — วัดจริง 6,047 แถว/วัน/สินทรัพย์ (M1 73%) × retention 365 วัน ≈ 2 ล้านแถว
+   → ตาราง `AnticipationFactorStat` + ยุบแถวที่ไม่ได้ปลุก AI หลัง 3 วัน (migration 17) ดู [[70_WakeTrigger_Architecture_V28]] ข้อ 5.4
+2. **คำตัดสิน AI ถูกเขียนลงทุกแถวของการสแกน** (รวมปัจจัย/TF ที่ AI ไม่ได้เห็น) → เขียนเฉพาะ `woke = 1`
+3. **บรรทัดเหตุการณ์บนการ์ดโชว์รหัสปัจจัย/สถิติให้ผู้ใช้** — regex ตัดข้อความยังเป็นรูปแบบก่อน P16 (`สถิติ:` เทียบกับ `สถิติ H1:`)
+   → แก้ + เทสต์ `WakeCardLineTest`
+4. **prune ยุบแล้วลบคนละ transaction** — ถ้าลบพลาดสถิติจะถูกนับซ้ำ → รวมเป็น transaction เดียว
+5. **มุมมอง SKIP ค้าง 1 ปี** ทั้งที่ใช้แค่สถิติ 30 วัน (ปลุกทุกนาทีจึงมีวันละหลายร้อย) → เก็บ 30 วัน
+6. **Order Block ไม่เคยเกิดเลย** — `FvgDetection` หา FVG แค่ 30 แท่งท้าย แต่ `OrderBlockDetection` ค้น swing ทั้ง 300 แท่ง
+   และรับ OB เฉพาะที่มี FVG ห่าง ≤5 แท่ง → บนแท่ง BTC จริง: FVG 3 อัน (ท้ายสุด) → OB 0 อัน
+   ทำให้ระดับ OB ไม่เคยถึง AI และปัจจัย OB_TOUCH/OB_MITIGATED ไม่เคยยิง
+   → `MarketContextDigest` หา FVG ทั้งหน้าต่างก่อนส่งให้ OB (ทดสอบแล้วได้ OB 8 อัน) — **`SmcEngine` ของระบบ signal ยังมีบั๊กนี้อยู่ (ยังไม่แก้)**
+
+ตรวจแล้วถูกต้อง: สูตรปัจจัย 30 ตัว × 5 TF (ไม่ตรง 0), โครงสร้าง D1–M1, รายละเอียดต่อ TF, PDH/PWH, migration 16/17 บนสำเนาฐานข้อมูลจริง,
+การยุบสถิติ (ค่าตรงเป๊ะหลังยุบ 2 รอบ), governor (cooldown ต่อ TF / ระยะห่าง / พกเหตุการณ์ / memory รุ่นเก่า), เวลาประเมิน ~16 ms/รอบ
+
+เทสต์ 493/493 · ติดตั้งบนมือถือแล้ว (schema 18)
+
+## 2026-09-20 — ปัจจัย × TF: ประเมินทุกปัจจัยบน M1/M5/M15/H1/H4 ทุกนาที + เรียนรู้แยก TF (P16)
+
+ที่มา: ผู้ใช้ไม่พอใจที่ AI ถูกปลุกได้แค่แท่ง M15 ละครั้ง (≤6/ชม., ~144/วัน ทั้งที่มีโควตา 1000+/วัน และ API key 7 ตัว)
+เหตุการณ์กลางแท่ง M15 ต้องรอแท่งปิด และต้องการให้ระบบเรียนรู้ว่าปัจจัยไหนเหมาะกับ TF ไหน
+
+- ใหม่ `WakeTfProfile.kt` (ชุด TF ที่ปลุกได้ต่อปัจจัย + 26 ปัจจัยตายตัว), `WakeContext.forTf` + `SeriesSet`, `WakeTriggerRegistry.scanAllTf`
+- `16.sqm`: `AnticipationFactorOutcome.factor_tf` + UNIQUE(signal_id, factor_id, factor_tf) (สร้างตารางใหม่ — ทดลองบนสำเนาฐานข้อมูลมือถือก่อน: 330 แถวครบ)
+- `WakeLearningStore`: สถิติ/วัดผล/ลดชั้น/เลื่อนชั้น ต่อปัจจัย × TF (`tfVerdict`), รายงานเป็นตาราง ปัจจัย × M1…H4
+- `WakeGovernor`: cooldown ต่อ ปัจจัย@TF, เว้น 1 นาที, พกเหตุการณ์ ≤10 นาที; งบ 40/ชม. 3,000/วัน; `TradingAlertEvaluator` ไม่ throttle 90 วิ กับงานปลุก
+- Engine: ดึง 800 แท่งทุก TF, รหัสการปลุกรายนาที, ATR/บริบทการเรียนรู้ของ TF ที่เกิด, prompt อธิบายป้าย TF
+- เครื่องมือ: `wake_factor_replay.py` ตรวจ 30 สูตร × 5 TF (ไม่ตรง 0) + `--step 1m` จำลองความถี่การปลุก; `device_wake_audit.py` อ่าน factor_tf
+- เทสต์ `WakeMultiTfTest` 5 เคส + governor ใหม่ 4 เคส — รวม 492/492
+- บนมือถือ: migration 16→17 ผ่าน, การปลุกแรก 03:59 (กลางแท่ง M15) ด้วยเหตุการณ์ NR7@H1, NR7@H4, SPREAD_WIDENING@M1 — ดู [[70_WakeTrigger_Architecture_V28]] ข้อ 5.3
+
+## 2026-09-20 — ตรวจการแจ้งเตือนตาม runbook 67 (หลังติดตั้ง D1 + กติกาสวนเทรนด์)
+
+- 8 การปลุก BTC 00:45–02:45: ปัจจัยที่มีสูตร ✓ 17/17, เล่นซ้ำ 16 แท่งล่าสุดตรงทุกค่า, เหตุผล AI (SKIP ทั้งหมด) ตรงกับภาพตลาดขณะนั้น
+- ไม่มี NOTIFY สวนเทรนด์อีก; ปลุกทุกแท่งตามออกแบบ (ปัจจัยสลับทิศเกือบทุกแท่ง) — รายละเอียดใน [[67_Device_Wake_Alert_Audit]]
+
+## 2026-09-20 — ภาพตลาด D1 + รายละเอียดต่อ TF + ห้ามแจ้งสวนเทรนด์ที่เรียงกัน
+
+ที่มา: ผู้ใช้ให้แก้ข้อเสนอ 2 ข้อ (Premium/Discount ชี้ SELL ในขาขึ้น, ห้ามแจ้งสวนเทรนด์) และถามว่า trend/RSI/ADX/MACD/EMA/BB/ATR
+ต่อ TF พอให้เห็นภาพรวมไหม — คำตอบ: ไม่พอ (ไม่มี D1, ไม่รู้ตำแหน่งในขา, ความแรงของการวิ่ง, แท่งปฏิเสธราคา, divergence, ระดับ HTF)
+
+- `MarketContextDigest`: เพิ่ม D1 (รวมจาก H4 ด้วยจุดกึ่งกลางแท่ง — OANDA H4 ทองเปิด 21:00/01:00… UTC),
+  `TfDetail` 2 บรรทัดย่อยต่อ TF, แนวรับ/ต้าน swing H4 + PDH/PDL + PWH/PWL, แก้ป้าย swing high ใต้ราคาที่ติดผิดเป็น "swing L",
+  divergence ที่ยืนยันพร้อมกันแสดงทั้งคู่ — ดู [[70_WakeTrigger_Architecture_V28]] ข้อ 5.1
+- กติกาสวนเทรนด์: `WakeContext.htfAlignment`, `PREMIUM_DISCOUNT_EXTREME` เป็น NEUTRAL เมื่อเรียงกัน, prompt เตือน + กติกา,
+  `WakePrompt.enforceTrend` เปลี่ยน NOTIFY สวนทางเป็น SKIP (log `⏰ บล็อก NOTIFY … สวนเทรนด์`) — ข้อ 5.2
+- เครื่องมือเล่นซ้ำตรวจค่าใหม่ทั้งหมด (1b โครงสร้าง D1–M1, 1c รายละเอียด 12 ค่า, 1d PDH/PWH): BTC 200 แท่ง + ทอง 200 แท่ง ไม่ตรง 0
+- เทสต์ `DigestDetailAndTrendRuleTest` 7 เคส — รวม 484/484
+- บนมือถือ: การปลุกแรกหลังติดตั้ง (sweep แนวต้านในขาขึ้น) AI ตอบ SKIP โดยอ้างว่า H4/H1/M15 ยังเรียงเป็นขาขึ้น
+
 ## 2026-09-19 — Device Control เฟส A: AI เห็นพิกัดปุ่มและกดได้จริง
 - **User Request**: รีวิวโหมดขับขี่ที่ควบคุมมือถือได้ 100% แล้วดำเนินการเฟส A (ดู [[Review_2026-09-19_Driving_Mode_Full_Device_Control]])
 - **Changes**:
@@ -170,6 +279,96 @@
   - Test ใหม่ `ScreenSnapshotFormatterTest` (7 เคส) — `testDebugUnitTest` ผ่านทั้งหมด
 - **พบบนเครื่องจริง (SM-S908E)**: `enabled_accessibility_services = null` — Accessibility Service ไม่เคยถูกเปิด ผู้ใช้ต้องเปิดเองที่ ตั้งค่า > การช่วยเหลือการเข้าถึง > แอปที่ติดตั้ง > JARVIS
 
+## 2026-09-19 — ตรวจค่าปัจจัยปลุก 115 ตัว × 5TF ด้วยการเล่นซ้ำ + แก้ "ล่าสุด=" ในภาพ 5TF
+
+ที่มา: ผู้ใช้ถามว่า 115 ปัจจัยจาก 5TF แสดงค่าถูกต้องไหม และ AI นำไปวิเคราะห์ถูกไหม
+
+- เครื่องมือใหม่ `tools/wake_factor_replay.py` + `WakeFactorReplayTest` (androidUnitTest): ดึงแท่งจริงจากมือถือ
+  แล้วรันโค้ดของแอปย้อนหลังทีละแท่ง TF หลัก (เฉพาะแท่งที่ปิดแล้ว ณ เวลานั้น) เทียบกับสูตรอิสระใน Python
+- ผล BTC 300 แท่ง M15 (09-16 → 09-19):
+  - อินดิเคเตอร์ 5TF (EMA20/50/200, RSI, ATR, MACD hist, ADX, BB%B) ทั้งชุดของ trigger และภาพ 5TF ตรงกัน (ต่าง < 1e-8)
+  - 30 ปัจจัยที่มีสูตรอิสระ: เกิด/ไม่เกิด/ทิศ ตรงกันทุกแท่ง (0 ผิด)
+  - error ระหว่างประเมิน: ไม่มี; 19 ตัวไม่เกิดเลย — ส่วนใหญ่ต้องใช้ข้อมูลภายนอก/memory ที่การเล่นซ้ำไม่มี, GAP/WEEK_BOUNDARY ไม่ใช้กับคริปโต
+  - **ความจริงเรื่อง "5TF"**: ~95 ตัวดูเฉพาะ TF หลัก (M15), ที่เหลือใช้ H1/H4/M5/M1/ภาพ 5TF/ข้อมูลภายนอก
+- **บัคที่พบและแก้**: `MarketContextDigest` บรรทัด `ล่าสุด=` ใช้ `BooleanArray.sliceArray(..).any()` (ไม่มีเงื่อนไข = "array ไม่ว่าง")
+  → AI เห็น "CHoCH↑" ทุก TF ทุกครั้ง (300/300) และเรียงตามชนิดแทนเวลา → `lastStructureEvent()` คืนเหตุการณ์ใหม่สุดพร้อมอายุ
+  เช่น `CHoCH↓ (8 แท่งก่อน)`; ATR ในภาพ 5TF ใช้ `TaIndicators.atrSeries` เหมือนปัจจัย (เดิม M1/M5 ต่าง 0.1–0.24%)
+- ตรวจเหตุผล AI 46 ครั้งเทียบภาพ 5TF ขณะนั้น: อ่านค่าถูกเกือบทั้งหมด (ผิด 2: อ้าง M1/M15 เป็น DOWN ทั้งที่ UP), ไม่เคยอ้าง CHoCH ที่ผิด
+  แต่ **ตีความเอนเอียง**: SELL 9 ครั้งอ้าง "Premium สุดขอบ H1" ทั้งที่ทุก TF เป็นขาขึ้น — ปัจจัย `PREMIUM_DISCOUNT_EXTREME` ติดป้าย SELL
+  ทุกครั้งที่ราคาอยู่บน 90% ของกรอบ 100 แท่ง H1 (33% ของแท่งในการเล่นซ้ำ) ซึ่งในขาขึ้นแรงเป็นเรื่องปกติ (ยังไม่แก้ — รอผู้ใช้ตัดสิน)
+- เทสต์ `DigestStructureEventTest` 3 เคส — รวม 477/477; ติดตั้งบนมือถือแล้ว
+
+## 2026-09-19 — ติดตามผล "มุมมอง" ของ AI ทุกการปลุก + ส่งผลกลับเข้า prompt
+
+ที่มา: ผู้ใช้ถามว่า AI บอก SELL แล้วราคาลงจริงไหม และการเรียนรู้ได้ผลจริงหรือไม่ — เดิมวัดแค่รายปัจจัย ไม่มีใครวัดว่ามุมมองที่ AI แจ้งถูกหรือผิด
+
+- ย้อนตรวจ NOTIFY เดิม 16 ใบ (M1 ในเครื่อง): ปิดแล้ว 14 → ชน TP 4 (+3.90R) / ชน SL 10 (−10R) = **สุทธิ −6.1R, ชนะ 29%**;
+  BTC SELL 8/8 ชน SL (ขายสวนขาขึ้นเพราะราคา "premium"), BUY 4 TP / 1 SL; TP ช่วงแรกได้ RR < 1 (ก่อนมีเกณฑ์ 1:1)
+- `15.sqm` ตาราง `AiWakeView` (1 แถว/การปลุก): decision, bias, confidence, reason, price, atr, SL/TP, status
+  `OPEN → TP / SL / EXPIRED (48 แท่ง) / CLOSED (SKIP/ไม่มีระดับ วัด 12 แท่ง)`, result_r, move/mfe/mae (ATR)
+- `AiViewTracker` (ใหม่): `record` ตอน `handleWakeAlert`, `resolve` ทุกรอบสแกน (ช่วงแรกใช้ M1 หลังเวลามุมมอง — กัน high/low ก่อนมุมมองทำให้ชนปลอม;
+  แท่งเดียวชนทั้งคู่นับ SL), `backfillOnce` ดึงคำตัดสินเก่าจาก `AnticipationFactorOutcome` + ระดับจากการ์ดแชท
+- prompt: ส่วนใหม่ "มุมมองที่คุณเคยให้บน SYMBOL (24 ชม.) และผลจริง" (4 รายการล่าสุด + สถิติ 30 วันแยก BUY/SELL)
+  กติกา: ห้ามแจ้งทิศเดิมซ้ำขณะมุมมองยังเปิด, กลับทิศต้องบอกว่าอะไรเปลี่ยน, ใช้สถิติตัวเองประกอบความมั่นใจ
+- รายงานการเรียนรู้ (`WakeLearningStore.buildReport`) ต่อท้ายด้วยสรุปผลมุมมอง; ไฟล์ส่งออกการเรียนรู้พก `views`; prune: OPEN เกิน 30 วัน → EXPIRED, ลบเกิน 365 วัน
+- สคริปต์ `device_wake_audit.py` แสดง "ผลมุมมอง AI" ต่อการปลุก
+- เทสต์ `AiViewTrackerTest` 8 เคส — รวม 473/473
+- ข้อจำกัดที่ยังอยู่: การเรียนรู้รายปัจจัยต้องมี 20 ตัวอย่างจึงเชื่อถือ/40 จึงลดน้ำหนัก ตอนนี้สูงสุด 8 → ยังไม่มีผลต่อการปลุก;
+  แถวของ job ที่ถูกลบ (XAU 35 แถว PENDING) ไม่มีใครสแกนต่อ จะหมดอายุเองใน 30 วัน
+- ติดตั้งบนมือถือแล้ว (23:07): ย้อนเติม 55 มุมมอง, ปิดผลทันที 28 — NOTIFY BUY: TP 3 / SL 1 (+2.16R), NOTIFY SELL: SL 8/8 (−8R),
+  SKIP ปิดแล้ว 16; มุมมองทองยังเปิด (ตลาดปิด) และ BTC SELL 23:00 (บันทึกโดย build ก่อน ยังไม่มีผลย้อนหลังใน prompt)
+
+## 2026-09-19 — ตรวจการคำนวณรอบ BTC (20:30–22:30 ไทย) + ขยายสคริปต์ตรวจ
+
+- สคริปต์ตรวจเงื่อนไขปัจจัยที่ปลุกได้ 31 ตัว → **ตรงกับแอปทั้งหมด (✗ 0)**; ATR ที่แอปบันทึกตรงกับที่คำนวณใหม่ทุกครั้ง
+- RR ของ NOTIFY ทั้ง 3 ครั้งผ่านเกณฑ์ 1:1 (2.14, 1.29, 1.14) — คำนวณซ้ำแล้วถูกต้อง
+- ยืนยันบนเครื่อง: การ์ดขึ้นแชทก่อนเสียง (22:15:16.268 pushToChat → .282 speakAlert)
+- แก้สคริปต์: ราคาอ้างอิงเดิมใช้ max ของทุกแถวในแท่ง (รวมแถวที่บันทึกทีหลังด้วยราคาอื่น) → ใช้แถวที่ปลุกจริง;
+  แยกป้าย [STATE]/[EVENT] ของแถวที่ไม่ได้ปลุก; ข้อความ error ภาษาไทยบน stderr; แยก "ต้องใช้ข้อมูลภายในแอป" กับ "ยังไม่มีสูตร"
+- แก้แอป: log "เสียงจริงใช้ …" เตือนเฉพาะตอนสลับ Live ↔ Android TTS จริง (เดิมขึ้นทุกครั้งเพราะชื่อป้ายต่างกัน)
+- ข้อสังเกต: AI แจ้ง BUY 21:46 แล้ว SELL 22:15 และ 22:30 — แต่ละครั้งวิเคราะห์ใหม่โดยไม่รู้ว่าเพิ่งแจ้งอะไรไป
+
+## 2026-09-19 — ระบบปลุก AI เคารพเวลาเปิด/ปิดตลาด + เกณฑ์ RR 1:1
+
+ที่มา: ตรวจการแจ้งเตือนตาม runbook — ทองถูกปลุก 5 ครั้งในชั่วโมงสุดท้ายก่อนปิดสัปดาห์ (SKIP ทั้งหมด เปลืองงบ 5/6)
+และ BTC NOTIFY SELL มีระดับ SL/TP ที่ให้ RR แค่ 1:0.76
+
+- `MarketHours` (commonMain, อิง America/New_York รองรับ DST): FX เปิดอาทิตย์ 17:00 → ปิดศุกร์ 17:00, ทองเปิดอาทิตย์ 18:00
+  + พักรายวัน จ–พฤ 17:00–18:00, คริปโต 24/7, อื่นๆ ถือว่าเปิด (ยังไม่รวมวันหยุดพิเศษ)
+- `AnticipationEngine`: ตลาดปิด → คืนผลทันที **ไม่ดึงแท่งเทียน ไม่สแกน ไม่เรียก AI** (log เฉพาะตอนสถานะเปลี่ยน);
+  เหลือ ≤ 60 นาทีก่อนปิดสิ้นสัปดาห์ → ยังสแกน/เก็บการเรียนรู้แต่ไม่ปลุก AI; tool `scan` แจ้งว่าตลาดปิด + เวลาเปิดถัดไป
+- RR: prompt บังคับ LEVEL_SL/LEVEL_TP ที่ให้ RR ≥ 1:1 ไม่งั้นตอบ SKIP; `Verdict.rr()`; การ์ดแชทแสดง "ผิดทาง · เป้า · RR 1:x"
+  (สีเหลือง + ⚠️ ถ้าต่ำกว่า 1:1) และเสียงพูดเตือนเมื่อ RR ต่ำกว่า 1:1
+- เทสต์ `MarketHoursTest` (สุดสัปดาห์, ก่อนปิดวันศุกร์, อาทิตย์ FX/ทองเปิดไม่พร้อมกัน, พักรายวันทอง, ฤดูหนาว EST, RR) — รวม 465/465
+- ติดตั้งบนมือถือแล้ว: BTC สแกนปกติ, log "▶ BTCUSDT@15m ตลาดเปิด — เริ่มสแกน"
+
+## 2026-09-19 — เก็บเหตุผลและความมั่นใจของ AI ทุกการปลุก (NOTIFY และ SKIP)
+
+- ที่มา: ตรวจการ SKIP 5 ครั้ง (00:01–01:00 ไทย) แล้วพบว่าเหตุผลของ AI ไม่ได้เก็บไว้ที่ไหนเลยนอกจาก logcat ซึ่งถูกเขียนทับไปแล้ว
+  (ประเมินจากหลักฐานแทน: 3 ครั้งถูกต้อง 2 ครั้งก้ำกึ่ง — ราคาไปต่อแค่ ~1.2–1.3 ATR)
+- `14.sqm`: `AnticipationFactorOutcome` เพิ่ม `ai_confidence INTEGER`, `ai_reason TEXT` (ต่อท้ายตาราง ตรงกับ `JarvisDatabase.sq`)
+- `setFactorOutcomeAiDecision` / `WakeLearningStore.setAiDecision` รับ confidence + reason; `handleWakeAlert` ส่ง `verdict.confidence`, `verdict.reasonTh`
+- ไฟล์ส่งออกการเรียนรู้ (`LearningTransfer`) พกค่าใหม่ไปด้วย — ไฟล์รุ่นเก่ายังนำเข้าได้ (ค่าเป็น null)
+- tool action `inspect` แสดงความมั่นใจ, สคริปต์ `tools/device_wake_audit.py` แสดงความมั่นใจ + เหตุผล
+- ติดตั้งบนมือถือจริงแล้ว: migration ผ่าน (schema 15, quick_check ok, ข้อมูลเดิม 61 แถวครบ)
+- เทสต์ 450/450 (เพิ่มเทสต์ไฟล์การเรียนรู้รุ่นเก่า/ใหม่)
+
+## 2026-09-19 — แก้: ดึงแท่งเทียนจาก TradingView ช้า 13–14 วิ/ครั้ง
+
+- สาเหตุ: `TvHistoryBridge.android.kt` ต่อ string เฟรมคำสั่งเอง — payload ของ `resolve_symbol` (JSON ซ้อนใน string)
+  มี `"` ที่ไม่ได้ escape → TradingView ตอบ `protocol_error` (ยืนยันจาก PC: เฟรมเดิม error ใน 0.3 วิ, เฟรมที่ escape ถูกได้แท่งใน 0.17 วิ)
+  bridge ไม่ฟัง error จึงรอ timeout 12 วิ แล้วค่อยไปเส้นสำรอง (Ktor) ทุกครั้ง
+- แก้: `TvProtocol` (commonMain) สร้างเฟรมด้วย JSON encoder + bridge เลิกรอทันทีเมื่อได้ `protocol_error/critical_error/symbol_error/series_error`
+- ผลบนมือถือจริง: 0.5–0.9 วิ/ครั้ง, สแกนระบบปลุก AI 1 รอบ 4–6 วิ (จาก 1.5–2.5 นาที) — แจ้งเตือนไม่ช้า ~2 นาทีอีกต่อไป
+- เทสต์ `TvProtocolTest` (เฟรมเป็น JSON ถูกต้อง, payload round-trip, จำนวนแท่งเป็นตัวเลข, ตรวจจับ error) — รวม 448/448
+
+## 2026-09-19 — Runbook ตรวจแจ้งเตือนระบบปลุก AI บนมือถือจริง
+
+- เพิ่ม `tools/device_wake_audit.py` — ดึงฐานข้อมูลแอปผ่าน `adb exec-out run-as` แสดง job/การตั้งค่า/การปลุกแต่ละครั้ง
+  แล้วคำนวณค่าหลักใหม่จากแท่งเทียนดิบ, `--logcat` สรุป log และระยะห่างการดึงแท่งเทียน, ลบสำเนาฐานข้อมูลตอนจบ
+- วิธีทำเองและการตีความ: [[../07_Trading_Intelligence/67_Device_Wake_Alert_Audit]]
+- ผลตรวจครั้งแรก: ค่าในแจ้งเตือน 23:21 และ 23:56 ถูกต้องทุกตัว; พบการดึงแท่งเทียน ~13–14 วิ/ครั้ง (ยังไม่แก้)
+
 ## 2026-09-18 — Compose Canvas Engine: ปรับโทนให้ตรงภาพ LOOI 40 Moodset (Neon Cyan & Sensor Style)
 - **User Request**: ปรับโหมดสัตว์เลี้ยง Compose Canvas Engine ให้สวยงามคล้ายภาพต้นฉบับ LOOI Robot 40 Moodset
 - **Changes**:
@@ -180,6 +379,228 @@
   - `drawParametricEye`: glow ค่าเริ่มต้น 0dp → 6dp (alpha 0.30); rim offset 2.5dp,4.5dp → 0.8dp,4dp
   - Test `getEyeDeepShadowColor` อัปเดตเป็น `#0A5C6B`
 - **ยังไม่ทำ**: สถานะ 21–40 ในภาพ (Proud, Scanning, Processing, Charge, Weather, Alarm, Standby Clock, Face Recognized ฯลฯ) ยังไม่มีใน `AvatarEmotion`
+
+## 2026-09-18 — แก้: alert ระบบปลุก AI ค้าง TRIGGERED และหยุดสแกนหลังปลุกครั้งแรก
+
+อาการ (logcat จริง 23:21–23:25): ปลุก AI สำเร็จ 1 ครั้ง แล้วไม่ดึงแท่งเทียนอีกเลย, หน้า Cron job ค้าง TRIGGERED,
+4 นาทีต่อมาบริการหยุดตัวเอง ("No active alert jobs or scheduled tasks. Stopping service.")
+
+สาเหตุ: `getRunnableJobs` ข้าม job ที่ `is_triggered = 1` ยกเว้น `trading_signal_alert`
+— job `trading_anticipation` เป็น edge-trigger เหมือนกัน (ต้องสแกนรอบถัดไปเพื่อรีเซ็ตตัวเอง)
+แต่ไม่อยู่ในข้อยกเว้น พอปลุกครั้งแรกจึงหลุดจากรอบสแกนถาวร และบริการเห็นว่าไม่มี job เหลือ
+
+แก้: `getRunnableJobs` รวม `trading_anticipation`, หน้า Automation แสดง "TRIGGERED · ปลุก AI แล้ว รอเหตุการณ์ใหม่"
+และไม่แสดงปุ่ม 🔁 สำหรับ job ประเภทนี้ (รีเซ็ตเองในรอบถัดไป)
+
+## 2026-09-18 — V29.1: review ระบบปลุก AI รอบ 2
+
+ดูตารางบัคทั้งหมด [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29#8. Review รอบ 2 — บัคที่แก้ (2026-09-18)]]
+
+**บัคหนักที่สุด**
+- สแกนจากแชทกิน cooldown/การปลุกของแท่งนั้น → alert เบื้องหลังเงียบ (แก้: preview mode)
+- ตัวนับ wake_event_count/wake_buy/wake_sell นับเหตุการณ์ที่ติดงบ → เรียก AI เกินงบ
+- ทุกการปลุกส่ง system prompt แชทของ JARVIS ทั้งชุด (ประมาณ 14,000 ตัวอักษร) → ใช้ system prompt เฉพาะงาน (< 600 ตัวอักษร)
+- การเรียนรู้ใช้ราคาอ้างอิงเก่า (ราคาปิดแท่ง TF หลัก) กับเหตุการณ์ที่เกิดกลางแท่ง
+- แถวการเรียนรู้ค้าง PENDING และบังแถวใหม่ไม่ให้ได้วัดผล
+- ความแม่นของ AI วัดตามทิศของปัจจัย ไม่ใช่ของ AI
+- digest รวมแนวรับ/ต้านของคู่เงิน FX เป็นก้อนเดียว
+- governor ลืมทุกอย่างเมื่อบริการรีสตาร์ท
+
+**สถานะ**: `:composeApp:testDebugUnitTest` **444/444** ✅
+
+## 2026-09-18 — V29: ต่อระบบปลุก AI เข้า alert จริง + OHLCV pruning + สำรอง/กู้คืน
+
+ดูรายละเอียด [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29]]
+
+**ระบบปลุก AI ทำงานจริงบนมือถือแล้ว** — แยกจาก Signal Alert (strategies/backtest) โดยสิ้นเชิง
+- alert job `trading_anticipation` / field `wake` (migration ย้าย job คาดการณ์เดิมให้)
+- โหมด ai: AI เห็น snapshot 5TF แล้วตัดสิน NOTIFY/SKIP เอง; SKIP = ไม่รบกวนผู้ใช้ แต่บันทึกลงการเรียนรู้
+- เสียงพูด summary ที่ AI เขียน — ไม่ส่ง payload ให้ Live สรุปซ้ำ (ประหยัด TPM 65K ของ Live)
+- ลบ supervisor/การ์ด/เสียงของระบบคาดการณ์เดิม และ field `signal_anticipation*` ออกจาก Signal Alert
+
+**คำตอบเรื่องขนาด OHLCV store**: ≈1 MB ต่อซีรีส์ (6,000 แท่ง), ≈6–8 MB ต่อสินทรัพย์ที่เฝ้า 5TF + intermarket
+→ เพิ่ม `OhlcvMaintenance`: ลบซีรีส์ที่ไม่ได้อ่านเกิน 30 วันและไม่มี alert ใช้ (วันละครั้ง) + ลบการเรียนรู้เก่ากว่า 1 ปี
+
+**สำรอง/กู้คืน** (Settings → สำรอง / กู้คืนข้อมูล)
+- การเรียนรู้: JSON, นำเข้าแบบรวม (ย้ายเครื่อง A → B ได้, นำเข้าซ้ำได้)
+- ฐานข้อมูลทั้งหมด: zip + manifest, ตรวจไฟล์ก่อนกู้คืน, สลับไฟล์ตอนเริ่มแอป เก็บของเดิม 1 ชุด
+- Google Drive ผ่านหน้าต่างเลือกไฟล์ของระบบ (SAF) — ไม่ต้องตั้ง OAuth
+
+**สถานะ**: compile Android ผ่าน, `:composeApp:testDebugUnitTest` **433/433** ✅
+(ลดจาก 436 เพราะลบเทสต์ของโค้ดคาดการณ์เดิม แล้วเพิ่ม `WakeSystemTest`, `BackupAndMaintenanceTest`)
+ยังไม่ได้ทดสอบบนเครื่องจริง: flow กู้คืน+รีสตาร์ท, การเลือก Google Drive, การปลุก AI ในตลาดจริง
+
+## 2026-09-18 (รอบ 3) — Anticipation = ระบบปลุก AI (V28)
+เจตนาที่ผู้ใช้ชี้แจง: **ปัจจัยคือนาฬิกาปลุก ไม่ใช่เทรดเดอร์**
+AI เฝ้ากราฟตลอดเวลาไม่ได้เพราะเปลืองโทเคน → ปัจจัยทำหน้าที่เป็นอินดิเคเตอร์ที่คอยปลุก
+แล้ว snapshot 5TF คือ "ภาพที่ AI ตื่นมาเห็น" — AI เป็นคนวิเคราะห์เอง ปัจจัยไม่ใช่ข้อสรุป
+รายละเอียดเต็ม: [[../07_Trading_Intelligence/70_WakeTrigger_Architecture_V28]]
+
+**ปัญหาแกนกลางที่พบ**: โค้ดทำตรงข้ามกับเจตนา — ปัจจัยคำนวณ Entry/SL/TP/RR/confidence
+แล้วยัดใส่ prompt ว่า "Execution Rails คาดหมาย" ก่อนที่ AI จะได้มองโครงสร้างตลาด
+AI จึงถูก anchor ด้วยตัวเลขที่อินดิเคเตอร์แต่งขึ้น แล้วถูกถามแค่ APPROVE/VETO/ADJUST
+(ตัวอย่างที่ชัดสุด: FAST_RSI ใช้ entry×0.95/×1.10 ซึ่งเป็นพารามิเตอร์คริปโต
+ → ทอง 4000 ได้ SL 3800 / TP 4400 แล้วบอก AI ว่านี่คือแผนเทรด)
+
+**แก้แล้ว**
+- **prompt ใหม่**: ถอด Execution Rails ออก เหลือ "เกิดอะไรขึ้น + ภาพ 5TF + วิเคราะห์เอง"
+  เปลี่ยน DECISION เป็น NOTIFY/SKIP + BIAS + LEVEL_SL/LEVEL_TP ที่ **AI กำหนดเองจากโครงสร้างจริง**
+  (ใช้รูปแบบเดียวกับสาขา isKeyzoneOnly ที่ออกแบบถูกอยู่แล้วในโค้ดเดิม)
+- **ส่งหลักฐานฝั่งตรงข้ามให้ AI**: เดิม dominantHits ทิ้งฝั่งน้อยกว่าเงียบๆ แล้วรายงาน confidence สูง
+  เพิ่ม `signal_anticipation_opposing` + `signal_anticipation_factors`
+- **confidence คิดจากกลุ่มหลักฐาน ไม่ใช่จำนวนปัจจัย**: `factorEvidenceGroup()` จัดกลุ่ม
+  squeeze 2 ตัว / oscillator 3 ตัว / sweep 2 ตัว เป็นกลุ่มเดียว
+  เดิม `max(88, base+10)` ทำให้ 3 ปัจจัยอ่อนได้ 88% เสมอ และ 2 ปัจจัยอ่อน (70,71) ชนะ 1 ปัจจัยแข็ง (79)
+  ตอนนี้: `base + (กลุ่มอิสระ−1)×5 − (กลุ่มฝ่ายตรงข้าม)×8`
+
+**Learning เขียนใหม่ทั้งหมด** (`AnticipationLearningStore` + migration 13)
+- เดิมเก็บใน `mutableMapOf` ระดับ object → **หายทุกครั้งที่ปิดแอป** และสร้างใหม่ไม่ได้
+- เดิม 10 จาก 13 ปัจจัยฝัง confidence เป็นเลขดิบ → การเรียนรู้ไม่มีผลกับมันเลย
+- เดิมสัญญาณหลายปัจจัยบันทึกเป็น `ANTICIPATION_CONFLUENCE` ซึ่งไม่อยู่ในทะเบียน
+  → **ปัจจัยที่ร่วมยิงไม่เคยได้เครดิต/ถูกตำหนิ** ทั้งที่เป็นข้อมูลชิ้นเดียวที่ใช้ตัดปัจจัยได้
+- ตอนนี้: ตาราง `AnticipationFactorOutcome` แตก 1 สัญญาณเป็น N แถว (แถวละปัจจัย)
+  พร้อม context bucket (mtf_align × adx × volatility × session)
+  วัดด้วย **forward return 12 แท่ง หน่วย ATR** ไม่ใช่ SL/TP สมมติ
+  ความเชื่อมั่นใช้ shrinkage: n น้อย→เชื่อ prior, n มาก→เชื่อข้อมูลจริง (ใช้ปัจจัยใหม่ได้ทันที)
+- `buildReport()` ชี้ปัจจัยที่ n≥30 แต่ avg R ≈ 0 ว่า "ควรตัดทิ้ง"
+
+**แก้ข้อมูลเรียนรู้ปนเปื้อน**: `forwardCandles` เปลี่ยนจาก `>= created_at` เป็น `> created_at`
+เดิมรวมแท่งที่สัญญาณเกิดทั้งแท่ง รวม high/low ที่เกิด**ก่อน**สัญญาณมีอยู่จริง
+→ ถูกตัดสิน INVALIDATED −1R จากราคาของตัวเอง และลำเอียงกับปัจจัยประเภท sweep มากที่สุด
+(เพราะมันต้องมี sweep เกิดก่อนจึงยิง)
+
+**Token economy** — จาก Live API docs: *"billing follows a compounding model based on the
+active context window"* คิดทั้ง context สะสมใหม่ทุก turn และเก็บประวัติเสียงเป็น audio token
+- วัดจริง: snapshot 5TF = 284 tokens, prompt รวม = 765 tokens, 1 turn ≈ 855 tokens
+- ปัญหาไม่ใช่ข้อมูล แต่คือ context สะสม: context 20K → 1 turn ≈ 21K → เหลือ ~3 ครั้ง/นาที
+- แก้ `LiveContextWindowCompressionConfig` จาก `slidingWindow: {}` เปล่าๆ
+  เป็น `triggerTokens 25K / targetTokens 8K` ตามที่ docs แนะนำ พร้อม fallback ไล่ระดับ
+- TPM 250K ÷ RPM 15 = **16,666 tokens/request** แต่ใช้อยู่ 765 → เหลือ 95%
+  → ขยาย snapshot ได้อีกมาก
+
+**ขยาย snapshot 5TF** (`MarketContextDigest`)
+- `TfLine` เพิ่ม ADX / MACD hist / BB %B / BB width (×ATR) / ระยะจาก EMA50 (×ATR) / volume ratio
+- key levels 3 → 6 ต่อฝั่ง พร้อมระยะห่างเป็นหน่วย ATR (AI ไม่ต้องคำนวณเอง)
+
+**สถาปัตยกรรมใหม่รองรับ 100+ ปัจจัย** (`automation/wake/`)
+- `WakeTrigger` interface: id / evidenceGroup / kind (EVENT vs STATE) / detect(WakeContext)
+  **`TriggerEvent` ไม่มี entry/sl/tp โดยเจตนา** — ปัจจัยห้ามสรุปแทน AI
+- `WakeContext` ให้ครบ 5 TF (m1/m5/m15/h1/h4) + digest — ปัจจัยใช้ MTF ได้จริง
+  (เดิม 12 จาก 13 ปัจจัยรันบน TF เดียว ทั้งที่ระบบดึง 5TF มาแล้วทุกรอบ)
+- แยก EVENT (ปลุกได้) ออกจาก STATE (เป็นบริบท ไม่ปลุกซ้ำทุกแท่ง)
+- ชุดเริ่มต้น 12 ตัว ครบทุก evidence group รวม **`M5_CONFIRM_DIVERGENCE`**
+  (ชั้นคัดกรองการหลอกด้วย M5 ที่ระบบเดิมขาดไป) และ `SESSION_LEVEL_SWEEP`
+  ที่อิงเวลา session จริง (ASIA/LONDON/NY) แทนตัวเดิมที่ใช้แค่ 24 แท่งล่าสุด
+
+**ผลตรวจที่ผมรายงานผิดรอบก่อน**: "7 EMA field หายไป" — **ไม่จริง** มีครบทั้ง 2 map
+(grep ผมกรองเฉพาะ key ขึ้นต้น `signal_` เลยพลาด) ไม่ได้แก้อะไรตรงนี้
+
+**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **436/436** ✅
+เพิ่ม `WakeTriggerRegistryTest` + เขียน `SignalAnticipationTest` ส่วน RL ใหม่
+
+## 2026-09-18 (รอบ 2) — Indicator Consolidation & Definition Parity
+ต่อจาก Phase 0–4 — ปิดงานที่ค้างไว้ 3 ข้อ และพบ implementation ซ้ำตัวที่ 4 ระหว่างทาง
+
+**พบ implementation อินดิเคเตอร์ตัวที่ 4** ใน `StrategySignalProvider.TradingViewIndicatorSnapshot`
+(object นี้มีหน้าที่ "ส่ง indicator ให้ AI โดยเฉพาะ" จึงกระทบหลักการโดยตรงที่สุด) ปัญหาที่พบ:
+- `rsi(...) ?: 50.0` และ `adx(...) = Triple(0,0,0)` → **ป้อนค่าปลอมให้ AI ตรงๆ**
+- `adx()` คืน **DX ดิบ** ไม่ใช่ ADX ที่ smooth แล้ว และ DI ใช้ค่าเฉลี่ยธรรมดาแทน Wilder RMA
+  → เกณฑ์ `adx >= 25` ที่ใช้ตัดสิน STRONG_UPTREND เทียบกับตัวเลขคนละสเกลกับ tool อื่น
+- `supertrend()` ไม่ใช่ Supertrend เลย — เป็นแค่ ATR band รอบ mid ของแท่งล่าสุด ไม่มี band locking/trend persistence
+- `trueRangeAtr()` ใช้ simple average แทน Wilder RMA
+- `macdSeries` เรียก `ema(c,12)`/`ema(c,26)` ใหม่ทุก index → O(n²) พร้อม allocation
+- `macdSignal` แปลง NaN → 0.0 ก่อนเข้า EMA → signal line ปนเลขศูนย์
+- VWAP สะสมทั้งชุดข้อมูล ไม่รีเซ็ตรายเซสชัน
+→ เขียน `calculate()` ใหม่ delegate ไป TaIndicators ทั้งหมด **fail-closed ทั้งก้อน**
+(คืน null ถ้าตัวใดตัวหนึ่งคำนวณไม่ได้ ดีกว่าส่ง snapshot ที่มีค่าปลอมปน) ลบ helper ซ้ำ 180 บรรทัด
+เกณฑ์แท่งขั้นต่ำ 220 → `Warmup.FULL_SET` (800) เพราะ 220 ไม่พอให้ EMA200 ลู่เข้า
+
+**แก้ ADX off-by-one**: DX ตัวแรกที่แท่ง index=`period` ไม่เคยถูกนับ (loop เริ่มที่ `period+1`)
+ค่า ADX จึงเลื่อนไป 1 แท่งเทียบกับ TradingView/MT5
+
+**VWAP session anchor ต่อ instrument**: `sessionOffsetHoursFor()` — FX/โลหะมีค่ารีเซ็ตที่ 22:00 UTC
+(ซิดนีย์เปิด ตรงกับจุดที่โบรกเกอร์ปิดแท่ง D1) ส่วนคริปโตใช้ขอบวัน UTC
+
+**Parity harness** `IndicatorDefinitionParityTest` — เขียน reference implementation ตามสูตรตรงๆ
+(ช้าแต่ชัด ไม่ optimize) แล้วเทียบกับตัวจริงบน 6 ชุดข้อมูล × ทุก period:
+- EMA/RSI/ATR/ADX/MACD/Bollinger ตรงตามนิยาม ±1e-9
+- Supertrend ที่ optimize เป็น O(n) ให้ผลเท่ากับ naive O(n²) เป๊ะ
+- `atrSeries()` (ตัวที่เพิ่มมาแก้ O(n²)) ค่าสุดท้ายตรงกับ `atr()`
+- อินดิเคเตอร์ไม่ขึ้นกับ timeframe spacing (จับกรณีเผลอเอา timestamp ไปคำนวณ) — ทดสอบครบทุก TF ในทะเบียน
+- VWAP รายเซสชันไม่รวมแท่งของวันก่อนหน้า
+- known-answer: ราคาขึ้นทุกแท่ง → RSI=100, ราคาคงที่ → stdev=0/BB ทุกเส้นเท่ากัน, OBV/Donchian/ROC/Williams %R
+
+**แก้ผลกระทบจากเกณฑ์แท่งที่สูงขึ้น**: `StrategySignalProvider` 3 จุดยังดึงแค่ 300 แท่งผ่าน
+`fetchTradingViewCandlesOnly` (ยิงตรง TV ไม่ผ่าน DB) → snapshot จะเป็น null ตลอด
+เปลี่ยนเป็น `fetchCandlesWithSource` ที่เป็น DB-backed และขอ 800 แท่ง
+ตอนนี้ **ไม่มี caller ของ `fetchTradingViewCandlesOnly` เหลือในโปรเจกต์แล้ว** — ทุกเส้นทางผ่าน store เดียวกัน
+
+**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **423/423** ✅
+เหลือเฉพาะ parity เทียบตัวเลขจาก TradingView ของจริง ซึ่งต้องมี fixture ที่ export มาจาก TV
+(ปัจจุบันยืนยันความถูกต้องเทียบ "นิยาม" ได้ครบแล้ว)
+
+## 2026-09-18 — OHLCV Foundation & Indicator Correctness (Phase 0–4)
+ที่มา: audit ทั้งระบบ tool ของ composeApp พบว่าระบบ "ป้อนตัวเลขปลอมให้ AI" หลายจุด ซึ่งขัดหลักการหลักของโปรเจกต์
+(ระบบต้องคำนวณค่าจริงแล้วส่งให้ AI วิเคราะห์ — ไม่ใช่ปล่อยให้ AI เดา) รายละเอียดเต็มที่
+[[../07_Trading_Intelligence/69_OHLCV_Indicator_Foundation_V27]]
+
+**Phase 0 — หยุดเลือด**
+- `TaIndicators.ema/sma` เดิมคืน `data.last()` เมื่อแท่งไม่ครบ period → **EMA200 บน 15m เท่ากับราคาปิดเป๊ะทุกครั้ง**
+  (เพราะ `recommendedMinBars` ให้แค่ 150 แท่ง) ตอนนี้คืน `null` — fail-closed
+- รูปแบบเดียวกันใน `AdvancedTradingEngine`: HMA/WMA คืน `data.last()` → เปลี่ยนเป็น nullable, `analyze()` คืน null เมื่อแท่งไม่พอ
+  (MIN_BARS 60 → 80 เพราะ HMA55 ต้องการ 55+√55−1 = 61 แท่ง เดิมต่ำกว่าเกณฑ์ 1 แท่งพอดี → fallback ตลอด)
+- **รวม timeframe map 4 ชุดเป็นทะเบียนเดียว** `TaIndicators.TIMEFRAMES` — เดิม 6h/8h/12h ตกไป "60" ใน tvResolution
+  และ 8h ไม่มีใน `intervalToMillis` → ขอ 8h ได้แท่ง 1h เงียบๆ + นับแท่งที่ขาดผิด 8 เท่า
+- แก้ ambiguity `"1M"` (รายเดือน) vs `"1m"` (1 นาที) ด้วยการ match canonical แบบตรงตัวพิมพ์ก่อน
+  (เดิม `normalize("mn")="1M"` แล้วป้อน `"1M"` กลับได้ `"1m"` — round-trip พัง)
+
+**Phase 1 — OHLCV Store**
+- **DB ไม่เคยสะสมประวัติ**: `trimTvCandlesByWindow` ลบทุกแท่งที่เก่ากว่า 300 แท่งล่าสุดทุกครั้งที่ refresh
+  ทับ retention ที่ `saveTvCandlesToDb` เพิ่งตั้งในทรานแซกชันเดียวกัน → ลบทิ้งแล้ว retention = 6,000 แท่ง/ซีรีส์
+- **schema (migration 12.sqm)**: `UNIQUE(symbol, interval, source, ts)` + คอลัมน์ `is_closed`
+  เดิม source ไม่อยู่ใน unique key และ query ไม่ filter → ราคา OANDA/FX_IDC/TVC เขียนทับกันรายแท่ง เป็น "โมเสก" ของหลาย feed
+- **แท่งที่ยังก่อตัว**: `Candle.isClosed` + `markClosedState()` — อินดิเคเตอร์ใช้เฉพาะแท่งปิด (กัน repainting)
+- **bucket alignment**: `estimateMissingBars` เลิกใช้ `(now/tfMs)*tfMs` ที่ align กับ epoch
+  (แท่ง D1 ทองเปิด 21:00 UTC ไม่ใช่ 00:00; epoch week เริ่ม "วันพฤหัส") → วัดจาก timestamp แท่งล่าสุดแทน
+- **warm-up policy** `TaIndicators.Warmup`: FAST_SET 150 / MACD_SET 200 / ICHIMOKU_SET 250 / FULL_SET 800 / BACKTEST 5,000
+  `recommendedMinBars` เดิม 150-300 → 800 (EMA200 ต้องการ period × 4 จึงลู่เข้า)
+- **backfill** ย้อนหลังทีละรอบ (guard 30 นาที) + backtest อ่านจาก DB แทน in-memory cache
+  → ไม่ต้องโหลด 5,000 แท่งใหม่ทุกครั้งที่รีสตาร์ทแอป
+- **ตัด Yahoo ออกจากเส้นทาง OHLCV ทั้งหมด** (ยังใช้กับราคา/fundamental ที่ TradingApiService)
+  TradingView เป็นแหล่งหลัก, Binance เป็น fallback เฉพาะคู่คริปโตแท้
+- `OhlcvCentralStore`: เลือก source ตามลำดับความน่าเชื่อถือ (เดิม "ซีรีส์ไหนยาวสุด" → PAXG ชนะทองจริงได้)
+  + เพดาน 1,200 แท่ง/ซีรีส์ และ LRU 64 ซีรีส์ (เดิมโตไม่จำกัด)
+
+**Phase 2 — Indicator Engine**
+- ลบสำเนา EMA/RSI/SMA/Stoch/CCI/BB/ATR/ADX ใน `IndicatorAlertProvider` (fail คนละแบบกับ TaIndicators) → เหลืออิมพลีเมนต์เดียว
+- Supertrend เดิม O(n²) (เรียก `atr()` ใหม่ทุกรอบบน sublist ที่ยาวขึ้น) → ใช้ `atrSeries()` คำนวณครั้งเดียว O(n)
+  และ seed band จากแท่งแรกที่คำนวณได้จริง (เดิมเริ่มที่ 0.0 ซึ่งบังเอิญใช้ได้เฉพาะราคาบวก)
+- **เพิ่มที่ประกาศไว้แต่ไม่เคยมี**: OBV + obv_slope20, MFI14, Ichimoku ครบ 5 ค่า, ROC, Williams %R,
+  Donchian (มี mid), Pivot R1-R3/S1-S3, Fibonacci levels, atr_pct, volume_sma20, ema spreads
+- **VWAP แก้ให้ถูกนิยาม**: `vwapSession()` ผูก anchor รายเซสชัน (เดิมสะสมทั้ง 500 แท่ง = ~5 วันบน 15m ไม่ใช่ VWAP)
+
+**Phase 3 — สัญญาระหว่างระบบกับ AI**
+- **ชื่อ field ไม่ตรงกัน**: ประกาศ `adx14`/`resistance1`/`donchian_upper` แต่ส่งออก `adx`/`r1`/`donchian20_high`
+  และ `obv`/`mfi14`/`ichimoku_*` ไม่เคย implement — `AutomationEvaluator` หาไม่เจอแล้ว `return false` **เงียบๆ**
+  ผู้ใช้ตั้ง alert เห็นว่า active แต่ไม่มีวันยิงและไม่มีใครบอก → แก้ชื่อให้ตรง + ขยาย `AlertFieldCatalog.INDICATORS` ครบทุกตัว
+- ลบ `automation_manage_alerts` / `automation_manage_schedule` ที่ประกาศซ้ำ 2 ครั้ง
+  (`associateBy` เก็บตัวหลัง → ตัวที่ field ครบกว่าถูกทิ้ง AI จึงไม่รู้ว่ามี rsi7/vwap/ichimoku/supertrend ให้ใช้)
+- ทุก tool result ติด `bars_used` + `source` + `timeframe` — แท่งไม่พอจะไม่ส่ง field นั้นเลย ไม่ส่งค่า default ปลอม
+
+**Phase 4 — เก็บงานค้าง**
+- `trading_price` หน่วยผิด: column `change` ของ TV scanner เป็น **%** ไม่ใช่ราคา (ยืนยันจาก `getTopGainers`/`getVolumeBreakout`
+  ในไฟล์เดียวกันที่ sort/filter ด้วย field นี้) เดิมตีความเป็นราคา → `prev_close = close − %` คลาดเคลื่อนเกือบทั้งวัน
+  และหน่วยไม่ตรงกับสาขา Yahoo/SMC ที่ถูกอยู่แล้ว
+- `trading_elliot_modern_analysis` handler ใช้ชื่อ branch `trading_elliot_wave` ที่ไม่มีใครเรียก → คืน "Unknown tool" ทุกครั้ง
+- `trading_crypto_overview` / `trading_economic_data` / `automation_manage_schedule` ไม่อยู่ใน allowlist ทั้ง 2 ชุด
+  → `isToolAllowed` คืน false ทุกบริบท AI เรียกไม่ได้เลย
+- Position sizing: ลบคำแนะนำ "ให้ลดขนาดเหลือ balance/riskPerUnit units" ที่จริงๆ คือ **ใหญ่กว่าเดิม 100 เท่า**
+  ที่ risk 1% และเป็นขนาดที่โดน SL แล้วเสียเงินต้น 100% + เพิ่ม contract_size → คืนค่าเป็น lot ที่ใช้กับ MT5 ได้จริง
+
+**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **411/411** ✅ (เพิ่ม 3 ไฟล์เทสต์: OhlcvStoreIntegrityTest,
+IndicatorFieldContractTest, TradingToolReachabilityTest)
+**งาน MT5 พักไว้ตามคำสั่ง** — ยังเหลือ: SL/TP guard เป็น dead code (schema ไม่มี `price`), P6 RiskEngine เรียกไม่ถึง,
+`close_all` ไม่มี confirmation, RiskEngine ปน risk กับ margin คนละหน่วย, daily-loss ตัดวันที่ UTC
 
 ## 2026-09-17 — แก้ไขขนาดวงกลมหน้า-หลังให้เท่ากัน 100% (ตัด Outer Glow Halo ออก) และติดตั้งลงอุปกรณ์จริง SM-S908E
 - **User Request**: "มันยังเหมือนเดิมน่ะ วงกลม ดานหลังก้ยังใหญ่กว่าวงกลมด้านหน้า" (อ้างอิงภาพ `media_1789627409647.jpg`)
@@ -2803,6 +3224,17 @@
 - **Unit Test Verification (`AnticipationConfigManagerTest.kt`, `SignalAnticipationTest.kt`)**:
   - ทดสอบการจัดการ Whitelist, การเพิ่ม/ลดปัจจัย, การบล็อกปัจจัยที่ไม่ได้อยู่ในคลัง, การคำนวณ Confluence และการตรวจสอบความพร้อมของ Tool ผ่าน 100%
 
+## 2026-09-05 — ปรับ Timeframe คาดการณ์เริ่มต้นเป็น 15m (m15) และรองรับหลาย Timeframe (m5–h4 / all)
+- **Default Timeframe Policy (15m)**: ปรับแก้เกณฑ์การสร้าง Alert คาดการณ์ล่วงหน้า (`signal_anticipation` / `trading_signal_anticipation`) หากผู้ใช้ไม่ได้ระบุ Timeframe ให้เริ่มต้นที่ **`15m`** (m15) เสมอ (แทนที่ 1h เดิม) ซึ่งสอดคล้องกับหลักการวิเคราะห์ SMC และ Intra-day Confluence
+- **รองรับช่วง Timeframe กว้าง (m5–h4)**: อนุญาตให้คาดการณ์ได้ตั้งแต่ `5m`, `15m`, `30m`, `1h`, ถึง `4h` สอดคล้องกับระบบ Market Structure Ingestion ที่ดึงแท่งเทียน 5 TF (1m, 5m, 15m, 1h, 4h) อยู่ตลอดเวลา
+- **รองรับ Multi-TF & All**: ผู้ใช้สามารถสั่งให้ AI คาดการณ์หลาย TF เช่น `15m,1h` หรือสั่ง *"ทุก TF"* / `"all"` ซึ่งระบบจะขยายเป็น 5 Timeframe หลัก และสร้าง Alert Job แยกอิสระให้ทุก TF อัตโนมัติ
+- **อัปเดตไฟล์ระบบ**:
+  - `JarvisOrchestrator.kt`: แยก logic `isAnticipationAlert` กำหนด default `15m` และขยาย `"all"` เป็น `[5m, 15m, 30m, 1h, 4h]`
+  - `ToolExecutor.kt`: ฟังก์ชัน `executeSignalAnticipation` ใช้ default `15m`
+  - `TradingToolDefinitions.kt`: อัปเดต Parameter Documentation
+  - `JarvisPersona.kt`: อัปเดต AI Prompt Rule 9 และ 10 กำหนดชัดเจนว่า default คือ 15m และช่วง m5-h4
+  - `SignalAnticipationTest.kt`: เพิ่ม Unit Test `testAnticipationDefaultTimeframeIs15mAndSupportsMultiTf` ทดสอบครอบคลุมทั้ง default 15m, explicit 5m, และ all (ผ่าน 100%)
+
 ## 2026-09-04 — SignalTracker Duplication Fix & TradingView WebSocket Timeout Optimization
 - **SignalOutcomeTracker Deduplication & Lifecycle Fix (`SignalAlertProvider.kt`, `SignalOutcomeTracker.kt`, `JarvisDatabase.sq`)**:
   - **Verified in Production Log**: ใน Log ล่าสุด (18:53:04 - 19:29:48) เมื่อเกิดสัญญาณใหม่ `XAUUSD_1h_SELL_1788519600000` ที่เวลา 19:08:12 ระบบบันทึก `SignalTracker: Recorded signal ...` **เพียงครั้งเดียวถ้วน** และไม่พ่นซ้ำหรือบันทึกทับในรอบถัดไปอีกเลยตลอด 21+ นาทีที่เหลือ
@@ -3188,448 +3620,3 @@
 - ปรับ Live Voice ให้แยก queue / setup / first-output / session timeout ชัดเจน และ log latency ของ request→output พร้อม cause classification
 - เพิ่ม RESULT log: AUDIO_SUCCESS, TRANSCRIPT_ONLY, API_ERROR, FIRST_AUDIO_TIMEOUT_* และสถานะ fallback
 - Queue acquisition log แสดงแม้รอ 0ms เพื่อยืนยันว่า queue ไม่ใช่คอขวด
-## 2026-09-05 — ปรับ Timeframe คาดการณ์เริ่มต้นเป็น 15m (m15) และรองรับหลาย Timeframe (m5–h4 / all)
-- **Default Timeframe Policy (15m)**: ปรับแก้เกณฑ์การสร้าง Alert คาดการณ์ล่วงหน้า (`signal_anticipation` / `trading_signal_anticipation`) หากผู้ใช้ไม่ได้ระบุ Timeframe ให้เริ่มต้นที่ **`15m`** (m15) เสมอ (แทนที่ 1h เดิม) ซึ่งสอดคล้องกับหลักการวิเคราะห์ SMC และ Intra-day Confluence
-- **รองรับช่วง Timeframe กว้าง (m5–h4)**: อนุญาตให้คาดการณ์ได้ตั้งแต่ `5m`, `15m`, `30m`, `1h`, ถึง `4h` สอดคล้องกับระบบ Market Structure Ingestion ที่ดึงแท่งเทียน 5 TF (1m, 5m, 15m, 1h, 4h) อยู่ตลอดเวลา
-- **รองรับ Multi-TF & All**: ผู้ใช้สามารถสั่งให้ AI คาดการณ์หลาย TF เช่น `15m,1h` หรือสั่ง *"ทุก TF"* / `"all"` ซึ่งระบบจะขยายเป็น 5 Timeframe หลัก และสร้าง Alert Job แยกอิสระให้ทุก TF อัตโนมัติ
-- **อัปเดตไฟล์ระบบ**:
-  - `JarvisOrchestrator.kt`: แยก logic `isAnticipationAlert` กำหนด default `15m` และขยาย `"all"` เป็น `[5m, 15m, 30m, 1h, 4h]`
-  - `ToolExecutor.kt`: ฟังก์ชัน `executeSignalAnticipation` ใช้ default `15m`
-  - `TradingToolDefinitions.kt`: อัปเดต Parameter Documentation
-  - `JarvisPersona.kt`: อัปเดต AI Prompt Rule 9 และ 10 กำหนดชัดเจนว่า default คือ 15m และช่วง m5-h4
-  - `SignalAnticipationTest.kt`: เพิ่ม Unit Test `testAnticipationDefaultTimeframeIs15mAndSupportsMultiTf` ทดสอบครอบคลุมทั้ง default 15m, explicit 5m, และ all (ผ่าน 100%)
-
-## 2026-09-18 — OHLCV Foundation & Indicator Correctness (Phase 0–4)
-ที่มา: audit ทั้งระบบ tool ของ composeApp พบว่าระบบ "ป้อนตัวเลขปลอมให้ AI" หลายจุด ซึ่งขัดหลักการหลักของโปรเจกต์
-(ระบบต้องคำนวณค่าจริงแล้วส่งให้ AI วิเคราะห์ — ไม่ใช่ปล่อยให้ AI เดา) รายละเอียดเต็มที่
-[[../07_Trading_Intelligence/57_OHLCV_Indicator_Foundation_V27]]
-
-**Phase 0 — หยุดเลือด**
-- `TaIndicators.ema/sma` เดิมคืน `data.last()` เมื่อแท่งไม่ครบ period → **EMA200 บน 15m เท่ากับราคาปิดเป๊ะทุกครั้ง**
-  (เพราะ `recommendedMinBars` ให้แค่ 150 แท่ง) ตอนนี้คืน `null` — fail-closed
-- รูปแบบเดียวกันใน `AdvancedTradingEngine`: HMA/WMA คืน `data.last()` → เปลี่ยนเป็น nullable, `analyze()` คืน null เมื่อแท่งไม่พอ
-  (MIN_BARS 60 → 80 เพราะ HMA55 ต้องการ 55+√55−1 = 61 แท่ง เดิมต่ำกว่าเกณฑ์ 1 แท่งพอดี → fallback ตลอด)
-- **รวม timeframe map 4 ชุดเป็นทะเบียนเดียว** `TaIndicators.TIMEFRAMES` — เดิม 6h/8h/12h ตกไป "60" ใน tvResolution
-  และ 8h ไม่มีใน `intervalToMillis` → ขอ 8h ได้แท่ง 1h เงียบๆ + นับแท่งที่ขาดผิด 8 เท่า
-- แก้ ambiguity `"1M"` (รายเดือน) vs `"1m"` (1 นาที) ด้วยการ match canonical แบบตรงตัวพิมพ์ก่อน
-  (เดิม `normalize("mn")="1M"` แล้วป้อน `"1M"` กลับได้ `"1m"` — round-trip พัง)
-
-**Phase 1 — OHLCV Store**
-- **DB ไม่เคยสะสมประวัติ**: `trimTvCandlesByWindow` ลบทุกแท่งที่เก่ากว่า 300 แท่งล่าสุดทุกครั้งที่ refresh
-  ทับ retention ที่ `saveTvCandlesToDb` เพิ่งตั้งในทรานแซกชันเดียวกัน → ลบทิ้งแล้ว retention = 6,000 แท่ง/ซีรีส์
-- **schema (migration 12.sqm)**: `UNIQUE(symbol, interval, source, ts)` + คอลัมน์ `is_closed`
-  เดิม source ไม่อยู่ใน unique key และ query ไม่ filter → ราคา OANDA/FX_IDC/TVC เขียนทับกันรายแท่ง เป็น "โมเสก" ของหลาย feed
-- **แท่งที่ยังก่อตัว**: `Candle.isClosed` + `markClosedState()` — อินดิเคเตอร์ใช้เฉพาะแท่งปิด (กัน repainting)
-- **bucket alignment**: `estimateMissingBars` เลิกใช้ `(now/tfMs)*tfMs` ที่ align กับ epoch
-  (แท่ง D1 ทองเปิด 21:00 UTC ไม่ใช่ 00:00; epoch week เริ่ม "วันพฤหัส") → วัดจาก timestamp แท่งล่าสุดแทน
-- **warm-up policy** `TaIndicators.Warmup`: FAST_SET 150 / MACD_SET 200 / ICHIMOKU_SET 250 / FULL_SET 800 / BACKTEST 5,000
-  `recommendedMinBars` เดิม 150-300 → 800 (EMA200 ต้องการ period × 4 จึงลู่เข้า)
-- **backfill** ย้อนหลังทีละรอบ (guard 30 นาที) + backtest อ่านจาก DB แทน in-memory cache
-  → ไม่ต้องโหลด 5,000 แท่งใหม่ทุกครั้งที่รีสตาร์ทแอป
-- **ตัด Yahoo ออกจากเส้นทาง OHLCV ทั้งหมด** (ยังใช้กับราคา/fundamental ที่ TradingApiService)
-  TradingView เป็นแหล่งหลัก, Binance เป็น fallback เฉพาะคู่คริปโตแท้
-- `OhlcvCentralStore`: เลือก source ตามลำดับความน่าเชื่อถือ (เดิม "ซีรีส์ไหนยาวสุด" → PAXG ชนะทองจริงได้)
-  + เพดาน 1,200 แท่ง/ซีรีส์ และ LRU 64 ซีรีส์ (เดิมโตไม่จำกัด)
-
-**Phase 2 — Indicator Engine**
-- ลบสำเนา EMA/RSI/SMA/Stoch/CCI/BB/ATR/ADX ใน `IndicatorAlertProvider` (fail คนละแบบกับ TaIndicators) → เหลืออิมพลีเมนต์เดียว
-- Supertrend เดิม O(n²) (เรียก `atr()` ใหม่ทุกรอบบน sublist ที่ยาวขึ้น) → ใช้ `atrSeries()` คำนวณครั้งเดียว O(n)
-  และ seed band จากแท่งแรกที่คำนวณได้จริง (เดิมเริ่มที่ 0.0 ซึ่งบังเอิญใช้ได้เฉพาะราคาบวก)
-- **เพิ่มที่ประกาศไว้แต่ไม่เคยมี**: OBV + obv_slope20, MFI14, Ichimoku ครบ 5 ค่า, ROC, Williams %R,
-  Donchian (มี mid), Pivot R1-R3/S1-S3, Fibonacci levels, atr_pct, volume_sma20, ema spreads
-- **VWAP แก้ให้ถูกนิยาม**: `vwapSession()` ผูก anchor รายเซสชัน (เดิมสะสมทั้ง 500 แท่ง = ~5 วันบน 15m ไม่ใช่ VWAP)
-
-**Phase 3 — สัญญาระหว่างระบบกับ AI**
-- **ชื่อ field ไม่ตรงกัน**: ประกาศ `adx14`/`resistance1`/`donchian_upper` แต่ส่งออก `adx`/`r1`/`donchian20_high`
-  และ `obv`/`mfi14`/`ichimoku_*` ไม่เคย implement — `AutomationEvaluator` หาไม่เจอแล้ว `return false` **เงียบๆ**
-  ผู้ใช้ตั้ง alert เห็นว่า active แต่ไม่มีวันยิงและไม่มีใครบอก → แก้ชื่อให้ตรง + ขยาย `AlertFieldCatalog.INDICATORS` ครบทุกตัว
-- ลบ `automation_manage_alerts` / `automation_manage_schedule` ที่ประกาศซ้ำ 2 ครั้ง
-  (`associateBy` เก็บตัวหลัง → ตัวที่ field ครบกว่าถูกทิ้ง AI จึงไม่รู้ว่ามี rsi7/vwap/ichimoku/supertrend ให้ใช้)
-- ทุก tool result ติด `bars_used` + `source` + `timeframe` — แท่งไม่พอจะไม่ส่ง field นั้นเลย ไม่ส่งค่า default ปลอม
-
-**Phase 4 — เก็บงานค้าง**
-- `trading_price` หน่วยผิด: column `change` ของ TV scanner เป็น **%** ไม่ใช่ราคา (ยืนยันจาก `getTopGainers`/`getVolumeBreakout`
-  ในไฟล์เดียวกันที่ sort/filter ด้วย field นี้) เดิมตีความเป็นราคา → `prev_close = close − %` คลาดเคลื่อนเกือบทั้งวัน
-  และหน่วยไม่ตรงกับสาขา Yahoo/SMC ที่ถูกอยู่แล้ว
-- `trading_elliot_modern_analysis` handler ใช้ชื่อ branch `trading_elliot_wave` ที่ไม่มีใครเรียก → คืน "Unknown tool" ทุกครั้ง
-- `trading_crypto_overview` / `trading_economic_data` / `automation_manage_schedule` ไม่อยู่ใน allowlist ทั้ง 2 ชุด
-  → `isToolAllowed` คืน false ทุกบริบท AI เรียกไม่ได้เลย
-- Position sizing: ลบคำแนะนำ "ให้ลดขนาดเหลือ balance/riskPerUnit units" ที่จริงๆ คือ **ใหญ่กว่าเดิม 100 เท่า**
-  ที่ risk 1% และเป็นขนาดที่โดน SL แล้วเสียเงินต้น 100% + เพิ่ม contract_size → คืนค่าเป็น lot ที่ใช้กับ MT5 ได้จริง
-
-**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **411/411** ✅ (เพิ่ม 3 ไฟล์เทสต์: OhlcvStoreIntegrityTest,
-IndicatorFieldContractTest, TradingToolReachabilityTest)
-**งาน MT5 พักไว้ตามคำสั่ง** — ยังเหลือ: SL/TP guard เป็น dead code (schema ไม่มี `price`), P6 RiskEngine เรียกไม่ถึง,
-`close_all` ไม่มี confirmation, RiskEngine ปน risk กับ margin คนละหน่วย, daily-loss ตัดวันที่ UTC
-
-## 2026-09-18 (รอบ 2) — Indicator Consolidation & Definition Parity
-ต่อจาก Phase 0–4 — ปิดงานที่ค้างไว้ 3 ข้อ และพบ implementation ซ้ำตัวที่ 4 ระหว่างทาง
-
-**พบ implementation อินดิเคเตอร์ตัวที่ 4** ใน `StrategySignalProvider.TradingViewIndicatorSnapshot`
-(object นี้มีหน้าที่ "ส่ง indicator ให้ AI โดยเฉพาะ" จึงกระทบหลักการโดยตรงที่สุด) ปัญหาที่พบ:
-- `rsi(...) ?: 50.0` และ `adx(...) = Triple(0,0,0)` → **ป้อนค่าปลอมให้ AI ตรงๆ**
-- `adx()` คืน **DX ดิบ** ไม่ใช่ ADX ที่ smooth แล้ว และ DI ใช้ค่าเฉลี่ยธรรมดาแทน Wilder RMA
-  → เกณฑ์ `adx >= 25` ที่ใช้ตัดสิน STRONG_UPTREND เทียบกับตัวเลขคนละสเกลกับ tool อื่น
-- `supertrend()` ไม่ใช่ Supertrend เลย — เป็นแค่ ATR band รอบ mid ของแท่งล่าสุด ไม่มี band locking/trend persistence
-- `trueRangeAtr()` ใช้ simple average แทน Wilder RMA
-- `macdSeries` เรียก `ema(c,12)`/`ema(c,26)` ใหม่ทุก index → O(n²) พร้อม allocation
-- `macdSignal` แปลง NaN → 0.0 ก่อนเข้า EMA → signal line ปนเลขศูนย์
-- VWAP สะสมทั้งชุดข้อมูล ไม่รีเซ็ตรายเซสชัน
-→ เขียน `calculate()` ใหม่ delegate ไป TaIndicators ทั้งหมด **fail-closed ทั้งก้อน**
-(คืน null ถ้าตัวใดตัวหนึ่งคำนวณไม่ได้ ดีกว่าส่ง snapshot ที่มีค่าปลอมปน) ลบ helper ซ้ำ 180 บรรทัด
-เกณฑ์แท่งขั้นต่ำ 220 → `Warmup.FULL_SET` (800) เพราะ 220 ไม่พอให้ EMA200 ลู่เข้า
-
-**แก้ ADX off-by-one**: DX ตัวแรกที่แท่ง index=`period` ไม่เคยถูกนับ (loop เริ่มที่ `period+1`)
-ค่า ADX จึงเลื่อนไป 1 แท่งเทียบกับ TradingView/MT5
-
-**VWAP session anchor ต่อ instrument**: `sessionOffsetHoursFor()` — FX/โลหะมีค่ารีเซ็ตที่ 22:00 UTC
-(ซิดนีย์เปิด ตรงกับจุดที่โบรกเกอร์ปิดแท่ง D1) ส่วนคริปโตใช้ขอบวัน UTC
-
-**Parity harness** `IndicatorDefinitionParityTest` — เขียน reference implementation ตามสูตรตรงๆ
-(ช้าแต่ชัด ไม่ optimize) แล้วเทียบกับตัวจริงบน 6 ชุดข้อมูล × ทุก period:
-- EMA/RSI/ATR/ADX/MACD/Bollinger ตรงตามนิยาม ±1e-9
-- Supertrend ที่ optimize เป็น O(n) ให้ผลเท่ากับ naive O(n²) เป๊ะ
-- `atrSeries()` (ตัวที่เพิ่มมาแก้ O(n²)) ค่าสุดท้ายตรงกับ `atr()`
-- อินดิเคเตอร์ไม่ขึ้นกับ timeframe spacing (จับกรณีเผลอเอา timestamp ไปคำนวณ) — ทดสอบครบทุก TF ในทะเบียน
-- VWAP รายเซสชันไม่รวมแท่งของวันก่อนหน้า
-- known-answer: ราคาขึ้นทุกแท่ง → RSI=100, ราคาคงที่ → stdev=0/BB ทุกเส้นเท่ากัน, OBV/Donchian/ROC/Williams %R
-
-**แก้ผลกระทบจากเกณฑ์แท่งที่สูงขึ้น**: `StrategySignalProvider` 3 จุดยังดึงแค่ 300 แท่งผ่าน
-`fetchTradingViewCandlesOnly` (ยิงตรง TV ไม่ผ่าน DB) → snapshot จะเป็น null ตลอด
-เปลี่ยนเป็น `fetchCandlesWithSource` ที่เป็น DB-backed และขอ 800 แท่ง
-ตอนนี้ **ไม่มี caller ของ `fetchTradingViewCandlesOnly` เหลือในโปรเจกต์แล้ว** — ทุกเส้นทางผ่าน store เดียวกัน
-
-**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **423/423** ✅
-เหลือเฉพาะ parity เทียบตัวเลขจาก TradingView ของจริง ซึ่งต้องมี fixture ที่ export มาจาก TV
-(ปัจจุบันยืนยันความถูกต้องเทียบ "นิยาม" ได้ครบแล้ว)
-
-## 2026-09-18 (รอบ 3) — Anticipation = ระบบปลุก AI (V28)
-เจตนาที่ผู้ใช้ชี้แจง: **ปัจจัยคือนาฬิกาปลุก ไม่ใช่เทรดเดอร์**
-AI เฝ้ากราฟตลอดเวลาไม่ได้เพราะเปลืองโทเคน → ปัจจัยทำหน้าที่เป็นอินดิเคเตอร์ที่คอยปลุก
-แล้ว snapshot 5TF คือ "ภาพที่ AI ตื่นมาเห็น" — AI เป็นคนวิเคราะห์เอง ปัจจัยไม่ใช่ข้อสรุป
-รายละเอียดเต็ม: [[../07_Trading_Intelligence/58_WakeTrigger_Architecture_V28]]
-
-**ปัญหาแกนกลางที่พบ**: โค้ดทำตรงข้ามกับเจตนา — ปัจจัยคำนวณ Entry/SL/TP/RR/confidence
-แล้วยัดใส่ prompt ว่า "Execution Rails คาดหมาย" ก่อนที่ AI จะได้มองโครงสร้างตลาด
-AI จึงถูก anchor ด้วยตัวเลขที่อินดิเคเตอร์แต่งขึ้น แล้วถูกถามแค่ APPROVE/VETO/ADJUST
-(ตัวอย่างที่ชัดสุด: FAST_RSI ใช้ entry×0.95/×1.10 ซึ่งเป็นพารามิเตอร์คริปโต
- → ทอง 4000 ได้ SL 3800 / TP 4400 แล้วบอก AI ว่านี่คือแผนเทรด)
-
-**แก้แล้ว**
-- **prompt ใหม่**: ถอด Execution Rails ออก เหลือ "เกิดอะไรขึ้น + ภาพ 5TF + วิเคราะห์เอง"
-  เปลี่ยน DECISION เป็น NOTIFY/SKIP + BIAS + LEVEL_SL/LEVEL_TP ที่ **AI กำหนดเองจากโครงสร้างจริง**
-  (ใช้รูปแบบเดียวกับสาขา isKeyzoneOnly ที่ออกแบบถูกอยู่แล้วในโค้ดเดิม)
-- **ส่งหลักฐานฝั่งตรงข้ามให้ AI**: เดิม dominantHits ทิ้งฝั่งน้อยกว่าเงียบๆ แล้วรายงาน confidence สูง
-  เพิ่ม `signal_anticipation_opposing` + `signal_anticipation_factors`
-- **confidence คิดจากกลุ่มหลักฐาน ไม่ใช่จำนวนปัจจัย**: `factorEvidenceGroup()` จัดกลุ่ม
-  squeeze 2 ตัว / oscillator 3 ตัว / sweep 2 ตัว เป็นกลุ่มเดียว
-  เดิม `max(88, base+10)` ทำให้ 3 ปัจจัยอ่อนได้ 88% เสมอ และ 2 ปัจจัยอ่อน (70,71) ชนะ 1 ปัจจัยแข็ง (79)
-  ตอนนี้: `base + (กลุ่มอิสระ−1)×5 − (กลุ่มฝ่ายตรงข้าม)×8`
-
-**Learning เขียนใหม่ทั้งหมด** (`AnticipationLearningStore` + migration 13)
-- เดิมเก็บใน `mutableMapOf` ระดับ object → **หายทุกครั้งที่ปิดแอป** และสร้างใหม่ไม่ได้
-- เดิม 10 จาก 13 ปัจจัยฝัง confidence เป็นเลขดิบ → การเรียนรู้ไม่มีผลกับมันเลย
-- เดิมสัญญาณหลายปัจจัยบันทึกเป็น `ANTICIPATION_CONFLUENCE` ซึ่งไม่อยู่ในทะเบียน
-  → **ปัจจัยที่ร่วมยิงไม่เคยได้เครดิต/ถูกตำหนิ** ทั้งที่เป็นข้อมูลชิ้นเดียวที่ใช้ตัดปัจจัยได้
-- ตอนนี้: ตาราง `AnticipationFactorOutcome` แตก 1 สัญญาณเป็น N แถว (แถวละปัจจัย)
-  พร้อม context bucket (mtf_align × adx × volatility × session)
-  วัดด้วย **forward return 12 แท่ง หน่วย ATR** ไม่ใช่ SL/TP สมมติ
-  ความเชื่อมั่นใช้ shrinkage: n น้อย→เชื่อ prior, n มาก→เชื่อข้อมูลจริง (ใช้ปัจจัยใหม่ได้ทันที)
-- `buildReport()` ชี้ปัจจัยที่ n≥30 แต่ avg R ≈ 0 ว่า "ควรตัดทิ้ง"
-
-**แก้ข้อมูลเรียนรู้ปนเปื้อน**: `forwardCandles` เปลี่ยนจาก `>= created_at` เป็น `> created_at`
-เดิมรวมแท่งที่สัญญาณเกิดทั้งแท่ง รวม high/low ที่เกิด**ก่อน**สัญญาณมีอยู่จริง
-→ ถูกตัดสิน INVALIDATED −1R จากราคาของตัวเอง และลำเอียงกับปัจจัยประเภท sweep มากที่สุด
-(เพราะมันต้องมี sweep เกิดก่อนจึงยิง)
-
-**Token economy** — จาก Live API docs: *"billing follows a compounding model based on the
-active context window"* คิดทั้ง context สะสมใหม่ทุก turn และเก็บประวัติเสียงเป็น audio token
-- วัดจริง: snapshot 5TF = 284 tokens, prompt รวม = 765 tokens, 1 turn ≈ 855 tokens
-- ปัญหาไม่ใช่ข้อมูล แต่คือ context สะสม: context 20K → 1 turn ≈ 21K → เหลือ ~3 ครั้ง/นาที
-- แก้ `LiveContextWindowCompressionConfig` จาก `slidingWindow: {}` เปล่าๆ
-  เป็น `triggerTokens 25K / targetTokens 8K` ตามที่ docs แนะนำ พร้อม fallback ไล่ระดับ
-- TPM 250K ÷ RPM 15 = **16,666 tokens/request** แต่ใช้อยู่ 765 → เหลือ 95%
-  → ขยาย snapshot ได้อีกมาก
-
-**ขยาย snapshot 5TF** (`MarketContextDigest`)
-- `TfLine` เพิ่ม ADX / MACD hist / BB %B / BB width (×ATR) / ระยะจาก EMA50 (×ATR) / volume ratio
-- key levels 3 → 6 ต่อฝั่ง พร้อมระยะห่างเป็นหน่วย ATR (AI ไม่ต้องคำนวณเอง)
-
-**สถาปัตยกรรมใหม่รองรับ 100+ ปัจจัย** (`automation/wake/`)
-- `WakeTrigger` interface: id / evidenceGroup / kind (EVENT vs STATE) / detect(WakeContext)
-  **`TriggerEvent` ไม่มี entry/sl/tp โดยเจตนา** — ปัจจัยห้ามสรุปแทน AI
-- `WakeContext` ให้ครบ 5 TF (m1/m5/m15/h1/h4) + digest — ปัจจัยใช้ MTF ได้จริง
-  (เดิม 12 จาก 13 ปัจจัยรันบน TF เดียว ทั้งที่ระบบดึง 5TF มาแล้วทุกรอบ)
-- แยก EVENT (ปลุกได้) ออกจาก STATE (เป็นบริบท ไม่ปลุกซ้ำทุกแท่ง)
-- ชุดเริ่มต้น 12 ตัว ครบทุก evidence group รวม **`M5_CONFIRM_DIVERGENCE`**
-  (ชั้นคัดกรองการหลอกด้วย M5 ที่ระบบเดิมขาดไป) และ `SESSION_LEVEL_SWEEP`
-  ที่อิงเวลา session จริง (ASIA/LONDON/NY) แทนตัวเดิมที่ใช้แค่ 24 แท่งล่าสุด
-
-**ผลตรวจที่ผมรายงานผิดรอบก่อน**: "7 EMA field หายไป" — **ไม่จริง** มีครบทั้ง 2 map
-(grep ผมกรองเฉพาะ key ขึ้นต้น `signal_` เลยพลาด) ไม่ได้แก้อะไรตรงนี้
-
-**สถานะ**: `:composeApp:testDebugUnitTest` ผ่าน **436/436** ✅
-เพิ่ม `WakeTriggerRegistryTest` + เขียน `SignalAnticipationTest` ส่วน RL ใหม่
-
----
-
-## 2026-09-18 — V29: ต่อระบบปลุก AI เข้า alert จริง + OHLCV pruning + สำรอง/กู้คืน
-
-ดูรายละเอียด [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29]]
-
-**ระบบปลุก AI ทำงานจริงบนมือถือแล้ว** — แยกจาก Signal Alert (strategies/backtest) โดยสิ้นเชิง
-- alert job `trading_anticipation` / field `wake` (migration ย้าย job คาดการณ์เดิมให้)
-- โหมด ai: AI เห็น snapshot 5TF แล้วตัดสิน NOTIFY/SKIP เอง; SKIP = ไม่รบกวนผู้ใช้ แต่บันทึกลงการเรียนรู้
-- เสียงพูด summary ที่ AI เขียน — ไม่ส่ง payload ให้ Live สรุปซ้ำ (ประหยัด TPM 65K ของ Live)
-- ลบ supervisor/การ์ด/เสียงของระบบคาดการณ์เดิม และ field `signal_anticipation*` ออกจาก Signal Alert
-
-**คำตอบเรื่องขนาด OHLCV store**: ≈1 MB ต่อซีรีส์ (6,000 แท่ง), ≈6–8 MB ต่อสินทรัพย์ที่เฝ้า 5TF + intermarket
-→ เพิ่ม `OhlcvMaintenance`: ลบซีรีส์ที่ไม่ได้อ่านเกิน 30 วันและไม่มี alert ใช้ (วันละครั้ง) + ลบการเรียนรู้เก่ากว่า 1 ปี
-
-**สำรอง/กู้คืน** (Settings → สำรอง / กู้คืนข้อมูล)
-- การเรียนรู้: JSON, นำเข้าแบบรวม (ย้ายเครื่อง A → B ได้, นำเข้าซ้ำได้)
-- ฐานข้อมูลทั้งหมด: zip + manifest, ตรวจไฟล์ก่อนกู้คืน, สลับไฟล์ตอนเริ่มแอป เก็บของเดิม 1 ชุด
-- Google Drive ผ่านหน้าต่างเลือกไฟล์ของระบบ (SAF) — ไม่ต้องตั้ง OAuth
-
-**สถานะ**: compile Android ผ่าน, `:composeApp:testDebugUnitTest` **433/433** ✅
-(ลดจาก 436 เพราะลบเทสต์ของโค้ดคาดการณ์เดิม แล้วเพิ่ม `WakeSystemTest`, `BackupAndMaintenanceTest`)
-ยังไม่ได้ทดสอบบนเครื่องจริง: flow กู้คืน+รีสตาร์ท, การเลือก Google Drive, การปลุก AI ในตลาดจริง
-
----
-
-## 2026-09-18 — V29.1: review ระบบปลุก AI รอบ 2
-
-ดูตารางบัคทั้งหมด [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29#8. Review รอบ 2 — บัคที่แก้ (2026-09-18)]]
-
-**บัคหนักที่สุด**
-- สแกนจากแชทกิน cooldown/การปลุกของแท่งนั้น → alert เบื้องหลังเงียบ (แก้: preview mode)
-- ตัวนับ wake_event_count/wake_buy/wake_sell นับเหตุการณ์ที่ติดงบ → เรียก AI เกินงบ
-- ทุกการปลุกส่ง system prompt แชทของ JARVIS ทั้งชุด (ประมาณ 14,000 ตัวอักษร) → ใช้ system prompt เฉพาะงาน (< 600 ตัวอักษร)
-- การเรียนรู้ใช้ราคาอ้างอิงเก่า (ราคาปิดแท่ง TF หลัก) กับเหตุการณ์ที่เกิดกลางแท่ง
-- แถวการเรียนรู้ค้าง PENDING และบังแถวใหม่ไม่ให้ได้วัดผล
-- ความแม่นของ AI วัดตามทิศของปัจจัย ไม่ใช่ของ AI
-- digest รวมแนวรับ/ต้านของคู่เงิน FX เป็นก้อนเดียว
-- governor ลืมทุกอย่างเมื่อบริการรีสตาร์ท
-
-**สถานะ**: `:composeApp:testDebugUnitTest` **444/444** ✅
-
-
----
-
-## 2026-09-18 — แก้: alert ระบบปลุก AI ค้าง TRIGGERED และหยุดสแกนหลังปลุกครั้งแรก
-
-อาการ (logcat จริง 23:21–23:25): ปลุก AI สำเร็จ 1 ครั้ง แล้วไม่ดึงแท่งเทียนอีกเลย, หน้า Cron job ค้าง TRIGGERED,
-4 นาทีต่อมาบริการหยุดตัวเอง ("No active alert jobs or scheduled tasks. Stopping service.")
-
-สาเหตุ: `getRunnableJobs` ข้าม job ที่ `is_triggered = 1` ยกเว้น `trading_signal_alert`
-— job `trading_anticipation` เป็น edge-trigger เหมือนกัน (ต้องสแกนรอบถัดไปเพื่อรีเซ็ตตัวเอง)
-แต่ไม่อยู่ในข้อยกเว้น พอปลุกครั้งแรกจึงหลุดจากรอบสแกนถาวร และบริการเห็นว่าไม่มี job เหลือ
-
-แก้: `getRunnableJobs` รวม `trading_anticipation`, หน้า Automation แสดง "TRIGGERED · ปลุก AI แล้ว รอเหตุการณ์ใหม่"
-และไม่แสดงปุ่ม 🔁 สำหรับ job ประเภทนี้ (รีเซ็ตเองในรอบถัดไป)
-
----
-
-## 2026-09-19 — Runbook ตรวจแจ้งเตือนระบบปลุก AI บนมือถือจริง
-
-- เพิ่ม `tools/device_wake_audit.py` — ดึงฐานข้อมูลแอปผ่าน `adb exec-out run-as` แสดง job/การตั้งค่า/การปลุกแต่ละครั้ง
-  แล้วคำนวณค่าหลักใหม่จากแท่งเทียนดิบ, `--logcat` สรุป log และระยะห่างการดึงแท่งเทียน, ลบสำเนาฐานข้อมูลตอนจบ
-- วิธีทำเองและการตีความ: [[../07_Trading_Intelligence/67_Device_Wake_Alert_Audit]]
-- ผลตรวจครั้งแรก: ค่าในแจ้งเตือน 23:21 และ 23:56 ถูกต้องทุกตัว; พบการดึงแท่งเทียน ~13–14 วิ/ครั้ง (ยังไม่แก้)
-
----
-
-## 2026-09-19 — แก้: ดึงแท่งเทียนจาก TradingView ช้า 13–14 วิ/ครั้ง
-
-- สาเหตุ: `TvHistoryBridge.android.kt` ต่อ string เฟรมคำสั่งเอง — payload ของ `resolve_symbol` (JSON ซ้อนใน string)
-  มี `"` ที่ไม่ได้ escape → TradingView ตอบ `protocol_error` (ยืนยันจาก PC: เฟรมเดิม error ใน 0.3 วิ, เฟรมที่ escape ถูกได้แท่งใน 0.17 วิ)
-  bridge ไม่ฟัง error จึงรอ timeout 12 วิ แล้วค่อยไปเส้นสำรอง (Ktor) ทุกครั้ง
-- แก้: `TvProtocol` (commonMain) สร้างเฟรมด้วย JSON encoder + bridge เลิกรอทันทีเมื่อได้ `protocol_error/critical_error/symbol_error/series_error`
-- ผลบนมือถือจริง: 0.5–0.9 วิ/ครั้ง, สแกนระบบปลุก AI 1 รอบ 4–6 วิ (จาก 1.5–2.5 นาที) — แจ้งเตือนไม่ช้า ~2 นาทีอีกต่อไป
-- เทสต์ `TvProtocolTest` (เฟรมเป็น JSON ถูกต้อง, payload round-trip, จำนวนแท่งเป็นตัวเลข, ตรวจจับ error) — รวม 448/448
-
----
-
-## 2026-09-19 — เก็บเหตุผลและความมั่นใจของ AI ทุกการปลุก (NOTIFY และ SKIP)
-
-- ที่มา: ตรวจการ SKIP 5 ครั้ง (00:01–01:00 ไทย) แล้วพบว่าเหตุผลของ AI ไม่ได้เก็บไว้ที่ไหนเลยนอกจาก logcat ซึ่งถูกเขียนทับไปแล้ว
-  (ประเมินจากหลักฐานแทน: 3 ครั้งถูกต้อง 2 ครั้งก้ำกึ่ง — ราคาไปต่อแค่ ~1.2–1.3 ATR)
-- `14.sqm`: `AnticipationFactorOutcome` เพิ่ม `ai_confidence INTEGER`, `ai_reason TEXT` (ต่อท้ายตาราง ตรงกับ `JarvisDatabase.sq`)
-- `setFactorOutcomeAiDecision` / `WakeLearningStore.setAiDecision` รับ confidence + reason; `handleWakeAlert` ส่ง `verdict.confidence`, `verdict.reasonTh`
-- ไฟล์ส่งออกการเรียนรู้ (`LearningTransfer`) พกค่าใหม่ไปด้วย — ไฟล์รุ่นเก่ายังนำเข้าได้ (ค่าเป็น null)
-- tool action `inspect` แสดงความมั่นใจ, สคริปต์ `tools/device_wake_audit.py` แสดงความมั่นใจ + เหตุผล
-- ติดตั้งบนมือถือจริงแล้ว: migration ผ่าน (schema 15, quick_check ok, ข้อมูลเดิม 61 แถวครบ)
-- เทสต์ 450/450 (เพิ่มเทสต์ไฟล์การเรียนรู้รุ่นเก่า/ใหม่)
-
----
-
-## 2026-09-19 — ระบบปลุก AI เคารพเวลาเปิด/ปิดตลาด + เกณฑ์ RR 1:1
-
-ที่มา: ตรวจการแจ้งเตือนตาม runbook — ทองถูกปลุก 5 ครั้งในชั่วโมงสุดท้ายก่อนปิดสัปดาห์ (SKIP ทั้งหมด เปลืองงบ 5/6)
-และ BTC NOTIFY SELL มีระดับ SL/TP ที่ให้ RR แค่ 1:0.76
-
-- `MarketHours` (commonMain, อิง America/New_York รองรับ DST): FX เปิดอาทิตย์ 17:00 → ปิดศุกร์ 17:00, ทองเปิดอาทิตย์ 18:00
-  + พักรายวัน จ–พฤ 17:00–18:00, คริปโต 24/7, อื่นๆ ถือว่าเปิด (ยังไม่รวมวันหยุดพิเศษ)
-- `AnticipationEngine`: ตลาดปิด → คืนผลทันที **ไม่ดึงแท่งเทียน ไม่สแกน ไม่เรียก AI** (log เฉพาะตอนสถานะเปลี่ยน);
-  เหลือ ≤ 60 นาทีก่อนปิดสิ้นสัปดาห์ → ยังสแกน/เก็บการเรียนรู้แต่ไม่ปลุก AI; tool `scan` แจ้งว่าตลาดปิด + เวลาเปิดถัดไป
-- RR: prompt บังคับ LEVEL_SL/LEVEL_TP ที่ให้ RR ≥ 1:1 ไม่งั้นตอบ SKIP; `Verdict.rr()`; การ์ดแชทแสดง "ผิดทาง · เป้า · RR 1:x"
-  (สีเหลือง + ⚠️ ถ้าต่ำกว่า 1:1) และเสียงพูดเตือนเมื่อ RR ต่ำกว่า 1:1
-- เทสต์ `MarketHoursTest` (สุดสัปดาห์, ก่อนปิดวันศุกร์, อาทิตย์ FX/ทองเปิดไม่พร้อมกัน, พักรายวันทอง, ฤดูหนาว EST, RR) — รวม 465/465
-- ติดตั้งบนมือถือแล้ว: BTC สแกนปกติ, log "▶ BTCUSDT@15m ตลาดเปิด — เริ่มสแกน"
-
----
-
-## 2026-09-19 — ตรวจการคำนวณรอบ BTC (20:30–22:30 ไทย) + ขยายสคริปต์ตรวจ
-
-- สคริปต์ตรวจเงื่อนไขปัจจัยที่ปลุกได้ 31 ตัว → **ตรงกับแอปทั้งหมด (✗ 0)**; ATR ที่แอปบันทึกตรงกับที่คำนวณใหม่ทุกครั้ง
-- RR ของ NOTIFY ทั้ง 3 ครั้งผ่านเกณฑ์ 1:1 (2.14, 1.29, 1.14) — คำนวณซ้ำแล้วถูกต้อง
-- ยืนยันบนเครื่อง: การ์ดขึ้นแชทก่อนเสียง (22:15:16.268 pushToChat → .282 speakAlert)
-- แก้สคริปต์: ราคาอ้างอิงเดิมใช้ max ของทุกแถวในแท่ง (รวมแถวที่บันทึกทีหลังด้วยราคาอื่น) → ใช้แถวที่ปลุกจริง;
-  แยกป้าย [STATE]/[EVENT] ของแถวที่ไม่ได้ปลุก; ข้อความ error ภาษาไทยบน stderr; แยก "ต้องใช้ข้อมูลภายในแอป" กับ "ยังไม่มีสูตร"
-- แก้แอป: log "เสียงจริงใช้ …" เตือนเฉพาะตอนสลับ Live ↔ Android TTS จริง (เดิมขึ้นทุกครั้งเพราะชื่อป้ายต่างกัน)
-- ข้อสังเกต: AI แจ้ง BUY 21:46 แล้ว SELL 22:15 และ 22:30 — แต่ละครั้งวิเคราะห์ใหม่โดยไม่รู้ว่าเพิ่งแจ้งอะไรไป
-
----
-
-## 2026-09-19 — ติดตามผล "มุมมอง" ของ AI ทุกการปลุก + ส่งผลกลับเข้า prompt
-
-ที่มา: ผู้ใช้ถามว่า AI บอก SELL แล้วราคาลงจริงไหม และการเรียนรู้ได้ผลจริงหรือไม่ — เดิมวัดแค่รายปัจจัย ไม่มีใครวัดว่ามุมมองที่ AI แจ้งถูกหรือผิด
-
-- ย้อนตรวจ NOTIFY เดิม 16 ใบ (M1 ในเครื่อง): ปิดแล้ว 14 → ชน TP 4 (+3.90R) / ชน SL 10 (−10R) = **สุทธิ −6.1R, ชนะ 29%**;
-  BTC SELL 8/8 ชน SL (ขายสวนขาขึ้นเพราะราคา "premium"), BUY 4 TP / 1 SL; TP ช่วงแรกได้ RR < 1 (ก่อนมีเกณฑ์ 1:1)
-- `15.sqm` ตาราง `AiWakeView` (1 แถว/การปลุก): decision, bias, confidence, reason, price, atr, SL/TP, status
-  `OPEN → TP / SL / EXPIRED (48 แท่ง) / CLOSED (SKIP/ไม่มีระดับ วัด 12 แท่ง)`, result_r, move/mfe/mae (ATR)
-- `AiViewTracker` (ใหม่): `record` ตอน `handleWakeAlert`, `resolve` ทุกรอบสแกน (ช่วงแรกใช้ M1 หลังเวลามุมมอง — กัน high/low ก่อนมุมมองทำให้ชนปลอม;
-  แท่งเดียวชนทั้งคู่นับ SL), `backfillOnce` ดึงคำตัดสินเก่าจาก `AnticipationFactorOutcome` + ระดับจากการ์ดแชท
-- prompt: ส่วนใหม่ "มุมมองที่คุณเคยให้บน SYMBOL (24 ชม.) และผลจริง" (4 รายการล่าสุด + สถิติ 30 วันแยก BUY/SELL)
-  กติกา: ห้ามแจ้งทิศเดิมซ้ำขณะมุมมองยังเปิด, กลับทิศต้องบอกว่าอะไรเปลี่ยน, ใช้สถิติตัวเองประกอบความมั่นใจ
-- รายงานการเรียนรู้ (`WakeLearningStore.buildReport`) ต่อท้ายด้วยสรุปผลมุมมอง; ไฟล์ส่งออกการเรียนรู้พก `views`; prune: OPEN เกิน 30 วัน → EXPIRED, ลบเกิน 365 วัน
-- สคริปต์ `device_wake_audit.py` แสดง "ผลมุมมอง AI" ต่อการปลุก
-- เทสต์ `AiViewTrackerTest` 8 เคส — รวม 473/473
-- ข้อจำกัดที่ยังอยู่: การเรียนรู้รายปัจจัยต้องมี 20 ตัวอย่างจึงเชื่อถือ/40 จึงลดน้ำหนัก ตอนนี้สูงสุด 8 → ยังไม่มีผลต่อการปลุก;
-  แถวของ job ที่ถูกลบ (XAU 35 แถว PENDING) ไม่มีใครสแกนต่อ จะหมดอายุเองใน 30 วัน
-- ติดตั้งบนมือถือแล้ว (23:07): ย้อนเติม 55 มุมมอง, ปิดผลทันที 28 — NOTIFY BUY: TP 3 / SL 1 (+2.16R), NOTIFY SELL: SL 8/8 (−8R),
-  SKIP ปิดแล้ว 16; มุมมองทองยังเปิด (ตลาดปิด) และ BTC SELL 23:00 (บันทึกโดย build ก่อน ยังไม่มีผลย้อนหลังใน prompt)
-
----
-
-## 2026-09-19 — ตรวจค่าปัจจัยปลุก 115 ตัว × 5TF ด้วยการเล่นซ้ำ + แก้ "ล่าสุด=" ในภาพ 5TF
-
-ที่มา: ผู้ใช้ถามว่า 115 ปัจจัยจาก 5TF แสดงค่าถูกต้องไหม และ AI นำไปวิเคราะห์ถูกไหม
-
-- เครื่องมือใหม่ `tools/wake_factor_replay.py` + `WakeFactorReplayTest` (androidUnitTest): ดึงแท่งจริงจากมือถือ
-  แล้วรันโค้ดของแอปย้อนหลังทีละแท่ง TF หลัก (เฉพาะแท่งที่ปิดแล้ว ณ เวลานั้น) เทียบกับสูตรอิสระใน Python
-- ผล BTC 300 แท่ง M15 (09-16 → 09-19):
-  - อินดิเคเตอร์ 5TF (EMA20/50/200, RSI, ATR, MACD hist, ADX, BB%B) ทั้งชุดของ trigger และภาพ 5TF ตรงกัน (ต่าง < 1e-8)
-  - 30 ปัจจัยที่มีสูตรอิสระ: เกิด/ไม่เกิด/ทิศ ตรงกันทุกแท่ง (0 ผิด)
-  - error ระหว่างประเมิน: ไม่มี; 19 ตัวไม่เกิดเลย — ส่วนใหญ่ต้องใช้ข้อมูลภายนอก/memory ที่การเล่นซ้ำไม่มี, GAP/WEEK_BOUNDARY ไม่ใช้กับคริปโต
-  - **ความจริงเรื่อง "5TF"**: ~95 ตัวดูเฉพาะ TF หลัก (M15), ที่เหลือใช้ H1/H4/M5/M1/ภาพ 5TF/ข้อมูลภายนอก
-- **บัคที่พบและแก้**: `MarketContextDigest` บรรทัด `ล่าสุด=` ใช้ `BooleanArray.sliceArray(..).any()` (ไม่มีเงื่อนไข = "array ไม่ว่าง")
-  → AI เห็น "CHoCH↑" ทุก TF ทุกครั้ง (300/300) และเรียงตามชนิดแทนเวลา → `lastStructureEvent()` คืนเหตุการณ์ใหม่สุดพร้อมอายุ
-  เช่น `CHoCH↓ (8 แท่งก่อน)`; ATR ในภาพ 5TF ใช้ `TaIndicators.atrSeries` เหมือนปัจจัย (เดิม M1/M5 ต่าง 0.1–0.24%)
-- ตรวจเหตุผล AI 46 ครั้งเทียบภาพ 5TF ขณะนั้น: อ่านค่าถูกเกือบทั้งหมด (ผิด 2: อ้าง M1/M15 เป็น DOWN ทั้งที่ UP), ไม่เคยอ้าง CHoCH ที่ผิด
-  แต่ **ตีความเอนเอียง**: SELL 9 ครั้งอ้าง "Premium สุดขอบ H1" ทั้งที่ทุก TF เป็นขาขึ้น — ปัจจัย `PREMIUM_DISCOUNT_EXTREME` ติดป้าย SELL
-  ทุกครั้งที่ราคาอยู่บน 90% ของกรอบ 100 แท่ง H1 (33% ของแท่งในการเล่นซ้ำ) ซึ่งในขาขึ้นแรงเป็นเรื่องปกติ (ยังไม่แก้ — รอผู้ใช้ตัดสิน)
-- เทสต์ `DigestStructureEventTest` 3 เคส — รวม 477/477; ติดตั้งบนมือถือแล้ว
-
----
-
-## 2026-09-20 — ภาพตลาด D1 + รายละเอียดต่อ TF + ห้ามแจ้งสวนเทรนด์ที่เรียงกัน
-
-ที่มา: ผู้ใช้ให้แก้ข้อเสนอ 2 ข้อ (Premium/Discount ชี้ SELL ในขาขึ้น, ห้ามแจ้งสวนเทรนด์) และถามว่า trend/RSI/ADX/MACD/EMA/BB/ATR
-ต่อ TF พอให้เห็นภาพรวมไหม — คำตอบ: ไม่พอ (ไม่มี D1, ไม่รู้ตำแหน่งในขา, ความแรงของการวิ่ง, แท่งปฏิเสธราคา, divergence, ระดับ HTF)
-
-- `MarketContextDigest`: เพิ่ม D1 (รวมจาก H4 ด้วยจุดกึ่งกลางแท่ง — OANDA H4 ทองเปิด 21:00/01:00… UTC),
-  `TfDetail` 2 บรรทัดย่อยต่อ TF, แนวรับ/ต้าน swing H4 + PDH/PDL + PWH/PWL, แก้ป้าย swing high ใต้ราคาที่ติดผิดเป็น "swing L",
-  divergence ที่ยืนยันพร้อมกันแสดงทั้งคู่ — ดู [[58_WakeTrigger_Architecture_V28]] ข้อ 5.1
-- กติกาสวนเทรนด์: `WakeContext.htfAlignment`, `PREMIUM_DISCOUNT_EXTREME` เป็น NEUTRAL เมื่อเรียงกัน, prompt เตือน + กติกา,
-  `WakePrompt.enforceTrend` เปลี่ยน NOTIFY สวนทางเป็น SKIP (log `⏰ บล็อก NOTIFY … สวนเทรนด์`) — ข้อ 5.2
-- เครื่องมือเล่นซ้ำตรวจค่าใหม่ทั้งหมด (1b โครงสร้าง D1–M1, 1c รายละเอียด 12 ค่า, 1d PDH/PWH): BTC 200 แท่ง + ทอง 200 แท่ง ไม่ตรง 0
-- เทสต์ `DigestDetailAndTrendRuleTest` 7 เคส — รวม 484/484
-- บนมือถือ: การปลุกแรกหลังติดตั้ง (sweep แนวต้านในขาขึ้น) AI ตอบ SKIP โดยอ้างว่า H4/H1/M15 ยังเรียงเป็นขาขึ้น
-
-
----
-
-## 2026-09-20 — ตรวจการแจ้งเตือนตาม runbook 67 (หลังติดตั้ง D1 + กติกาสวนเทรนด์)
-
-- 8 การปลุก BTC 00:45–02:45: ปัจจัยที่มีสูตร ✓ 17/17, เล่นซ้ำ 16 แท่งล่าสุดตรงทุกค่า, เหตุผล AI (SKIP ทั้งหมด) ตรงกับภาพตลาดขณะนั้น
-- ไม่มี NOTIFY สวนเทรนด์อีก; ปลุกทุกแท่งตามออกแบบ (ปัจจัยสลับทิศเกือบทุกแท่ง) — รายละเอียดใน [[67_Device_Wake_Alert_Audit]]
-
----
-
-## 2026-09-20 — ปัจจัย × TF: ประเมินทุกปัจจัยบน M1/M5/M15/H1/H4 ทุกนาที + เรียนรู้แยก TF (P16)
-
-ที่มา: ผู้ใช้ไม่พอใจที่ AI ถูกปลุกได้แค่แท่ง M15 ละครั้ง (≤6/ชม., ~144/วัน ทั้งที่มีโควตา 1000+/วัน และ API key 7 ตัว)
-เหตุการณ์กลางแท่ง M15 ต้องรอแท่งปิด และต้องการให้ระบบเรียนรู้ว่าปัจจัยไหนเหมาะกับ TF ไหน
-
-- ใหม่ `WakeTfProfile.kt` (ชุด TF ที่ปลุกได้ต่อปัจจัย + 26 ปัจจัยตายตัว), `WakeContext.forTf` + `SeriesSet`, `WakeTriggerRegistry.scanAllTf`
-- `16.sqm`: `AnticipationFactorOutcome.factor_tf` + UNIQUE(signal_id, factor_id, factor_tf) (สร้างตารางใหม่ — ทดลองบนสำเนาฐานข้อมูลมือถือก่อน: 330 แถวครบ)
-- `WakeLearningStore`: สถิติ/วัดผล/ลดชั้น/เลื่อนชั้น ต่อปัจจัย × TF (`tfVerdict`), รายงานเป็นตาราง ปัจจัย × M1…H4
-- `WakeGovernor`: cooldown ต่อ ปัจจัย@TF, เว้น 1 นาที, พกเหตุการณ์ ≤10 นาที; งบ 40/ชม. 3,000/วัน; `TradingAlertEvaluator` ไม่ throttle 90 วิ กับงานปลุก
-- Engine: ดึง 800 แท่งทุก TF, รหัสการปลุกรายนาที, ATR/บริบทการเรียนรู้ของ TF ที่เกิด, prompt อธิบายป้าย TF
-- เครื่องมือ: `wake_factor_replay.py` ตรวจ 30 สูตร × 5 TF (ไม่ตรง 0) + `--step 1m` จำลองความถี่การปลุก; `device_wake_audit.py` อ่าน factor_tf
-- เทสต์ `WakeMultiTfTest` 5 เคส + governor ใหม่ 4 เคส — รวม 492/492
-- บนมือถือ: migration 16→17 ผ่าน, การปลุกแรก 03:59 (กลางแท่ง M15) ด้วยเหตุการณ์ NR7@H1, NR7@H4, SPREAD_WIDENING@M1 — ดู [[58_WakeTrigger_Architecture_V28]] ข้อ 5.3
-
----
-
-## 2026-09-20 — review ระบบคาดการณ์ล่วงหน้าทั้งระบบ (หลัง P16) + แก้ 6 จุด
-
-ตรวจตั้งแต่ engine → governor → การเรียนรู้ → prompt → การ์ด → ฐานข้อมูล → เครื่องมือ พบและแก้:
-
-1. **ข้อมูลโตเกินเครื่อง** — วัดจริง 6,047 แถว/วัน/สินทรัพย์ (M1 73%) × retention 365 วัน ≈ 2 ล้านแถว
-   → ตาราง `AnticipationFactorStat` + ยุบแถวที่ไม่ได้ปลุก AI หลัง 3 วัน (migration 17) ดู [[58_WakeTrigger_Architecture_V28]] ข้อ 5.4
-2. **คำตัดสิน AI ถูกเขียนลงทุกแถวของการสแกน** (รวมปัจจัย/TF ที่ AI ไม่ได้เห็น) → เขียนเฉพาะ `woke = 1`
-3. **บรรทัดเหตุการณ์บนการ์ดโชว์รหัสปัจจัย/สถิติให้ผู้ใช้** — regex ตัดข้อความยังเป็นรูปแบบก่อน P16 (`สถิติ:` เทียบกับ `สถิติ H1:`)
-   → แก้ + เทสต์ `WakeCardLineTest`
-4. **prune ยุบแล้วลบคนละ transaction** — ถ้าลบพลาดสถิติจะถูกนับซ้ำ → รวมเป็น transaction เดียว
-5. **มุมมอง SKIP ค้าง 1 ปี** ทั้งที่ใช้แค่สถิติ 30 วัน (ปลุกทุกนาทีจึงมีวันละหลายร้อย) → เก็บ 30 วัน
-6. **Order Block ไม่เคยเกิดเลย** — `FvgDetection` หา FVG แค่ 30 แท่งท้าย แต่ `OrderBlockDetection` ค้น swing ทั้ง 300 แท่ง
-   และรับ OB เฉพาะที่มี FVG ห่าง ≤5 แท่ง → บนแท่ง BTC จริง: FVG 3 อัน (ท้ายสุด) → OB 0 อัน
-   ทำให้ระดับ OB ไม่เคยถึง AI และปัจจัย OB_TOUCH/OB_MITIGATED ไม่เคยยิง
-   → `MarketContextDigest` หา FVG ทั้งหน้าต่างก่อนส่งให้ OB (ทดสอบแล้วได้ OB 8 อัน) — **`SmcEngine` ของระบบ signal ยังมีบั๊กนี้อยู่ (ยังไม่แก้)**
-
-ตรวจแล้วถูกต้อง: สูตรปัจจัย 30 ตัว × 5 TF (ไม่ตรง 0), โครงสร้าง D1–M1, รายละเอียดต่อ TF, PDH/PWH, migration 16/17 บนสำเนาฐานข้อมูลจริง,
-การยุบสถิติ (ค่าตรงเป๊ะหลังยุบ 2 รอบ), governor (cooldown ต่อ TF / ระยะห่าง / พกเหตุการณ์ / memory รุ่นเก่า), เวลาประเมิน ~16 ms/รอบ
-
-เทสต์ 493/493 · ติดตั้งบนมือถือแล้ว (schema 18)
-
----
-
-## 2026-09-20 — แก้บั๊ก FVG/OB ใน SmcEngine (Order Block ไม่เคยทำงานเลย) + installDebug สร้างแอปโคลน
-
-- **บั๊ก 1 หน้าต่างค้นหาไม่ตรงกัน**: `FvgDetection` หา FVG 30 แท่งท้าย แต่ `OrderBlockDetection` ค้น swing ทั้ง 300 แท่ง
-  และรับ OB เฉพาะที่มี FVG ห่าง ≤5 แท่ง → บน BTC จริง OB = 0 อันเสมอ
-  แก้ใน `SmcEngine`: ส่ง FVG ที่ค้นทั้งหน้าต่างให้ OB (`activeFvgs` ของฝั่งเข้าเทรดยังเป็น 30 แท่งท้าย ไม่เปลี่ยนพฤติกรรม)
-- **บั๊ก 2 นับ mitigation ตั้งแต่แท่งถัดจาก OB** ซึ่งคือ impulse ที่สร้าง OB เอง → OB ถูกตีว่า "ถูกแตะแล้ว" ทันทีที่เกิด
-  แก้: เริ่มนับหลัง `breakIndex` (แท่งทะลุโครงสร้าง) — เพิ่มฟิลด์ `SmcOrderBlock.breakIndex`
-- ผลบนแท่งจริง: OB ที่ยัง active จาก 1/24 หน้าต่าง → **17/24**; ระดับ Supply/Demand OB เข้าภาพตลาดของ AI แล้ว
-  (เล่นซ้ำ 200 จุด เจอระดับ OB 9 ครั้ง) และฝั่งสัญญาณได้ OB setup / กำแพง OB / คะแนน confluence กลับมา
-- เทสต์ใหม่ `SmcOrderBlockTest` 3 เคส (หน้าต่าง FVG, mitigation หลัง break, snapshot) — รวม 496/496
-- **installDebug สร้างแอป 2 อัน**: `adb install` ติดตั้งให้ทุก user profile เครื่องเปิด Dual Messenger (user 95 = DUAL_APP)
-  จึงได้ไอคอนโคลนทุกครั้ง → ตั้ง `installation { installOptions("--user", "0") }` ใน `composeApp/build.gradle.kts`
-  และถอนของ user 95 ออกแล้ว (ยืนยัน: user 0 installed=true, user 95 installed=false)
-
----
-
-## 2026-09-22 — ยกระดับ Tool วิเคราะห์ปัจจัยพื้นฐาน งบดุล งบการเงิน & AI Multi-Dimensional Analysis
-
-- **ปัญหาเดิม**: `trading_fundamental_analysis` ใน `ResearchToolHandler.kt` เป็นเพียง Mock / News Dummy ที่ดึงหัวข้อข่าว 10 ข่าวส่งให้ AI เดา ไม่มีตัวเลขจริง งบดุล (Balance Sheet), งบกำไรขาดทุน (Income Statement), โครงสร้างทุน (Capital Structure), หรือ Valuation Multiples
-- **สร้าง `StockFundamentalModels.kt`**: Model `StockFundamentalData` ครอบคลุม 50 ตัวชี้วัดสำคัญ พร้อมฟังก์ชัน Compact Formatting สำหรับมูลค่าเงินตรา, จำนวนหุ้น, อัตราส่วน และเปอร์เซ็นต์
-- **เพิ่ม Data Pipeline ใน `TradingApiService.kt`**:
-  - เมธอด `getStockFundamentals(rawSymbol, requestedExchange)` ยิง TradingView Scanner API (`thailand`, `america`, `global`) ดึงข้อมูลงบการเงินและอัตราส่วนจริง
-  - Auto-resolve ตลาดและ Ticker: รองรับหุ้นไทย (SET/MAI เช่น SCB, PTT, CPALL) และสหรัฐฯ/สากล (NASDAQ/NYSE เช่น AAPL, NVDA, TSLA)
-  - คำนวณค่าอนุพันธ์สำคัญ: Cash & Equivalents (`Total Debt - Net Debt`), Free Float % vs Closely Held %, Upside % จากราคาเป้าหมายเฉลี่ย
-- **ยกระดับ `ResearchToolHandler.kt`**:
-  - ปรับปรุง `executeFundamentalAnalysis` แสดงผลข้อมูลแบบครบวงจร 6 หมวดหมู่:
-    1. ข้อเท็จจริงที่มีนัยยะ (Market Cap, P/E, Basic EPS, P/S, P/B, Dividend Yield, DPS, 52W Range, Beta 1Y)
-    2. ความเป็นเจ้าของ (Total Shares, Free Float %, Closely Held %, Visual Float Bar)
-    3. โครงสร้างเงินทุน & สภาพคล่องงบดุล (Enterprise Value, Market Cap, Total Debt, Cash, Net Debt, Equity, Total Assets, D/E)
-    4. ผลการดำเนินงาน & ความสามารถทำกำไร (Revenue TTM/FQ/FY, Net Income TTM/FQ/FY, FCF, Margins, ROE, ROA, ROIC)
-    5. เป้าหมายนักวิเคราะห์ & โมเมนตัมราคา (Target Price Avg/High/Low, Upside %, YTD %)
-    6. บทวิเคราะห์ AI เชิงลึก 6 มิติ (Valuation, Solvency, Profitability, Dividend Safety, Ownership, Fundamental Health Score 0-100)
-- **อัปเดตคำอธิบายและพารามิเตอร์ใน `TradingToolDefinitions.kt`**: ระบุพารามิเตอร์ `symbol` และ `exchange` ชัดเจน
-- **อัปเดตสมองส่วนนอก**: `.obsidian-wiki/03_Tools/catalogue.md` และสร้างโน้ตใหม่ [[68_Stock_Fundamental_Financial_Engine]]
-- **การทดสอบ**: คอมไพล์ผ่าน `:composeApp:compileDebugKotlinAndroid` สำเร็จ 100% (BUILD SUCCESSFUL)
-

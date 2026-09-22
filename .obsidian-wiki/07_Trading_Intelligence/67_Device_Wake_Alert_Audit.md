@@ -1,6 +1,6 @@
 # ตรวจการแจ้งเตือนระบบปลุก AI บนมือถือจริง (adb) — Runbook
 
-**Links**: [[66_WakeEngine_Live_Backup_V29]] | [[58_WakeTrigger_Architecture_V28]] | [[Trading_Intelligence_MOC]]
+**Links**: [[66_WakeEngine_Live_Backup_V29]] | [[70_WakeTrigger_Architecture_V28]] | [[Trading_Intelligence_MOC]]
 
 > ใช้เมื่อต้องการยืนยันว่าแจ้งเตือนคาดการณ์ล่วงหน้าที่ได้รับ "ค่าถูกต้องไหม" และ "ระบบยังสแกนอยู่ไหม"
 > โดยอ่านข้อมูลจริงจากมือถือ แล้วคำนวณใหม่จากแท่งเทียนดิบ — ไม่ต้องเชื่อตัวเลขในการ์ด

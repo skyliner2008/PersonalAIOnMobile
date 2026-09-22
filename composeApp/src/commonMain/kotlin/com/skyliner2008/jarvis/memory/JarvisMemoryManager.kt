@@ -41,8 +41,9 @@ class JarvisMemoryManager(private val database: JarvisDatabase) {
         database.jarvisDatabaseQueries.getRecentHistory(limit).executeAsList()
     }
 
-    suspend fun getHistoryAfter(since: Long) = withContext(Dispatchers.IO) {
-        database.jarvisDatabaseQueries.getHistoryAfter(since).executeAsList()
+    /** ข้อความหลัง [since] ไม่เกิน [limit] รายการล่าสุด — กันการ์ดระบบปลุก AI ที่เข้ามาถี่ๆ ทำให้หน้าแชทโหลดหลายร้อยรายการ */
+    suspend fun getHistoryAfter(since: Long, limit: Long = 300) = withContext(Dispatchers.IO) {
+        database.jarvisDatabaseQueries.getHistoryAfter(since, limit).executeAsList()
     }
 
     /** จำนวนข้อความทั้งหมดใน Working Memory — ใช้ตัดสิน auto sleep cycle */

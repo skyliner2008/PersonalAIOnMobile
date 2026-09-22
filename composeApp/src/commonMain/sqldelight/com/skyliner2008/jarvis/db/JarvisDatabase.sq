@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS ChatMessage (
     metadata TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_chat_message_ts ON ChatMessage(timestamp);
+
 -- ═══════════════════════════════════════════════════════════════
 -- App Settings
 -- ═══════════════════════════════════════════════════════════════
@@ -140,8 +142,11 @@ VALUES (?, ?, ?, ?);
 getRecentHistory:
 SELECT * FROM ChatMessage ORDER BY timestamp DESC LIMIT :limit;
 
+-- ข้อความหลัง :since แต่ไม่เกิน :limit รายการล่าสุด (เรียงเก่า→ใหม่)
 getHistoryAfter:
-SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp ASC;
+SELECT * FROM (
+    SELECT * FROM ChatMessage WHERE timestamp > :since ORDER BY timestamp DESC LIMIT :limit
+) ORDER BY timestamp ASC;
 
 getOldMessages:
 SELECT * FROM ChatMessage ORDER BY timestamp ASC LIMIT :limit;

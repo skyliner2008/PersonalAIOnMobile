@@ -19,6 +19,8 @@ captures
 node_modules/
 brain/
 .agent/
+# สำเนาต้นทางของ skill ที่ติดตั้งไว้ใน .agent/skills แล้ว
+/rive-interactive/
 .agents/
 composeApp/google-services.json
 *.env

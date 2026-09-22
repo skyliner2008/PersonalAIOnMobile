@@ -135,7 +135,7 @@
 
 ## อัปเดต 2026-09-18 — Foundation V27
 
-**เปลี่ยนแปลงที่กระทบ catalogue โดยตรง** (ดู [[../07_Trading_Intelligence/57_OHLCV_Indicator_Foundation_V27]]):
+**เปลี่ยนแปลงที่กระทบ catalogue โดยตรง** (ดู [[../07_Trading_Intelligence/69_OHLCV_Indicator_Foundation_V27]]):
 
 - **จำนวน declaration ลดลง 2 รายการ** — `automation_manage_alerts` และ `automation_manage_schedule`
   เคยประกาศซ้ำอย่างละ 2 ครั้ง (`associateBy` เก็บแค่ตัวหลัง) ตอนนี้เหลืออย่างละ 1
