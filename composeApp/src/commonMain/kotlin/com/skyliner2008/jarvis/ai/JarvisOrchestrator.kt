@@ -647,6 +647,9 @@ class JarvisOrchestrator(
     /** ไมค์หยุดสตรีมชั่วคราว (mute) — ให้ server VAD ปิดท้าย utterance ที่ค้าง */
     suspend fun sendLiveAudioStreamEnd() = liveService.sendAudioStreamEnd()
 
+    /** ไมค์ในเครื่องได้ยินเสียงพูด — คิวคำถามค้างจะไม่ส่งข้อความแทรกตอนผู้ใช้กำลังพูด */
+    fun noteLiveUserVoice() = liveService.noteLocalUserVoice()
+
     /** สถานะการเชื่อมต่อ Live session — ใช้แสดง "กำลังเชื่อมต่อ…" ในแชทกันเคส 3.1 READY ช้า 7–15 วิ */
     val liveConnectionState: StateFlow<com.skyliner2008.jarvis.data.ConnectionState> = liveService.connectionState
 

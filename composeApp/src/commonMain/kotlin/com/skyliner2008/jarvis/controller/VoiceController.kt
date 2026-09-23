@@ -81,6 +81,7 @@ class VoiceController(
                 _audioLevel.value = volume.coerceIn(0f, 1f)
             }
             val speaking = volume > speechThreshold
+            if (speaking && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
             onUserSpeakingChanged(speaking)
         }
     }

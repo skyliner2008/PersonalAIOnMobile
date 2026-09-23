@@ -117,10 +117,10 @@ class LiveToolBridge(
 
     /**
      * server ยกเลิก call เมื่อ VAD ได้ยินเสียงแทรก (เสียงรอบข้าง หรือผู้ใช้พูดคำถามถัดไป) — ห้ามทิ้งคำถาม:
-     * - ผู้ใช้ยังไม่ได้เริ่ม turn ใหม่ → ส่งผลเป็น realtime text ให้ตอบคำถามเดิมทันที
-     *   (logcat 2026-09-24 00:50: ถูกยกเลิกภายใน 0.5–1 วิ ตามด้วย Turn Complete ที่ user="-" jarvis="-")
-     * - ผู้ใช้ถามเรื่องอื่นต่อแล้ว → เข้าคิว ตอบหลังข้อใหม่เสร็จ (logcat 01:19: ถาม 3 ข้อติดกัน ได้แค่ข้อสุดท้าย)
-     * - โมเดลเรียก tool เดิมด้วย args เดิมซ้ำเอง → ทิ้ง (call ใหม่ตอบให้แล้ว)
+     * ผลเข้าคิวของ LiveGeminiService ซึ่งส่งให้โมเดลตอบเฉพาะตอนเงียบจริง
+     * (เดิมส่ง realtime text ทันทีเมื่อ "ยังไม่มี transcript ใหม่" — แต่ transcript มาช้ากว่าเสียงพูด 2–3 วิ
+     *  จึงส่งแทรกขณะผู้ใช้พูดคำถามถัดไป แล้ว session ค้างไม่ตอบอะไรอีก, logcat 2026-09-24 01:48)
+     * โมเดลเรียก tool เดิมด้วย args เดิมซ้ำเอง → ทิ้ง (call ใหม่ตอบให้แล้ว)
      * ห้ามส่งเป็น toolResponse ของ id ที่ถูกยกเลิก (ตาม Live API)
      */
     private suspend fun deliverCancelledResult(event: LiveToolCallEvent, result: String) {
@@ -130,18 +130,7 @@ class LiveToolBridge(
             logDebug("LiveBridge", "🚫 ไม่ส่งผล ${event.name} callId=${event.callId} — ถูกยกเลิก (superseded=$superseded)")
             return
         }
-        if (liveService.userTurnSerial != origin.turnSerial) {
-            // ผู้ใช้ถามเรื่องอื่นต่อ — เก็บผลไว้ตอบหลังตอบข้อใหม่เสร็จ (เดิมทิ้ง: ถามหลายข้อติดกันได้คำตอบแค่ข้อสุดท้าย)
-            liveService.enqueuePendingToolResult(origin.question, event.name, result)
-            return
-        }
-        val delivered = liveService.sendRealtimeTextWhenReady(
-            "[SYSTEM] คำถามของผู้ใช้ \"${origin!!.question}\" ถูกขัดจังหวะด้วยเสียงรบกวนก่อนได้คำตอบ — " +
-                "ผลจากเครื่องมือ ${event.name}: ${result.take(3000)}\n" +
-                "ตอบคำถามนั้นให้ผู้ใช้ทันทีแบบสนทนา ห้ามใช้ markdown ห้ามทักทาย",
-            timeoutMs = 15_000L
-        )
-        logDebug("LiveBridge", "↪️ ผล ${event.name} ของ call ที่ถูกยกเลิก (เสียงรบกวน) ส่งเป็น realtime text: $delivered")
+        liveService.enqueuePendingToolResult(origin.question, event.name, result)
     }
 
     private suspend fun respond(event: LiveToolCallEvent, result: String, deliverIfStale: Boolean = false) {

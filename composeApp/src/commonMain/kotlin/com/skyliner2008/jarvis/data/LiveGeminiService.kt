@@ -521,17 +521,55 @@ class LiveGeminiService(
         schedulePendingAnswer()
     }
 
-    private fun schedulePendingAnswer(delayMs: Long = 1_500L) {
+    /** เสียงพูดจากไมค์ในเครื่อง (จาก VoiceController) — มาก่อน transcript/interrupted ของ server 2–3 วิ */
+    @kotlin.jvm.Volatile
+    private var lastLocalVoiceAtMs = 0L
+    fun noteLocalUserVoice() { lastLocalVoiceAtMs = System.currentTimeMillis() }
+
+    /** เวลาที่โมเดลส่งเสียง/ข้อความล่าสุด และจบเทิร์นล่าสุด — ใช้จับโมเดลเงียบค้างหลังผล tool */
+    @kotlin.jvm.Volatile
+    private var lastModelOutputAtMs = 0L
+    @kotlin.jvm.Volatile
+    private var lastTurnCompleteAtMs = 0L
+
+    /** tool call ที่ยังไม่ได้ส่งผลกลับ (id → เวลาเริ่ม) — ระหว่างนี้ห้ามส่งข้อความแทรก; ค้างเกิน 30 วิถือว่าหลุด */
+    private val inFlightToolCalls = mutableMapOf<String, Long>()
+
+    private var pendingFlushJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * เงียบจริง: ไม่มีคนพูด ไม่มีโมเดลกำลังตอบ ไม่มี tool ค้าง — ส่งข้อความแทรกตอนผู้ใช้กำลังพูด
+     * ทำให้ session ค้างจนไม่ตอบอะไรอีกเลย (logcat 2026-09-24 01:48: ส่ง [SYSTEM] ระหว่างผู้ใช้พูดคำถามถัดไป 2 ครั้ง)
+     */
+    private fun isConversationIdle(now: Long): Boolean {
+        val serverQuietMs = now - lastConversationActivityAtMs
+        val localQuietMs = now - lastLocalVoiceAtMs
+        return isSetupComplete &&
+            serverQuietMs >= 1_500 &&
+            // ไมค์ในเครื่องยังได้ยินเสียง = ผู้ใช้อาจกำลังพูด; เสียงรอบข้างดังตลอดได้ จึงยอมถ้า server เงียบนานแล้ว
+            (localQuietMs >= 1_000 || serverQuietMs >= 6_000) &&
+            pendingUserTurnText == null && pendingModelTurnText == null && pendingModelTextParts == null &&
+            synchronized(inFlightToolCalls) { inFlightToolCalls.values.none { now - it < 30_000L } }
+    }
+
+    /** ส่งข้อค้างข้อถัดไปเมื่อเงียบจริง (รอได้ถึง 60 วิ) — ข้อที่เหลือส่งต่อหลังโมเดลตอบข้อนี้จบ */
+    private fun schedulePendingAnswer() {
         if (synchronized(pendingAnswers) { pendingAnswers.isEmpty() }) return
-        val scheduledAt = System.currentTimeMillis()
-        scope.launch {
-            delay(delayMs)
-            val busy = lastConversationActivityAtMs > scheduledAt ||
-                pendingUserTurnText != null || pendingModelTurnText != null || pendingModelTextParts != null
-            if (busy) return@launch // เทิร์นถัดไปที่ตอบจบจะเรียกใหม่เอง
-            val item = synchronized(pendingAnswers) { pendingAnswers.next(System.currentTimeMillis()) } ?: return@launch
-            logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size})")
-            sendRealtimeText(PendingAnswerQueue.toPrompt(item))
+        if (pendingFlushJob?.isActive == true) return
+        pendingFlushJob = scope.launch {
+            val deadline = System.currentTimeMillis() + 60_000L
+            while (System.currentTimeMillis() < deadline) {
+                delay(750)
+                if (synchronized(pendingAnswers) { pendingAnswers.isEmpty() }) return@launch
+                val now = System.currentTimeMillis()
+                if (!isConversationIdle(now)) continue
+                val item = synchronized(pendingAnswers) { pendingAnswers.next(now) } ?: return@launch
+                logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size})")
+                lastConversationActivityAtMs = now
+                sendRealtimeText(PendingAnswerQueue.toPrompt(item))
+                return@launch
+            }
+            logDebug("LiveGemini", "⌛ ไม่มีช่วงเงียบใน 60 วิ — ยังไม่ส่งข้อค้าง (คิว ${pendingAnswers.size})")
         }
     }
 
@@ -820,6 +858,8 @@ class LiveGeminiService(
         synchronized(recentTurns) { recentTurns.clear() }
         synchronized(pendingAnswers) { pendingAnswers.clear() }
         synchronized(toolResultsThisTurn) { toolResultsThisTurn.clear() }
+        synchronized(inFlightToolCalls) { inFlightToolCalls.clear() }
+        pendingFlushJob?.cancel()
         toolCallsThisTurn = 0
         modelSpokeThisTurn = false
         userTurnFinalized = true
@@ -1256,6 +1296,8 @@ class LiveGeminiService(
 
             msg.toolCallCancellation?.ids?.takeIf { it.isNotEmpty() }?.let { ids ->
                 logDebug("LiveGemini", "🚫 Tool call cancelled by server: $ids")
+                synchronized(inFlightToolCalls) { ids.forEach { inFlightToolCalls.remove(it) } }
+                lastConversationActivityAtMs = System.currentTimeMillis()
                 _toolCallCancellationFlow.emit(ids)
             }
 
@@ -1263,6 +1305,7 @@ class LiveGeminiService(
                 finalizeUserTurn()
                 toolCallsThisTurn += calls.size
                 lastConversationActivityAtMs = System.currentTimeMillis()
+                synchronized(inFlightToolCalls) { calls.forEach { c -> c.id?.let { inFlightToolCalls[it] = lastConversationActivityAtMs } } }
                 val generation = liveSessionGeneration
                 calls.forEach { call ->
                     val event = LiveToolCallEvent(
@@ -1288,6 +1331,7 @@ class LiveGeminiService(
                     audioEpoch++
                     logDebug("LiveGemini", "⚡ Interrupted (VAD/user) — flushing playback queue (audioEpoch=$audioEpoch)")
                     turnWasInterrupted = true
+                    lastConversationActivityAtMs = System.currentTimeMillis()
                     audioBytesThisTurn = 0
                     val partialModel = pendingModelTurnText ?: pendingModelTextParts
                     if (userTurnFinalized) {
@@ -1321,6 +1365,8 @@ class LiveGeminiService(
                             }
                             audioBytesThisTurn += bytes.size
                             modelSpokeThisTurn = true
+                            lastModelOutputAtMs = System.currentTimeMillis()
+                            lastConversationActivityAtMs = lastModelOutputAtMs
                             _audioOutputFlow.emit(LiveAudioChunk(audioEpoch, bytes))
                         }
                     }
@@ -1381,6 +1427,7 @@ class LiveGeminiService(
                     if (chunk.isNotBlank()) {
                         finalizeUserTurn()
                         lastConversationActivityAtMs = System.currentTimeMillis()
+                        lastModelOutputAtMs = lastConversationActivityAtMs
                         val isFirst = pendingModelTurnText == null
                         val text = mergeTranscript(pendingModelTurnText, chunk)
                         pendingModelTurnText = text
@@ -1399,6 +1446,8 @@ class LiveGeminiService(
                 }
 
                 if (content.turnComplete == true) {
+                    lastTurnCompleteAtMs = System.currentTimeMillis()
+                    lastConversationActivityAtMs = lastTurnCompleteAtMs
                     finalizeUserTurn()
                     turnCompleteFlow.tryEmit(System.currentTimeMillis())
                     val userText = pendingUserTurnText
@@ -1594,6 +1643,7 @@ class LiveGeminiService(
     ): Boolean {
         if (sessionGeneration != null && sessionGeneration != liveSessionGeneration) {
             logDebug("LiveGemini", "⚠️ Tool response dropped: $toolName callId=$callId belongs to session $sessionGeneration (current=$liveSessionGeneration)")
+            synchronized(inFlightToolCalls) { inFlightToolCalls.remove(callId) }
             return false
         }
         // ติดป้ายทุกครั้งว่าผลก้อนนี้เป็นคำตอบของคำถามไหน — ถ้าไม่ติด โมเดลมักปิดเทิร์นไปแล้ว
@@ -1622,11 +1672,22 @@ class LiveGeminiService(
         if (sent) {
             logDebug("LiveGemini", "✅ Tool response sent: $toolName callId=$callId → ${result.take(200)}")
             // จำไว้ — ถ้าเทิร์นนี้ถูกตัดก่อน AI ได้พูด ผลนี้ต้องเข้าคิวตอบทีหลัง (ส่งถึงโมเดลแล้วแต่คำตอบถูกทิ้ง)
-            synchronized(toolResultsThisTurn) {
-                toolResultsThisTurn.add(Triple(askedFor.ifBlank { lastUserText.trim() }, toolName, result))
+            val question = askedFor.ifBlank { lastUserText.trim() }
+            synchronized(toolResultsThisTurn) { toolResultsThisTurn.add(Triple(question, toolName, result)) }
+            synchronized(inFlightToolCalls) { inFlightToolCalls.remove(callId) }
+            lastConversationActivityAtMs = System.currentTimeMillis()
+            // กันค้าง: ส่งผลแล้วโมเดลเงียบ ไม่พูดและไม่จบเทิร์น (logcat 01:48: ราคาทองส่งผลแล้วเงียบจนปิด session)
+            val sentAt = lastConversationActivityAtMs
+            scope.launch {
+                delay(12_000)
+                if (lastModelOutputAtMs < sentAt && lastTurnCompleteAtMs < sentAt && isSetupComplete) {
+                    logDebug("LiveGemini", "⚠️ โมเดลเงียบ 12 วิหลังผล $toolName — ส่งผลซ้ำผ่านคิว")
+                    enqueuePendingToolResult(question, toolName, result)
+                }
             }
         } else {
             logDebug("LiveGemini", "⚠️ Tool response NOT sent (session not ready): $toolName callId=$callId")
+            synchronized(inFlightToolCalls) { inFlightToolCalls.remove(callId) }
         }
         return sent
     }
