@@ -550,6 +550,29 @@ class LiveGeminiService(
 
     private var pendingFlushJob: kotlinx.coroutines.Job? = null
 
+    /** รายงานที่ส่งไปแล้ว รอยืนยันว่า AI พูดจริง (ไม่ถูกคำถามใหม่กลืน) */
+    @kotlin.jvm.Volatile
+    private var reportAwaitingDelivery: PendingAnswerQueue.Item? = null
+    @kotlin.jvm.Volatile
+    private var reportSentAtMs = 0L
+    /** เวลาที่ transcript ของผู้ใช้มาถึงล่าสุด — มีคำพูดหลังส่งรายงาน = รายงานอาจถูกกลืน */
+    @kotlin.jvm.Volatile
+    private var lastUserTranscriptAtMs = 0L
+
+    /**
+     * จบเทิร์นหลังส่งรายงาน: ผู้ใช้พูดคำถามใหม่ทับ หรือ AI ไม่ได้พูด → รายงานถูกกลืน ใส่กลับหัวคิว
+     * AI พูดโดยไม่มีคำพูดใหม่ของผู้ใช้ → รายงานถึงผู้ใช้แล้ว
+     */
+    private fun settleReportDelivery(modelSpoke: Boolean) {
+        val item = reportAwaitingDelivery ?: return
+        val userSpokeOver = lastUserTranscriptAtMs > reportSentAtMs
+        reportAwaitingDelivery = null
+        if (modelSpoke && !userSpokeOver) return
+        val requeued = synchronized(pendingAnswers) { pendingAnswers.requeueFront(item) }
+        logDebug("LiveGemini", "↩️ รายงาน \"${item.question.take(40)}\" ถูกกลืน (ผู้ใช้พูดทับ=$userSpokeOver, AI พูด=$modelSpoke) — " +
+            if (requeued) "ส่งใหม่หลังตอบข้อใหม่ (ครั้งที่ ${item.attempts + 2})" else "เลิกส่ง (ครบ ${PendingAnswerQueue.MAX_ATTEMPTS} ครั้ง)")
+    }
+
     /**
      * เงียบจริง: ไม่มีคนพูด ไม่มีโมเดลกำลังตอบ ไม่มี tool ค้าง — ส่งข้อความแทรกตอนผู้ใช้กำลังพูด
      * ทำให้ session ค้างจนไม่ตอบอะไรอีกเลย (logcat 2026-09-24 01:48: ส่ง [SYSTEM] ระหว่างผู้ใช้พูดคำถามถัดไป 2 ครั้ง)
@@ -578,6 +601,8 @@ class LiveGeminiService(
                 val now = System.currentTimeMillis()
                 if (!isConversationIdle(now)) continue
                 val item = synchronized(pendingAnswers) { pendingAnswers.next(now) } ?: return@launch
+                reportAwaitingDelivery = item
+                reportSentAtMs = now
                 logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size}, " +
                     "ไมค์เงียบ ${now - lastLocalVoiceAtMs}ms, server เงียบ ${now - lastConversationActivityAtMs}ms)")
                 lastConversationActivityAtMs = now
@@ -875,6 +900,7 @@ class LiveGeminiService(
         synchronized(toolResultsThisTurn) { toolResultsThisTurn.clear() }
         synchronized(inFlightToolCalls) { inFlightToolCalls.clear() }
         pendingFlushJob?.cancel()
+        reportAwaitingDelivery = null
         toolCallsThisTurn = 0
         modelSpokeThisTurn = false
         userTurnFinalized = true
@@ -1424,6 +1450,7 @@ class LiveGeminiService(
                         lastUserText = text.trim()
                         lastUserSpeechAtMs = System.currentTimeMillis()
                         lastConversationActivityAtMs = lastUserSpeechAtMs
+                        lastUserTranscriptAtMs = lastUserSpeechAtMs
                         // log เฉพาะชิ้นที่เพิ่มเข้ามา — เดิม log ข้อความสะสมทุกชิ้น ทำให้ logcat ยาวเป็นสิบบรรทัดต่อประโยค
                         logDebug("LiveGemini", "🎤 User +\"${chunk.trim()}\"")
 
@@ -1504,9 +1531,11 @@ class LiveGeminiService(
                         // tool ที่เพิ่งตอบด้วยเสียงแล้ว — ผลค้างของ tool เดียวกันในคิวไม่ต้องตอบซ้ำ
                         synchronized(pendingAnswers) { sentResults.forEach { pendingAnswers.onToolAnswered(it.second) } }
                     }
+                    val hadReport = reportAwaitingDelivery != null
+                    settleReportDelivery(modelSpokeThisTurn)
                     toolCallsThisTurn = 0
                     modelSpokeThisTurn = false
-                    if (answered || queued > 0) schedulePendingAnswer()
+                    if (answered || queued > 0 || hadReport) schedulePendingAnswer()
 
                     rememberTurn("user", userText)
                     rememberTurn("model", modelText)

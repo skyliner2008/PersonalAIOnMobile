@@ -55,6 +55,8 @@ class VoiceController(
 
     private val pcmAudioEngine = PcmAudioEngine()
     private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
+    /** เกณฑ์ "อาจกำลังพูด" สำหรับคิวรายงานของ Live — ไวกว่า [speechThreshold]; เสียงรอบข้างดังตลอดมี fallback ฝั่ง server */
+    private val voiceActivityThreshold = 0.02f
 
     var onStartDemo: (() -> Unit)? = null
     var onStopDemo: (() -> Unit)? = null
@@ -85,7 +87,8 @@ class VoiceController(
                 _audioLevel.value = volume.coerceIn(0f, 1f)
             }
             val speaking = volume > speechThreshold
-            if (speaking && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
+            // เกณฑ์ต่ำกว่า UI — เสียงพูดหลัง AEC/NoiseSuppressor เบา 0.05 จับไม่ได้ (logcat 03:25:05 คิวคิดว่าเงียบขณะผู้ใช้พูด)
+            if (volume > voiceActivityThreshold && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
             onUserSpeakingChanged(speaking)
         }
         // เสียง AI ยังเล่นอยู่ในลำโพง (server จบเทิร์นก่อนเล่นจบนาน) — คิวคำถามค้างต้องรอ

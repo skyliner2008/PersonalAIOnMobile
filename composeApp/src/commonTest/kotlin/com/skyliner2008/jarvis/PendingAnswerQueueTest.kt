@@ -122,6 +122,33 @@ class PendingAnswerQueueTest {
         assertTrue(q.isEmpty())
     }
 
+    /** logcat 03:25: รายงาน BTC ถูกส่งขณะผู้ใช้พูด "ปฏิทิน…" — โมเดลตอบข้อใหม่ รายงานต้องกลับมาส่งใหม่ */
+    @Test
+    fun `swallowed report goes back to the front and is retried at most three times`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("วิเคราะห์ BTC 5 มิติ", "trading_deep_analysis_suite", "Deep", nowMs = 0)
+        q.addToolResult("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_macro_calendar", "📅", nowMs = 1)
+        var btc = q.next(2)!!
+        assertTrue(q.requeueFront(btc))
+        btc = q.next(3)!!
+        assertEquals("trading_deep_analysis_suite", btc.toolName) // กลับมาเป็นข้อแรก ก่อนปฏิทิน
+        assertEquals(1, btc.attempts)
+        assertTrue(q.requeueFront(btc))
+        btc = q.next(4)!!
+        assertFalse(q.requeueFront(btc)) // ครั้งที่ 3 แล้ว เลิก
+        assertEquals("trading_macro_calendar", q.next(5)!!.toolName)
+    }
+
+    @Test
+    fun `requeue does not override a newer result of the same tool`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("ราคาทอง", "trading_price", "4290", nowMs = 0)
+        val old = q.next(1)!!
+        q.addToolResult("ราคาทอง", "trading_price", "4291", nowMs = 2)
+        assertFalse(q.requeueFront(old))
+        assertEquals("4291", q.next(3)!!.result)
+    }
+
     @Test
     fun `stale items expire`() {
         val q = PendingAnswerQueue(ttlMs = 1_000)

@@ -17,7 +17,9 @@ class PendingAnswerQueue(
         val question: String,
         val toolName: String?,
         val result: String?,
-        val addedAtMs: Long
+        val addedAtMs: Long,
+        /** ส่งไปแล้วกี่ครั้ง — รายงานที่ถูกคำถามใหม่กลืนจะถูกส่งซ้ำ */
+        val attempts: Int = 0
     )
 
     private val items = ArrayDeque<Item>()
@@ -72,6 +74,21 @@ class PendingAnswerQueue(
     fun clear() = items.clear()
 
     /**
+     * รายงานที่ส่งไปแล้วแต่ผู้ใช้พูดคำถามใหม่ทับก่อน AI ได้พูด — โมเดลตอบคำถามใหม่ รายงานหายเงียบ
+     * (logcat 2026-09-24 03:25: ส่งรายงาน BTC ขณะผู้ใช้กำลังพูด "ปฏิทิน…" ที่ไมค์ในเครื่องจับไม่ได้)
+     * → ใส่กลับหัวคิวให้ส่งใหม่หลังตอบข้อใหม่เสร็จ; ครบ [MAX_ATTEMPTS] แล้วเลิก คืน true ถ้าใส่กลับ
+     */
+    fun requeueFront(item: Item): Boolean {
+        val next = item.copy(attempts = item.attempts + 1)
+        if (next.attempts >= MAX_ATTEMPTS) return false
+        // มีผลใหม่กว่าของ tool เดียวกันรออยู่แล้ว — ใช้ของใหม่
+        if (item.toolName != null && items.any { it.toolName == item.toolName }) return false
+        items.addFirst(next)
+        while (items.size > maxItems) items.removeLast()
+        return true
+    }
+
+    /**
      * เทิร์นเพิ่งจบ — เก็บสิ่งที่ผู้ใช้ยังไม่ได้ยินเข้าคิว คืนจำนวนที่เข้าคิว
      * - ถูกตัดก่อน AI ได้พูดและก่อนเรียก tool → คำถามเข้าคิว (ให้โมเดลเรียก tool ใหม่เอง)
      * - tool ส่งผลถึงโมเดลแล้ว แต่ถูกตัดก่อน AI ได้พูด → ผลเข้าคิว (logcat 2026-09-24 01:34, 01:36)
@@ -97,6 +114,7 @@ class PendingAnswerQueue(
     }
 
     companion object {
+        const val MAX_ATTEMPTS = 3
         private val CANCEL_WORDS = listOf("ไม่เอาแล้ว", "ยกเลิก", "หยุดก่อน", "พอแล้ว", "ไม่ต้องแล้ว")
         private val FILLERS = setOf("ครับ", "ค่ะ", "คะ", "โอเค", "ok", "อืม", "เอ่อ", "หยุด", "พอ", "เดี๋ยว", "เดี๋ยวก่อน", "ไม่เป็นไร")
 
