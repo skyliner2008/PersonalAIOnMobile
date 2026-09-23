@@ -1,3 +1,16 @@
+## 2026-09-24 — แก้: tool ถูก server ยกเลิกเพราะเสียงรบกวน แล้วคำถามหายเงียบ
+- **User Request**: "ยังดึงข้อมูลผิดพลาด ทั้งที่ช่วง commit 75bbbd3 ทดสอบ tool ไปหมดแล้วปกติ" (logcat 00:50)
+- **อาการ**: `trading_deep_analysis_suite` และ `trading_macro_calendar` ถูก `Tool call cancelled by server` ภายใน 0.5–1 วิหลังเริ่ม
+  พร้อม `Interrupted (VAD/user)` แล้ว `Turn Complete | user="-" | jarvis="-"` — ไม่มีคำพูดใหม่ถูกถอดเสียงเลย (เป็นเสียงรอบข้าง)
+  มีแค่ `trading_price` ที่รอดเพราะเสร็จใน 0.4 วิ
+- **ต้นเหตุ**: `LiveToolBridge` cancel งานทันทีที่ server ยกเลิก (มีตั้งแต่ `b1b013d` 09-17 — ไม่ได้เปลี่ยนหลัง 75bbbd3)
+  → tool ที่ใช้เวลาเกิน ~0.5 วิ เสี่ยงหายทุกครั้งที่มีเสียงรบกวน; VAD ตั้ง `START_SENSITIVITY_LOW` อยู่แล้ว
+- **แก้**: ไม่ cancel งานเมื่อ server ยกเลิก (ยังไม่ส่ง toolResponse ของ id นั้นตาม Live API) → `deliverCancelledResult`:
+  ถ้าผู้ใช้ยังไม่ได้เริ่ม turn ใหม่ (`userTurnSerial` เท่าเดิม) และโมเดลไม่ได้เรียก tool เดิมซ้ำเอง → ส่งผลเป็น realtime text
+  "[SYSTEM] คำถาม … ถูกขัดจังหวะด้วยเสียงรบกวน — ผลจากเครื่องมือ …" ให้ตอบคำถามเดิม; ผู้ใช้ถามใหม่แล้ว → ทิ้งผล
+  ดูใน log: `↪️ ผล … ของ call ที่ถูกยกเลิก (เสียงรบกวน) ส่งเป็น realtime text`
+- **Verify**: เทสต์ 521 ผ่าน ข้าม 5; ติดตั้งบน SM-S908E แล้ว เปิดแอปได้ ไม่มี crash; ยังไม่ได้ทดสอบด้วยเสียง
+
 ## 2026-09-24 — แก้: GeminiService ถือว่าการยกเลิกงานคือโมเดลล่ม แล้วสลับโมเดลไล่ทั้ง chain
 - **จาก logcat 00:43**: ถามปฏิทินเศรษฐกิจ → มีเสียงแทรก (`Interrupted (VAD/user)`) → server ยกเลิก tool call (ปกติของ Live API)
   → `LiveToolBridge` cancel งาน → `GeminiService.generateResponse` จับ `CancellationException` ด้วย `catch (e: Exception)`
