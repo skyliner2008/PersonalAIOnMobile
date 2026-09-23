@@ -80,8 +80,8 @@ class LiveToolBridge(
     /** turn ของผู้ใช้และคำถาม ณ ตอนที่ call เริ่ม — ใช้ตัดสินว่าผลของ call ที่ถูกยกเลิกยังควรส่งไหม */
     private data class CallOrigin(val turnSerial: Int, val question: String)
     private val callOrigins = mutableMapOf<String, CallOrigin>()
-    /** call ล่าสุดของแต่ละ tool — ถ้าโมเดลเรียก tool เดิมซ้ำเองหลังถูกยกเลิก ผลของ call เก่าไม่ต้องส่ง */
-    private val latestCallByTool = mutableMapOf<String, String>()
+    /** call ล่าสุดของแต่ละ tool (id to args) — โมเดลเรียก tool เดิมด้วย args เดิมซ้ำเองหลังถูกยกเลิก = ผลเก่าไม่ต้องส่ง */
+    private val latestCallByTool = mutableMapOf<String, Pair<String, Map<String, String>>>()
 
     /** turn ที่ผู้ใช้เรียก custom tool / skill แบบ chain — ขั้นตอนของ skill กำหนด TF เอง จึงไม่ให้ profile guard ไปขวาง */
     private var skillChainTurnKey: String = ""
@@ -116,17 +116,23 @@ class LiveToolBridge(
     )
 
     /**
-     * server ยกเลิก call เมื่อ VAD ได้ยินเสียงแทรก — แต่ส่วนใหญ่เป็นเสียงรอบข้าง ผู้ใช้ไม่ได้พูดอะไรต่อ
-     * (logcat 2026-09-24 00:50: tool ถูกยกเลิกภายใน 0.5–1 วิ ตามด้วย Turn Complete ที่ user="-" jarvis="-" → คำถามหายเงียบ)
-     * ถ้าผู้ใช้ยังไม่ได้เริ่ม turn ใหม่ และโมเดลไม่ได้เรียก tool เดิมซ้ำเอง → ส่งผลเป็น realtime text ให้ตอบคำถามเดิม
+     * server ยกเลิก call เมื่อ VAD ได้ยินเสียงแทรก (เสียงรอบข้าง หรือผู้ใช้พูดคำถามถัดไป) — ห้ามทิ้งคำถาม:
+     * - ผู้ใช้ยังไม่ได้เริ่ม turn ใหม่ → ส่งผลเป็น realtime text ให้ตอบคำถามเดิมทันที
+     *   (logcat 2026-09-24 00:50: ถูกยกเลิกภายใน 0.5–1 วิ ตามด้วย Turn Complete ที่ user="-" jarvis="-")
+     * - ผู้ใช้ถามเรื่องอื่นต่อแล้ว → เข้าคิว ตอบหลังข้อใหม่เสร็จ (logcat 01:19: ถาม 3 ข้อติดกัน ได้แค่ข้อสุดท้าย)
+     * - โมเดลเรียก tool เดิมด้วย args เดิมซ้ำเอง → ทิ้ง (call ใหม่ตอบให้แล้ว)
      * ห้ามส่งเป็น toolResponse ของ id ที่ถูกยกเลิก (ตาม Live API)
      */
     private suspend fun deliverCancelledResult(event: LiveToolCallEvent, result: String) {
         val (origin, latest) = runningCallsMutex.withLock { callOrigins[event.callId] to latestCallByTool[event.name] }
-        val userMovedOn = origin == null || liveService.userTurnSerial != origin.turnSerial
-        val superseded = latest != null && latest != event.callId
-        if (userMovedOn || superseded || event.name in uiOnlyTools || result.startsWith("PROFILE_GUARD")) {
-            logDebug("LiveBridge", "🚫 ไม่ส่งผล ${event.name} callId=${event.callId} — ถูกยกเลิก (userMovedOn=$userMovedOn superseded=$superseded)")
+        val superseded = latest != null && latest.first != event.callId && latest.second == event.args
+        if (origin == null || superseded || event.name in uiOnlyTools || result.startsWith("PROFILE_GUARD")) {
+            logDebug("LiveBridge", "🚫 ไม่ส่งผล ${event.name} callId=${event.callId} — ถูกยกเลิก (superseded=$superseded)")
+            return
+        }
+        if (liveService.userTurnSerial != origin.turnSerial) {
+            // ผู้ใช้ถามเรื่องอื่นต่อ — เก็บผลไว้ตอบหลังตอบข้อใหม่เสร็จ (เดิมทิ้ง: ถามหลายข้อติดกันได้คำตอบแค่ข้อสุดท้าย)
+            liveService.enqueuePendingToolResult(origin.question, event.name, result)
             return
         }
         val delivered = liveService.sendRealtimeTextWhenReady(
@@ -964,9 +970,9 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                 liveService.nativeToolCallFlow.collect { event ->
                     runningCallsMutex.withLock {
                         callOrigins[event.callId] = CallOrigin(liveService.userTurnSerial, liveService.lastUserText)
-                        latestCallByTool[event.name] = event.callId
+                        latestCallByTool[event.name] = event.callId to event.args
                     }
-                    val job = launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                    val job = launch(com.skyliner2008.jarvis.data.LiveToolCallContext(), start = kotlinx.coroutines.CoroutineStart.LAZY) {
                         try {
                             handleNativeToolCall(event, memoryContextProvider())
                         } catch (e: kotlinx.coroutines.CancellationException) {

@@ -1029,8 +1029,20 @@ class GeminiService(
     suspend fun generateToolEnrichment(
         prompt: String,
         intentAddon: String = "",
-        overallTimeoutMs: Long = 10_000
-    ): String = kotlinx.coroutines.withTimeoutOrNull(overallTimeoutMs) {
+        overallTimeoutMs: Long = 10_000,
+        /** false = ผลของการเรียกนี้เป็นข้อมูลที่ tool ต้องใช้จริง (เช่นจับคู่ sector) ไม่ใช่บทวิเคราะห์เสริม */
+        skipInLive: Boolean = true
+    ): String {
+        // tool ที่ Live เรียก: โมเดล Live วิเคราะห์ข้อมูลดิบเองได้ — รอโมเดลที่สองทำให้ช้า 8–10 วิ
+        // และยิ่งรอนานยิ่งโดนเสียงแทรกยกเลิก (logcat 2026-09-24 01:21 trading_macro_calendar 8.4 วิ)
+        if (skipInLive && kotlin.coroutines.coroutineContext[LiveToolCallContext] != null) {
+            return "(โหมดเสียง: ข้ามบทวิเคราะห์เสริม — ให้ผู้ช่วยวิเคราะห์จากข้อมูลด้านบนเอง)"
+        }
+        return boundedEnrichment(prompt, intentAddon, overallTimeoutMs)
+    }
+
+    private suspend fun boundedEnrichment(prompt: String, intentAddon: String, overallTimeoutMs: Long): String =
+        kotlinx.coroutines.withTimeoutOrNull(overallTimeoutMs) {
         generateResponse(prompt = prompt, intentAddon = intentAddon, timeoutMs = overallTimeoutMs, retryLongerOnTimeout = false)
     } ?: run {
         logDebug("GeminiService", "⏱️ tool enrichment เกิน ${overallTimeoutMs}ms — ข้ามการวิเคราะห์เสริม")
@@ -1267,3 +1279,8 @@ class GeminiService(
 }
 
 class ToolEnrichmentTimeoutException(val timeoutMs: Long) : Exception("tool enrichment exceeded ${timeoutMs}ms")
+
+/** ติดใน coroutine ของ tool call ที่มาจาก Live session — ดู [GeminiService.generateToolEnrichment] */
+class LiveToolCallContext : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<LiveToolCallContext>
+}

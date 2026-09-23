@@ -305,7 +305,8 @@ class TradingApiService(private val client: HttpClient) {
                     5. For Healthcare, use 'Health Services, Health Technology'.
                     
                     Return ONLY the names, no extra text.
-                """.trimIndent()
+                """.trimIndent(),
+                skipInLive = false // ผลใช้กรองหุ้นจริง ไม่ใช่บทวิเคราะห์เสริม
             ).trim()
             if (response.isBlank() || response.contains("error", ignoreCase = true)) listOf(userInput)
             else response.split(",").map { it.trim() }.filter { it.isNotEmpty() }

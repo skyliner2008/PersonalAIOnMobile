@@ -493,7 +493,39 @@ class LiveGeminiService(
         userTurnFinalized = true
         userTurnFinalAtMs = System.currentTimeMillis()
         val text = pendingUserTurnText?.trim().orEmpty()
-        if (text.isNotBlank()) _userTurnFinalFlow.emit(text)
+        if (text.isNotBlank()) {
+            synchronized(pendingAnswers) { pendingAnswers.onUserTurn(text) }
+            _userTurnFinalFlow.emit(text)
+        }
+    }
+
+    /** คำถามที่ถูกตัดเพราะผู้ใช้ถามเรื่องอื่นต่อ — ตอบต่อทีละข้อหลังตอบข้อปัจจุบันเสร็จ (ดู PendingAnswerQueue) */
+    private val pendingAnswers = PendingAnswerQueue()
+    /** จำนวน tool call ในเทิร์นปัจจุบัน — เทิร์นที่ถูกตัดโดยไม่มี tool call และไม่มีคำตอบ = คำถามหาย */
+    private var toolCallsThisTurn = 0
+    /** เวลาล่าสุดที่มีการพูด/ตอบ/เรียก tool — ส่งข้อค้างเฉพาะตอนเงียบจริง (ไม่พูดทับผู้ใช้หรือคำตอบที่กำลังมา) */
+    @kotlin.jvm.Volatile
+    private var lastConversationActivityAtMs = 0L
+
+    /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — เก็บผลไว้ตอบทีหลัง (เรียกจาก LiveToolBridge) */
+    fun enqueuePendingToolResult(question: String, toolName: String, result: String) {
+        synchronized(pendingAnswers) { pendingAnswers.addToolResult(question, toolName, result, System.currentTimeMillis()) }
+        logDebug("LiveGemini", "📥 เก็บผล $toolName ของคำถามที่ถูกขัดไว้ตอบทีหลัง: \"${question.take(60)}\" (คิว ${pendingAnswers.size})")
+        schedulePendingAnswer()
+    }
+
+    private fun schedulePendingAnswer(delayMs: Long = 1_500L) {
+        if (synchronized(pendingAnswers) { pendingAnswers.isEmpty() }) return
+        val scheduledAt = System.currentTimeMillis()
+        scope.launch {
+            delay(delayMs)
+            val busy = lastConversationActivityAtMs > scheduledAt ||
+                pendingUserTurnText != null || pendingModelTurnText != null || pendingModelTextParts != null
+            if (busy) return@launch // เทิร์นถัดไปที่ตอบจบจะเรียกใหม่เอง
+            val item = synchronized(pendingAnswers) { pendingAnswers.next(System.currentTimeMillis()) } ?: return@launch
+            logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size})")
+            sendRealtimeText(PendingAnswerQueue.toPrompt(item))
+        }
     }
 
     /** turn ล่าสุดของ session นี้ — ใช้เป็นบริบทตอน reconnect ที่ไม่มี resumption handle */
@@ -779,6 +811,8 @@ class LiveGeminiService(
         // session ที่ผู้ใช้เริ่มใหม่ต้องไม่ resume บทสนทนาของ session ก่อน (persona/voice อาจเปลี่ยนแล้ว)
         sessionResumptionHandle = null
         synchronized(recentTurns) { recentTurns.clear() }
+        synchronized(pendingAnswers) { pendingAnswers.clear() }
+        toolCallsThisTurn = 0
         userTurnFinalized = true
         // Always start attempt 1 with the user's explicitly configured model
         liveModelName = configuredLiveModelName
@@ -1218,6 +1252,8 @@ class LiveGeminiService(
 
             msg.toolCall?.functionCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
                 finalizeUserTurn()
+                toolCallsThisTurn += calls.size
+                lastConversationActivityAtMs = System.currentTimeMillis()
                 val generation = liveSessionGeneration
                 calls.forEach { call ->
                     val event = LiveToolCallEvent(
@@ -1316,6 +1352,7 @@ class LiveGeminiService(
                         pendingUserTurnText = text
                         lastUserText = text.trim()
                         lastUserSpeechAtMs = System.currentTimeMillis()
+                        lastConversationActivityAtMs = lastUserSpeechAtMs
                         // log เฉพาะชิ้นที่เพิ่มเข้ามา — เดิม log ข้อความสะสมทุกชิ้น ทำให้ logcat ยาวเป็นสิบบรรทัดต่อประโยค
                         logDebug("LiveGemini", "🎤 User +\"${chunk.trim()}\"")
 
@@ -1333,6 +1370,7 @@ class LiveGeminiService(
                 content.outputTranscription?.text?.let { chunk ->
                     if (chunk.isNotBlank()) {
                         finalizeUserTurn()
+                        lastConversationActivityAtMs = System.currentTimeMillis()
                         val isFirst = pendingModelTurnText == null
                         val text = mergeTranscript(pendingModelTurnText, chunk)
                         pendingModelTurnText = text
@@ -1372,6 +1410,16 @@ class LiveGeminiService(
                     if (!userText.isNullOrBlank() && modelText != null && LiveProtocol.startsWithSessionGreeting(modelText)) {
                         logDebug("LiveGemini", "⚠️ ทักทายซ้ำกลางบทสนทนา (model=$liveModelName) — user=\"${userText.take(60)}\"")
                     }
+
+                    // คำถามที่ถูกตัดก่อน AI ได้ตอบหรือเรียก tool (ผู้ใช้พูดคำถามถัดไปทับ) → เข้าคิวไว้ตอบทีหลัง
+                    val droppedQuestion = !userText.isNullOrBlank() && modelText == null &&
+                        audioBytesThisTurn == 0 && turnWasInterrupted && toolCallsThisTurn == 0
+                    if (droppedQuestion && synchronized(pendingAnswers) { pendingAnswers.addUnanswered(userText!!, System.currentTimeMillis()) }) {
+                        logDebug("LiveGemini", "📥 คำถามถูกตัดก่อนได้ตอบ เก็บไว้ตอบทีหลัง: \"${userText.take(60)}\" (คิว ${pendingAnswers.size})")
+                    }
+                    val answered = modelText != null && !turnWasInterrupted
+                    toolCallsThisTurn = 0
+                    if (answered || droppedQuestion) schedulePendingAnswer()
 
                     rememberTurn("user", userText)
                     rememberTurn("model", modelText)
