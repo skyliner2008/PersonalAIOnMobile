@@ -74,6 +74,10 @@ class VoiceController(
     private var liveMicChannel: kotlinx.coroutines.channels.Channel<String>? = null
     private var lastAlwaysLiveTriggerTime = 0L
 
+    /** Android TTS กำลังอ่านเทิร์นที่โมเดลตอบเป็นข้อความล้วน */
+    @kotlin.jvm.Volatile
+    private var ttsFallbackSpeaking = false
+
     init {
         // Bridge speech state to camera service for Adaptive Vision (Token Saving) and UI audio level
         pcmAudioEngine.onVolumeChanged = { volume ->
@@ -83,6 +87,10 @@ class VoiceController(
             val speaking = volume > speechThreshold
             if (speaking && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
             onUserSpeakingChanged(speaking)
+        }
+        // เสียง AI ยังเล่นอยู่ในลำโพง (server จบเทิร์นก่อนเล่นจบนาน) — คิวคำถามค้างต้องรอ
+        scope.launch {
+            _isAiSpeaking.collect { playing -> orchestrator.setLiveLocalOutputActive(playing || ttsFallbackSpeaking) }
         }
     }
 
@@ -141,8 +149,12 @@ class VoiceController(
             if (voiceManager.isAvailable()) {
                 val prevMuted = _isMuted.value
                 setMicMuted(true)
+                ttsFallbackSpeaking = true
+                orchestrator.setLiveLocalOutputActive(true)
                 voiceManager.speak(text) {
                     _isMuted.value = prevMuted
+                    ttsFallbackSpeaking = false
+                    orchestrator.setLiveLocalOutputActive(_isAiSpeaking.value)
                 }
             }
         }

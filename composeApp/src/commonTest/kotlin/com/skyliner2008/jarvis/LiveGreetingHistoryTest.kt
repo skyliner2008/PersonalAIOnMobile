@@ -62,6 +62,17 @@ class LiveGreetingHistoryTest {
         assertTrue(history.lines().all { it.length <= 520 }, "each turn is capped")
     }
 
+    /** logcat 02:07: โมเดลพูดตัวเลขวิเคราะห์ BTC ของ session ก่อนซ้ำ โดยไม่เรียก tool */
+    @Test
+    fun `old AI answers are cut short so stale figures cannot be replayed`() {
+        val old = "ผลวิเคราะห์ บิตคอยน์ แบบ ห้ามิติ มาแล้ว ค่ะบอส ภาพรวม ตอนนี้ มีคะแนน ความเชื่อมั่น อยู่ที่ เจ็ดสิบ เต็ม ร้อยนะคะ " +
+            "โดยแนวโน้ม หลัก ยังเป็น ขาลง ค่ะ ราคา อยู่ใกล้ โซน ฟีโบนักชี สำคัญ ที่ระดับ ศูนย์จุดห้า ถึง ศูนย์จุดหก หนึ่งแปด"
+        val history = LiveProtocol.buildSessionHistory(listOf("user" to "วิเคราะห์ BTC 5 มิติ", "model" to old))
+        assertFalse(history.contains("ฟีโบนักชี"), history)
+        assertTrue(history.contains("ผู้ใช้: วิเคราะห์ BTC 5 มิติ"))
+        assertTrue(LiveProtocol.HISTORY_HEADER.contains("ข้อมูลเก่า"))
+    }
+
     @Test
     fun `live transcripts are hidden from chat but tool reports are kept`() {
         assertTrue(LiveProtocol.isLiveTranscript("{\"mode\": \"live_voice\"}"))

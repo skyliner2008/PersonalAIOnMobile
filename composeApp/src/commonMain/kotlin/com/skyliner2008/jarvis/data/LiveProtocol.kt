@@ -83,7 +83,14 @@ object LiveProtocol {
      */
     const val HISTORY_HEADER =
         "Recent Conversation History (บทสนทนาก่อนหน้า — ตอบไปแล้วทั้งหมด ใช้เป็นบริบทเท่านั้น " +
-            "ห้ามตอบหรือพูดคำตอบเหล่านี้ซ้ำ ห้ามเรียก tool ให้คำถามเก่าอีก ตอบเฉพาะสิ่งที่ผู้ใช้พูดในเซสชันนี้):\n"
+            "ห้ามตอบหรือพูดคำตอบเหล่านี้ซ้ำ ห้ามเรียก tool ให้คำถามเก่าอีก ตอบเฉพาะสิ่งที่ผู้ใช้พูดในเซสชันนี้ " +
+            "ราคาและตัวเลขในประวัติเป็นข้อมูลเก่า ห้ามนำมาตอบ — ข้อมูลตลาดต้องเรียก tool ใหม่ทุกครั้ง):\n"
+
+    /**
+     * คำตอบของ AI ในประวัติเก็บแค่ต้นประโยค — เดิม 500 ตัวอักษรพอให้โมเดลพูดตัวเลขวิเคราะห์เก่าซ้ำเกือบคำต่อคำ
+     * แทนการเรียก tool (logcat 2026-09-24 02:07: "คะแนนความเชื่อมั่นเจ็ดสิบ…Fibo 0.5–0.618" ตรงกับคำตอบ session ก่อน)
+     */
+    const val MAX_MODEL_TURN_CHARS = 120
 
     /**
      * ประกอบ "Recent Conversation History" ที่ส่งตอนเปิด session
@@ -103,7 +110,8 @@ object LiveProtocol {
         }
         .takeLast(maxTurns)
         .joinToString("\n") { (role, text) ->
-            "${if (role == "user") "ผู้ใช้" else "จาวิส"}: ${if (text.length > maxCharsPerTurn) text.take(maxCharsPerTurn) + "…" else text}"
+            val cap = if (role == "user") maxCharsPerTurn else minOf(maxCharsPerTurn, MAX_MODEL_TURN_CHARS)
+            "${if (role == "user") "ผู้ใช้" else "จาวิส"}: ${if (text.length > cap) text.take(cap) + "…" else text}"
         }
 
     /**

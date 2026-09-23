@@ -94,6 +94,34 @@ class PendingAnswerQueueTest {
         assertNull(q.next(1)!!.result)
     }
 
+    /** logcat 02:07: ผล BTC ติดป้ายประโยค "ปฏิทิน…" (ถามรัว) — ต้องไม่ลบผลปฏิทินที่รออยู่ และ prompt ต้องอ้าง tool */
+    @Test
+    fun `results of different tools with the same spoken sentence are both kept`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_macro_calendar", "📅", nowMs = 0)
+        q.addToolResult("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_deep_analysis_suite", "Deep", nowMs = 1)
+        assertEquals(2, q.size)
+        val first = q.next(2)!!
+        assertTrue(PendingAnswerQueue.toPrompt(first).contains("ผลจากเครื่องมือ trading_macro_calendar"))
+    }
+
+    @Test
+    fun `a newer result of the same tool replaces the older one`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("ราคาทอง", "trading_price", "4290", nowMs = 0)
+        q.addToolResult("ราคาทองตอนนี้", "trading_price", "4291", nowMs = 1)
+        assertEquals(1, q.size)
+        assertEquals("4291", q.next(2)!!.result)
+    }
+
+    @Test
+    fun `tool answered later in a normal turn is dropped from the queue`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_macro_calendar", "📅", nowMs = 0)
+        q.onToolAnswered("trading_macro_calendar")
+        assertTrue(q.isEmpty())
+    }
+
     @Test
     fun `stale items expire`() {
         val q = PendingAnswerQueue(ttlMs = 1_000)

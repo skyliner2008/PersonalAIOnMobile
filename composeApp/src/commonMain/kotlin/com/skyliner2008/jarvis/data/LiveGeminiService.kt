@@ -526,6 +526,19 @@ class LiveGeminiService(
     private var lastLocalVoiceAtMs = 0L
     fun noteLocalUserVoice() { lastLocalVoiceAtMs = System.currentTimeMillis() }
 
+    /**
+     * เครื่องกำลังเล่นเสียงออกลำโพง (เสียง AI ที่ยังเล่นค้าง หรือ TTS สำรองของเทิร์นที่ไม่มีเสียง)
+     * server จบเทิร์นก่อนเสียงเล่นจบนานมาก — ส่งข้อค้างตอนนี้ = เสียงซ้อน 2 แบบ (logcat 2026-09-24 02:07:15 TTS + Live)
+     */
+    @kotlin.jvm.Volatile
+    private var localOutputActive = false
+    @kotlin.jvm.Volatile
+    private var localOutputEndedAtMs = 0L
+    fun setLocalOutputActive(active: Boolean) {
+        if (localOutputActive && !active) localOutputEndedAtMs = System.currentTimeMillis()
+        localOutputActive = active
+    }
+
     /** เวลาที่โมเดลส่งเสียง/ข้อความล่าสุด และจบเทิร์นล่าสุด — ใช้จับโมเดลเงียบค้างหลังผล tool */
     @kotlin.jvm.Volatile
     private var lastModelOutputAtMs = 0L
@@ -545,6 +558,7 @@ class LiveGeminiService(
         val serverQuietMs = now - lastConversationActivityAtMs
         val localQuietMs = now - lastLocalVoiceAtMs
         return isSetupComplete &&
+            !localOutputActive && now - localOutputEndedAtMs >= 1_000 &&
             serverQuietMs >= 1_500 &&
             // ไมค์ในเครื่องยังได้ยินเสียง = ผู้ใช้อาจกำลังพูด; เสียงรอบข้างดังตลอดได้ จึงยอมถ้า server เงียบนานแล้ว
             (localQuietMs >= 1_000 || serverQuietMs >= 6_000) &&
@@ -564,7 +578,8 @@ class LiveGeminiService(
                 val now = System.currentTimeMillis()
                 if (!isConversationIdle(now)) continue
                 val item = synchronized(pendingAnswers) { pendingAnswers.next(now) } ?: return@launch
-                logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size})")
+                logDebug("LiveGemini", "📤 ตอบคำถามที่ค้าง: \"${item.question.take(60)}\" (tool=${item.toolName ?: "-"}, เหลือ ${pendingAnswers.size}, " +
+                    "ไมค์เงียบ ${now - lastLocalVoiceAtMs}ms, server เงียบ ${now - lastConversationActivityAtMs}ms)")
                 lastConversationActivityAtMs = now
                 sendRealtimeText(PendingAnswerQueue.toPrompt(item))
                 return@launch
@@ -1485,6 +1500,10 @@ class LiveGeminiService(
                             "(${if (toolCallsThisTurn == 0) "คำถาม: \"${userText?.take(60)}\"" else sentResults.joinToString { it.second }})")
                     }
                     val answered = modelText != null && !turnWasInterrupted
+                    if (answered && sentResults.isNotEmpty()) {
+                        // tool ที่เพิ่งตอบด้วยเสียงแล้ว — ผลค้างของ tool เดียวกันในคิวไม่ต้องตอบซ้ำ
+                        synchronized(pendingAnswers) { sentResults.forEach { pendingAnswers.onToolAnswered(it.second) } }
+                    }
                     toolCallsThisTurn = 0
                     modelSpokeThisTurn = false
                     if (answered || queued > 0) schedulePendingAnswer()

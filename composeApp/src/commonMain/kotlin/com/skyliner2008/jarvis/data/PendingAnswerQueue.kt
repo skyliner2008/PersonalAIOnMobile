@@ -36,9 +36,15 @@ class PendingAnswerQueue(
     /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — รันจนเสร็จแล้ว เก็บผลไว้ตอบทีหลัง */
     fun addToolResult(question: String, toolName: String, result: String, nowMs: Long) {
         val q = question.trim()
-        // ข้อเดิมที่รอ "ยังไม่ได้ตอบ" ถูกแทนด้วยผลจริง
-        items.removeAll { same(it.question, q) }
+        // ผลเก่าของ tool เดียวกันถูกแทนด้วยผลใหม่; ข้อ "ยังไม่ได้ตอบ" ของประโยคเดียวกันถูกแทนด้วยผลจริง
+        // (ไม่ลบผลของ tool อื่นที่บังเอิญติดประโยคเดียวกัน — ถามรัว ประโยคล่าสุดอาจไม่ใช่ของ call นี้)
+        items.removeAll { it.toolName == toolName || (it.toolName == null && same(it.question, q)) }
         push(Item(q.ifBlank { "(คำถามก่อนหน้า)" }, toolName, result, nowMs))
+    }
+
+    /** tool นี้ได้คำตอบด้วยเสียงแล้วในเทิร์นที่จบปกติ — ผลค้างของ tool เดียวกันไม่ต้องตอบซ้ำ */
+    fun onToolAnswered(toolName: String) {
+        items.removeAll { it.toolName == toolName }
     }
 
     /**
@@ -111,9 +117,11 @@ class PendingAnswerQueue(
         }
 
         fun toPrompt(item: Item): String = if (item.result != null) {
-            "[PENDING QUESTION] ก่อนหน้านี้ผู้ใช้ถามว่า \"${item.question}\" แต่ถูกขัดเพราะถามเรื่องอื่นต่อ — " +
-                "ผลจากเครื่องมือ ${item.toolName}: ${item.result.take(3000)}\n" +
-                "ตอบคำถามนี้ต่อทันทีแบบสนทนา (เช่น \"ส่วนเรื่อง…\") ห้ามใช้ markdown ห้ามทักทาย"
+            // อ้างชื่อ tool เป็นหลัก — ประโยคที่ติดมาอาจเป็นของคำถามอื่นเมื่อถามรัว (logcat 02:07: ผล BTC ติดป้าย "ปฏิทิน"
+            // โมเดลจึงพูดเรื่องปฏิทินซ้ำ)
+            "[PENDING QUESTION] ผลจากเครื่องมือ ${item.toolName} ที่ผู้ใช้ขอไว้ก่อนหน้ายังไม่ได้ตอบด้วยเสียง " +
+                "(ช่วงนั้นผู้ใช้พูดว่า \"${item.question}\") — ผล: ${item.result.take(3000)}\n" +
+                "สรุปผลนี้ให้ผู้ใช้ฟังต่อทันทีแบบสนทนา (เช่น \"ส่วนเรื่อง…\") พูดเฉพาะเรื่องของผลนี้ ห้ามใช้ markdown ห้ามทักทาย"
         } else {
             "[PENDING QUESTION] ก่อนหน้านี้ผู้ใช้ถามว่า \"${item.question}\" แต่ยังไม่ได้ตอบเพราะถามเรื่องอื่นต่อ — " +
                 "ตอบคำถามนี้ต่อทันที เรียกเครื่องมือที่ต้องใช้ได้ (เช่น \"ส่วนเรื่อง…\") ห้ามทักทาย"
