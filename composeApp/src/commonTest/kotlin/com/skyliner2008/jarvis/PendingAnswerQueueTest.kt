@@ -61,6 +61,39 @@ class PendingAnswerQueueTest {
         assertEquals("ผล", q.next(nowMs = 2)!!.result)
     }
 
+    /** logcat 01:34: tool ส่งผลถึงโมเดลแล้ว แต่ผู้ใช้ถามข้อถัดไปทับก่อน AI ได้พูด — ถามสลับลำดับ 2 รอบ ได้แค่ข้อสุดท้าย */
+    @Test
+    fun `tool answers cut before the model spoke are queued in order`() {
+        val q = PendingAnswerQueue()
+        val btc = Triple("วิเคราะห์ BTC 5 มิติ", "trading_deep_analysis_suite", "Deep Analysis…")
+        val cal = Triple("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_macro_calendar", "📅 Economic Calendar…")
+        assertEquals(1, q.onTurnEnded(null, interrupted = true, modelSpoke = false, toolCalls = 1, sentResults = listOf(btc), nowMs = 0))
+        assertEquals(1, q.onTurnEnded(null, interrupted = true, modelSpoke = false, toolCalls = 1, sentResults = listOf(cal), nowMs = 1))
+        // ราคาทองตอบปกติ → ตอบข้อค้างตามลำดับที่ถาม
+        assertEquals(0, q.onTurnEnded("ราคาทองคำปัจจุบันเท่าไหร่", interrupted = false, modelSpoke = true, toolCalls = 1,
+            sentResults = listOf(Triple("ราคาทองคำปัจจุบันเท่าไหร่", "trading_price", "4286.74")), nowMs = 2))
+        assertEquals("trading_deep_analysis_suite", q.next(3)!!.toolName)
+        assertEquals("trading_macro_calendar", q.next(4)!!.toolName)
+        assertNull(q.next(5))
+    }
+
+    @Test
+    fun `answer the user already heard part of is not repeated`() {
+        val q = PendingAnswerQueue()
+        val n = q.onTurnEnded(null, interrupted = true, modelSpoke = true, toolCalls = 1,
+            sentResults = listOf(Triple("วิเคราะห์ BTC 5 มิติ", "trading_deep_analysis_suite", "…")), nowMs = 0)
+        assertEquals(0, n)
+        assertTrue(q.isEmpty())
+    }
+
+    @Test
+    fun `question cut before any tool call is queued without a result`() {
+        val q = PendingAnswerQueue()
+        assertEquals(1, q.onTurnEnded("วิเคราะห์ BTC 5 มิติ", interrupted = true, modelSpoke = false, toolCalls = 0,
+            sentResults = emptyList(), nowMs = 0))
+        assertNull(q.next(1)!!.result)
+    }
+
     @Test
     fun `stale items expire`() {
         val q = PendingAnswerQueue(ttlMs = 1_000)

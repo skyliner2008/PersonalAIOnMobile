@@ -503,6 +503,13 @@ class LiveGeminiService(
     private val pendingAnswers = PendingAnswerQueue()
     /** จำนวน tool call ในเทิร์นปัจจุบัน — เทิร์นที่ถูกตัดโดยไม่มี tool call และไม่มีคำตอบ = คำถามหาย */
     private var toolCallsThisTurn = 0
+    /**
+     * ผล tool ที่ส่งถึงโมเดลแล้วในเทิร์นนี้ (คำถาม, tool, ผล) — ผู้ใช้พูดคำถามถัดไปทับก่อน AI ได้พูด
+     * server ทิ้งคำตอบทั้งเทิร์น ผลที่ส่งไปแล้วจึงหายเงียบ (logcat 2026-09-24 01:34, 01:36)
+     */
+    private val toolResultsThisTurn = mutableListOf<Triple<String, String, String>>()
+    /** AI เปล่งเสียงในเทิร์นนี้แล้วหรือยัง — ตอน interrupted ตัวนับเสียงถูกรีเซ็ต จึงต้องจำแยก (กันตอบซ้ำข้อที่พูดไปแล้ว) */
+    private var modelSpokeThisTurn = false
     /** เวลาล่าสุดที่มีการพูด/ตอบ/เรียก tool — ส่งข้อค้างเฉพาะตอนเงียบจริง (ไม่พูดทับผู้ใช้หรือคำตอบที่กำลังมา) */
     @kotlin.jvm.Volatile
     private var lastConversationActivityAtMs = 0L
@@ -812,7 +819,9 @@ class LiveGeminiService(
         sessionResumptionHandle = null
         synchronized(recentTurns) { recentTurns.clear() }
         synchronized(pendingAnswers) { pendingAnswers.clear() }
+        synchronized(toolResultsThisTurn) { toolResultsThisTurn.clear() }
         toolCallsThisTurn = 0
+        modelSpokeThisTurn = false
         userTurnFinalized = true
         // Always start attempt 1 with the user's explicitly configured model
         liveModelName = configuredLiveModelName
@@ -1311,6 +1320,7 @@ class LiveGeminiService(
                                 )
                             }
                             audioBytesThisTurn += bytes.size
+                            modelSpokeThisTurn = true
                             _audioOutputFlow.emit(LiveAudioChunk(audioEpoch, bytes))
                         }
                     }
@@ -1411,15 +1421,24 @@ class LiveGeminiService(
                         logDebug("LiveGemini", "⚠️ ทักทายซ้ำกลางบทสนทนา (model=$liveModelName) — user=\"${userText.take(60)}\"")
                     }
 
-                    // คำถามที่ถูกตัดก่อน AI ได้ตอบหรือเรียก tool (ผู้ใช้พูดคำถามถัดไปทับ) → เข้าคิวไว้ตอบทีหลัง
-                    val droppedQuestion = !userText.isNullOrBlank() && modelText == null &&
-                        audioBytesThisTurn == 0 && turnWasInterrupted && toolCallsThisTurn == 0
-                    if (droppedQuestion && synchronized(pendingAnswers) { pendingAnswers.addUnanswered(userText!!, System.currentTimeMillis()) }) {
-                        logDebug("LiveGemini", "📥 คำถามถูกตัดก่อนได้ตอบ เก็บไว้ตอบทีหลัง: \"${userText.take(60)}\" (คิว ${pendingAnswers.size})")
+                    // ผู้ใช้พูดคำถามถัดไปทับก่อน AI ได้พูด — คำถาม/ผล tool ของเทิร์นนี้เข้าคิวตอบทีหลัง (PendingAnswerQueue)
+                    val sentResults = synchronized(toolResultsThisTurn) {
+                        toolResultsThisTurn.toList().also { toolResultsThisTurn.clear() }
+                    }
+                    val queued = synchronized(pendingAnswers) {
+                        pendingAnswers.onTurnEnded(
+                            userText, turnWasInterrupted, modelSpokeThisTurn, toolCallsThisTurn, sentResults,
+                            System.currentTimeMillis()
+                        )
+                    }
+                    if (queued > 0) {
+                        logDebug("LiveGemini", "📥 เทิร์นถูกตัดก่อน AI ได้พูด — เก็บ $queued ข้อไว้ตอบทีหลัง " +
+                            "(${if (toolCallsThisTurn == 0) "คำถาม: \"${userText?.take(60)}\"" else sentResults.joinToString { it.second }})")
                     }
                     val answered = modelText != null && !turnWasInterrupted
                     toolCallsThisTurn = 0
-                    if (answered || droppedQuestion) schedulePendingAnswer()
+                    modelSpokeThisTurn = false
+                    if (answered || queued > 0) schedulePendingAnswer()
 
                     rememberTurn("user", userText)
                     rememberTurn("model", modelText)
@@ -1602,6 +1621,10 @@ class LiveGeminiService(
         }
         if (sent) {
             logDebug("LiveGemini", "✅ Tool response sent: $toolName callId=$callId → ${result.take(200)}")
+            // จำไว้ — ถ้าเทิร์นนี้ถูกตัดก่อน AI ได้พูด ผลนี้ต้องเข้าคิวตอบทีหลัง (ส่งถึงโมเดลแล้วแต่คำตอบถูกทิ้ง)
+            synchronized(toolResultsThisTurn) {
+                toolResultsThisTurn.add(Triple(askedFor.ifBlank { lastUserText.trim() }, toolName, result))
+            }
         } else {
             logDebug("LiveGemini", "⚠️ Tool response NOT sent (session not ready): $toolName callId=$callId")
         }

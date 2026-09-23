@@ -65,6 +65,26 @@ class PendingAnswerQueue(
 
     fun clear() = items.clear()
 
+    /**
+     * เทิร์นเพิ่งจบ — เก็บสิ่งที่ผู้ใช้ยังไม่ได้ยินเข้าคิว คืนจำนวนที่เข้าคิว
+     * - ถูกตัดก่อน AI ได้พูดและก่อนเรียก tool → คำถามเข้าคิว (ให้โมเดลเรียก tool ใหม่เอง)
+     * - tool ส่งผลถึงโมเดลแล้ว แต่ถูกตัดก่อน AI ได้พูด → ผลเข้าคิว (logcat 2026-09-24 01:34, 01:36)
+     * AI พูดไปแล้วบางส่วน = ผู้ใช้ได้ยินแล้ว ไม่ตอบซ้ำ
+     */
+    fun onTurnEnded(
+        userText: String?,
+        interrupted: Boolean,
+        modelSpoke: Boolean,
+        toolCalls: Int,
+        sentResults: List<Triple<String, String, String>>,
+        nowMs: Long
+    ): Int {
+        if (!interrupted || modelSpoke) return 0
+        if (toolCalls == 0 && !userText.isNullOrBlank()) return if (addUnanswered(userText, nowMs)) 1 else 0
+        sentResults.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }
+        return sentResults.size
+    }
+
     private fun push(item: Item) {
         items.addLast(item)
         while (items.size > maxItems) items.removeFirst()
