@@ -42,6 +42,18 @@ class LiveTimeframeGuardTest {
     }
 
     @Test
+    fun `VAD waits for the user to really finish before ending the turn`() {
+        val vad = com.skyliner2008.jarvis.data.LiveRealtimeInputConfig.default().automaticActivityDetection!!
+        assertEquals("END_SENSITIVITY_LOW", vad.endOfSpeechSensitivity)
+        assertEquals("START_SENSITIVITY_LOW", vad.startOfSpeechSensitivity)
+        val json = kotlinx.serialization.json.Json.encodeToString(
+            com.skyliner2008.jarvis.data.LiveRealtimeInputConfig.serializer(),
+            com.skyliner2008.jarvis.data.LiveRealtimeInputConfig.default()
+        )
+        assertTrue(json.contains("\"end_of_speech_sensitivity\":\"END_SENSITIVITY_LOW\""), json)
+    }
+
+    @Test
     fun `session history header marks past turns as already answered`() {
         assertTrue(LiveProtocol.HISTORY_HEADER.contains("ตอบไปแล้ว"))
         assertTrue(LiveProtocol.HISTORY_HEADER.endsWith("\n"))

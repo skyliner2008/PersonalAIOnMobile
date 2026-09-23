@@ -50,7 +50,25 @@ data class LiveSetup(
 @Serializable
 data class LiveRealtimeInputConfig(
     @SerialName("automatic_activity_detection") val automaticActivityDetection: LiveAutomaticActivityDetection? = null
-)
+) {
+    companion object {
+        fun default() = LiveRealtimeInputConfig(
+            automaticActivityDetection = LiveAutomaticActivityDetection(
+                disabled = false,
+                // START_SENSITIVITY_LOW + padding 500ms — เดิมไวเกินจนเสียงรบกวน/ลมหายใจ
+                // นับเป็น "ผู้ใช้พูดแทรก" ระหว่างรอผล tool แล้ว server ทิ้งคำตอบทั้ง turn
+                // (log 2026-09-16: Interrupted 0.8 วิหลัง tool response → ไม่พูดผลเครื่องมือแรก)
+                startOfSpeechSensitivity = "START_SENSITIVITY_LOW",
+                // ค่าเริ่มต้นคือ END_SENSITIVITY_HIGH ("ends speech more often") — ผู้ใช้เว้นจังหวะกลางประโยค
+                // โมเดลก็ถือว่าพูดจบแล้วเรียก tool ทันที พอพูดท้ายประโยคต่อ ("…ล่ะครับ") server นับเป็นพูดแทรก
+                // แล้วยกเลิก tool (logcat 2026-09-24 01:04: transcript คำถามถัดไปขึ้นต้นด้วย "ล่ะ ครับ")
+                endOfSpeechSensitivity = "END_SENSITIVITY_LOW",
+                prefixPaddingMs = 500,
+                silenceDurationMs = 1200
+            )
+        )
+    }
+}
 
 @Serializable
 data class LiveAutomaticActivityDetection(
@@ -840,17 +858,7 @@ class LiveGeminiService(
                                     add("en-US")
                                 }
                             },
-                            realtimeInputConfig = LiveRealtimeInputConfig(
-                                automaticActivityDetection = LiveAutomaticActivityDetection(
-                                    disabled = false,
-                                    // START_SENSITIVITY_LOW + padding 500ms — เดิมไวเกินจนเสียงรบกวน/ลมหายใจ
-                                    // นับเป็น "ผู้ใช้พูดแทรก" ระหว่างรอผล tool แล้ว server ทิ้งคำตอบทั้ง turn
-                                    // (log 2026-09-16: Interrupted 0.8 วิหลัง tool response → ไม่พูดผลเครื่องมือแรก)
-                                    startOfSpeechSensitivity = "START_SENSITIVITY_LOW",
-                                    prefixPaddingMs = 500,
-                                    silenceDurationMs = 1200
-                                )
-                            ),
+                            realtimeInputConfig = LiveRealtimeInputConfig.default(),
                             // ส่ง {} ครั้งแรกเพื่อเปิดรับ SessionResumptionUpdate และส่ง handle ตอน reconnect
                             // ถ้า server ปฏิเสธ (NOT_CONSISTENT/INVALID_ARGUMENT) จะปิด resumption อัตโนมัติแล้วลองใหม่
                             sessionResumption = if (sentResumptionConfig) {

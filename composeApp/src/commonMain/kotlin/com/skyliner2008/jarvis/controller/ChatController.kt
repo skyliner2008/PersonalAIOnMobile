@@ -64,7 +64,12 @@ class ChatController(
         val cutoff = Clock.System.now().toEpochMilliseconds() - 24 * 60 * 60 * 1000L
         return memoryManager.getHistoryAfter(cutoff, limit)
             .filterNot { it.metadata?.contains("live_voice_tool_result") == true }
-            .map { it.role to it.content }
+            .mapNotNull { msg ->
+                val compact = msg.content.filterNot { it.isWhitespace() }
+                if (msg.role == "user" && compact.contains("พร้อมคุยไหม")) return@mapNotNull null
+                val text = if (msg.role == "user") msg.content else LiveProtocol.stripSessionGreeting(msg.content)
+                if (text.isBlank()) null else msg.role to text
+            }
     }
 
 
@@ -232,13 +237,15 @@ class ChatController(
         return prompt to inlineFiles
     }
 
-    private fun buildHistorySnapshot(): List<Pair<String, String>> {
-        val current = _messages.value
+    private suspend fun buildHistorySnapshot(): List<Pair<String, String>> {
+        // อ่านจากฐานข้อมูล ไม่ใช่รายการแชท — แชทไม่แสดงคำพูดสดของ Live (ตั้งแต่ b1b013d)
+        // ถ้าอ่านจากแชท AI ฝั่งพิมพ์จะไม่รู้ว่าเพิ่งคุยอะไรกันด้วยเสียง
+        val current = recentConversationTurns(limit = (maxContextTurns * 2 + 1).toLong())
+        // ตัดข้อความล่าสุด (ประโยคที่เพิ่งพิมพ์และบันทึกไป — ส่งเป็น prompt แยกอยู่แล้ว)
         val withoutLatest = if (current.isNotEmpty()) current.dropLast(1) else current
         val maxMessages = maxContextTurns * 2
         val recentMsgs = withoutLatest
             .takeLast(maxMessages)
-            .map { Pair(it.role, it.content) }
             .filter { it.second.isNotBlank() }
 
         // ป้องกัน Input Tokens ล้น (เช่น Claude Haiku limit 50K tokens)
