@@ -281,7 +281,7 @@ internal class MarketTechnicalToolHandler(
         }
 
         val aiSynthesis = try {
-            geminiService.generateResponse(
+            geminiService.generateToolEnrichment(
                 prompt = prompt,
                 intentAddon = "You are a behavioral finance and market sentiment expert. Provide sharp, realistic insights in Thai."
             )
@@ -467,7 +467,7 @@ internal class MarketTechnicalToolHandler(
         """.trimIndent()
 
         val aiAnalysis = try {
-            geminiService.generateResponse(
+            geminiService.generateToolEnrichment(
                 prompt = prompt,
                 intentAddon = "You are a professional news analyst. Be concise and objective."
             )
@@ -511,7 +511,7 @@ internal class MarketTechnicalToolHandler(
         }
 
         val aiAnalysis = try {
-            geminiService.generateResponse(
+            geminiService.generateToolEnrichment(
                 prompt = """
                     เวลาปัจจุบันในประเทศไทยคือ: $nowFormatted
                     
@@ -523,9 +523,7 @@ internal class MarketTechnicalToolHandler(
                     2. ข่าวที่ระบุสถานะ [PASSED / ประกาศแล้ว] หมายถึงประกาศผ่านไปแล้ว ให้สรุปสั้นๆ เท่านั้น ห้ามพูดเสมือนว่าเป็นเหตุการณ์ที่ยังไม่เกิดขึ้นเด็ดขาด
                     3. สรุปความเสี่ยงและคำแนะนำสำหรับเทรดเดอร์ (เช่น การงดถือออเดอร์ข้ามช่วงข่าว)
                 """.trimIndent(),
-                intentAddon = "คุณคือนักเศรษฐศาสตร์มหภาคและเทรดเดอร์มืออาชีพ ปัจจุบันคือเวลา $nowFormatted จงวิเคราะห์เฉพาะข่าวที่กำลังจะเกิดขึ้นต่อจากนี้และผลกระทบต่อตลาดอย่างแม่นยำ",
-                timeoutMs = 12_000,
-                retryLongerOnTimeout = false
+                intentAddon = "คุณคือนักเศรษฐศาสตร์มหภาคและเทรดเดอร์มืออาชีพ ปัจจุบันคือเวลา $nowFormatted จงวิเคราะห์เฉพาะข่าวที่กำลังจะเกิดขึ้นต่อจากนี้และผลกระทบต่อตลาดอย่างแม่นยำ"
             )
         } catch (_: Exception) { "การวิเคราะห์อัตโนมัติไม่พร้อมใช้งานในขณะนี้" }
 

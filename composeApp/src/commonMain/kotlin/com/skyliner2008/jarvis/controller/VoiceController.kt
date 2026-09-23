@@ -30,6 +30,8 @@ class VoiceController(
     private val messages: MutableStateFlow<List<Message>>,
     /** core memory + MT5 runtime context สำหรับเปิด live session */
     private val coreContextProvider: suspend () -> String,
+    /** บทสนทนาล่าสุดจากฐานข้อมูล (role to text) — แชทไม่แสดงคำพูดสดของ Live จึงใช้ messages แทนไม่ได้ */
+    private val historyTurnsProvider: suspend () -> List<Pair<String, String>>,
     /** bridge สถานะ "ผู้ใช้กำลังพูด" ให้ VM/camera (Adaptive Vision) */
     private val onUserSpeakingChanged: (Boolean) -> Unit
 ) {
@@ -53,6 +55,8 @@ class VoiceController(
 
     private val pcmAudioEngine = PcmAudioEngine()
     private val speechThreshold = 0.05f // Volume threshold for "Speaking" state
+    /** เกณฑ์ "อาจกำลังพูด" สำหรับคิวรายงานของ Live — ไวกว่า [speechThreshold]; เสียงรอบข้างดังตลอดมี fallback ฝั่ง server */
+    private val voiceActivityThreshold = 0.02f
 
     var onStartDemo: (() -> Unit)? = null
     var onStopDemo: (() -> Unit)? = null
@@ -72,6 +76,10 @@ class VoiceController(
     private var liveMicChannel: kotlinx.coroutines.channels.Channel<String>? = null
     private var lastAlwaysLiveTriggerTime = 0L
 
+    /** Android TTS กำลังอ่านเทิร์นที่โมเดลตอบเป็นข้อความล้วน */
+    @kotlin.jvm.Volatile
+    private var ttsFallbackSpeaking = false
+
     init {
         // Bridge speech state to camera service for Adaptive Vision (Token Saving) and UI audio level
         pcmAudioEngine.onVolumeChanged = { volume ->
@@ -79,7 +87,13 @@ class VoiceController(
                 _audioLevel.value = volume.coerceIn(0f, 1f)
             }
             val speaking = volume > speechThreshold
+            // เกณฑ์ต่ำกว่า UI — เสียงพูดหลัง AEC/NoiseSuppressor เบา 0.05 จับไม่ได้ (logcat 03:25:05 คิวคิดว่าเงียบขณะผู้ใช้พูด)
+            if (volume > voiceActivityThreshold && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
             onUserSpeakingChanged(speaking)
+        }
+        // เสียง AI ยังเล่นอยู่ในลำโพง (server จบเทิร์นก่อนเล่นจบนาน) — คิวคำถามค้างต้องรอ
+        scope.launch {
+            _isAiSpeaking.collect { playing -> orchestrator.setLiveLocalOutputActive(playing || ttsFallbackSpeaking) }
         }
     }
 
@@ -138,8 +152,12 @@ class VoiceController(
             if (voiceManager.isAvailable()) {
                 val prevMuted = _isMuted.value
                 setMicMuted(true)
+                ttsFallbackSpeaking = true
+                orchestrator.setLiveLocalOutputActive(true)
                 voiceManager.speak(text) {
                     _isMuted.value = prevMuted
+                    ttsFallbackSpeaking = false
+                    orchestrator.setLiveLocalOutputActive(_isAiSpeaking.value)
                 }
             }
         }
@@ -160,19 +178,17 @@ class VoiceController(
                 val historySnapshot = if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
                     ""
                 } else {
-                    messages.value
-                        .filter { msg ->
-                            val c = msg.content.trim()
-                            !c.contains("พร้อมคุยไหม") &&
+                    // ตัดข้อความสถานะและคำสั่งสลับโหมด; คำทักทายเปิดเซสชันของทั้งสองฝั่งตัดใน LiveProtocol.buildSessionHistory
+                    val turns = historyTurnsProvider()
+                        .filter { (_, text) ->
+                            val c = text.trim()
                             !c.contains("LIVE READY") &&
                             !c.contains("กำลังเชื่อมต่อ Live session") &&
                             !c.contains("โหมดสัตว์เลี้ยง") &&
                             !c.contains("โหมดควบคุม") &&
                             !c.contains("โหมดขับขี่")
                         }
-                        .takeLast(8).joinToString("\n") {
-                            "${if (it.role == "user") "ผู้ใช้" else "จาวิส"}: ${it.content}"
-                        }
+                    com.skyliner2008.jarvis.data.LiveProtocol.buildSessionHistory(turns)
                 }
 
                 // 3. เปิด Live session พร้อม tool bridge (Path A + Path B auto-detected)

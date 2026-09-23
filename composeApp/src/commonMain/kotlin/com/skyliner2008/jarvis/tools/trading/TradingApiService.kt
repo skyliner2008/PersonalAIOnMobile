@@ -290,7 +290,7 @@ class TradingApiService(private val client: HttpClient) {
         """.trimIndent()
 
         return try {
-            val response = geminiService.generateResponse(
+            val response = geminiService.generateToolEnrichment(
                 prompt = prompt,
                 intentAddon = """
                     You are a specialized financial sector mapper for TradingView Scanner.
@@ -305,7 +305,8 @@ class TradingApiService(private val client: HttpClient) {
                     5. For Healthcare, use 'Health Services, Health Technology'.
                     
                     Return ONLY the names, no extra text.
-                """.trimIndent()
+                """.trimIndent(),
+                skipInLive = false // ผลใช้กรองหุ้นจริง ไม่ใช่บทวิเคราะห์เสริม
             ).trim()
             if (response.isBlank() || response.contains("error", ignoreCase = true)) listOf(userInput)
             else response.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -363,6 +364,13 @@ class TradingApiService(private val client: HttpClient) {
                 put("left", "exchange")
                 put("operation", "in_range")
                 put("right", buildJsonArray { add("SET"); add("MAI") })
+            })
+            // ตัด DR (NVDA80, AAPL80 …) — scanner ให้ market cap ของบริษัทแม่ จึงครองอันดับต้นทั้งหมดเมื่อเรียงตาม market cap
+            // (logcat 2026-09-24 00:26: ถาม "SET สัปดาห์นี้" ได้แต่ DR ของหุ้นสหรัฐ)
+            filters.add(buildJsonObject {
+                put("left", "type")
+                put("operation", "equal")
+                put("right", "stock")
             })
         } else {
             filters.add(buildJsonObject {

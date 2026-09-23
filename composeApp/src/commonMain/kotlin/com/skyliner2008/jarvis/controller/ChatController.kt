@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.skyliner2008.jarvis.data.LiveProtocol
 import kotlinx.datetime.Clock
 
 /**
@@ -48,10 +49,30 @@ class ChatController(
         // โหลดเฉพาะประวัติข้อความที่ยังไม่ครบ 24 ชั่วโมง (< 24 ชม.) ตามเงื่อนไขเวลา
         val cutoff = Clock.System.now().toEpochMilliseconds() - 24 * 60 * 60 * 1000L
         val history = memoryManager.getHistoryAfter(cutoff)
+        // คำพูดสดของ Live (ทั้งผู้ใช้และ AI) ไม่แสดงในแชท — ตรงกับระหว่าง Live ที่แสดงเฉพาะรายงาน/ผล tool
+        // (เดิมซ่อนแค่ฝั่งผู้ใช้ เปิดแอปใหม่คำพูด AI ทุกประโยครวมคำทักทายจึงโผล่ขึ้นมา)
         _messages.value = history
-            .filterNot { it.role == "user" && it.metadata?.contains("live_voice") == true }
+            .filterNot { LiveProtocol.isLiveTranscript(it.metadata) }
             .map { Message(it.role, it.content, metadata = it.metadata, timestamp = it.timestamp) }
     }
+
+    /**
+     * บทสนทนาล่าสุดจากฐานข้อมูล (รวมคำพูดสดของ Live ที่ไม่แสดงในแชท) — ใช้เป็นบริบทตอนเปิด Live session
+     * ไม่รวมผล tool ดิบ (markdown ยาว — คำตอบที่พูดจริงถูกบันทึกแยกไว้แล้ว)
+     */
+    suspend fun recentConversationTurns(limit: Long = 40): List<Pair<String, String>> {
+        val cutoff = Clock.System.now().toEpochMilliseconds() - 24 * 60 * 60 * 1000L
+        return memoryManager.getHistoryAfter(cutoff, limit)
+            .filterNot { it.metadata?.contains("live_voice_tool_result") == true }
+            .mapNotNull { msg ->
+                val compact = msg.content.filterNot { it.isWhitespace() }
+                if (msg.role == "user" && compact.contains("พร้อมคุยไหม")) return@mapNotNull null
+                val text = if (msg.role == "user") msg.content else LiveProtocol.stripSessionGreeting(msg.content)
+                if (text.isBlank()) null else msg.role to text
+            }
+    }
+
+
 
     fun clearChat() {
         scope.launch(Dispatchers.IO) {
@@ -216,13 +237,15 @@ class ChatController(
         return prompt to inlineFiles
     }
 
-    private fun buildHistorySnapshot(): List<Pair<String, String>> {
-        val current = _messages.value
+    private suspend fun buildHistorySnapshot(): List<Pair<String, String>> {
+        // อ่านจากฐานข้อมูล ไม่ใช่รายการแชท — แชทไม่แสดงคำพูดสดของ Live (ตั้งแต่ b1b013d)
+        // ถ้าอ่านจากแชท AI ฝั่งพิมพ์จะไม่รู้ว่าเพิ่งคุยอะไรกันด้วยเสียง
+        val current = recentConversationTurns(limit = (maxContextTurns * 2 + 1).toLong())
+        // ตัดข้อความล่าสุด (ประโยคที่เพิ่งพิมพ์และบันทึกไป — ส่งเป็น prompt แยกอยู่แล้ว)
         val withoutLatest = if (current.isNotEmpty()) current.dropLast(1) else current
         val maxMessages = maxContextTurns * 2
         val recentMsgs = withoutLatest
             .takeLast(maxMessages)
-            .map { Pair(it.role, it.content) }
             .filter { it.second.isNotBlank() }
 
         // ป้องกัน Input Tokens ล้น (เช่น Claude Haiku limit 50K tokens)

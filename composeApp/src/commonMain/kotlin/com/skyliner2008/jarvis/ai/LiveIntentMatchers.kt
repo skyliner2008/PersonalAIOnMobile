@@ -44,6 +44,24 @@ object LiveIntentMatchers {
         "trading_smc_analysis"
     )
 
+    /**
+     * tool ที่ Live (หัวหน้า) ส่งต่อให้ลูกน้องทำเบื้องหลัง: ตอบรับทันที → รันจริงเบื้องหลัง → รายงานผลตอนเงียบ
+     * อ่านข้อมูล/วิเคราะห์อย่างเดียว และอาจใช้เวลาเกินครึ่งวินาที — รอผลในเทิร์นเดียวกันทำให้ผู้ใช้พูดแทรกแล้ว
+     * server ยกเลิก call หรือทิ้งคำตอบ (logcat 2026-09-24 00:26–02:07: ถามรัวได้คำตอบแค่ข้อสุดท้าย)
+     * ไม่รวม: trading_price (เร็ว), คำสั่ง MT5 (ต้องยืนยัน), backtest (มีงานยาวของตัวเอง), alert/automation
+     */
+    private val DELEGATED_TOOLS = setOf(
+        "trading_deep_analysis_suite", "trading_technical_analysis", "trading_multi_timeframe",
+        "trading_smc_analysis", "trading_smc_flow", "trading_smc_liquidity", "trading_smc_orderblocks",
+        "trading_smc_structure", "trading_smc_sweeps", "trading_elliot_modern_analysis", "trading_harmonic_scan",
+        "trading_macro_calendar", "trading_economic_data", "trading_news", "trading_sentiment", "trading_fear_greed",
+        "trading_fundamental_analysis", "trading_market_snapshot", "trading_crypto_overview", "trading_combined",
+        "trading_correlation_matrix", "trading_strategy_signal", "trading_top_gainers", "trading_top_losers",
+        "trading_volume_breakout", "trading_bollinger_scan", "trading_overbought_scan", "trading_oversold_scan"
+    )
+
+    fun isDelegatedTool(name: String): Boolean = name in DELEGATED_TOOLS
+
     private val DEFAULT_TIMEFRAMES = setOf("15m", "m15", "1h", "h1", "4h", "h4")
     private val HIGHER_TIMEFRAMES = setOf("1d", "d1", "d", "1w", "w1", "w")
 
@@ -60,15 +78,40 @@ object LiveIntentMatchers {
      * (เดิมบล็อก D1 ทุกกรณี ทั้งที่ข้อความ guard บอกว่า "เว้นแต่ผู้ใช้ระบุเอง")
      */
     fun allowedTradingTimeframe(args: Map<String, String>, prompt: String = ""): Boolean {
-        // โมเดลส่ง timeframe มาได้หลายชื่อ: "XAUUSD@m15", timeframe=..., interval=... (เคสจริงจาก log)
-        val raw = args["symbol"] ?: ""
-        val tf = raw.substringAfter("@", "").lowercase()
+        val tf = requestedTimeframe(args)
+        if (tf in DEFAULT_TIMEFRAMES) return true
+        if (tf in HIGHER_TIMEFRAMES) return userRequestsHigherTimeframe(prompt)
+        // TF เล็ก (M1/M5/M30) — อนุญาตเมื่อผู้ใช้พูดถึงเอง (เดิมบล็อกแม้ผู้ใช้ขอ "M5")
+        return userMentionsMinuteTimeframe(prompt, tf)
+    }
+
+    /** timeframe ที่โมเดลส่งมา — ได้หลายชื่อ: "XAUUSD@m15", timeframe=..., interval=... (เคสจริงจาก log) */
+    private fun requestedTimeframe(args: Map<String, String>): String =
+        (args["symbol"] ?: "").substringAfter("@", "").lowercase()
             .ifBlank { args["timeframe"]?.lowercase().orEmpty() }
             .ifBlank { args["interval"]?.lowercase().orEmpty() }
             .ifBlank { args["tf"]?.lowercase().orEmpty() }
             .ifBlank { "1h" }
-        if (tf in DEFAULT_TIMEFRAMES) return true
-        return tf in HIGHER_TIMEFRAMES && userRequestsHigherTimeframe(prompt)
+
+    /** ผู้ใช้พูดถึง TF นาทีนี้เอง เช่น "M5", "5m", "5 นาที" */
+    private fun userMentionsMinuteTimeframe(prompt: String, tf: String): Boolean {
+        val minutes = Regex("""\d+""").find(tf)?.value ?: return false
+        val p = prompt.lowercase()
+        val words = Regex("""[a-z0-9]+""").findAll(p).map { it.value }.toSet()
+        return "m$minutes" in words || "${minutes}m" in words ||
+            p.contains("$minutes นาที") || p.contains("${minutes}นาที")
+    }
+
+    /**
+     * แทน timeframe ที่ผู้ใช้ไม่ได้ขอด้วย 15m แล้วให้ tool ทำงานต่อ
+     * (เดิมบล็อกทั้งคำขอด้วยข้อความเรื่อง D1 — โมเดลเลือก 5m เองแล้วตอบผู้ใช้ว่า "ดึงข้อมูลไม่สำเร็จ", logcat 2026-09-24 00:26)
+     */
+    fun withDefaultTimeframe(args: Map<String, String>): Map<String, String> {
+        val out = args.toMutableMap()
+        args["symbol"]?.takeIf { it.contains("@") }?.let { out["symbol"] = it.substringBefore("@") }
+        val keys = listOf("interval", "timeframe", "tf").filter { it in args }
+        if (keys.isEmpty()) out["interval"] = "15m" else keys.forEach { out[it] = "15m" }
+        return out
     }
 
     fun profileToolAllowed(prompt: String, toolName: String, args: Map<String, String>): Boolean {

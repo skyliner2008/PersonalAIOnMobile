@@ -1020,6 +1020,35 @@ class GeminiService(
         }
     }
 
+    /**
+     * เรียกเสริมจากภายใน tool (สรุป/วิเคราะห์ประกอบผล) — จำกัดเวลารวมทั้ง fallback chain
+     * เดิมแต่ละโมเดลใน chain ได้ timeout ของตัวเอง tool ที่ Live รออยู่จึงค้าง 38 วิ
+     * (503 → timeout → 503 → 404 → timeout, logcat 2026-09-24 00:28 trading_macro_calendar)
+     * เกินเวลา → throw [ToolEnrichmentTimeoutException] ให้ catch เดิมของผู้เรียกใช้ข้อความสำรอง
+     */
+    suspend fun generateToolEnrichment(
+        prompt: String,
+        intentAddon: String = "",
+        overallTimeoutMs: Long = 10_000,
+        /** false = ผลของการเรียกนี้เป็นข้อมูลที่ tool ต้องใช้จริง (เช่นจับคู่ sector) ไม่ใช่บทวิเคราะห์เสริม */
+        skipInLive: Boolean = true
+    ): String {
+        // tool ที่ Live เรียก: โมเดล Live วิเคราะห์ข้อมูลดิบเองได้ — รอโมเดลที่สองทำให้ช้า 8–10 วิ
+        // และยิ่งรอนานยิ่งโดนเสียงแทรกยกเลิก (logcat 2026-09-24 01:21 trading_macro_calendar 8.4 วิ)
+        if (skipInLive && kotlin.coroutines.coroutineContext[LiveToolCallContext] != null) {
+            return "(โหมดเสียง: ข้ามบทวิเคราะห์เสริม — ให้ผู้ช่วยวิเคราะห์จากข้อมูลด้านบนเอง)"
+        }
+        return boundedEnrichment(prompt, intentAddon, overallTimeoutMs)
+    }
+
+    private suspend fun boundedEnrichment(prompt: String, intentAddon: String, overallTimeoutMs: Long): String =
+        kotlinx.coroutines.withTimeoutOrNull(overallTimeoutMs) {
+        generateResponse(prompt = prompt, intentAddon = intentAddon, timeoutMs = overallTimeoutMs, retryLongerOnTimeout = false)
+    } ?: run {
+        logDebug("GeminiService", "⏱️ tool enrichment เกิน ${overallTimeoutMs}ms — ข้ามการวิเคราะห์เสริม")
+        throw ToolEnrichmentTimeoutException(overallTimeoutMs)
+    }
+
     suspend fun generateResponse(
         prompt: String,
         history: List<ConversationTurn> = emptyList(),
@@ -1131,6 +1160,10 @@ class GeminiService(
                     if (switchModel()) continue
                 }
                 return "⚠️ Error $code"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // ผู้เรียกยกเลิก (server ยกเลิก tool call เพราะผู้ใช้พูดแทรก / withTimeout ของ tool enrichment) — ไม่ใช่โมเดลล่ม
+                // เดิมถูกจับเป็น Exception แล้วสลับโมเดลไล่ทั้ง chain ทั้งที่งานถูกยกเลิกไปแล้ว (logcat 2026-09-24 00:43)
+                throw e
             } catch (e: Exception) {
                 logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)
                 // Interactive/chat paths may retry once with a longer timeout. Alert paths must
@@ -1243,4 +1276,11 @@ class GeminiService(
             emptyList()
         }
     }
+}
+
+class ToolEnrichmentTimeoutException(val timeoutMs: Long) : Exception("tool enrichment exceeded ${timeoutMs}ms")
+
+/** ติดใน coroutine ของ tool call ที่มาจาก Live session — ดู [GeminiService.generateToolEnrichment] */
+class LiveToolCallContext : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<LiveToolCallContext>
 }

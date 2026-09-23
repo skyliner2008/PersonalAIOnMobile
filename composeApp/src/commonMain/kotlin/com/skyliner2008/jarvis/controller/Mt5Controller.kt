@@ -224,7 +224,9 @@ class Mt5Controller(
             appendLine("mt5_orders_count=${_mt5Orders.value.size}")
             appendLine("mt5_symbols_cached=${_mt5Symbols.value.size}")
             appendLine("When user asks to place/close MT5 orders, use trading_mt5_order/trading_mt5_close_position directly without asking for endpoint or token.")
-            appendLine("If mt5_paired=false, first tell user to connect/approve in MT5 dashboard.")
+            // จำกัดขอบเขต — เดิมไม่ระบุ โมเดลตอบ "MT5 ยังไม่เชื่อมต่อ" แทนผลวิเคราะห์ SMC (logcat 2026-09-23 02:55)
+            appendLine("Only if the user asks to place, close or view MT5 orders/positions/account and mt5_paired=false, tell them to connect/approve in the MT5 dashboard first.")
+            appendLine("Market analysis, prices, SMC and other trading tools do not need MT5 — never mention the MT5 connection when answering those.")
         }
     }
 

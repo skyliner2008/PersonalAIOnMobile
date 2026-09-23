@@ -769,6 +769,7 @@ class JarvisViewModel(
         voiceManager = voiceManager,
         messages = chat.messagesMutable,
         coreContextProvider = { buildRuntimeCoreContext() },
+        historyTurnsProvider = { chat.recentConversationTurns() },
         onUserSpeakingChanged = { speaking ->
             if (speaking != _isUserSpeaking.value) {
                 _isUserSpeaking.value = speaking
@@ -1000,12 +1001,12 @@ class JarvisViewModel(
                         com.skyliner2008.jarvis.memory.AlertChatBus.tryEmit("assistant", c.chatBody, c.chatMeta)
                     }
                     val sentToLive = runCatching {
-                        // realtimeInput — model ตอบเองได้ขณะ stream audio (clientContent จะเงียบ — พิสูจน์แล้ว)
-                        orchestrator.sendLiveRealtimeTextWhenReady(
-                            "[SYSTEM] งานพื้นหลังเสร็จแล้ว: ${c.title}\nสรุปผล: ${c.speech}\n" +
-                                "โปรดพูดแจ้งผู้ใช้แบบสนทนา 2-4 ประโยคว่างานเสร็จแล้วและผลเป็นอย่างไร " +
-                                "(มีการ์ดรายละเอียดลงในแชทแล้ว ไม่ต้องอ่านตาราง/ตัวเลขยาวๆ)"
+                        // รายงานผ่านคิวของ Live — ส่งตอนเงียบจริง (เดิมส่ง realtime text ทันที พูดทับผู้ใช้ได้)
+                        orchestrator.enqueueLiveReport(
+                            c.title,
+                            "งานเสร็จแล้ว สรุปผล: ${c.speech}\n(มีการ์ดรายละเอียดลงในแชทแล้ว พูดแจ้งผู้ใช้ 2-4 ประโยค ไม่ต้องอ่านตาราง/ตัวเลขยาวๆ)"
                         )
+                        true
                     }.getOrElse {
                         logError("JarvisVM", "ส่งผลเข้า live ไม่สำเร็จ: ${it.message}", it)
                         false
