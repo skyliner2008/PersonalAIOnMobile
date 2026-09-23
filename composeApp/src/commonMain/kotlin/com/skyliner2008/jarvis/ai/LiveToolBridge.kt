@@ -82,6 +82,8 @@ class LiveToolBridge(
     private val callOrigins = mutableMapOf<String, CallOrigin>()
     /** call ล่าสุดของแต่ละ tool (id to args) — โมเดลเรียก tool เดิมด้วย args เดิมซ้ำเองหลังถูกยกเลิก = ผลเก่าไม่ต้องส่ง */
     private val latestCallByTool = mutableMapOf<String, Pair<String, Map<String, String>>>()
+    /** call ที่ตอบรับไปแล้วและส่งต่อให้ลูกน้องทำ — ผลจริงเข้าคิวรายงาน ไม่ส่งเป็น toolResponse */
+    private val delegatedCallIds = mutableSetOf<String>()
 
     /** turn ที่ผู้ใช้เรียก custom tool / skill แบบ chain — ขั้นตอนของ skill กำหนด TF เอง จึงไม่ให้ profile guard ไปขวาง */
     private var skillChainTurnKey: String = ""
@@ -126,7 +128,10 @@ class LiveToolBridge(
     private suspend fun deliverCancelledResult(event: LiveToolCallEvent, result: String) {
         val (origin, latest) = runningCallsMutex.withLock { callOrigins[event.callId] to latestCallByTool[event.name] }
         val superseded = latest != null && latest.first != event.callId && latest.second == event.args
-        if (origin == null || superseded || event.name in uiOnlyTools || result.startsWith("PROFILE_GUARD")) {
+        // guard ของ call ที่ส่งต่อให้ลูกน้องต้องรายงาน (หัวหน้าตอบรับไปแล้ว ถ้าทิ้งจะเงียบหาย) — ของ call ที่ถูกยกเลิกทิ้งได้
+        val delegated = runningCallsMutex.withLock { event.callId in delegatedCallIds }
+        val droppableGuard = result.startsWith("PROFILE_GUARD") && !delegated
+        if (origin == null || superseded || event.name in uiOnlyTools || droppableGuard) {
             logDebug("LiveBridge", "🚫 ไม่ส่งผล ${event.name} callId=${event.callId} — ถูกยกเลิก (superseded=$superseded)")
             return
         }
@@ -136,7 +141,9 @@ class LiveToolBridge(
     private suspend fun respond(event: LiveToolCallEvent, result: String, deliverIfStale: Boolean = false) {
         // tool บางตัวจับ CancellationException ไว้เองแล้วคืน error ปกติ — ถ้าไม่เช็คตรงนี้เราจะส่งผล
         // ของ call ที่ server ยกเลิกไปแล้ว (เคสจริง 2026-09-16: SMC analysis ถูกยกเลิกแต่ยังส่ง response)
-        if (isCancelled(event.callId)) {
+        // งานของลูกน้อง (ตอบรับไปแล้ว) หรือ call ที่ server ยกเลิก → ผลเข้าคิวรายงาน
+        val delegated = runningCallsMutex.withLock { event.callId in delegatedCallIds }
+        if (delegated || isCancelled(event.callId)) {
             deliverCancelledResult(event, result)
             return
         }
@@ -960,6 +967,41 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                     runningCallsMutex.withLock {
                         callOrigins[event.callId] = CallOrigin(liveService.userTurnSerial, liveService.lastUserText)
                         latestCallByTool[event.name] = event.callId to event.args
+                    }
+                    // หัวหน้า (Live) ส่งต่องานให้ลูกน้อง: ตอบรับทันที ไม่มีช่วงให้ server ยกเลิก —
+                    // งานจริงรันเบื้องหลังผ่านเส้นทางเดิมทั้งหมด (guard, TF, การ์ดแชท) แล้วรายงานผลผ่านคิวตอนเงียบ
+                    val inSkillChain = skillChainTurnKey.isNotBlank() && skillChainTurnKey == "turn-${liveService.userTurnSerial}"
+                    if (LiveIntentMatchers.isDelegatedTool(event.name) && !inSkillChain) {
+                        runningCallsMutex.withLock { delegatedCallIds.add(event.callId) }
+                        liveService.sendNativeToolResponse(
+                            callId = event.callId,
+                            toolName = event.name,
+                            result = com.skyliner2008.jarvis.data.LiveProtocol.delegatedAck(event.name),
+                            sessionGeneration = event.sessionGeneration
+                        )
+                        logDebug("LiveBridge", "👷 ส่งต่อ ${event.name} ให้ผู้ช่วยทำเบื้องหลัง (${event.args})")
+                        launch(com.skyliner2008.jarvis.data.LiveToolCallContext()) {
+                            try {
+                                handleNativeToolCall(event, memoryContextProvider())
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                logError("LiveBridge", "Delegated tool ${event.name} failed", e)
+                                liveService.enqueuePendingToolResult(
+                                    liveService.lastUserText, event.name,
+                                    "ดึงข้อมูลไม่สำเร็จ: ${e.message} — บอกผู้ใช้ตรงๆ ห้ามเดาตัวเลข"
+                                )
+                            } finally {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                                    runningCallsMutex.withLock {
+                                        delegatedCallIds.remove(event.callId)
+                                        callOrigins.remove(event.callId)
+                                    }
+                                }
+                                _activeToolName.value = null
+                            }
+                        }
+                        return@collect
                     }
                     val job = launch(com.skyliner2008.jarvis.data.LiveToolCallContext(), start = kotlinx.coroutines.CoroutineStart.LAZY) {
                         try {

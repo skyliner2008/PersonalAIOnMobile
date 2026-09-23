@@ -650,6 +650,10 @@ class JarvisOrchestrator(
     /** ไมค์ในเครื่องได้ยินเสียงพูด — คิวคำถามค้างจะไม่ส่งข้อความแทรกตอนผู้ใช้กำลังพูด */
     fun noteLiveUserVoice() = liveService.noteLocalUserVoice()
 
+    /** รายงานผลงานเบื้องหลัง (agent task/backtest) ผ่านคิวของ Live — ส่งตอนเงียบจริง ไม่พูดทับผู้ใช้ */
+    fun enqueueLiveReport(title: String, speech: String) =
+        liveService.enqueuePendingToolResult(title, "งานเบื้องหลัง: $title", speech)
+
     /** เครื่องกำลังเล่นเสียง AI/TTS ออกลำโพง — คิวคำถามค้างจะรอจนเล่นจบ */
     fun setLiveLocalOutputActive(active: Boolean) = liveService.setLocalOutputActive(active)
 

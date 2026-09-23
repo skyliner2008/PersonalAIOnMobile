@@ -1691,10 +1691,12 @@ class LiveGeminiService(
         if (sent) {
             logDebug("LiveGemini", "✅ Tool response sent: $toolName callId=$callId → ${result.take(200)}")
             // จำไว้ — ถ้าเทิร์นนี้ถูกตัดก่อน AI ได้พูด ผลนี้ต้องเข้าคิวตอบทีหลัง (ส่งถึงโมเดลแล้วแต่คำตอบถูกทิ้ง)
-            val question = askedFor.ifBlank { lastUserText.trim() }
-            synchronized(toolResultsThisTurn) { toolResultsThisTurn.add(Triple(question, toolName, result)) }
             synchronized(inFlightToolCalls) { inFlightToolCalls.remove(callId) }
             lastConversationActivityAtMs = System.currentTimeMillis()
+            // ตอบรับงานที่ส่งต่อให้ลูกน้อง — ไม่ใช่ผลจริง ผลจริงมาทางคิวรายงานเมื่อลูกน้องทำเสร็จ
+            if (result.startsWith(LiveProtocol.DELEGATED_PREFIX)) return true
+            val question = askedFor.ifBlank { lastUserText.trim() }
+            synchronized(toolResultsThisTurn) { toolResultsThisTurn.add(Triple(question, toolName, result)) }
             // กันค้าง: ส่งผลแล้วโมเดลเงียบ ไม่พูดและไม่จบเทิร์น (logcat 01:48: ราคาทองส่งผลแล้วเงียบจนปิด session)
             val sentAt = lastConversationActivityAtMs
             scope.launch {

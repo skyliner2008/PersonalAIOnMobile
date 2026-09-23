@@ -41,6 +41,16 @@ class LiveTimeframeGuardTest {
         assertTrue(LiveIntentMatchers.allowedTradingTimeframe(fromSymbol, "วิเคราะห์ทอง"))
     }
 
+    /** หัวหน้า (Live) ส่งต่องานวิเคราะห์ให้ลูกน้อง — คำสั่งที่ต้องได้ผลทันที/ต้องยืนยันยังทำเอง */
+    @Test
+    fun `slow read-only analysis tools are delegated, fast or side-effect tools are not`() {
+        listOf("trading_deep_analysis_suite", "trading_macro_calendar", "trading_smc_analysis", "trading_sentiment")
+            .forEach { assertTrue(LiveIntentMatchers.isDelegatedTool(it), it) }
+        listOf("trading_price", "trading_mt5_order", "trading_mt5_close_all", "trading_backtest", "device_open_app", "agent_task_start")
+            .forEach { assertFalse(LiveIntentMatchers.isDelegatedTool(it), it) }
+        assertTrue(LiveProtocol.delegatedAck("trading_macro_calendar").startsWith(LiveProtocol.DELEGATED_PREFIX))
+    }
+
     @Test
     fun `VAD waits for the user to really finish before ending the turn`() {
         val vad = com.skyliner2008.jarvis.data.LiveRealtimeInputConfig.default().automaticActivityDetection!!

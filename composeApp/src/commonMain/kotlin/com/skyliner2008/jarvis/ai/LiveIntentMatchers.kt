@@ -44,6 +44,24 @@ object LiveIntentMatchers {
         "trading_smc_analysis"
     )
 
+    /**
+     * tool ที่ Live (หัวหน้า) ส่งต่อให้ลูกน้องทำเบื้องหลัง: ตอบรับทันที → รันจริงเบื้องหลัง → รายงานผลตอนเงียบ
+     * อ่านข้อมูล/วิเคราะห์อย่างเดียว และอาจใช้เวลาเกินครึ่งวินาที — รอผลในเทิร์นเดียวกันทำให้ผู้ใช้พูดแทรกแล้ว
+     * server ยกเลิก call หรือทิ้งคำตอบ (logcat 2026-09-24 00:26–02:07: ถามรัวได้คำตอบแค่ข้อสุดท้าย)
+     * ไม่รวม: trading_price (เร็ว), คำสั่ง MT5 (ต้องยืนยัน), backtest (มีงานยาวของตัวเอง), alert/automation
+     */
+    private val DELEGATED_TOOLS = setOf(
+        "trading_deep_analysis_suite", "trading_technical_analysis", "trading_multi_timeframe",
+        "trading_smc_analysis", "trading_smc_flow", "trading_smc_liquidity", "trading_smc_orderblocks",
+        "trading_smc_structure", "trading_smc_sweeps", "trading_elliot_modern_analysis", "trading_harmonic_scan",
+        "trading_macro_calendar", "trading_economic_data", "trading_news", "trading_sentiment", "trading_fear_greed",
+        "trading_fundamental_analysis", "trading_market_snapshot", "trading_crypto_overview", "trading_combined",
+        "trading_correlation_matrix", "trading_strategy_signal", "trading_top_gainers", "trading_top_losers",
+        "trading_volume_breakout", "trading_bollinger_scan", "trading_overbought_scan", "trading_oversold_scan"
+    )
+
+    fun isDelegatedTool(name: String): Boolean = name in DELEGATED_TOOLS
+
     private val DEFAULT_TIMEFRAMES = setOf("15m", "m15", "1h", "h1", "4h", "h4")
     private val HIGHER_TIMEFRAMES = setOf("1d", "d1", "d", "1w", "w1", "w")
 
