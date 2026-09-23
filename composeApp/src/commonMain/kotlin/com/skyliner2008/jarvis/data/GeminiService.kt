@@ -1148,6 +1148,10 @@ class GeminiService(
                     if (switchModel()) continue
                 }
                 return "⚠️ Error $code"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // ผู้เรียกยกเลิก (server ยกเลิก tool call เพราะผู้ใช้พูดแทรก / withTimeout ของ tool enrichment) — ไม่ใช่โมเดลล่ม
+                // เดิมถูกจับเป็น Exception แล้วสลับโมเดลไล่ทั้ง chain ทั้งที่งานถูกยกเลิกไปแล้ว (logcat 2026-09-24 00:43)
+                throw e
             } catch (e: Exception) {
                 logError("GeminiService", "Generate response failed (model=$modelName, timeout=${timeout}ms)", e)
                 // Interactive/chat paths may retry once with a longer timeout. Alert paths must

@@ -1,3 +1,13 @@
+## 2026-09-24 — แก้: GeminiService ถือว่าการยกเลิกงานคือโมเดลล่ม แล้วสลับโมเดลไล่ทั้ง chain
+- **จาก logcat 00:43**: ถามปฏิทินเศรษฐกิจ → มีเสียงแทรก (`Interrupted (VAD/user)`) → server ยกเลิก tool call (ปกติของ Live API)
+  → `LiveToolBridge` cancel งาน → `GeminiService.generateResponse` จับ `CancellationException` ด้วย `catch (e: Exception)`
+  log stack trace ยาว แล้ว**สลับโมเดลถัดไป**ต่อทั้งที่งานถูกยกเลิกแล้ว (และทำให้โมเดลของ instance ถูกเปลี่ยนค้างไว้)
+- **ผลกระทบซ่อน**: ตัวจำกัดเวลา `generateToolEnrichment` (10 วิ) ที่เพิ่งเพิ่มก็ไม่ทำงานจริง — พอหมดเวลา loop กลืนการยกเลิกแล้ววนลองโมเดลอื่น
+  และคืนข้อความ "⚠️ Error…" ไปใส่ในผล tool แทนข้อความสำรอง
+- **แก้**: `catch (e: CancellationException) { throw e }` ก่อน catch-all ใน `generateResponse`
+  (ตรวจแล้ว `HttpRequestTimeoutException` ของ Ktor 3.1.1 เป็น `IOException` — fallback ตอน timeout จริงยังทำงานเหมือนเดิม)
+- **Verify**: เทสต์ 521 ผ่าน ข้าม 5; ติดตั้งบน SM-S908E แล้ว เปิดแอปได้ ไม่มี crash
+
 ## 2026-09-24 — Live "รวนไปหมด": guard บล็อก 5m, tool ค้าง 38 วิ, AI ตอบคำถามเก่าซ้ำ, หุ้นไทยได้แต่ DR
 - **User Request**: "ทำไมมันรวนไปหมดเลย" (logcat 00:26–00:29) — ไม่ใช่ปัญหาเดียว แต่ 4 ปัญหาต่อกัน
 - **1. "วิเคราะห์ BTC 5 มิติ" → "ดึงข้อมูลไม่สำเร็จ"**: โมเดลเลือก `interval=5m` เอง → `PROFILE_GUARD` บล็อกทั้งคำขอด้วยข้อความเรื่อง D1
