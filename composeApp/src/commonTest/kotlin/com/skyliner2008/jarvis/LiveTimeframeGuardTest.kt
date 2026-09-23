@@ -48,7 +48,11 @@ class LiveTimeframeGuardTest {
             .forEach { assertTrue(LiveIntentMatchers.isDelegatedTool(it), it) }
         listOf("trading_price", "trading_mt5_order", "trading_mt5_close_all", "trading_backtest", "device_open_app", "agent_task_start")
             .forEach { assertFalse(LiveIntentMatchers.isDelegatedTool(it), it) }
-        assertTrue(LiveProtocol.delegatedAck("trading_macro_calendar").startsWith(LiveProtocol.DELEGATED_PREFIX))
+        val ack = LiveProtocol.delegatedAck("trading_macro_calendar")
+        assertTrue(ack.startsWith(LiveProtocol.DELEGATED_PREFIX))
+        // ประโยครับงานถูกกำหนดชัด ไม่ปล่อยให้โมเดลหยิบประโยคทักทายมาใช้ (logcat 03:45:09, 03:46:25)
+        assertTrue(ack.contains(LiveProtocol.DELEGATED_ACK_SENTENCE))
+        assertTrue(ack.contains("ห้ามทักทาย"))
     }
 
     @Test
