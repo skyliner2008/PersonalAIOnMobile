@@ -1020,6 +1020,23 @@ class GeminiService(
         }
     }
 
+    /**
+     * เรียกเสริมจากภายใน tool (สรุป/วิเคราะห์ประกอบผล) — จำกัดเวลารวมทั้ง fallback chain
+     * เดิมแต่ละโมเดลใน chain ได้ timeout ของตัวเอง tool ที่ Live รออยู่จึงค้าง 38 วิ
+     * (503 → timeout → 503 → 404 → timeout, logcat 2026-09-24 00:28 trading_macro_calendar)
+     * เกินเวลา → throw [ToolEnrichmentTimeoutException] ให้ catch เดิมของผู้เรียกใช้ข้อความสำรอง
+     */
+    suspend fun generateToolEnrichment(
+        prompt: String,
+        intentAddon: String = "",
+        overallTimeoutMs: Long = 10_000
+    ): String = kotlinx.coroutines.withTimeoutOrNull(overallTimeoutMs) {
+        generateResponse(prompt = prompt, intentAddon = intentAddon, timeoutMs = overallTimeoutMs, retryLongerOnTimeout = false)
+    } ?: run {
+        logDebug("GeminiService", "⏱️ tool enrichment เกิน ${overallTimeoutMs}ms — ข้ามการวิเคราะห์เสริม")
+        throw ToolEnrichmentTimeoutException(overallTimeoutMs)
+    }
+
     suspend fun generateResponse(
         prompt: String,
         history: List<ConversationTurn> = emptyList(),
@@ -1244,3 +1261,5 @@ class GeminiService(
         }
     }
 }
+
+class ToolEnrichmentTimeoutException(val timeoutMs: Long) : Exception("tool enrichment exceeded ${timeoutMs}ms")

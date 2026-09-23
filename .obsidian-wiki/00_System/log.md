@@ -1,3 +1,20 @@
+## 2026-09-24 — Live "รวนไปหมด": guard บล็อก 5m, tool ค้าง 38 วิ, AI ตอบคำถามเก่าซ้ำ, หุ้นไทยได้แต่ DR
+- **User Request**: "ทำไมมันรวนไปหมดเลย" (logcat 00:26–00:29) — ไม่ใช่ปัญหาเดียว แต่ 4 ปัญหาต่อกัน
+- **1. "วิเคราะห์ BTC 5 มิติ" → "ดึงข้อมูลไม่สำเร็จ"**: โมเดลเลือก `interval=5m` เอง → `PROFILE_GUARD` บล็อกทั้งคำขอด้วยข้อความเรื่อง D1
+  (ไม่ตรงเหตุการณ์) และเดิมบล็อก M5 แม้ผู้ใช้ขอเอง
+  → `LiveToolBridge`: TF ที่ผู้ใช้ไม่ได้ขอ **เปลี่ยนเป็น 15m แล้วรันต่อ** (`LiveIntentMatchers.withDefaultTimeframe`);
+  TF นาที (M1/M5/M30) อนุญาตเมื่อผู้ใช้พูดถึงเอง ("M5", "5m", "5 นาที")
+- **2. ปฏิทินเศรษฐกิจค้าง 38 วิ**: `trading_macro_calendar` ดึง ForexFactory เสร็จเร็ว แต่เรียก Gemini ข้อความอีกตัวเขียน "AI Strategic Preview"
+  — 503 → timeout 12 วิ → 503 → 404 → timeout ไล่ทั้ง fallback chain
+  → `GeminiService.generateToolEnrichment` จำกัดเวลารวม 10 วิ (ครอบทั้ง chain) เกินแล้ว throw `ToolEnrichmentTimeoutException`
+  ให้ catch เดิมใช้ข้อความสำรอง — ใช้กับทุก tool ที่เรียก LLM เสริม (6 จุด: sentiment, news, calendar, fundamental ×2, sector matching)
+- **3. ถามปฏิทินเศรษฐกิจ แต่ AI ไปเรียก market_snapshot TH แล้วพูดคำตอบเรื่อง SET ของ session ก่อนเกือบคำต่อคำ**:
+  ประวัติใน system instruction มีแค่หัวข้อ "Recent Conversation History:" → `LiveProtocol.HISTORY_HEADER` ระบุว่าเป็นเรื่องที่ตอบไปแล้ว
+  ใช้เป็นบริบทเท่านั้น ห้ามตอบ/เรียก tool ให้คำถามเก่าซ้ำ
+- **4. "SET สัปดาห์นี้" ได้แต่ DR ของหุ้นสหรัฐ (NVDA80, AAPL80…)**: scanner เรียงตาม market cap และ DR ได้ market cap ของบริษัทแม่
+  → กรอง `type = stock` (ทดสอบกับ TradingView scanner จริงแล้ว: ได้ DELTA, PTT, ADVANC, GULF, AOT…)
+- **Verify**: เทสต์ `LiveTimeframeGuardTest` 4 เคส — รวม 521 ผ่าน ข้าม 5; ติดตั้งบน SM-S908E แล้ว เปิดแอปได้ ไม่มี crash; ยังไม่ได้ทดสอบด้วยเสียง
+
 ## 2026-09-23 — แชทไม่แสดงคำพูดสดของ AI (รวมหลังเปิดแอปใหม่) + AI ตอบเรื่อง MT5 แทนผล SMC
 - **User Request**: "ระหว่าง Live แชทมีแต่ผลวิเคราะห์ ไม่มีคำพูด AI แต่ปิดแล้วเปิดแอปใหม่ คำพูด AI ทุกประโยคขึ้นมา" → "ไม่ต้องการให้คำพูดของ AI แสดงในแชท"
 - **ต้นเหตุ**: 2 จุดใช้กติกาไม่ตรงกัน — ระหว่าง Live `VoiceController` แสดงเฉพาะ `isStatic` (เพิ่มใน multi-session `b1b013d`)

@@ -875,7 +875,7 @@ class LiveGeminiService(
                                         LivePart(text = LIVE_SYSTEM_PROMPT),
                                         LivePart(text = "[STRICT RULE] เมื่อต้องระบุรายชื่อหุ้นหรือข้อมูลตลาด คุณต้องเรียกใช้เครื่องมือที่เกี่ยวข้องเสมอ ห้ามตอบจากความจำเด็ดขาด"),
                                         LivePart(text = if (coreContext.isNotBlank()) "Core Memory Context:\n$coreContext" else ""),
-                                        LivePart(text = if (effectiveHistory.isNotBlank()) "Recent Conversation History:\n$effectiveHistory" else "")
+                                        LivePart(text = if (effectiveHistory.isNotBlank()) LiveProtocol.HISTORY_HEADER + effectiveHistory else "")
                                     ).filter { it.text?.isNotBlank() == true }
                                 }
                             ),

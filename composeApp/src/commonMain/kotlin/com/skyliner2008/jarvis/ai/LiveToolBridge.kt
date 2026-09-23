@@ -460,6 +460,12 @@ class LiveToolBridge(
         }
 
         val inSkillChain = turnKey.isNotBlank() && turnKey == skillChainTurnKey
+        if (isTradingAnalysisTool(event.name) && !inSkillChain &&
+            !LiveIntentMatchers.allowedTradingTimeframe(event.args, userPrompt)) {
+            val fixed = LiveIntentMatchers.withDefaultTimeframe(event.args)
+            logDebug("LiveBridge", "🔧 ${event.name}: TF ที่ผู้ใช้ไม่ได้ขอ (${event.args}) → ใช้ 15m แทน")
+            return handleNativeToolCall(event.copy(args = fixed), memoryContext)
+        }
         if (isTradingAnalysisTool(event.name) && !inSkillChain) {
             val profile = tradingProfileFor(userPrompt)
             if (!LiveIntentMatchers.profileToolAllowed(userPrompt, event.name, event.args)) {

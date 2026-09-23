@@ -290,7 +290,7 @@ class TradingApiService(private val client: HttpClient) {
         """.trimIndent()
 
         return try {
-            val response = geminiService.generateResponse(
+            val response = geminiService.generateToolEnrichment(
                 prompt = prompt,
                 intentAddon = """
                     You are a specialized financial sector mapper for TradingView Scanner.
@@ -363,6 +363,13 @@ class TradingApiService(private val client: HttpClient) {
                 put("left", "exchange")
                 put("operation", "in_range")
                 put("right", buildJsonArray { add("SET"); add("MAI") })
+            })
+            // ตัด DR (NVDA80, AAPL80 …) — scanner ให้ market cap ของบริษัทแม่ จึงครองอันดับต้นทั้งหมดเมื่อเรียงตาม market cap
+            // (logcat 2026-09-24 00:26: ถาม "SET สัปดาห์นี้" ได้แต่ DR ของหุ้นสหรัฐ)
+            filters.add(buildJsonObject {
+                put("left", "type")
+                put("operation", "equal")
+                put("right", "stock")
             })
         } else {
             filters.add(buildJsonObject {

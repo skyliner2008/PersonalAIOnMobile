@@ -60,15 +60,40 @@ object LiveIntentMatchers {
      * (เดิมบล็อก D1 ทุกกรณี ทั้งที่ข้อความ guard บอกว่า "เว้นแต่ผู้ใช้ระบุเอง")
      */
     fun allowedTradingTimeframe(args: Map<String, String>, prompt: String = ""): Boolean {
-        // โมเดลส่ง timeframe มาได้หลายชื่อ: "XAUUSD@m15", timeframe=..., interval=... (เคสจริงจาก log)
-        val raw = args["symbol"] ?: ""
-        val tf = raw.substringAfter("@", "").lowercase()
+        val tf = requestedTimeframe(args)
+        if (tf in DEFAULT_TIMEFRAMES) return true
+        if (tf in HIGHER_TIMEFRAMES) return userRequestsHigherTimeframe(prompt)
+        // TF เล็ก (M1/M5/M30) — อนุญาตเมื่อผู้ใช้พูดถึงเอง (เดิมบล็อกแม้ผู้ใช้ขอ "M5")
+        return userMentionsMinuteTimeframe(prompt, tf)
+    }
+
+    /** timeframe ที่โมเดลส่งมา — ได้หลายชื่อ: "XAUUSD@m15", timeframe=..., interval=... (เคสจริงจาก log) */
+    private fun requestedTimeframe(args: Map<String, String>): String =
+        (args["symbol"] ?: "").substringAfter("@", "").lowercase()
             .ifBlank { args["timeframe"]?.lowercase().orEmpty() }
             .ifBlank { args["interval"]?.lowercase().orEmpty() }
             .ifBlank { args["tf"]?.lowercase().orEmpty() }
             .ifBlank { "1h" }
-        if (tf in DEFAULT_TIMEFRAMES) return true
-        return tf in HIGHER_TIMEFRAMES && userRequestsHigherTimeframe(prompt)
+
+    /** ผู้ใช้พูดถึง TF นาทีนี้เอง เช่น "M5", "5m", "5 นาที" */
+    private fun userMentionsMinuteTimeframe(prompt: String, tf: String): Boolean {
+        val minutes = Regex("""\d+""").find(tf)?.value ?: return false
+        val p = prompt.lowercase()
+        val words = Regex("""[a-z0-9]+""").findAll(p).map { it.value }.toSet()
+        return "m$minutes" in words || "${minutes}m" in words ||
+            p.contains("$minutes นาที") || p.contains("${minutes}นาที")
+    }
+
+    /**
+     * แทน timeframe ที่ผู้ใช้ไม่ได้ขอด้วย 15m แล้วให้ tool ทำงานต่อ
+     * (เดิมบล็อกทั้งคำขอด้วยข้อความเรื่อง D1 — โมเดลเลือก 5m เองแล้วตอบผู้ใช้ว่า "ดึงข้อมูลไม่สำเร็จ", logcat 2026-09-24 00:26)
+     */
+    fun withDefaultTimeframe(args: Map<String, String>): Map<String, String> {
+        val out = args.toMutableMap()
+        args["symbol"]?.takeIf { it.contains("@") }?.let { out["symbol"] = it.substringBefore("@") }
+        val keys = listOf("interval", "timeframe", "tf").filter { it in args }
+        if (keys.isEmpty()) out["interval"] = "15m" else keys.forEach { out[it] = "15m" }
+        return out
     }
 
     fun profileToolAllowed(prompt: String, toolName: String, args: Map<String, String>): Boolean {

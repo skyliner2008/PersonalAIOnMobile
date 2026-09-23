@@ -77,6 +77,15 @@ object LiveProtocol {
     fun startsWithSessionGreeting(text: String): Boolean = stripSessionGreeting(text) != text.trim()
 
     /**
+     * หัวข้อของประวัติใน system instruction — เดิมเป็นแค่ "Recent Conversation History:"
+     * โมเดลจึงหยิบคำถามเก่ามาตอบซ้ำแทนคำถามใหม่ (logcat 2026-09-24 00:28: ถามปฏิทินเศรษฐกิจ
+     * → เรียก market_snapshot TH ซ้ำแล้วพูดคำตอบเรื่อง SET ของ session ก่อนเกือบคำต่อคำ)
+     */
+    const val HISTORY_HEADER =
+        "Recent Conversation History (บทสนทนาก่อนหน้า — ตอบไปแล้วทั้งหมด ใช้เป็นบริบทเท่านั้น " +
+            "ห้ามตอบหรือพูดคำตอบเหล่านี้ซ้ำ ห้ามเรียก tool ให้คำถามเก่าอีก ตอบเฉพาะสิ่งที่ผู้ใช้พูดในเซสชันนี้):\n"
+
+    /**
      * ประกอบ "Recent Conversation History" ที่ส่งตอนเปิด session
      * - ตัดคำทักทายเปิดเซสชันทั้งฝั่งระบบ ("สวัสดีจาวิส พร้อมคุยไหม") และที่ AI ตอบ
      * - จำกัดความยาวต่อข้อความ — คำตอบยาวๆ ไม่ควรกิน system instruction

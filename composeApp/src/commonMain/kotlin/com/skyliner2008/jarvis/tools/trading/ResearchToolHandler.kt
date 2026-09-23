@@ -502,7 +502,7 @@ internal class ResearchToolHandler(
                 """.trimIndent()
 
                 val aiText = runCatching {
-                    geminiService.generateResponse(
+                    geminiService.generateToolEnrichment(
                         prompt = fallbackPrompt,
                         intentAddon = "You are a senior equity research analyst."
                     )
@@ -601,7 +601,7 @@ internal class ResearchToolHandler(
             """.trimIndent()
 
             val aiAnalysis = try {
-                geminiService.generateResponse(
+                geminiService.generateToolEnrichment(
                     prompt = prompt,
                     intentAddon = "You are a professional equity research analyst. Deliver deep, data-driven financial insights with clear markdown formatting."
                 )
