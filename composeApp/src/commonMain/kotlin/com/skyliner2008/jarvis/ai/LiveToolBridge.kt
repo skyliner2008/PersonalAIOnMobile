@@ -84,6 +84,8 @@ class LiveToolBridge(
     private val latestCallByTool = mutableMapOf<String, Pair<String, Map<String, String>>>()
     /** call ที่ตอบรับไปแล้วและส่งต่อให้ลูกน้องทำ — ผลจริงเข้าคิวรายงาน ไม่ส่งเป็น toolResponse */
     private val delegatedCallIds = mutableSetOf<String>()
+    /** กันเรียก tool เดิมด้วยค่าเดิมวนซ้ำในเทิร์นเดียวกัน (ใช้ภายใต้ runningCallsMutex) */
+    private val duplicateGuard = DuplicateCallGuard()
 
     /** turn ที่ผู้ใช้เรียก custom tool / skill แบบ chain — ขั้นตอนของ skill กำหนด TF เอง จึงไม่ให้ profile guard ไปขวาง */
     private var skillChainTurnKey: String = ""
@@ -147,6 +149,7 @@ class LiveToolBridge(
             deliverCancelledResult(event, result)
             return
         }
+        runningCallsMutex.withLock { duplicateGuard.recordResult(event.callId, result) }
         val sent = liveService.sendNativeToolResponse(
             callId = event.callId,
             toolName = event.name,
@@ -964,8 +967,22 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
             // และต้องยกเลิกได้เมื่อ server ส่ง toolCallCancellation
             launch {
                 liveService.nativeToolCallFlow.collect { event ->
+                    // กันโมเดลวนเรียก tool เดิมด้วยค่าเดิมในเทิร์นเดียวกัน — ตอบผลเดิม ไม่รันใหม่
+                    val turn = liveService.userTurnSerial
+                    val dup = runningCallsMutex.withLock {
+                        duplicateGuard.check(event.callId, event.name, event.args, turn, System.currentTimeMillis())
+                    }
+                    if (dup !is DuplicateCallGuard.Decision.Run) {
+                        val reply = when (dup) {
+                            is DuplicateCallGuard.Decision.Repeat -> DuplicateCallGuard.repeatNote(event.name, dup.previousResult)
+                            else -> DuplicateCallGuard.stillRunningNote(event.name)
+                        }
+                        logDebug("LiveBridge", "🔁 ${event.name} ถูกเรียกซ้ำด้วยค่าเดิมในเทิร์นเดียวกัน — ไม่รันใหม่ (${event.args})")
+                        liveService.sendNativeToolResponse(event.callId, event.name, reply, event.sessionGeneration)
+                        return@collect
+                    }
                     runningCallsMutex.withLock {
-                        callOrigins[event.callId] = CallOrigin(liveService.userTurnSerial, liveService.lastUserText)
+                        callOrigins[event.callId] = CallOrigin(turn, liveService.lastUserText)
                         latestCallByTool[event.name] = event.callId to event.args
                     }
                     // หัวหน้า (Live) ส่งต่องานให้ลูกน้อง: ตอบรับทันที ไม่มีช่วงให้ server ยกเลิก —

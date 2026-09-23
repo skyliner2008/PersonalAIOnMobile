@@ -584,7 +584,9 @@ class LiveGeminiService(
             !localOutputActive && now - localOutputEndedAtMs >= 1_000 &&
             serverQuietMs >= 1_500 &&
             // ไมค์ในเครื่องยังได้ยินเสียง = ผู้ใช้อาจกำลังพูด; เสียงรอบข้างดังตลอดได้ จึงยอมถ้า server เงียบนานแล้ว
-            (localQuietMs >= 1_000 || serverQuietMs >= 6_000) &&
+            // 2.5 วิ: ผู้ใช้หยุดพูดแล้ว server ยังรอเงียบ 1.2 วิ (silenceDurationMs) ก่อนปิดเทิร์นและส่ง transcript
+            // — ส่งในช่องนี้ชนคำถามที่กำลังจะเข้ามา (logcat 03:32:57: ไมค์เงียบ 1633ms แต่ transcript มาถึง 22ms ต่อมา)
+            (localQuietMs >= 2_500 || serverQuietMs >= 6_000) &&
             pendingUserTurnText == null && pendingModelTurnText == null && pendingModelTextParts == null &&
             synchronized(inFlightToolCalls) { inFlightToolCalls.values.none { now - it < 30_000L } }
     }
