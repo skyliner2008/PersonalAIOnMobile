@@ -2,16 +2,17 @@ package com.skyliner2008.jarvis.ui.component.avatar
 
 import androidx.compose.animation.core.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.runtime.State
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.*
@@ -46,47 +47,6 @@ val NeonGrey = Color(0xFF90A4AE)
 // ─── 1. Reusable 2-Layer Neon Drawing Functions ──────────────────────────────
 
 /**
- * วาด RoundRect สไตล์ Neon 2 ชั้น (Glow layer + Core layer)
- */
-fun DrawScope.drawNeonRoundRect(
-    color: Color,
-    topLeft: Offset,
-    size: Size,
-    cornerRadius: CornerRadius,
-    glowRadiusDp: Dp = 10.dp,
-    glowAlpha: Float = 0.5f,
-    alpha: Float = 1f
-) {
-    val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
-    if (effAlpha <= 0.005f || size.width <= 0f || size.height <= 0f) return
-    val glowPad = glowRadiusDp.toPx()
-    val glowColor = color.copy(alpha = (glowAlpha * effAlpha).coerceIn(0f, 1f))
-
-    // 1. Glow Layer: Outer diffuse halo + main glow (~15-20% larger than core)
-    val outerPad = glowPad * 1.4f
-    drawRoundRect(
-        color = glowColor.copy(alpha = glowColor.alpha * 0.35f),
-        topLeft = Offset(topLeft.x - outerPad, topLeft.y - outerPad),
-        size = Size(size.width + outerPad * 2f, size.height + outerPad * 2f),
-        cornerRadius = CornerRadius(cornerRadius.x + outerPad, cornerRadius.y + outerPad)
-    )
-    drawRoundRect(
-        color = glowColor,
-        topLeft = Offset(topLeft.x - glowPad, topLeft.y - glowPad),
-        size = Size(size.width + glowPad * 2f, size.height + glowPad * 2f),
-        cornerRadius = CornerRadius(cornerRadius.x + glowPad, cornerRadius.y + glowPad)
-    )
-
-    // 2. Core Layer: Crisp solid fill (no gradient, solid neon)
-    drawRoundRect(
-        color = color.copy(alpha = 0.98f * effAlpha),
-        topLeft = topLeft,
-        size = size,
-        cornerRadius = cornerRadius
-    )
-}
-
-/**
  * Soft OLED bloom halo (radial falloff) behind a glowing eye — matches the diffuse
  * neon glow of the LOOI 40 Moodset sheet, instead of hard concentric stroke rings.
  * @param spread how far the halo extends beyond the shape, as a fraction of its radius
@@ -103,23 +63,51 @@ fun DrawScope.drawSoftBloom(
     if (effAlpha <= 0.005f || size.width <= 0f || size.height <= 0f) return
     val baseR = maxOf(size.width, size.height) / 2f
     val haloR = baseR * (1f + spread)
-    val coreStop = (baseR / haloR).coerceIn(0.05f, 0.95f)
-    val opaque = color.copy(alpha = 1f)
-    val brush = Brush.radialGradient(
-        colorStops = arrayOf(
-            0f to opaque.copy(alpha = effAlpha),
-            coreStop to opaque.copy(alpha = effAlpha * 0.55f),
-            (coreStop + (1f - coreStop) * 0.35f) to opaque.copy(alpha = effAlpha * 0.14f),
-            1f to Color.Transparent
-        ),
-        center = center,
-        radius = haloR
-    )
-    // squashed (blinking) eyes get a squashed halo so the glow hugs the shape
-    val sx = size.width / (baseR * 2f)
-    val sy = size.height / (baseR * 2f)
-    scale(scaleX = sx.coerceAtLeast(0.3f), scaleY = sy.coerceAtLeast(0.3f), pivot = center) {
-        drawCircle(brush = brush, radius = haloR, center = center)
+    val brush = BloomBrushCache.get(color, effAlpha, spread)
+    // The cached brush is drawn at a fixed reference radius around the origin and moved/scaled
+    // into place, so the same brush (and its shader) is reused every frame.
+    // Squashed (blinking) eyes get a squashed halo so the glow hugs the shape.
+    val k = haloR / BloomBrushCache.REF_RADIUS
+    val sx = (size.width / (baseR * 2f)).coerceAtLeast(0.3f) * k
+    val sy = (size.height / (baseR * 2f)).coerceAtLeast(0.3f) * k
+    translate(center.x, center.y) {
+        scale(scaleX = sx, scaleY = sy, pivot = Offset.Zero) {
+            drawCircle(brush = brush, radius = BloomBrushCache.REF_RADIUS, center = Offset.Zero)
+        }
+    }
+}
+
+/**
+ * Small cache of bloom gradients keyed by (colour, alpha, spread). Alpha is quantised to 1/64
+ * so a fading eye reuses a handful of brushes instead of allocating a new one each frame.
+ */
+private object BloomBrushCache {
+    const val REF_RADIUS = 100f
+    private const val MAX_ENTRIES = 48
+    private val cache = LinkedHashMap<Long, Brush>(MAX_ENTRIES, 0.75f, true)
+
+    fun get(color: Color, effAlpha: Float, spread: Float): Brush {
+        val alphaStep = (effAlpha * 64f).roundToInt().coerceIn(1, 64)
+        val spreadStep = (spread * 100f).roundToInt().coerceIn(0, 255)
+        // sRGB Color packs ARGB in the upper 32 bits, so the lower bits are free for the rest of the key
+        val key = color.copy(alpha = 1f).value.toLong() xor (alphaStep.toLong() shl 8) xor spreadStep.toLong()
+        cache[key]?.let { return it }
+        val a = alphaStep / 64f
+        val coreStop = (1f / (1f + spread)).coerceIn(0.05f, 0.95f)
+        val opaque = color.copy(alpha = 1f)
+        val brush = Brush.radialGradient(
+            colorStops = arrayOf(
+                0f to opaque.copy(alpha = a),
+                coreStop to opaque.copy(alpha = a * 0.55f),
+                (coreStop + (1f - coreStop) * 0.35f) to opaque.copy(alpha = a * 0.14f),
+                1f to Color.Transparent
+            ),
+            center = Offset.Zero,
+            radius = REF_RADIUS
+        )
+        if (cache.size >= MAX_ENTRIES) cache.remove(cache.keys.first())
+        cache[key] = brush
+        return brush
     }
 }
 
@@ -134,9 +122,9 @@ fun getEyeDeepShadowColor(baseColor: Color): Color {
 
     return when {
         // Cyan / Sky Blue (Default / Happy / Reading) -> Deep Teal lower rim (LOOI 40 Moodset sheet #0A5C6B)
-        b > 0.7f && g > 0.6f && r < 0.4f -> Color(0xFF0A5C6B)
+        b > 0.7f && g > 0.6f && r < 0.4f -> EyeMetrics.SHADOW_CYAN
         // Red / Crimson (Angry / Enraged / Evil) -> Deep Burgundy / Dark Maroon
-        r > 0.7f && g < 0.4f && b < 0.5f -> Color(0xFF42000E)
+        r > 0.7f && g < 0.4f && b < 0.5f -> EyeMetrics.SHADOW_RED
         // Pink (Love / Romantic / Shy) -> Deep Plum / Violet
         r > 0.7f && b > 0.4f && g < 0.5f -> Color(0xFF450624)
         // Yellow / Gold (Excited / Star) -> Deep Amber Bronze
@@ -146,101 +134,6 @@ fun getEyeDeepShadowColor(baseColor: Color): Color {
         // Grey / Blue-Grey (Bored / Sleepy) -> Deep Slate
         else -> Color(0xFF141E28)
     }
-}
-
-/**
- * คำนวณสีไฮไลท์อ่อน (Top-Left Highlight Tint) สำหรับดวงตา
- */
-fun getEyeHighlightColor(baseColor: Color): Color {
-    return Color(
-        red = (baseColor.red * 0.45f + 0.55f).coerceIn(0f, 1f),
-        green = (baseColor.green * 0.45f + 0.55f).coerceIn(0f, 1f),
-        blue = (baseColor.blue * 0.45f + 0.55f).coerceIn(0f, 1f),
-        alpha = baseColor.alpha
-    )
-}
-
-/**
- * วาดดวงตา RoundRect สไตล์ LOOI 2.5D (Glow Layer + 2.5D Spherical Gradient Core + Crescent Shadow + Specular Glint)
- */
-fun DrawScope.drawNeonEyeRoundRect(
-    color: Color,
-    topLeft: Offset,
-    size: Size,
-    cornerRadius: CornerRadius,
-    glowRadiusDp: Dp = 10.dp,
-    glowAlpha: Float = 0.52f,
-    alpha: Float = 1f
-) {
-    val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
-    if (effAlpha <= 0.005f || size.width <= 0f || size.height <= 0f) return
-    val glowPad = glowRadiusDp.toPx()
-    val glowColor = color.copy(alpha = (glowAlpha * effAlpha).coerceIn(0f, 1f))
-
-    // 1. Glow Layer: Outer diffuse halo + main glow (~15-20% larger than core)
-    val outerPad = glowPad * 1.4f
-    drawRoundRect(
-        color = glowColor.copy(alpha = glowColor.alpha * 0.35f),
-        topLeft = Offset(topLeft.x - outerPad, topLeft.y - outerPad),
-        size = Size(size.width + outerPad * 2f, size.height + outerPad * 2f),
-        cornerRadius = CornerRadius(cornerRadius.x + outerPad, cornerRadius.y + outerPad)
-    )
-    drawRoundRect(
-        color = glowColor,
-        topLeft = Offset(topLeft.x - glowPad, topLeft.y - glowPad),
-        size = Size(size.width + glowPad * 2f, size.height + glowPad * 2f),
-        cornerRadius = CornerRadius(cornerRadius.x + glowPad, cornerRadius.y + glowPad)
-    )
-
-    // 2. Core Layer with 2.5D Spherical Gradient (Light Top-Left -> Base Color -> Deep Shadow Bottom-Right)
-    val highlightColor = getEyeHighlightColor(color)
-    val deepShadowColor = getEyeDeepShadowColor(color)
-    val lightCenter = Offset(topLeft.x + size.width * 0.32f, topLeft.y + size.height * 0.28f)
-    val maxDim = maxOf(size.width, size.height)
-
-    val coreBrush = Brush.radialGradient(
-        colorStops = arrayOf(
-            0.00f to highlightColor.copy(alpha = 0.98f * effAlpha),
-            0.35f to color.copy(alpha = 0.98f * effAlpha),
-            0.70f to color.copy(alpha = 0.98f * effAlpha),
-            1.00f to deepShadowColor.copy(alpha = 0.98f * effAlpha)
-        ),
-        center = lightCenter,
-        radius = maxDim * 0.88f
-    )
-    drawRoundRect(
-        brush = coreBrush,
-        topLeft = topLeft,
-        size = size,
-        cornerRadius = cornerRadius
-    )
-
-    // 3. Crescent Shadow Arc on Bottom-Right (Deep indigo crescent as seen in LOOI product photo)
-    val crescentBrush = Brush.verticalGradient(
-        colorStops = arrayOf(
-            0.0f to Color.Transparent,
-            0.65f to Color.Transparent,
-            1.0f to deepShadowColor.copy(alpha = 0.70f * effAlpha)
-        ),
-        startY = topLeft.y,
-        endY = topLeft.y + size.height
-    )
-    drawRoundRect(
-        brush = crescentBrush,
-        topLeft = topLeft,
-        size = size,
-        cornerRadius = cornerRadius
-    )
-
-    // 4. Subtle Specular Highlight Glint at Top-Left
-    val specW = size.width * 0.26f
-    val specH = size.height * 0.16f
-    val specTopLeft = Offset(topLeft.x + size.width * 0.18f, topLeft.y + size.height * 0.14f)
-    drawOval(
-        color = Color.White.copy(alpha = 0.22f * effAlpha),
-        topLeft = specTopLeft,
-        size = Size(specW, specH)
-    )
 }
 
 /**
@@ -455,7 +348,7 @@ fun DrawScope.drawNeonHeart(
     val effColor = color.copy(alpha = effAlpha)
     val glowColor = effColor.copy(alpha = 0.5f * effAlpha)
 
-    fun createHeartPath(scale: Float): Path = Path().apply {
+    fun createHeartPath(scale: Float): Path = EyePaths.obtain().apply {
         val w = size * scale
         val h = size * 0.95f * scale
         moveTo(centerX, centerY + h * 0.38f)
@@ -500,7 +393,7 @@ fun DrawScope.drawNeonTeardrop(
     val effColor = color.copy(alpha = effAlpha)
     val glowColor = effColor.copy(alpha = 0.5f * effAlpha)
 
-    fun createDropPath(scale: Float): Path = Path().apply {
+    fun createDropPath(scale: Float): Path = EyePaths.obtain().apply {
         val s = size * scale
         moveTo(centerX, centerY - s * 0.65f)
         cubicTo(centerX - s * 0.55f, centerY, centerX - s * 0.55f, centerY + s * 0.55f, centerX, centerY + s * 0.55f)
@@ -532,7 +425,7 @@ fun DrawScope.drawNeonSparkle(
     val glowColor = effColor.copy(alpha = 0.5f * effAlpha)
 
     rotate(degrees = rotationDeg, pivot = Offset(centerX, centerY)) {
-        fun createSparklePath(scale: Float): Path = Path().apply {
+        fun createSparklePath(scale: Float): Path = EyePaths.obtain().apply {
             val s = size * scale
             val rOuter = s * 0.5f
             val rInner = s * 0.12f
@@ -566,7 +459,7 @@ fun DrawScope.drawNeonZzz(
     val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
     val effColor = color.copy(alpha = effAlpha)
 
-    val zPath = Path().apply {
+    val zPath = EyePaths.obtain().apply {
         moveTo(x - size / 2f, y - size / 2f)
         lineTo(x + size / 2f, y - size / 2f)
         lineTo(x - size / 2f, y + size / 2f)
@@ -625,6 +518,7 @@ fun DrawScope.drawNeonSwirl(
 /**
  * State สำหรับควบคุมการเคลื่อนไหวแบบอิสระของพร็อพ (Particle Motion Layer)
  * พร็อพฝั่งซ้ายและขวาจะใช้ Phase และ Duration ต่างกันเล็กน้อย เพื่อให้การเคลื่อนไหวเป็นธรรมชาติ
+ * (snapshot ของเฟรมเดียว — สร้างจาก [PetParticleMotionSource.snapshot] ภายใน draw phase)
  */
 data class PetParticleMotionState(
     // Love: floating mini hearts
@@ -635,138 +529,95 @@ data class PetParticleMotionState(
     // Crying: dropping tears
     val tearFallLeft: Float = 0f,
     val tearFallRight: Float = 0f,
-    // Sparkle: excited/magic stars
-    val sparkleRotateLeft: Float = 0f,
-    val sparkleRotateRight: Float = 0f,
-    val sparkleScaleLeft: Float = 1f,
-    val sparkleScaleRight: Float = 1f,
-    // Swirl: sick/dizzy hypnotic rotation
-    val swirlRotateLeft: Float = 0f,
-    val swirlRotateRight: Float = 0f,
     // Sleepy: drifting Zzz
     val zzzRise1: Float = 0f,
-    val zzzRise2: Float = 0f,
-    // Hot/Exhausted: dripping sweat drops
-    val sweatDripLeft: Float = 0f,
-    val sweatDripRight: Float = 0f
+    val zzzRise2: Float = 0f
 )
+
+/**
+ * ถือ State ของ particle animation โดยไม่อ่านค่าใน composition — เรียก [snapshot] ใน DrawScope
+ */
+@Stable
+class PetParticleMotionSource internal constructor(
+    private val heartFloatLeft: State<Float>,
+    private val heartFloatRight: State<Float>,
+    private val heartPulseLeft: State<Float>,
+    private val heartPulseRight: State<Float>,
+    private val tearFallLeft: State<Float>,
+    private val tearFallRight: State<Float>,
+    private val zzzRise1: State<Float>,
+    private val zzzRise2: State<Float>
+) {
+    fun snapshot(): PetParticleMotionState = PetParticleMotionState(
+        heartFloatLeft = heartFloatLeft.value,
+        heartFloatRight = heartFloatRight.value,
+        heartPulseLeft = heartPulseLeft.value,
+        heartPulseRight = heartPulseRight.value,
+        tearFallLeft = tearFallLeft.value,
+        tearFallRight = tearFallRight.value,
+        zzzRise1 = zzzRise1.value,
+        zzzRise2 = zzzRise2.value
+    )
+}
 
 /**
  * Composable สร้าง particle transitions อิสระซ้าย-ขวา
  */
 @Composable
-fun rememberPetParticleMotionState(): PetParticleMotionState {
+fun rememberPetParticleMotionSource(): PetParticleMotionSource {
     val transLeft = rememberInfiniteTransition(label = "pet_particles_left")
     val transRight = rememberInfiniteTransition(label = "pet_particles_right")
 
     // 1. Love hearts
-    val heartFloatLeft by transLeft.animateFloat(
+    val heartFloatLeft = transLeft.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
         label = "heart_fl_l"
     )
-    val heartFloatRight by transRight.animateFloat(
+    val heartFloatRight = transRight.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(2150, easing = LinearEasing), RepeatMode.Restart),
         label = "heart_fl_r"
     )
-    val heartPulseLeft by transLeft.animateFloat(
+    val heartPulseLeft = transLeft.animateFloat(
         initialValue = 0.92f, targetValue = 1.08f,
         animationSpec = infiniteRepeatable(tween(750, easing = EaseInOutSine), RepeatMode.Reverse),
         label = "heart_p_l"
     )
-    val heartPulseRight by transRight.animateFloat(
+    val heartPulseRight = transRight.animateFloat(
         initialValue = 0.90f, targetValue = 1.10f,
         animationSpec = infiniteRepeatable(tween(880, easing = EaseInOutSine), RepeatMode.Reverse),
         label = "heart_p_r"
     )
 
     // 2. Tears
-    val tearFallLeft by transLeft.animateFloat(
+    val tearFallLeft = transLeft.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1350, easing = EaseInQuad), RepeatMode.Restart),
         label = "tear_f_l"
     )
-    val tearFallRight by transRight.animateFloat(
+    val tearFallRight = transRight.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1550, easing = EaseInQuad), RepeatMode.Restart),
         label = "tear_f_r"
     )
 
-    // 3. Sparkles
-    val sparkleRotateLeft by transLeft.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(3200, easing = LinearEasing), RepeatMode.Restart),
-        label = "spark_r_l"
-    )
-    val sparkleRotateRight by transRight.animateFloat(
-        initialValue = 0f, targetValue = -360f,
-        animationSpec = infiniteRepeatable(tween(2700, easing = LinearEasing), RepeatMode.Restart),
-        label = "spark_r_r"
-    )
-    val sparkleScaleLeft by transLeft.animateFloat(
-        initialValue = 0.65f, targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(tween(900, easing = EaseInOutQuad), RepeatMode.Reverse),
-        label = "spark_s_l"
-    )
-    val sparkleScaleRight by transRight.animateFloat(
-        initialValue = 0.55f, targetValue = 1.30f,
-        animationSpec = infiniteRepeatable(tween(1100, easing = EaseInOutQuad), RepeatMode.Reverse),
-        label = "spark_s_r"
-    )
-
-    // 4. Sick/Dizzy Swirl
-    val swirlRotateLeft by transLeft.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
-        label = "swirl_r_l"
-    )
-    val swirlRotateRight by transRight.animateFloat(
-        initialValue = 360f, targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(1900, easing = LinearEasing), RepeatMode.Restart),
-        label = "swirl_r_r"
-    )
-
-    // 5. Sleepy Zzz
-    val zzzRise1 by transLeft.animateFloat(
+    // 3. Sleepy Zzz
+    val zzzRise1 = transLeft.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
         label = "zzz_r_1"
     )
-    val zzzRise2 by transRight.animateFloat(
+    val zzzRise2 = transRight.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(2750, easing = LinearEasing), RepeatMode.Restart),
         label = "zzz_r_2"
     )
 
-    // 6. Sweat Drops
-    val sweatDripLeft by transLeft.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = EaseInCubic), RepeatMode.Restart),
-        label = "sweat_d_l"
-    )
-    val sweatDripRight by transRight.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1650, easing = EaseInCubic), RepeatMode.Restart),
-        label = "sweat_d_r"
-    )
-
-    return PetParticleMotionState(
-        heartFloatLeft = heartFloatLeft,
-        heartFloatRight = heartFloatRight,
-        heartPulseLeft = heartPulseLeft,
-        heartPulseRight = heartPulseRight,
-        tearFallLeft = tearFallLeft,
-        tearFallRight = tearFallRight,
-        sparkleRotateLeft = sparkleRotateLeft,
-        sparkleRotateRight = sparkleRotateRight,
-        sparkleScaleLeft = sparkleScaleLeft,
-        sparkleScaleRight = sparkleScaleRight,
-        swirlRotateLeft = swirlRotateLeft,
-        swirlRotateRight = swirlRotateRight,
-        zzzRise1 = zzzRise1,
-        zzzRise2 = zzzRise2,
-        sweatDripLeft = sweatDripLeft,
-        sweatDripRight = sweatDripRight
-    )
+    return remember(transLeft, transRight) {
+        PetParticleMotionSource(
+            heartFloatLeft, heartFloatRight, heartPulseLeft, heartPulseRight,
+            tearFallLeft, tearFallRight, zzzRise1, zzzRise2
+        )
+    }
 }

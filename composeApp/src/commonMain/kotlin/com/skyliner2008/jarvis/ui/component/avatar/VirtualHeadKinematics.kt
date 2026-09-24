@@ -9,14 +9,17 @@ import kotlin.math.sin
 /**
  * EyeLayerPosition — พิกัดและขนาดของดวงตาแต่ละชั้น
  *
- * @param backCenter จุดศูนย์กลางของวงกลมหลัง (เบ้าตาบนหัวหุ่นยนต์ สีน้ำเงินคราม)
+ * @param backCenter จุดศูนย์กลางของวงกลมหลัง (เบ้าตาบนหัวหุ่นยนต์ สีเงาเข้มจาก getEyeDeepShadowColor)
  * @param frontCenter จุดศูนย์กลางของวงกลมหน้า (ลูกตาสีนีออนไซแอน)
  * @param discSize ขนาดของวงกลมทั้ง 2 ชั้น (มีขนาดเท่ากัน 100% ตามภาพ LOOI Robot)
+ * @param lookCenter จุดที่ "ทั้งดวงตา" ควรอยู่สำหรับตาที่ไม่มีชั้นลูกตาแยก (หัวใจ, ตาเฉียง, moodset)
+ *        = เบ้าตา + ระยะกลอกตา + parallax (ไม่รวม resting offset) — ขยับตามสายตาทั้งแกน X และ Y
  */
 data class EyeLayerPosition(
     val backCenter: Offset,
     val frontCenter: Offset,
-    val discSize: Size
+    val discSize: Size,
+    val lookCenter: Offset = backCenter
 )
 
 /**
@@ -35,7 +38,7 @@ data class DualEyeKinematicsResult(
  * จำลองการเคลื่อนไหวเหมือนมี "หัวหุ่นยนต์ 3 มิติ" จริง โดยไม่ต้องวาดหัวหุ่นยนต์ (Pure Living OLED Face):
  * 1. วงกลม 2 วง (Front Disc และ Back Disc) มีขนาดเท่ากันทุกประการ (Equal Diameter)
  * 2. วงด้านหน้า (Front Disc - ลูกตาสีนีออนไซแอน): เปรียบเหมือน "ลูกตา" ขยับกลอกสายตา (Gaze / Saccades) ได้กว้างและคล่องแคล่ว
- * 3. วงด้านหลัง (Back Disc - เบ้าตาสีน้ำเงินคราม): เปรียบเหมือน "เบ้าตาบนหัวหุ่นยนต์"
+ * 3. วงด้านหลัง (Back Disc - เบ้าตาสีเงาเข้ม deep teal): เปรียบเหมือน "เบ้าตาบนหัวหุ่นยนต์"
  *    จะขยับต่อเมื่อหันหน้า (Yaw), เงยหน้า/ก้มหน้า (Pitch), หรือเอียงคอ (Roll) เท่านั้น
  * 4. เมื่อหัวหุ่นยนต์หันข้าง (Spherical Face Perspective):
  *    - เบ้าตาเลื่อนตามการหันของหัว
@@ -73,8 +76,8 @@ object VirtualHeadKinematics {
         val discSize = Size(effW, effH)
 
         // 1. Head Shift (ระยะเลื่อนของหัวหุ่นยนต์ 3 มิติ: หันหน้า / เงยหน้า-ก้มหน้า)
-        val maxHeadShiftX = eyeDiameter * 0.40f
-        val maxHeadShiftY = eyeDiameter * 0.30f
+        val maxHeadShiftX = eyeDiameter * EyeMetrics.HEAD_SHIFT_X
+        val maxHeadShiftY = eyeDiameter * EyeMetrics.HEAD_SHIFT_Y
         val headShiftX = clampedYaw * maxHeadShiftX
         val headShiftY = -clampedPitch * maxHeadShiftY // pitch > 0 (เงยหน้า) -> shift Y up (negative)
 
@@ -89,26 +92,26 @@ object VirtualHeadKinematics {
         val unrotatedBackRightX = headCenterX + headShiftX + dynamicSpacing
         val unrotatedBackRightY = headCenterY + headShiftY
 
-        // 4. Resting Offset (ระยะเยื้องปกติขณะพัก ให้เห็นเสี้ยวสีน้ำเงินครามด้านล่าง-ขวาตามภาพจริง LOOI)
-        val blinkCompress = squashY.coerceIn(0.12f, 1f)
-        val restingOffsetX = effW * 0.025f
-        val restingOffsetY = effH * 0.065f * blinkCompress
+        // 4. Resting Offset (ระยะเยื้องปกติขณะพัก ให้เห็นเสี้ยวเงาเบ้าตาด้านล่าง-ขวาตามภาพจริง LOOI)
+        val blinkCompress = squashY.coerceIn(EyeMetrics.BLINK_OFFSET_FLOOR, 1f)
+        val restingOffsetX = effW * EyeMetrics.REST_OFFSET_X
+        val restingOffsetY = effH * EyeMetrics.REST_OFFSET_Y * blinkCompress
 
         // 5. Pupil Gaze Travel (ระยะการกลอกของลูกตาหน้า ขยับได้กว้าง คล่องแคล่ว และตอบสนองเร็วกว่า)
-        val maxPupilShiftX = effW * 0.15f
-        val maxPupilShiftY = effH * 0.11f
+        val maxPupilShiftX = effW * EyeMetrics.PUPIL_TRAVEL_X
+        val maxPupilShiftY = effH * EyeMetrics.PUPIL_TRAVEL_Y
         val pupilShiftX = clampedGazeX * maxPupilShiftX
         val pupilShiftY = clampedGazeY * maxPupilShiftY
 
         // 6. 3D Depth Parallax (มิติความลึกระหว่างผิวดวงตาหน้ากับก้นเบ้าตาหลังเมื่อหัวหัน)
-        val maxParallaxX = effW * 0.055f
-        val maxParallaxY = effH * 0.038f
+        val maxParallaxX = effW * EyeMetrics.PARALLAX_X
+        val maxParallaxY = effH * EyeMetrics.PARALLAX_Y
         val parallaxX = clampedYaw * maxParallaxX
         val parallaxY = -clampedPitch * maxParallaxY
 
         // 7. ตำแหน่งลูกตาหน้า (Front Disc Centers) สัมพัทธ์กับเบ้าตา
         // เมื่อพัก (pupil = 0, parallax = 0): frontCenter = backCenter - restingOffset
-        // ทำให้ backCenter อยู่ไปทาง +X (ขวา) และ +Y (ล่าง) จึงเห็นเสี้ยวขอบสีน้ำเงินครามที่ด้านล่าง-ขวา
+        // ทำให้ backCenter อยู่ไปทาง +X (ขวา) และ +Y (ล่าง) จึงเห็นเสี้ยวขอบเงาเบ้าตาที่ด้านล่าง-ขวา
         val unrotatedFrontLeftX = unrotatedBackLeftX - restingOffsetX + pupilShiftX + parallaxX
         val unrotatedFrontLeftY = unrotatedBackLeftY - restingOffsetY + pupilShiftY + parallaxY
 
@@ -130,16 +133,21 @@ object VirtualHeadKinematics {
             return Offset(headPivot.x + rx, headPivot.y + ry)
         }
 
+        val lookShiftX = pupilShiftX + parallaxX
+        val lookShiftY = pupilShiftY + parallaxY
+
         return DualEyeKinematicsResult(
             leftEye = EyeLayerPosition(
                 backCenter = rotatePoint(unrotatedBackLeftX, unrotatedBackLeftY),
                 frontCenter = rotatePoint(unrotatedFrontLeftX, unrotatedFrontLeftY),
-                discSize = discSize
+                discSize = discSize,
+                lookCenter = rotatePoint(unrotatedBackLeftX + lookShiftX, unrotatedBackLeftY + lookShiftY)
             ),
             rightEye = EyeLayerPosition(
                 backCenter = rotatePoint(unrotatedBackRightX, unrotatedBackRightY),
                 frontCenter = rotatePoint(unrotatedFrontRightX, unrotatedFrontRightY),
-                discSize = discSize
+                discSize = discSize,
+                lookCenter = rotatePoint(unrotatedBackRightX + lookShiftX, unrotatedBackRightY + lookShiftY)
             ),
             headCenter = headPivot,
             headRollDeg = headRollDeg

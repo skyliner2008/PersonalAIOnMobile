@@ -121,7 +121,7 @@ internal fun DrawScope.drawRichMood(
     if (effAlpha <= 0.005f) return
     val goldColor = Color(0xFFFFD700).copy(alpha = effAlpha)
     val cyanColor = Color(0xFF00F5FF).copy(alpha = effAlpha)
-    val cyanShadowColor = Color(0xFF004D6B).copy(alpha = effAlpha)
+    val cyanShadowColor = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha)
     val goldShadowColor = Color(0xFF664400).copy(alpha = effAlpha)
 
     val eyeW = baseEyeW * 1.05f
@@ -212,7 +212,7 @@ private fun DrawScope.drawDollarSignEye(
 }
 
 private fun DrawScope.drawDollarS(color: Color, cx: Float, cy: Float, w: Float, h: Float) {
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         val hw = w * 0.45f
         val hh = h * 0.45f
         moveTo(cx + hw * 0.6f, cy - hh * 0.7f)
@@ -238,7 +238,7 @@ private fun DrawScope.drawGoldCoin(color: Color, cx: Float, cy: Float, radius: F
 }
 
 private fun DrawScope.drawMoneyBag(color: Color, cx: Float, cy: Float, size: Float, alpha: Float) {
-    val bagPath = Path().apply {
+    val bagPath = EyePaths.obtain().apply {
         // Tied top neck ruffles
         moveTo(cx - size * 0.22f, cy - size * 0.5f)
         lineTo(cx + size * 0.22f, cy - size * 0.5f)
@@ -285,7 +285,7 @@ internal fun DrawScope.drawCryingMood(
 
     for (eyeX in listOf(leftEyeX, rightEyeX)) {
         // Eye dome
-        val domePath = Path().apply {
+        val domePath = EyePaths.obtain().apply {
             val topR = eyeW * 0.5f
             moveTo(eyeX - eyeW * 0.5f, eyeY + eyeH * 0.2f)
             cubicTo(
@@ -304,7 +304,7 @@ internal fun DrawScope.drawCryingMood(
         val waterfallBottom = eyeY + baseEyeH * 1.15f
         val waveOffset = sin(streamProg * 2f * PI.toFloat() + (if (eyeX == leftEyeX) 0f else 1.2f)) * 4.dp.toPx()
 
-        val waterfallPath = Path().apply {
+        val waterfallPath = EyePaths.obtain().apply {
             moveTo(eyeX - tearW * 0.5f, eyeY + eyeH * 0.15f)
             // Left flowing wavy edge
             cubicTo(
@@ -328,7 +328,7 @@ internal fun DrawScope.drawCryingMood(
         drawNeonFilledPath(waterfallPath, cyanColor)
 
         // Falling neon droplets below waterfall
-        val dropProg = (streamProg * 1.5f + (if (eyeX == leftEyeX) 0f else 0.45f)) % 1f
+        val dropProg = (streamProg * 2f + (if (eyeX == leftEyeX) 0f else 0.45f)) % 1f
         val dropY = waterfallBottom + 8.dp.toPx() + dropProg * 35.dp.toPx()
         val dropAlpha = (1f - dropProg * 0.6f) * effAlpha
         drawNeonTeardrop(cyanColor, eyeX, dropY, size = 10.dp.toPx(), alpha = dropAlpha)
@@ -338,7 +338,7 @@ internal fun DrawScope.drawCryingMood(
     val mouthY = eyeY + baseEyeH * 0.48f
     val mouthW = 18.dp.toPx()
     val mouthH = 8.dp.toPx()
-    val sadMouthPath = Path().apply {
+    val sadMouthPath = EyePaths.obtain().apply {
         moveTo(centerX - mouthW * 0.5f, mouthY + mouthH)
         quadraticTo(centerX, mouthY - 2.dp.toPx(), centerX + mouthW * 0.5f, mouthY + mouthH)
     }
@@ -387,7 +387,7 @@ internal fun DrawScope.drawReadingMood(
         style = Stroke(width = strokeWidth)
     )
     // Arched Bridge between lenses
-    val bridgePath = Path().apply {
+    val bridgePath = EyePaths.obtain().apply {
         moveTo(leftEyeX + glassW / 2f, eyeY + 4.dp.toPx())
         quadraticTo(centerX, eyeY - 2.dp.toPx(), rightEyeX - glassW / 2f, eyeY + 4.dp.toPx())
     }
@@ -404,14 +404,14 @@ internal fun DrawScope.drawReadingMood(
 
     // Book cover back shadow
     drawRoundRect(
-        color = Color(0xFF004D6B).copy(alpha = effAlpha),
+        color = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha),
         topLeft = Offset(centerX - bookW * 0.52f, bookY + 3.dp.toPx()),
         size = Size(bookW * 1.04f, bookH * 1.05f),
         cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
     )
 
     // Left page
-    val leftPage = Path().apply {
+    val leftPage = EyePaths.obtain().apply {
         moveTo(centerX, bookY + bookH * 0.15f)
         cubicTo(centerX - bookW * 0.25f, bookY - 4.dp.toPx() + flutter, centerX - bookW * 0.45f, bookY + 2.dp.toPx(), centerX - bookW * 0.5f, bookY + bookH * 0.2f)
         lineTo(centerX - bookW * 0.5f, bookY + bookH)
@@ -422,7 +422,7 @@ internal fun DrawScope.drawReadingMood(
     drawPath(leftPage, cyanColor, style = Stroke(width = 2.dp.toPx()))
 
     // Right page
-    val rightPage = Path().apply {
+    val rightPage = EyePaths.obtain().apply {
         moveTo(centerX, bookY + bookH * 0.15f)
         cubicTo(centerX + bookW * 0.25f, bookY - 4.dp.toPx() - flutter, centerX + bookW * 0.45f, bookY + 2.dp.toPx(), centerX + bookW * 0.5f, bookY + bookH * 0.2f)
         lineTo(centerX + bookW * 0.5f, bookY + bookH)
@@ -441,7 +441,7 @@ internal fun DrawScope.drawReadingMood(
     )
 
     // Bookmark ribbon hanging down
-    val ribbonPath = Path().apply {
+    val ribbonPath = EyePaths.obtain().apply {
         moveTo(centerX - 2.dp.toPx(), bookY + bookH * 0.8f)
         lineTo(centerX + 2.dp.toPx(), bookY + bookH * 0.8f)
         lineTo(centerX + 3.dp.toPx(), bookY + bookH + 8.dp.toPx())
@@ -502,7 +502,7 @@ internal fun DrawScope.drawGamingMood(
     val bandTopY = eyeY - baseEyeH * 0.55f + bounceY
 
     // Headband arc
-    val bandPath = Path().apply {
+    val bandPath = EyePaths.obtain().apply {
         moveTo(centerX - headW * 0.5f, eyeY + bounceY)
         cubicTo(centerX - headW * 0.5f, bandTopY - 14.dp.toPx(), centerX + headW * 0.5f, bandTopY - 14.dp.toPx(), centerX + headW * 0.5f, eyeY + bounceY)
     }
@@ -540,7 +540,7 @@ internal fun DrawScope.drawGamingMood(
     )
 
     // Microphone boom on left earcup curving toward mouth
-    val micPath = Path().apply {
+    val micPath = EyePaths.obtain().apply {
         moveTo(centerX - headW * 0.5f, eyeY + cupH * 0.25f + bounceY)
         quadraticTo(centerX - headW * 0.35f, eyeY + baseEyeH * 0.55f, centerX - 12.dp.toPx(), eyeY + baseEyeH * 0.55f)
     }
@@ -560,7 +560,7 @@ private fun DrawScope.drawGamingControllerIcon(
     living: LivingMotionState = LivingMotionState()
 ) {
     // Ergonomic controller body path
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         moveTo(cx - w * 0.32f, cy - h * 0.4f)
         cubicTo(cx - w * 0.15f, cy - h * 0.45f, cx + w * 0.15f, cy - h * 0.45f, cx + w * 0.32f, cy - h * 0.4f)
         // Right grip wing
@@ -640,7 +640,7 @@ internal fun DrawScope.drawTravelingMood(
     val crownH = 34.dp.toPx()
     val brimW = (rightEyeX - leftEyeX) + baseEyeW * 1.65f
 
-    val crownPath = Path().apply {
+    val crownPath = EyePaths.obtain().apply {
         moveTo(centerX - crownW * 0.48f, hatY)
         cubicTo(centerX - crownW * 0.42f, hatY - crownH, centerX + crownW * 0.42f, hatY - crownH, centerX + crownW * 0.48f, hatY)
         close()
@@ -660,7 +660,7 @@ internal fun DrawScope.drawTravelingMood(
     drawCircle(Color(0xFFFFD700).copy(alpha = effAlpha), radius = 2.5.dp.toPx(), center = Offset(centerX, hatY - bandH * 0.5f))
 
     // Curved Brim sitting across forehead
-    val brimPath = Path().apply {
+    val brimPath = EyePaths.obtain().apply {
         moveTo(centerX - brimW * 0.5f, hatY + 6.dp.toPx())
         quadraticTo(centerX, hatY - 2.dp.toPx(), centerX + brimW * 0.5f, hatY + 6.dp.toPx())
         quadraticTo(centerX, hatY + 12.dp.toPx(), centerX - brimW * 0.5f, hatY + 6.dp.toPx())
@@ -734,7 +734,7 @@ internal fun DrawScope.drawTravelingMood(
     drawLine(cyanColor.copy(alpha = 0.6f * effAlpha), Offset(globeX - globeR, globeY), Offset(globeX + globeR, globeY), strokeWidth = 1.5.dp.toPx())
 
     // Stand C-arm and round base
-    val standPath = Path().apply {
+    val standPath = EyePaths.obtain().apply {
         moveTo(globeX, globeY - globeR - 4.dp.toPx())
         cubicTo(globeX + globeR + 6.dp.toPx(), globeY - globeR, globeX + globeR + 6.dp.toPx(), globeY + globeR, globeX, globeY + globeR + 4.dp.toPx())
         lineTo(globeX, globeY + globeR + 10.dp.toPx())
@@ -766,7 +766,7 @@ internal fun DrawScope.drawWorkingMood(
     drawCircle(cyanColor, radius = r, center = Offset(leftEyeX, eyeY), style = Stroke(width = 2.5.dp.toPx()))
     drawCircle(cyanColor, radius = r, center = Offset(rightEyeX, eyeY), style = Stroke(width = 2.5.dp.toPx()))
     // Bridge
-    val bridgePath = Path().apply {
+    val bridgePath = EyePaths.obtain().apply {
         moveTo(leftEyeX + r, eyeY)
         quadraticTo(centerX, eyeY - 4.dp.toPx(), rightEyeX - r, eyeY)
     }
@@ -799,7 +799,7 @@ internal fun DrawScope.drawWorkingMood(
         size = Size(mugW * 0.9f, 6.dp.toPx())
     )
     // Mug handle on left
-    val handlePath = Path().apply {
+    val handlePath = EyePaths.obtain().apply {
         moveTo(mugX - mugW / 2f, mugY + 5.dp.toPx())
         cubicTo(mugX - mugW / 2f - 9.dp.toPx(), mugY + 5.dp.toPx(), mugX - mugW / 2f - 9.dp.toPx(), mugY + mugH - 5.dp.toPx(), mugX - mugW / 2f, mugY + mugH - 5.dp.toPx())
     }
@@ -840,7 +840,7 @@ internal fun DrawScope.drawWorkingMood(
     )
     // Glowing cyan screen interior
     drawRoundRect(
-        color = Color(0xFF004D6B).copy(alpha = 0.5f * effAlpha),
+        color = EyeMetrics.SHADOW_CYAN.copy(alpha = 0.5f * effAlpha),
         topLeft = Offset(lapX - lapScreenW * 0.44f, screenTopY + 3.dp.toPx()),
         size = Size(lapScreenW * 0.88f, lapScreenH - 6.dp.toPx()),
         cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
@@ -875,7 +875,7 @@ internal fun DrawScope.drawWorkingMood(
     }
 
     // Keyboard Base (perspective trapezoid)
-    val baseTrapezoid = Path().apply {
+    val baseTrapezoid = EyePaths.obtain().apply {
         moveTo(lapX - lapScreenW * 0.48f, lapY + 2.dp.toPx())
         lineTo(lapX + lapScreenW * 0.48f, lapY + 2.dp.toPx())
         lineTo(lapX + lapBaseW * 0.5f, lapY + lapBaseH)
@@ -918,7 +918,7 @@ internal fun DrawScope.drawColdMood(
     // Shivering teeth chatter zigzag mouth
     val mouthY = eyeY + baseEyeH * 0.75f
     val chatterX = if (living.loopFast < 0.5f) 2.dp.toPx() else -2.dp.toPx()
-    val zzPath = Path().apply {
+    val zzPath = EyePaths.obtain().apply {
         moveTo(centerX - 16.dp.toPx() + chatterX, mouthY)
         lineTo(centerX - 10.dp.toPx() + chatterX, mouthY - 4.dp.toPx())
         lineTo(centerX - 4.dp.toPx() + chatterX, mouthY + 4.dp.toPx())
@@ -934,7 +934,7 @@ internal fun DrawScope.drawColdMood(
     val icicleStep = 18.dp.toPx()
     var ix = centerX - icicleW * 0.45f
     var toggle = true
-    val icePath = Path().apply {
+    val icePath = EyePaths.obtain().apply {
         moveTo(ix, topY)
         while (ix <= centerX + icicleW * 0.45f) {
             val len = if (toggle) 18.dp.toPx() else 10.dp.toPx()
@@ -950,7 +950,7 @@ internal fun DrawScope.drawColdMood(
     val bottomY = centerY + visorH * 0.48f
     var bx = centerX - icicleW * 0.45f
     var bToggle = true
-    val bIcePath = Path().apply {
+    val bIcePath = EyePaths.obtain().apply {
         moveTo(bx, bottomY)
         while (bx <= centerX + icicleW * 0.45f) {
             val len = if (bToggle) 18.dp.toPx() else 10.dp.toPx()
@@ -997,7 +997,7 @@ internal fun DrawScope.drawHotMood(
     if (effAlpha <= 0.005f) return
     val hotColor = Color(0xFFFF7043).copy(alpha = effAlpha)
     val cyanColor = Color(0xFF00F5FF).copy(alpha = effAlpha)
-    val shadowColor = Color(0xFF004D6B).copy(alpha = effAlpha)
+    val shadowColor = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha)
 
     // Solid melting puddle eyes with 3 dripping stalactites (Sheet 2 Cell 32)
     val dripPulse = sin(living.loopMedium * 2f * PI.toFloat()) * 3.dp.toPx()
@@ -1010,7 +1010,7 @@ internal fun DrawScope.drawHotMood(
     // Sad wavy drooping mouth (Sheet 2 Cell 32)
     val mouthY = eyeY + baseEyeH * 0.65f
     val mouthW = 22.dp.toPx()
-    val mouthPath = Path().apply {
+    val mouthPath = EyePaths.obtain().apply {
         moveTo(centerX - mouthW * 0.5f, mouthY)
         quadraticTo(centerX - mouthW * 0.2f, mouthY - 4.dp.toPx(), centerX, mouthY)
         quadraticTo(centerX + mouthW * 0.2f, mouthY + 4.dp.toPx(), centerX + mouthW * 0.5f, mouthY)
@@ -1085,7 +1085,7 @@ internal fun DrawScope.drawHotMood(
 
 private fun DrawScope.drawMeltingDropletEye(color: Color, cx: Float, cy: Float, w: Float, h: Float, dripPulse: Float = 0f) {
     val topDomeH = h * 0.45f
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         // Top rounded dome
         moveTo(cx - w * 0.45f, cy)
         cubicTo(cx - w * 0.45f, cy - topDomeH * 1.1f, cx + w * 0.45f, cy - topDomeH * 1.1f, cx + w * 0.45f, cy)
@@ -1135,7 +1135,7 @@ internal fun DrawScope.drawDetectiveMood(
     val brimW = (rightEyeX - leftEyeX) + baseEyeW * 1.6f
 
     // Indented crown (pinched top crease)
-    val crownPath = Path().apply {
+    val crownPath = EyePaths.obtain().apply {
         moveTo(centerX - crownW * 0.45f, hatY)
         cubicTo(centerX - crownW * 0.4f, hatY - crownH * 0.75f, centerX - 10.dp.toPx(), hatY - crownH * 0.9f, centerX, hatY - crownH * 0.78f)
         cubicTo(centerX + 10.dp.toPx(), hatY - crownH * 0.9f, centerX + crownW * 0.4f, hatY - crownH * 0.75f, centerX + crownW * 0.45f, hatY)
@@ -1162,7 +1162,7 @@ internal fun DrawScope.drawDetectiveMood(
     )
 
     // Curved Brim sitting across forehead
-    val brimPath = Path().apply {
+    val brimPath = EyePaths.obtain().apply {
         moveTo(centerX - brimW * 0.5f, hatY + 5.dp.toPx())
         cubicTo(centerX - brimW * 0.2f, hatY - 2.dp.toPx(), centerX + brimW * 0.2f, hatY - 2.dp.toPx(), centerX + brimW * 0.5f, hatY + 5.dp.toPx())
         cubicTo(centerX + brimW * 0.2f, hatY + 12.dp.toPx(), centerX - brimW * 0.2f, hatY + 12.dp.toPx(), centerX - brimW * 0.5f, hatY + 5.dp.toPx())
@@ -1239,7 +1239,7 @@ internal fun DrawScope.drawCookingMood(
     val toqueH = 54.dp.toPx()
 
     // Puffy cloud lobes expanding upward
-    val toquePath = Path().apply {
+    val toquePath = EyePaths.obtain().apply {
         moveTo(centerX - baseBandW * 0.5f, hatY)
         lineTo(centerX + baseBandW * 0.5f, hatY)
         cubicTo(centerX + baseBandW * 0.65f, hatY - toqueH * 0.4f, centerX + baseBandW * 0.5f, hatY - toqueH * 0.85f, centerX + baseBandW * 0.2f, hatY - toqueH * 0.85f)
@@ -1287,7 +1287,7 @@ internal fun DrawScope.drawCookingMood(
     drawLine(Color(0xFF78909C).copy(alpha = effAlpha), hStart, hEnd, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
 
     // Sunny-Side-Up Fried Egg inside pan!
-    val eggWhitePath = Path().apply {
+    val eggWhitePath = EyePaths.obtain().apply {
         moveTo(panX - 12.dp.toPx(), panY)
         cubicTo(panX - 14.dp.toPx(), panY - 12.dp.toPx(), panX + 10.dp.toPx(), panY - 14.dp.toPx(), panX + 12.dp.toPx(), panY - 2.dp.toPx())
         cubicTo(panX + 15.dp.toPx(), panY + 10.dp.toPx(), panX - 2.dp.toPx(), panY + 14.dp.toPx(), panX - 12.dp.toPx(), panY)
@@ -1337,7 +1337,7 @@ internal fun DrawScope.drawArtMode(
     val beretY = eyeY - baseEyeH * 0.48f
     val beretW = (rightEyeX - leftEyeX) + baseEyeW * 1.5f
     val beretTilt = sin(living.loopSlow * 2f * PI.toFloat()) * 1.5f
-    val beretPath = Path().apply {
+    val beretPath = EyePaths.obtain().apply {
         moveTo(centerX - beretW * 0.52f, beretY + 4.dp.toPx())
         cubicTo(centerX - beretW * 0.55f, beretY - 32.dp.toPx(), centerX + beretW * 0.05f, beretY - 36.dp.toPx(), centerX + beretW * 0.38f, beretY - 14.dp.toPx())
         cubicTo(centerX + beretW * 0.42f, beretY + 2.dp.toPx(), centerX - beretW * 0.1f, beretY + 8.dp.toPx(), centerX - beretW * 0.52f, beretY + 4.dp.toPx())
@@ -1363,7 +1363,7 @@ internal fun DrawScope.drawArtMode(
     val palW = 54.dp.toPx()
     val palH = 38.dp.toPx()
 
-    val palPath = Path().apply {
+    val palPath = EyePaths.obtain().apply {
         moveTo(palX - palW * 0.45f, palY)
         cubicTo(palX - palW * 0.5f, palY - palH * 0.5f, palX + palW * 0.45f, palY - palH * 0.55f, palX + palW * 0.48f, palY - palH * 0.1f)
         cubicTo(palX + palW * 0.5f, palY + palH * 0.45f, palX + palW * 0.15f, palY + palH * 0.55f, palX - palW * 0.1f, palY + palH * 0.4f)
@@ -1487,7 +1487,7 @@ internal fun DrawScope.drawPartyMood(
     val hatH = 46.dp.toPx()
 
     rotate(hatWobble, pivot = Offset(hatBaseX, hatBaseY)) {
-        val conePath = Path().apply {
+        val conePath = EyePaths.obtain().apply {
             moveTo(hatBaseX - hatW * 0.5f, hatBaseY)
             lineTo(hatBaseX + hatW * 0.5f, hatBaseY)
             lineTo(hatBaseX, hatBaseY - hatH)
@@ -1496,7 +1496,7 @@ internal fun DrawScope.drawPartyMood(
         drawPath(conePath, Color(0xFFFF4081).copy(alpha = effAlpha))
 
         // Diagonal festive stripes (Yellow & Cyan)
-        val stripe1 = Path().apply {
+        val stripe1 = EyePaths.obtain().apply {
             moveTo(hatBaseX - hatW * 0.35f, hatBaseY - hatH * 0.3f)
             lineTo(hatBaseX + hatW * 0.25f, hatBaseY - hatH * 0.5f)
             lineTo(hatBaseX + hatW * 0.15f, hatBaseY - hatH * 0.65f)
@@ -1505,7 +1505,7 @@ internal fun DrawScope.drawPartyMood(
         }
         drawPath(stripe1, Color(0xFFFFD700).copy(alpha = effAlpha))
 
-        val stripe2 = Path().apply {
+        val stripe2 = EyePaths.obtain().apply {
             moveTo(hatBaseX - hatW * 0.45f, hatBaseY - hatH * 0.1f)
             lineTo(hatBaseX + hatW * 0.4f, hatBaseY - hatH * 0.25f)
             lineTo(hatBaseX + hatW * 0.3f, hatBaseY - hatH * 0.38f)
@@ -1527,7 +1527,7 @@ internal fun DrawScope.drawPartyMood(
     val hornExtension = living.partyHornProg // 0f (curled) to 1f (fully blown out)
     val blowerLength = 16.dp.toPx() + hornExtension * 38.dp.toPx()
 
-    val hornPath = Path().apply {
+    val hornPath = EyePaths.obtain().apply {
         moveTo(centerX, blowerY - 3.dp.toPx())
         lineTo(centerX + blowerLength, blowerY - (4.dp.toPx() + hornExtension * 3.dp.toPx()))
         lineTo(centerX + blowerLength, blowerY + (4.dp.toPx() + hornExtension * 3.dp.toPx()))
@@ -1578,8 +1578,8 @@ internal fun DrawScope.drawDreamingMood(
     val calmCyan = Color(0xFF80DEEA).copy(alpha = effAlpha)
 
     // Closed calm curved eyes ⌒ ⌒
-    drawSleepingEye(calmCyan, leftEyeX, eyeY, baseEyeW, baseEyeH, alpha = effAlpha)
-    drawSleepingEye(calmCyan, rightEyeX, eyeY, baseEyeW, baseEyeH, alpha = effAlpha)
+    drawSleepingEye(calmCyan, leftEyeX, eyeY, baseEyeW, barHeight = EyeMetrics.SLIT_THICKNESS_DP.dp.toPx(), alpha = effAlpha)
+    drawSleepingEye(calmCyan, rightEyeX, eyeY, baseEyeW, barHeight = EyeMetrics.SLIT_THICKNESS_DP.dp.toPx(), alpha = effAlpha)
 
     // Smiling mouth centered between eyes (Sheet 2 Cell 38)
     drawSmileArc(calmCyan, centerX, eyeY + baseEyeH * 0.55f, 20.dp.toPx(), 6.dp.toPx(), alpha = effAlpha)
@@ -1675,7 +1675,7 @@ internal fun DrawScope.drawElectricMood(
     val effAlpha = alpha.coerceIn(0f, 1f)
     if (effAlpha <= 0.005f) return
     val electricColor = Color(0xFF00F5FF).copy(alpha = effAlpha)
-    val shadowColor = Color(0xFF004D6B).copy(alpha = effAlpha)
+    val shadowColor = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha)
 
     // Stepped arcade electric crackle jitter
     val stepIndex = (living.loopFast * 16f).toInt()
@@ -1692,11 +1692,11 @@ internal fun DrawScope.drawElectricMood(
 
     // Crackling electric discharge sparks shooting around borders (Sheet 2 Cell 40)
     for (i in 0 until 6) {
-        val angle = (i * 60f + living.sparkleRot * 0.4f) * (PI.toFloat() / 180f)
+        val angle = (i * 60f + living.sparkleRot / 3f) * (PI.toFloat() / 180f)
         val dist = baseEyeW * 1.35f
         val sx = centerX + cos(angle) * dist
         val sy = eyeY + sin(angle) * (baseEyeH * 0.85f)
-        val sparkPath = Path().apply {
+        val sparkPath = EyePaths.obtain().apply {
             moveTo(sx, sy)
             lineTo(sx + cos(angle + 0.3f) * 10.dp.toPx(), sy + sin(angle + 0.3f) * 10.dp.toPx())
             lineTo(sx + cos(angle - 0.2f) * 16.dp.toPx(), sy + sin(angle - 0.2f) * 16.dp.toPx())
@@ -1718,7 +1718,7 @@ internal fun DrawScope.drawElectricMood(
 }
 
 private fun DrawScope.drawLightningBolt(color: Color, cx: Float, cy: Float, w: Float, h: Float) {
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         moveTo(cx + w * 0.15f, cy - h * 0.55f)
         lineTo(cx - w * 0.35f, cy)
         lineTo(cx + w * 0.05f, cy)
@@ -1746,7 +1746,7 @@ internal fun DrawScope.drawSneakyMood(
     // Black bandit mask across visor
     val maskW = (rightEyeX - leftEyeX) + baseEyeW * 2.2f
     val maskH = baseEyeH * 1.35f
-    val maskPath = Path().apply {
+    val maskPath = EyePaths.obtain().apply {
         moveTo(centerX - maskW * 0.55f, eyeY - maskH * 0.1f)
         cubicTo(centerX - maskW * 0.4f, eyeY - maskH * 0.5f, centerX + maskW * 0.4f, eyeY - maskH * 0.5f, centerX + maskW * 0.55f, eyeY - maskH * 0.1f)
         cubicTo(centerX + maskW * 0.5f, eyeY + maskH * 0.5f, centerX - maskW * 0.5f, eyeY + maskH * 0.5f, centerX - maskW * 0.55f, eyeY - maskH * 0.1f)
@@ -1761,7 +1761,7 @@ internal fun DrawScope.drawSneakyMood(
     drawCircle(Color(0xFF263238).copy(alpha = effAlpha), radius = 5.dp.toPx(), center = Offset(knotX, knotY))
     drawCircle(Color(0xFF37474F).copy(alpha = effAlpha), radius = 5.dp.toPx(), center = Offset(knotX, knotY), style = Stroke(width = 1.5.dp.toPx()))
     val tailFlutter = sin(living.loopFast * 2f * PI.toFloat()) * 3.dp.toPx()
-    val tailPath = Path().apply {
+    val tailPath = EyePaths.obtain().apply {
         moveTo(knotX, knotY)
         quadraticTo(knotX + 12.dp.toPx(), knotY - 6.dp.toPx() + tailFlutter, knotX + 22.dp.toPx(), knotY - 10.dp.toPx())
         moveTo(knotX, knotY)
@@ -1778,7 +1778,7 @@ internal fun DrawScope.drawSneakyMood(
 
     // Smirking small mouth
     val smirkY = eyeY + baseEyeH * 0.8f
-    val smirkPath = Path().apply {
+    val smirkPath = EyePaths.obtain().apply {
         moveTo(centerX - 8.dp.toPx(), smirkY)
         cubicTo(centerX, smirkY + 3.dp.toPx(), centerX + 10.dp.toPx(), smirkY - 2.dp.toPx(), centerX + 14.dp.toPx(), smirkY - 4.dp.toPx())
     }
@@ -1801,7 +1801,7 @@ internal fun DrawScope.drawHeroMood(
     // Winged Superhero Domino Mask (Blue) with subtle light sweep
     val maskW = (rightEyeX - leftEyeX) + baseEyeW * 2.4f
     val maskH = baseEyeH * 1.4f
-    val maskPath = Path().apply {
+    val maskPath = EyePaths.obtain().apply {
         moveTo(centerX - maskW * 0.5f, eyeY - maskH * 0.5f)
         lineTo(centerX - maskW * 0.15f, eyeY - maskH * 0.15f)
         lineTo(centerX, eyeY - maskH * 0.25f)
@@ -1909,7 +1909,7 @@ internal fun DrawScope.drawMagicMood(
     val hatH = 56.dp.toPx()
 
     // Curved brim across forehead
-    val brimPath = Path().apply {
+    val brimPath = EyePaths.obtain().apply {
         moveTo(centerX - hatW * 0.5f, hatBaseY + 6.dp.toPx())
         cubicTo(centerX - hatW * 0.2f, hatBaseY - 3.dp.toPx(), centerX + hatW * 0.2f, hatBaseY - 3.dp.toPx(), centerX + hatW * 0.5f, hatBaseY + 6.dp.toPx())
         cubicTo(centerX + hatW * 0.2f, hatBaseY + 12.dp.toPx(), centerX - hatW * 0.2f, hatBaseY + 12.dp.toPx(), centerX - hatW * 0.5f, hatBaseY + 6.dp.toPx())
@@ -1921,7 +1921,7 @@ internal fun DrawScope.drawMagicMood(
 
     // Crooked Cone pointing to the right
     val coneW = hatW * 0.7f
-    val wizCone = Path().apply {
+    val wizCone = EyePaths.obtain().apply {
         moveTo(centerX - coneW * 0.45f, hatBaseY + 2.dp.toPx())
         cubicTo(centerX - coneW * 0.35f, hatBaseY - hatH * 0.6f, centerX + coneW * 0.1f, hatBaseY - hatH * 0.75f, centerX + coneW * 0.35f, hatBaseY - hatH)
         cubicTo(centerX + coneW * 0.45f, hatBaseY - hatH * 0.9f, centerX + coneW * 0.3f, hatBaseY - hatH * 0.5f, centerX + coneW * 0.45f, hatBaseY + 2.dp.toPx())
@@ -2032,7 +2032,7 @@ internal fun DrawScope.drawSportyMood(
     drawCircle(Color(0xFF263238).copy(alpha = effAlpha), radius = ballR, center = Offset(ballX, ballY), style = Stroke(width = 2.dp.toPx()))
 
     // Center black pentagon
-    val pentagonPath = Path().apply {
+    val pentagonPath = EyePaths.obtain().apply {
         for (i in 0 until 5) {
             val angle = (i * 72f - 18f) * (PI.toFloat() / 180f)
             val px = ballX + cos(angle) * (ballR * 0.40f)
@@ -2055,7 +2055,7 @@ internal fun DrawScope.drawSportyMood(
         // Edge black triangular patches around perimeter
         val edgeAngle1 = angle - 0.22f
         val edgeAngle2 = angle + 0.22f
-        val patchPath = Path().apply {
+        val patchPath = EyePaths.obtain().apply {
             moveTo(vX, vY)
             lineTo(ballX + cos(edgeAngle1) * ballR, ballY + sin(edgeAngle1) * ballR)
             lineTo(ballX + cos(edgeAngle2) * ballR, ballY + sin(edgeAngle2) * ballR)
@@ -2120,7 +2120,7 @@ internal fun DrawScope.drawScientistMood(
     val flaskH = 36.dp.toPx()
 
     // Conical flask path
-    val flaskPath = Path().apply {
+    val flaskPath = EyePaths.obtain().apply {
         moveTo(flaskX - flaskW * 0.22f, flaskY - flaskH * 0.5f)
         lineTo(flaskX + flaskW * 0.22f, flaskY - flaskH * 0.5f)
         lineTo(flaskX + flaskW * 0.22f, flaskY - flaskH * 0.15f)
@@ -2131,7 +2131,7 @@ internal fun DrawScope.drawScientistMood(
     }
 
     // Bubbling neon green liquid fill (bottom half)
-    val liquidPath = Path().apply {
+    val liquidPath = EyePaths.obtain().apply {
         moveTo(flaskX - flaskW * 0.38f, flaskY + flaskH * 0.1f)
         lineTo(flaskX + flaskW * 0.38f, flaskY + flaskH * 0.1f)
         lineTo(flaskX + flaskW * 0.48f, flaskY + flaskH * 0.48f)
@@ -2184,13 +2184,13 @@ internal fun DrawScope.drawScaredMood(
     drawDualCircleEye(cyanColor, rightEyeX + tremorX, eyeY + tremorY, eyeW, eyeH, gazeX = ghostGazeX, alpha = effAlpha)
 
     // Outer faint shudder circle pulsing
-    val shudderPulse = 1f + sin(living.loopFast * 10f) * 0.15f
+    val shudderPulse = 1f + sin(living.loopFast * 4f * PI.toFloat()) * 0.15f
     drawCircle(cyanColor.copy(alpha = 0.25f * effAlpha), radius = baseEyeW * 0.6f * shudderPulse, center = Offset(leftEyeX + tremorX, eyeY + tremorY), style = Stroke(width = 1.5.dp.toPx()))
     drawCircle(cyanColor.copy(alpha = 0.25f * effAlpha), radius = baseEyeW * 0.6f * shudderPulse, center = Offset(rightEyeX + tremorX, eyeY + tremorY), style = Stroke(width = 1.5.dp.toPx()))
 
     // Shivering mouth with fast tremor and teeth chatter
     val mouthY = eyeY + baseEyeH * 0.65f + tremorY * 0.8f
-    drawFrownArc(cyanColor, centerX + tremorX * 0.5f, mouthY, 14.dp.toPx(), 4.dp.toPx() + abs(sin(living.loopFast * 18f)) * 2.dp.toPx(), alpha = effAlpha)
+    drawFrownArc(cyanColor, centerX + tremorX * 0.5f, mouthY, 14.dp.toPx(), 4.dp.toPx() + abs(sin(living.loopFast * 6f * PI.toFloat())) * 2.dp.toPx(), alpha = effAlpha)
 
     // Floating little ghost wisps bobbing vertically (enlarged & with cute eyes)
     val ghostBob1 = sin(living.loopSlow * 2f * PI.toFloat()) * 6.dp.toPx()
@@ -2200,7 +2200,7 @@ internal fun DrawScope.drawScaredMood(
 }
 
 private fun DrawScope.drawGhostWisp(color: Color, cx: Float, cy: Float, size: Float, alpha: Float) {
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         moveTo(cx, cy - size * 0.5f)
         cubicTo(cx - size * 0.5f, cy - size * 0.2f, cx - size * 0.5f, cy + size * 0.35f, cx - size * 0.35f, cy + size * 0.45f)
         // Wavy tail at bottom
@@ -2254,7 +2254,7 @@ internal fun DrawScope.drawWarriorMood(
     drawCircle(Color(0xFFD32F2F).copy(alpha = effAlpha), radius = 2.5.dp.toPx(), center = Offset(centerX, crestCy))
 
     // Golden Kuwagata V-horns crest curving upward (Sheet 2 Cell 49)
-    val hornPath = Path().apply {
+    val hornPath = EyePaths.obtain().apply {
         moveTo(centerX - 4.dp.toPx(), crestCy - 5.dp.toPx())
         cubicTo(centerX - 14.dp.toPx(), crestCy - 18.dp.toPx(), centerX - 28.dp.toPx(), crestCy - 28.dp.toPx(), centerX - 26.dp.toPx(), crestCy - 40.dp.toPx())
         cubicTo(centerX - 20.dp.toPx(), crestCy - 30.dp.toPx(), centerX - 8.dp.toPx(), crestCy - 20.dp.toPx(), centerX, crestCy - 10.dp.toPx())
@@ -2268,7 +2268,7 @@ internal fun DrawScope.drawWarriorMood(
     // Side helmet neck guards (Fukikaeshi) on left & right
     val fukiW = 16.dp.toPx()
     val fukiH = 22.dp.toPx()
-    val leftFlap = Path().apply {
+    val leftFlap = EyePaths.obtain().apply {
         moveTo(centerX - bandW / 2f + 2.dp.toPx(), bandY + 4.dp.toPx())
         lineTo(centerX - bandW / 2f - fukiW, bandY + 10.dp.toPx())
         lineTo(centerX - bandW / 2f - fukiW * 0.8f, bandY + fukiH)
@@ -2278,7 +2278,7 @@ internal fun DrawScope.drawWarriorMood(
     drawPath(leftFlap, Color(0xFF37474F).copy(alpha = effAlpha))
     drawPath(leftFlap, Color(0xFF78909C).copy(alpha = effAlpha), style = Stroke(width = 1.5.dp.toPx()))
 
-    val rightFlap = Path().apply {
+    val rightFlap = EyePaths.obtain().apply {
         moveTo(centerX + bandW / 2f - 2.dp.toPx(), bandY + 4.dp.toPx())
         lineTo(centerX + bandW / 2f + fukiW, bandY + 10.dp.toPx())
         lineTo(centerX + bandW / 2f + fukiW * 0.8f, bandY + fukiH)
@@ -2291,7 +2291,7 @@ internal fun DrawScope.drawWarriorMood(
     // Headband tie ribbons fluttering in wind on left
     val ribbonFlutter1 = sin(living.loopFast * 2f * PI.toFloat()) * 5.dp.toPx()
     val ribbonFlutter2 = cos(living.loopFast * 2f * PI.toFloat()) * 5.dp.toPx()
-    val ribbonPath = Path().apply {
+    val ribbonPath = EyePaths.obtain().apply {
         moveTo(centerX - bandW / 2f, bandY + 2.dp.toPx())
         quadraticTo(centerX - bandW / 2f - 14.dp.toPx(), bandY + 8.dp.toPx() + ribbonFlutter1, centerX - bandW / 2f - 28.dp.toPx(), bandY + 18.dp.toPx() + ribbonFlutter2)
         quadraticTo(centerX - bandW / 2f - 14.dp.toPx(), bandY + 14.dp.toPx() + ribbonFlutter1, centerX - bandW / 2f, bandY + bandH)
@@ -2496,7 +2496,7 @@ internal fun DrawScope.drawInvertedQuestionMark(
     // Dot at top
     drawCircle(effColor, radius = 3.5f, center = Offset(centerX, centerY - height * 0.4f))
     // Curve at bottom
-    val qPath = Path().apply {
+    val qPath = EyePaths.obtain().apply {
         moveTo(centerX, centerY - height * 0.25f)
         lineTo(centerX, centerY)
         cubicTo(centerX, centerY + height * 0.25f, centerX + height * 0.3f, centerY + height * 0.25f, centerX + height * 0.3f, centerY + height * 0.4f)
@@ -2520,14 +2520,14 @@ internal fun DrawScope.drawRoseProp(
     val stemGreen = Color(0xFF43A047).copy(alpha = effAlpha)
 
     // Curved green stem angled down-left
-    val stemPath = Path().apply {
+    val stemPath = EyePaths.obtain().apply {
         moveTo(centerX, centerY)
         quadraticTo(centerX - size * 0.6f, centerY + size * 0.4f, centerX - size * 1.3f, centerY + size * 0.9f)
     }
     drawPath(stemPath, stemGreen, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
 
     // Small thorn on stem
-    val thornPath = Path().apply {
+    val thornPath = EyePaths.obtain().apply {
         moveTo(centerX - size * 0.5f, centerY + size * 0.35f)
         lineTo(centerX - size * 0.65f, centerY + size * 0.45f)
         lineTo(centerX - size * 0.55f, centerY + size * 0.5f)
@@ -2536,7 +2536,7 @@ internal fun DrawScope.drawRoseProp(
     drawPath(thornPath, stemGreen)
 
     // Green serrated leaf
-    val leafPath = Path().apply {
+    val leafPath = EyePaths.obtain().apply {
         moveTo(centerX - size * 0.7f, centerY + size * 0.5f)
         cubicTo(centerX - size * 1.1f, centerY + size * 0.3f, centerX - size * 1.3f, centerY + size * 0.6f, centerX - size * 0.9f, centerY + size * 0.7f)
         close()
@@ -2545,7 +2545,7 @@ internal fun DrawScope.drawRoseProp(
     drawPath(leafPath, Color(0xFF2E7D32).copy(alpha = effAlpha), style = Stroke(width = 1.2.dp.toPx()))
 
     // Green calyx / sepal under blossom
-    val sepalPath = Path().apply {
+    val sepalPath = EyePaths.obtain().apply {
         moveTo(centerX - size * 0.35f, centerY + size * 0.15f)
         lineTo(centerX, centerY + size * 0.28f)
         lineTo(centerX + size * 0.35f, centerY + size * 0.15f)
@@ -2560,7 +2560,7 @@ internal fun DrawScope.drawRoseProp(
     drawCircle(darkRed, radius = size * 0.48f, center = Offset(centerX, centerY), style = Stroke(width = 1.8.dp.toPx()))
 
     // Inner petal arcs
-    val innerPetal = Path().apply {
+    val innerPetal = EyePaths.obtain().apply {
         moveTo(centerX - size * 0.25f, centerY - size * 0.1f)
         cubicTo(centerX - size * 0.3f, centerY - size * 0.35f, centerX + size * 0.3f, centerY - size * 0.35f, centerX + size * 0.25f, centerY - size * 0.1f)
         cubicTo(centerX + size * 0.25f, centerY + size * 0.25f, centerX - size * 0.25f, centerY + size * 0.25f, centerX - size * 0.25f, centerY - size * 0.1f)
@@ -2595,9 +2595,9 @@ internal fun DrawScope.drawRomanticMood(
 
         // Right eye: Heart eye with flirty wink 😉
         val winkScaleY = living.winkEyeScaleY
-        val isWinkClosed = winkScaleY <= 0.20f
+        val isWinkClosed = winkScaleY <= EyeMetrics.WINK_CLOSED
         if (isWinkClosed) {
-            drawSleepingEye(pinkColor, rightEyeX, eyeY, baseEyeW * 1.05f, barHeight = 14.dp.toPx(), alpha = effAlpha)
+            drawSleepingEye(pinkColor, rightEyeX, eyeY, baseEyeW * 1.05f, barHeight = EyeMetrics.SLIT_THICKNESS_DP.dp.toPx(), alpha = effAlpha)
         } else {
             drawHeart(pinkColor, rightEyeX, eyeY, heartSize * winkScaleY.coerceAtLeast(0.35f), alpha = effAlpha)
         }
@@ -2615,7 +2615,7 @@ internal fun DrawScope.drawRomanticMood(
 
     // Pucker kiss mouth '3'
     val mouthY = eyeY + baseEyeH * 0.68f
-    val puckerPath = Path().apply {
+    val puckerPath = EyePaths.obtain().apply {
         moveTo(centerX - 8.dp.toPx(), mouthY - 6.dp.toPx())
         cubicTo(centerX - 1.dp.toPx(), mouthY - 6.dp.toPx(), centerX + 4.dp.toPx(), mouthY - 3.dp.toPx(), centerX - 1.dp.toPx(), mouthY)
         cubicTo(centerX + 4.dp.toPx(), mouthY + 3.dp.toPx(), centerX - 1.dp.toPx(), mouthY + 6.dp.toPx(), centerX - 8.dp.toPx(), mouthY + 6.dp.toPx())
@@ -2657,12 +2657,12 @@ internal fun DrawScope.drawConfusedMood(
         val w = baseEyeW * 0.9f
         val amp1 = 8.dp.toPx() + sin(wavePhase + phaseOffset) * 2.dp.toPx()
         val amp2 = 8.dp.toPx() - sin(wavePhase + phaseOffset) * 2.dp.toPx()
-        val wavePath = Path().apply {
+        val wavePath = EyePaths.obtain().apply {
             moveTo(cx - w * 0.45f, cy)
             cubicTo(cx - w * 0.25f, cy - amp1, cx - w * 0.1f, cy - amp1, cx, cy)
             cubicTo(cx + w * 0.1f, cy + amp2, cx + w * 0.25f, cy + amp2, cx + w * 0.45f, cy)
         }
-        drawPath(wavePath, Color(0xFF004D6B).copy(alpha = effAlpha), style = Stroke(width = 15.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(wavePath, EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha), style = Stroke(width = 15.dp.toPx(), cap = StrokeCap.Round))
         drawPath(wavePath, cyanColor, style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round))
     }
 
@@ -2682,7 +2682,7 @@ internal fun DrawScope.drawConfusedMood(
     val mouthY = eyeY + baseEyeH * 0.7f
     val mouthW = 20.dp.toPx()
     val mouthAmp = 4.dp.toPx() + sin(wavePhase) * 1.5.dp.toPx()
-    val mouthWave = Path().apply {
+    val mouthWave = EyePaths.obtain().apply {
         moveTo(centerX - mouthW * 0.5f, mouthY)
         cubicTo(centerX - mouthW * 0.25f, mouthY - mouthAmp, centerX - mouthW * 0.1f, mouthY - mouthAmp, centerX, mouthY)
         cubicTo(centerX + mouthW * 0.1f, mouthY + mouthAmp, centerX + mouthW * 0.25f, mouthY + mouthAmp, centerX + mouthW * 0.5f, mouthY)

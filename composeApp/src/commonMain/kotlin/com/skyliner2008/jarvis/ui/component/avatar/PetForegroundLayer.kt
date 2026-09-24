@@ -118,11 +118,7 @@ private fun CyberHudForeground() {
 @Composable
 private fun StarDustForeground() {
     val transition = rememberInfiniteTransition(label = "star_dust")
-    val drift by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(12000, easing = LinearEasing), RepeatMode.Restart),
-        label = "drift"
-    )
+    val layerClock = rememberLayerClock()
     val particles = remember {
         List(12) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.3f + 0.15f, Random.nextFloat() * 0.3f + 0.15f, Random.nextFloat() * 12f + 8f, 0f, Random.nextFloat() * 6.28f)
@@ -130,8 +126,10 @@ private fun StarDustForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val driftCycles = layerClock.cycles(12000)
+        val drift = (driftCycles % 1.0).toFloat()
         particles.forEach { p ->
-            val py = ((p.y - drift * p.speed) % 1f + 1f) % 1f * size.height
+            val py = loopFrac(p.y, driftCycles, -p.speed) * size.height
             val px = p.x * size.width + sin((drift * 2f * PI + p.extra).toDouble()).toFloat() * 18f
             drawCircle(
                 brush = Brush.radialGradient(
@@ -152,11 +150,7 @@ private fun StarDustForeground() {
 @Composable
 private fun MagicSparklesForeground() {
     val transition = rememberInfiniteTransition(label = "magic_sparkles")
-    val sparkProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(4000, easing = LinearEasing), RepeatMode.Restart),
-        label = "spark"
-    )
+    val layerClock = rememberLayerClock()
     val sparkles = remember {
         List(14) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 0.6f + 0.3f, Random.nextFloat() * 8f + 6f, Random.nextFloat() * 360f, Random.nextFloat() * 6.28f)
@@ -164,8 +158,10 @@ private fun MagicSparklesForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val sparkProgCycles = layerClock.cycles(4000)
+        val sparkProg = (sparkProgCycles % 1.0).toFloat()
         sparkles.forEach { s ->
-            val py = ((s.y - sparkProg * s.speed) % 1f + 1f) % 1f * size.height
+            val py = loopFrac(s.y, sparkProgCycles, -s.speed) * size.height
             val px = s.x * size.width + sin((sparkProg * 4f * PI + s.extra).toDouble()).toFloat() * 15f
             val alpha = (s.alpha * sin((sparkProg * 2f * PI + s.extra).toDouble()).toFloat().absoluteValue).coerceIn(0f, 0.85f)
             val color = if (s.speed > 0.5f) Color(0xFFFFD54F) else Color(0xFFE040FB)
@@ -210,11 +206,7 @@ private fun LensReflectionForeground() {
 @Composable
 private fun FrostVignetteForeground() {
     val transition = rememberInfiniteTransition(label = "frost_vignette")
-    val snowProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(1900, easing = LinearEasing), RepeatMode.Restart),
-        label = "snow"
-    )
+    val layerClock = rememberLayerClock()
     val fgSnow = remember {
         List(8) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.8f + 0.6f, Random.nextFloat() * 0.4f + 0.2f, Random.nextFloat() * 14f + 8f, 0f, Random.nextFloat() * 6.28f)
@@ -222,6 +214,7 @@ private fun FrostVignetteForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val snowProgCycles = layerClock.cycles(1900)
         // Corner icy vignette
         drawRect(
             brush = Brush.radialGradient(
@@ -233,7 +226,7 @@ private fun FrostVignetteForeground() {
 
         // Large out-of-focus foreground snowflakes
         fgSnow.forEach { s ->
-            val py = (s.y + snowProg * s.speed) % 1f * size.height
+            val py = loopFrac(s.y, snowProgCycles, s.speed) * size.height
             val px = (s.x * size.width + sin((py * 0.04f + s.extra).toDouble()).toFloat() * 22f) % size.width
             drawCircle(
                 brush = Brush.radialGradient(
@@ -254,11 +247,7 @@ private fun FrostVignetteForeground() {
 @Composable
 private fun HeatDistortionForeground() {
     val transition = rememberInfiniteTransition(label = "heat_distortion")
-    val riseProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
-        label = "rise"
-    )
+    val layerClock = rememberLayerClock()
     val embers = remember {
         List(10) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.5f, Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 10f + 6f, 0f, Random.nextFloat() * 6.28f)
@@ -266,8 +255,9 @@ private fun HeatDistortionForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val riseProgCycles = layerClock.cycles(2400)
         embers.forEach { e ->
-            val py = ((e.y - riseProg * e.speed) % 1f + 1f) % 1f * size.height
+            val py = loopFrac(e.y, riseProgCycles, -e.speed) * size.height
             val px = e.x * size.width + sin((py * 0.05f + e.extra).toDouble()).toFloat() * 18f
             drawCircle(
                 brush = Brush.radialGradient(
@@ -346,11 +336,7 @@ private fun ElectricSparksForeground() {
 @Composable
 private fun FallingPetalsForeground() {
     val transition = rememberInfiniteTransition(label = "falling_petals")
-    val fallProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(3500, easing = LinearEasing), RepeatMode.Restart),
-        label = "fall"
-    )
+    val layerClock = rememberLayerClock()
     val petals = remember {
         List(10) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.6f + 0.4f, Random.nextFloat() * 0.4f + 0.4f, Random.nextFloat() * 16f + 12f, Random.nextFloat() * 360f, Random.nextFloat() * 6.28f)
@@ -358,10 +344,12 @@ private fun FallingPetalsForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val fallProgCycles = layerClock.cycles(3500)
+        val fallProg = (fallProgCycles % 1.0).toFloat()
         petals.forEach { p ->
-            val py = (p.y + fallProg * p.speed) % 1f * size.height
+            val py = loopFrac(p.y, fallProgCycles, p.speed) * size.height
             val px = p.x * size.width + sin((py * 0.03f + p.extra).toDouble()).toFloat() * 35f
-            val pRot = p.rot + fallProg * 180f
+            val pRot = p.rot + loopFrac(0f, fallProgCycles, 0.5f) * 360f
             val squash = cos((fallProg * 4f * PI + p.extra).toDouble()).toFloat().absoluteValue
             rotate(pRot, pivot = Offset(px, py)) {
                 drawOval(
@@ -380,11 +368,7 @@ private fun FallingPetalsForeground() {
 @Composable
 private fun ConfettiTumbleForeground() {
     val transition = rememberInfiniteTransition(label = "confetti_tumble")
-    val fallProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2800, easing = LinearEasing), RepeatMode.Restart),
-        label = "tumble"
-    )
+    val layerClock = rememberLayerClock()
     val confetti = remember {
         val colors = listOf(Color(0xFFFF1744), Color(0xFF00E5FF), Color(0xFFFFEA00), Color(0xFF76FF03), Color(0xFFE040FB))
         List(18) {
@@ -393,8 +377,10 @@ private fun ConfettiTumbleForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val fallProgCycles = layerClock.cycles(2800)
+        val fallProg = (fallProgCycles % 1.0).toFloat()
         confetti.forEach { c ->
-            val py = (c.y + fallProg * c.speed) % 1f * size.height
+            val py = loopFrac(c.y, fallProgCycles, c.speed) * size.height
             val px = c.x * size.width + sin((py * 0.04f).toDouble()).toFloat() * 25f
             val rot = c.rot + fallProg * 360f
             val squash = cos((rot * PI.toFloat() / 90f).toDouble()).toFloat().absoluteValue
@@ -442,11 +428,7 @@ private fun GoldenShineForeground() {
 @Composable
 private fun HeartOrbsForeground() {
     val transition = rememberInfiniteTransition(label = "heart_orbs")
-    val riseProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(3800, easing = LinearEasing), RepeatMode.Restart),
-        label = "heart_rise"
-    )
+    val layerClock = rememberLayerClock()
     val hearts = remember {
         List(12) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 0.35f + 0.25f, Random.nextFloat() * 14f + 10f, 0f, Random.nextFloat() * 6.28f)
@@ -454,8 +436,9 @@ private fun HeartOrbsForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val riseProgCycles = layerClock.cycles(3800)
         hearts.forEach { h ->
-            val hy = ((h.y - riseProg * h.speed) % 1f + 1f) % 1f * size.height
+            val hy = loopFrac(h.y, riseProgCycles, -h.speed) * size.height
             val hx = h.x * size.width + sin((hy * 0.04f + h.extra).toDouble()).toFloat() * 16f
             drawPetHeart(Offset(hx, hy), h.size, Color(0xFFFF4081).copy(alpha = h.alpha * 0.6f))
         }
@@ -468,11 +451,7 @@ private fun HeartOrbsForeground() {
 @Composable
 private fun BubbleFloatForeground() {
     val transition = rememberInfiniteTransition(label = "bubble_float")
-    val bubbleProg by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2900, easing = LinearEasing), RepeatMode.Restart),
-        label = "bubble"
-    )
+    val layerClock = rememberLayerClock()
     val bubbles = remember {
         List(14) {
             FgParticle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.5f + 0.4f, Random.nextFloat() * 0.4f + 0.25f, Random.nextFloat() * 16f + 8f, 0f, Random.nextFloat() * 6.28f)
@@ -480,8 +459,9 @@ private fun BubbleFloatForeground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val bubbleProgCycles = layerClock.cycles(2900)
         bubbles.forEach { b ->
-            val by = ((b.y - bubbleProg * b.speed) % 1f + 1f) % 1f * size.height
+            val by = loopFrac(b.y, bubbleProgCycles, -b.speed) * size.height
             val bx = b.x * size.width + sin((by * 0.035f + b.extra).toDouble()).toFloat() * 15f
 
             // Bubble body

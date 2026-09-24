@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.ui.component.avatar
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -11,7 +12,7 @@ import kotlinx.serialization.json.Json
 enum class EyeStyle {
     /** ดวงตากลม LED สีฟ้าปกติ */
     DEFAULT,
-    /** ขยิบตาข้างซ้าย (ปิดตาข้าง เปิดตาข้าง) */
+    /** ขยิบตา: ตาซ้ายเปิด ตาขวาขยิบ (ตรงกับ renderer WINK) */
     WINK,
     /** ตารูปหัวใจ ♥ ♥ สีชมพู */
     HEART,
@@ -391,6 +392,7 @@ enum class EyeTrickState {
  * }
  * ```
  */
+@Immutable
 @Serializable
 data class RobotFaceState(
     @SerialName("emotion") val emotionName: String = "idle",
@@ -409,17 +411,17 @@ data class RobotFaceState(
     /** เพิ่มขึ้นทุกครั้งที่เริ่มฉาก เพื่อให้เล่นฉากเดิมซ้ำได้ */
     @SerialName("scene_id") val sceneId: Int = 0
 ) {
-    /** Parse eye trick name → EyeTrickState */
-    val eyeTrick: EyeTrickState
-        get() = try {
-            EyeTrickState.valueOf(eyeTrickName.uppercase())
-        } catch (_: Exception) {
-            EyeTrickState.NONE
-        }
+    // Parsed values are computed once per instance (the UI reads them on every recomposition).
+    // Delegated properties are not serialized and are not part of equals/hashCode/copy.
+
+    /** Parse eye trick name → EyeTrickState ("ping pong bounce" / "Ping-Pong-Bounce" also accepted) */
+    val eyeTrick: EyeTrickState by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        EyeTrickState.entries.firstOrNull { it.name == normalizeEnumName(eyeTrickName) } ?: EyeTrickState.NONE
+    }
 
     /** Parse emotion name → AvatarEmotion enum (safe fallback to IDLE) */
-    val emotion: AvatarEmotion
-        get() = try {
+    val emotion: AvatarEmotion by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        try {
             val clean = emotionName.uppercase().trim().replace(" ", "_")
             when (clean) {
                 "NORMAL" -> AvatarEmotion.IDLE
@@ -465,10 +467,11 @@ data class RobotFaceState(
         } catch (_: Exception) {
             AvatarEmotion.IDLE
         }
+    }
 
     /** Parse eye style name → EyeStyle enum (safe fallback to DEFAULT) */
-    val eyeStyle: EyeStyle
-        get() = try {
+    val eyeStyle: EyeStyle by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        try {
             val clean = eyeStyleName.uppercase().trim().replace(" ", "_")
             when (clean) {
                 "NORMAL", "ROUND", "SQUIRCLE" -> EyeStyle.DEFAULT
@@ -485,43 +488,38 @@ data class RobotFaceState(
         } catch (_: Exception) {
             EyeStyle.DEFAULT
         }
+    }
 
     /** Parse background theme name → BackgroundTheme enum (safe fallback to DEFAULT) */
-    val backgroundTheme: BackgroundTheme
-        get() = try {
-            val name = backgroundName.uppercase().replace(" ", "_")
-            BackgroundTheme.valueOf(name)
-        } catch (_: Exception) {
-            BackgroundTheme.DEFAULT
-        }
+    val backgroundTheme: BackgroundTheme by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        BackgroundTheme.entries.firstOrNull { it.name == normalizeEnumName(backgroundName) } ?: BackgroundTheme.DEFAULT
+    }
 
     /** Parse foreground effect name → ForegroundEffect enum (safe fallback to NONE) */
-    val foregroundEffect: ForegroundEffect
-        get() = try {
-            val name = foregroundName.uppercase().replace(" ", "_")
-            ForegroundEffect.valueOf(name)
-        } catch (_: Exception) {
-            ForegroundEffect.NONE
-        }
+    val foregroundEffect: ForegroundEffect by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ForegroundEffect.entries.firstOrNull { it.name == normalizeEnumName(foregroundName) } ?: ForegroundEffect.NONE
+    }
 
     /** Parse comma-separated props string → List<PropType> พร้อม Smart Alias & Synonym Resolver */
-    val props: List<PropType>
-        get() = propsRaw
+    val props: List<PropType> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        propsRaw
             .split(",")
             .mapNotNull { raw ->
                 resolvePropType(raw)
             }
+    }
 
     /** Parse gesture name → GestureType enum (safe fallback to IDLE) */
-    val gesture: GestureType
-        get() = try {
-            GestureType.valueOf(gestureName.uppercase())
-        } catch (_: Exception) {
-            GestureType.IDLE
-        }
+    val gesture: GestureType by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        GestureType.entries.firstOrNull { it.name == normalizeEnumName(gestureName) } ?: GestureType.IDLE
+    }
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+        /** "Ping pong-bounce " → "PING_PONG_BOUNCE" (enum constant form) */
+        internal fun normalizeEnumName(raw: String): String =
+            raw.trim().uppercase().replace(' ', '_').replace('-', '_')
 
         /** Parse JSON string → RobotFaceState (safe, returns default on failure) */
         fun fromJson(jsonString: String): RobotFaceState {

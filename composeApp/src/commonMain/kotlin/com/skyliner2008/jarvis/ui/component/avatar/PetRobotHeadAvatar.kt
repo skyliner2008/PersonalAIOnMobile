@@ -13,29 +13,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import kotlin.math.*
 
 /**
- * PetRobotHeadAvatar — Fullscreen Living Robot Head Avatar
+ * PetRobotHeadAvatar — Fullscreen Living Robot Face (LOOI-style OLED face, Compose Canvas engine)
  *
- * ออกแบบตามภาพอ้างอิงของแท้ (media_1789115340717.jpg):
- * 1. หัวหุ่นยนต์เซรามิกสีขาวทรงกลมมน นุ่มนวล 3D Lighting
- * 2. ปลั๊กหูฟังโลหะสีฟ้าเทา (Metallic Slate Ear Knobs) สองข้าง
- * 3. หน้ากากกระจกดำเงาวับ (Glossy Curved Visor) พร้อมแสงสะท้อนโค้ง (Specular Arc Reflection)
- * 4. หน้าจอดิจิทัล LED Dot Matrix แสดง 11 อารมณ์เป๊ะตามแบบ:
- *    - HAPPY: ตากลมยิ้ม + ปากยิ้ม
- *    - WINK: ตาขยิบข้างเดียว + ปากยิ้ม
- *    - SAD: คิ้วลู่ + ปากคว่ำ + หยดน้ำตากำลังหยด
- *    - ANGRY: ตาสายฟ้าสีแดงเฉียง + ปากฟันปลา
- *    - CONFUSED: เครื่องหมาย ? ตรงกลาง + ตากลม + ปากขีด
- *    - LOVE: ตาหัวใจสีชมพูแดงคู่ ♥ ♥ + ปากยิ้ม
- *    - SLEEPING: ตาหลับขีดเรียบ — — + ตัวอักษร z z z ลอยขึ้น
- *    - THINKING: ตาโตข้างเล็กข้าง คิ้วเลิกสูง + ไอคอนมือแตะคาง 🤔
- *    - EXCITED: ตาโค้งหยี ^^ + ปากอ้ากว้างยิ้มแฉ่ง
- *    - POUT: ตากลมมองข้าง + แก้มป่องสีชมพูแดงระเรื่อ + ปากบูด Hmph
- *    - DIZZY: ตาลายก้นหอยหมุนวนต่อเนื่อง @_@ + ปากหยักคลื่น เมื่อถูกเขย่า
- * 5. การขยับแบบมีชีวิต: หายใจลอยขึ้นลง (Breathing Bob), กะพริบตาธรรมชาติ, หันหัวเอียง, และกรอกสายตามองตาม
+ * ไม่มีหัวหุ่นยนต์ให้เห็น — จอดำสนิท มีแค่ดวงตานีออน (บางอารมณ์มีปาก/พร็อพ) ตามชีท LOOI Moodset:
+ * 1. ดวงตาปกติ = วงกลม 2 วงขนาดเท่ากันซ้อนเยื้อง (หน้า: ลูกตาสีนีออน / หลัง: เบ้าตาสีเงาเข้ม)
+ *    ตำแหน่งมาจาก [VirtualHeadKinematics] — เบ้าตาขยับตามหัว (yaw/pitch), ลูกตาขยับตามสายตา
+ * 2. อารมณ์ทั้งหมดใน [AvatarEmotion] มี renderer ของตัวเองใน [renderPetEmotion]
+ * 3. การเคลื่อนไหวแบบมีชีวิต: หายใจ, กะพริบตา, saccade, เอียงหัว, พยักหน้า/ส่ายหน้า, crossfade อารมณ์
+ * 4. ค่าที่ขยับทุกเฟรมถูกอ่านใน draw phase เท่านั้น (ดู [LivingMotionSource]) — composable นี้
+ *    recompose เฉพาะเมื่อ [AvatarState] เปลี่ยน
  */
 enum class AvatarEngineType {
     /** High-performance procedurally drawn Compose Canvas (zero binary dependency, 50+ LOOI moodsets) */
@@ -43,6 +32,21 @@ enum class AvatarEngineType {
     /** State-machine driven Rive Runtime (.riv binary) */
     RIVE_STATE_MACHINE
 }
+
+/** อารมณ์ที่ท่าทางคงที่ของตัวเอง — หัวไม่เอียงตามสายตา */
+private val emotionsWithFixedHeadTilt = setOf(
+    AvatarEmotion.DIZZY,
+    AvatarEmotion.THINKING,
+    AvatarEmotion.CONFUSED,
+    AvatarEmotion.POUT,
+    AvatarEmotion.SURPRISED,
+    AvatarEmotion.BORED,
+    AvatarEmotion.ENRAGED,
+    AvatarEmotion.EVIL
+)
+
+/** ระยะเวลา crossfade ระหว่างอารมณ์ (ms) */
+private const val EMOTION_CROSSFADE_MS = 280
 
 /**
  * @param riveReaction touch event (holographic hand) — drives the Rive `react` channel
@@ -75,8 +79,11 @@ fun PetRobotHeadAvatar(
     val localLayout = LocalAvatarLayout.current
     val localDetailLevel = LocalAvatarDetailLevel.current
     val infinite = rememberInfiniteTransition(label = "pet_head_living")
-    val living = rememberLivingMotionState()
-    val particles = rememberPetParticleMotionState()
+    val livingSource = rememberLivingMotionSource()
+    val particleSource = rememberPetParticleMotionSource()
+
+    // NOTE: ค่าที่ประกาศด้วย `by` จากนี้ไปต้องถูกอ่านภายใน Canvas เท่านั้น
+    // (อ่านใน composition = recompose ทุกเฟรมที่มันขยับ)
 
     // ─── 1. Living Breathing Bobbing Animation ────────────────────────────────
     val breathingOffsetY by infinite.animateFloat(
@@ -98,8 +105,8 @@ fun PetRobotHeadAvatar(
                 durationMillis = 3800
                 1f at 0
                 1f at 3450
-                0.06f at 3620 using FastOutSlowInEasing // ~170ms morph squash down
-                0.06f at 3680
+                EyeMetrics.BLINK_CLOSED at 3620 using FastOutSlowInEasing // ~170ms morph squash down
+                EyeMetrics.BLINK_CLOSED at 3680
                 1f at 3800 using FastOutSlowInEasing   // ~120ms morph open
             },
             repeatMode = RepeatMode.Restart
@@ -107,15 +114,15 @@ fun PetRobotHeadAvatar(
         label = "natural_blink_morph"
     )
 
-    // ─── 3. Continuous Dizzy Spiral Eye Rotation ─────────────────────────────
-    val dizzyAngle by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
+    // ─── 3. Dizzy head wobble (±1, added to the tilt in the draw phase) ──────
+    val dizzyWobble by infinite.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+            animation = tween(900, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
         ),
-        label = "dizzy_angle"
+        label = "dizzy_wobble"
     )
 
     // ─── 4. Animated Floating Zzz for Sleeping ────────────────────────────────
@@ -144,46 +151,55 @@ fun PetRobotHeadAvatar(
     // shared with the Rive engine so both show the same face (RiveAvatarBinding.kt)
     val effectiveEmotion = state.effectiveEmotion()
 
-    // ─── 7. Local Layout Integration ──────────────────────────────────────────
-    // localLayout is defined above
-
-    // ─── 8. Gaze & Face-Tracking Low-Pass Jitter Filtering ───────────────────
-    val gazeStabilizer = remember { GazeStabilizer() }
-    val (filteredGazeX, filteredGazeY) = remember(state.gazeOffsetX, state.gazeOffsetY) {
-        gazeStabilizer.update(state.gazeOffsetX, state.gazeOffsetY)
-    }
-
+    // ─── 7. Gaze & face distance ─────────────────────────────────────────────
+    // สายตาจากกล้องผ่าน GazeStabilizer มาแล้วใน PetVisionDetector; จากนิ้ว/idle wander เป็นค่าคงที่
+    // จึงให้ spring ทำหน้าที่ smoothing อย่างเดียว — spring ไล่ถึงเป้าเสมอ (สายตากลับศูนย์ได้จริง)
     val smoothedGazeX by animateFloatAsState(
-        targetValue = filteredGazeX,
+        targetValue = state.gazeOffsetX.coerceIn(-1f, 1f),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "smoothed_gaze_x"
     )
     val smoothedGazeY by animateFloatAsState(
-        targetValue = filteredGazeY,
+        targetValue = state.gazeOffsetY.coerceIn(-1f, 1f),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "smoothed_gaze_y"
     )
+    val animatedFaceScale by animateFloatAsState(
+        targetValue = state.faceScaleFactor.coerceIn(0.85f, 1.30f),
+        animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "face_scale"
+    )
 
-    // ─── 9. Head Tilt Smooth Animation (with gesture override & 350ms sync) ───
+    // ─── 8. Head Tilt (gesture override / emotion pose, 350ms) ────────────────
+    // TILT_LEFT/RIGHT ถูกหมุนที่นี่ที่เดียว (PetGestureAnimations ไม่หมุนซ้ำ)
     val gestureTilt = state.faceState.gesture.headTiltOverride()
     val targetHeadTilt = when {
         gestureTilt != null -> gestureTilt
-        state.isDizzy || effectiveEmotion == AvatarEmotion.DIZZY -> 4f * sin(breathingOffsetY * 0.5f)
         effectiveEmotion == AvatarEmotion.THINKING -> 5.5f
         effectiveEmotion == AvatarEmotion.CONFUSED -> -4.0f
         effectiveEmotion == AvatarEmotion.POUT -> -3.0f
-        effectiveEmotion == AvatarEmotion.SURPRISED -> 0f  // Alert upright posture
         effectiveEmotion == AvatarEmotion.BORED -> 4.5f    // Lazy tired tilt
-        effectiveEmotion == AvatarEmotion.ENRAGED || effectiveEmotion == AvatarEmotion.EVIL -> 0f
-        else -> smoothedGazeX * 3.0f
+        else -> 0f
     }
     val headTiltAnim by animateFloatAsState(
         targetValue = targetHeadTilt,
         animationSpec = tween(350, easing = FastOutSlowInEasing),
         label = "head_tilt"
     )
+    // Weights blend the per-frame tilt sources in/out instead of snapping them on or off
+    val isDizzyPose = gestureTilt == null && (state.isDizzy || effectiveEmotion == AvatarEmotion.DIZZY)
+    val dizzyTiltWeight by animateFloatAsState(
+        targetValue = if (isDizzyPose) 1f else 0f,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "dizzy_tilt_weight"
+    )
+    val gazeTiltWeight by animateFloatAsState(
+        targetValue = if (gestureTilt == null && effectiveEmotion !in emotionsWithFixedHeadTilt && !state.isDizzy) 1f else 0f,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "gaze_tilt_weight"
+    )
 
-    // ─── 10. Animated Vertical Shift for Mouth Balance ────────────────────────
+    // ─── 9. Animated Vertical Shift for Mouth Balance ─────────────────────────
     val isSpeaking = state.isSpeaking || effectiveEmotion == AvatarEmotion.SPEAKING
     val hasMouth = when {
         state.faceState.eyeTrick != EyeTrickState.NONE -> false
@@ -209,28 +225,24 @@ fun PetRobotHeadAvatar(
         label = "mouth_shift"
     )
 
-    // ─── 11. Continuous Emotion Morph & Parametric Shapes ────────────────────
-    var previousEmotion by remember { mutableStateOf(effectiveEmotion) }
-    var displayedEmotion by remember { mutableStateOf(effectiveEmotion) }
+    // ─── 10. Emotion crossfade ───────────────────────────────────────────────
+    // fromEmotion จางออก / toEmotion จางเข้า ในเวลา EMOTION_CROSSFADE_MS ผ่าน offscreen layer
+    // (สีและ progress ด้านล่างใช้ effectiveEmotion โดยตรงจึงไม่ล่าช้าหนึ่งเฟรม)
+    var fromEmotion by remember { mutableStateOf(effectiveEmotion) }
+    var toEmotion by remember { mutableStateOf(effectiveEmotion) }
     val emotionTransition = remember { Animatable(1f) }
-
-    val currentTargetLeftParams = effectiveEmotion.toEyeShapeParams(isLeft = true)
-    val currentTargetRightParams = effectiveEmotion.toEyeShapeParams(isLeft = false)
-
-    val animatedLeftParams = rememberAnimatedEyeShapeParams(currentTargetLeftParams, label = "LeftEye")
-    val animatedRightParams = rememberAnimatedEyeShapeParams(currentTargetRightParams, label = "RightEye")
-
     LaunchedEffect(effectiveEmotion) {
-        if (effectiveEmotion != displayedEmotion) {
-            previousEmotion = displayedEmotion
-            displayedEmotion = effectiveEmotion
-            // All emotions are 100% parametric: continuous morphing handled by rememberAnimatedEyeShapeParams
-            emotionTransition.snapTo(1f)
+        if (effectiveEmotion != toEmotion) {
+            // interrupted mid-fade: keep whichever face is currently more visible as the outgoing one
+            if (emotionTransition.value >= 0.5f) fromEmotion = toEmotion
+            toEmotion = effectiveEmotion
+            emotionTransition.snapTo(0f)
+            emotionTransition.animateTo(1f, tween(EMOTION_CROSSFADE_MS, easing = FastOutSlowInEasing))
         }
     }
 
     // Dynamic Eye Color Animation (Synchronized 350ms FastOutSlowInEasing)
-    val targetEyeColor = when (displayedEmotion) {
+    val targetEyeColor = when (effectiveEmotion) {
         AvatarEmotion.SPEAKING -> Color(0xFF00E676)
         AvatarEmotion.LOVE, AvatarEmotion.ROMANTIC, AvatarEmotion.SHY -> NeonPink
         AvatarEmotion.ANGRY, AvatarEmotion.ENRAGED, AvatarEmotion.EVIL -> NeonRed
@@ -278,45 +290,51 @@ fun PetRobotHeadAvatar(
         animationSpec = syncAnimSpec,
         label = "surpriseProgress"
     )
-    val happyProgress by animateFloatAsState(
-        targetValue = if (effectiveEmotion == AvatarEmotion.HAPPY) 1f else 0f,
-        animationSpec = syncAnimSpec,
-        label = "happyProgress"
-    )
 
-    // ─── 12. Screensaver Eye Trick Animation (Ping-Pong, Tired Bounce, Snooker Shot) ─
-    val trickProgress = remember { Animatable(0f) }
+    // ─── 11. Screensaver Eye Trick Animation (Ping-Pong, Tired Bounce, Snooker Shot) ─
+    // shownTrick ค้างค่าท่าสุดท้ายไว้ระหว่าง fade-out เพื่อไม่ให้ตาสลับรูปทันที
     val currentTrick = state.faceState.eyeTrick
+    val trickProgress = remember { Animatable(0f) }
+    var shownTrick by remember { mutableStateOf(currentTrick) }
+    val trickBlend by animateFloatAsState(
+        targetValue = if (currentTrick != EyeTrickState.NONE) 1f else 0f,
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "trick_blend"
+    )
     LaunchedEffect(currentTrick) {
         if (currentTrick != EyeTrickState.NONE) {
+            shownTrick = currentTrick
             trickProgress.snapTo(0f)
             trickProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(4200, easing = LinearEasing)
             )
-        } else {
-            trickProgress.snapTo(0f)
         }
     }
 
-    // ─── 13. Virtual 3D Robot Head Kinematics ─────────────────────────────────
-    // จำลองการเคลื่อนไหวของหัวหุ่นยนต์ 3 มิติ (หันหน้า Yaw / เงย-ก้ม Pitch) ด้วยมวลและแรงเฉื่อยทางกายภาพ
+    // ─── 12. Virtual 3D Robot Head Kinematics ─────────────────────────────────
+    // หัวหมุนตามเป้าสายตาดิบด้วย spring ที่อ่อนกว่า (มีแรงเฉื่อยมากกว่าลูกตา)
+    // เป้าหมายเปลี่ยนเฉพาะเมื่อ state เปลี่ยน — พยักหน้า/ส่ายหน้าบวกเพิ่มใน draw phase
     val gesture = state.faceState.gesture
-    val gestureNod = if (gesture == GestureType.NOD) 0.35f * sin(living.loopFast * 2f * PI.toFloat()) else 0f
-    val gestureShake = if (gesture == GestureType.SHAKE) 0.40f * sin(living.loopFast * 2f * PI.toFloat()) else 0f
-
-    val targetHeadYaw = (smoothedGazeX * 0.55f + gestureShake).coerceIn(-1f, 1f)
-    val targetHeadPitch = (-smoothedGazeY * 0.40f + gestureNod).coerceIn(-1f, 1f)
-
     val animatedHeadYaw by animateFloatAsState(
-        targetValue = targetHeadYaw,
+        targetValue = (state.gazeOffsetX.coerceIn(-1f, 1f) * 0.55f),
         animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "head_yaw"
     )
     val animatedHeadPitch by animateFloatAsState(
-        targetValue = targetHeadPitch,
+        targetValue = (-state.gazeOffsetY.coerceIn(-1f, 1f) * 0.40f),
         animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "head_pitch"
+    )
+    val nodWeight by animateFloatAsState(
+        targetValue = if (gesture == GestureType.NOD) 1f else 0f,
+        animationSpec = tween(250),
+        label = "nod_weight"
+    )
+    val shakeWeight by animateFloatAsState(
+        targetValue = if (gesture == GestureType.SHAKE) 1f else 0f,
+        animationSpec = tween(250),
+        label = "shake_weight"
     )
 
     // Canvas ไม่ใส่ graphicsLayer rotation 3D เพื่อป้องกันไม่ให้ระนาบ 2D บิดเบี้ยวเป็นสี่เหลี่ยมคางหมูจนตาบี้เป็นทรงไข่
@@ -325,34 +343,49 @@ fun PetRobotHeadAvatar(
         val canvasH = size.height
         if (canvasW <= 0f || canvasH <= 0f) return@Canvas
 
+        val living = livingSource.snapshot()
+        val particles = particleSource.snapshot()
+
         val layout = if (localLayout.eyeDiameter > 0f && localLayout.containerWidth > 0f) {
             localLayout
         } else {
             calculateAvatarLayout(canvasW, canvasH)
         }
-        val isLandscape = layout.isLandscape
-        val eyeDiameter = layout.eyeDiameter * state.faceScaleFactor.coerceIn(0.85f, 1.30f)
+        // faceScale ขยายทั้งตาและระยะห่างพร้อมกัน — ตาไม่ชนกันเมื่อผู้ใช้เข้าใกล้กล้อง
+        val faceScale = animatedFaceScale
+        val eyeDiameter = layout.eyeDiameter * faceScale
         val baseEyeW = eyeDiameter
         val baseEyeH = eyeDiameter
-        val baseSpacing = layout.baseSpacing
+        val baseSpacing = layout.baseSpacing * faceScale
 
         val centerX = layout.cX
-        val centerY = layout.cY + breathingOffsetY + living.breathingOffsetY
+        val centerY = layout.cY + (breathingOffsetY + living.breathingOffsetY).dp.toPx() * EyeMetrics.RAW_PX_TO_DP
 
         // Pupil Gaze (ลูกตา): กลอกสายตาว่องไว คล่องแคล่ว พร้อม Saccadic micro-darting
-        val pupilGazeX = (smoothedGazeX + living.saccadeOffsetX / (eyeDiameter * 0.15f).coerceAtLeast(1f)).coerceIn(-1f, 1f)
-        val pupilGazeY = (smoothedGazeY + living.saccadeOffsetY / (eyeDiameter * 0.11f).coerceAtLeast(1f)).coerceIn(-1f, 1f)
+        val saccadeX = living.saccadeOffsetX.dp.toPx() * EyeMetrics.RAW_PX_TO_DP
+        val saccadeY = living.saccadeOffsetY.dp.toPx() * EyeMetrics.RAW_PX_TO_DP
+        val pupilGazeX = (smoothedGazeX + saccadeX / (eyeDiameter * EyeMetrics.PUPIL_TRAVEL_X).coerceAtLeast(1f)).coerceIn(-1f, 1f)
+        val pupilGazeY = (smoothedGazeY + saccadeY / (eyeDiameter * EyeMetrics.PUPIL_TRAVEL_Y).coerceAtLeast(1f)).coerceIn(-1f, 1f)
 
         // Effective eye blink with natural morphing (circle -> flat slit -> circle)
-        val naturalBlink = when (displayedEmotion) {
+        val naturalBlink = when (effectiveEmotion) {
             AvatarEmotion.SLEEPING, AvatarEmotion.CAMERA_MODE -> 0.08f
             AvatarEmotion.WINK, AvatarEmotion.DIZZY, AvatarEmotion.DEAD, AvatarEmotion.LAUGHING, AvatarEmotion.DISGUSTED -> 1f
             AvatarEmotion.SURPRISED, AvatarEmotion.ENRAGED, AvatarEmotion.EVIL -> 1f
-            AvatarEmotion.BORED -> naturalBlinkScaleY.coerceIn(0.35f, 0.65f)
+            AvatarEmotion.BORED -> 1f // droopy lids are already drawn by the BORED renderer
             else -> if (state.isDizzy) 1f else (naturalBlinkScaleY * (0.85f + 0.15f * living.microBlinkFactor))
         }
-        val effectiveBlink = naturalBlink.coerceIn(0.06f, 1.25f)
+        val effectiveBlink = naturalBlink.coerceIn(EyeMetrics.BLINK_CLOSED, 1.25f)
         val blinkSquashX = if (effectiveBlink < 1f) 1f + (1f - effectiveBlink) * 0.15f else 1f
+
+        // Head roll: emotion pose + gaze follow + dizzy wobble + organic sway (all blended, no snaps)
+        val headRoll = headTiltAnim +
+            smoothedGazeX * 3.0f * gazeTiltWeight +
+            4f * dizzyWobble * dizzyTiltWeight +
+            living.headSwayDeg
+        val loopPhase = living.loopFast * 2f * PI.toFloat()
+        val headYaw = (animatedHeadYaw + 0.25f * sin(loopPhase) * shakeWeight).coerceIn(-1f, 1f)
+        val headPitch = (animatedHeadPitch + 0.22f * sin(loopPhase) * nodWeight).coerceIn(-1f, 1f)
 
         // Apply Whole-Face Respiration Scaling (volume-conserving breathing)
         scale(
@@ -361,15 +394,12 @@ fun PetRobotHeadAvatar(
             pivot = Offset(centerX, centerY)
         ) {
             // Apply Head/Face Tilt Rotation around center with living organic sway
-            rotate(degrees = headTiltAnim + living.headSwayDeg, pivot = Offset(centerX, centerY)) {
+            rotate(degrees = headRoll, pivot = Offset(centerX, centerY)) {
             // ═══════════════════════════════════════════════════════════════
             // PURE OLED LIVING FACE (LOOI ROBOT: 20 MOODSET - NEON CYAN STYLE)
             // ═══════════════════════════════════════════════════════════════
 
             val eyeColor = animatedEyeColor
-
-            val leftEyeScaleX = 1f
-            val rightEyeScaleX = 1f
 
             // เมื่อมีปากปรากฏเข้ามา ดวงตาจะขยับขึ้นด้านบนเล็กน้อย (~8.5% ของขนาดตา) เพื่อจัดสัดส่วนใบหน้าให้สมดุลกึ่งกลางจอ
             val eyeMouthUpwardShift = eyeDiameter * 0.085f * mouthShiftProgress
@@ -381,8 +411,8 @@ fun PetRobotHeadAvatar(
                 headCenterY = centerY - eyeMouthUpwardShift,
                 baseSpacing = baseSpacing,
                 eyeDiameter = eyeDiameter,
-                headYaw = animatedHeadYaw,
-                headPitch = animatedHeadPitch,
+                headYaw = headYaw,
+                headPitch = headPitch,
                 headRollDeg = 0f,
                 pupilGazeX = pupilGazeX,
                 pupilGazeY = pupilGazeY,
@@ -390,444 +420,290 @@ fun PetRobotHeadAvatar(
                 squashY = effectiveBlink
             )
 
+            val eyes = EyeAnchors(
+                leftX = kinematics.leftEye.lookCenter.x,
+                rightX = kinematics.rightEye.lookCenter.x,
+                y = kinematics.leftEye.lookCenter.y,
+                leftSocketX = kinematics.leftEye.backCenter.x,
+                rightSocketX = kinematics.rightEye.backCenter.x,
+                socketY = kinematics.leftEye.backCenter.y
+            )
             val faceCenterX = kinematics.headCenter.x
             val faceCenterY = kinematics.headCenter.y
-            val leftEyeCenterX = kinematics.leftEye.frontCenter.x
-            val rightEyeCenterX = kinematics.rightEye.frontCenter.x
-            val eyeCenterY = kinematics.headCenter.y
-            val gazeX = pupilGazeX
-            val gazeY = pupilGazeY
 
-            // 3. Disney Anticipation Squash & Stretch Physics
-            val transitionProg = emotionTransition.value
-            val anticipationSquashY = 1f - 0.08f * sin(transitionProg * PI.toFloat())
-            val anticipationSquashX = 1f + 0.05f * sin(transitionProg * PI.toFloat())
+            // Dynamic Eyebrows (Brows) - Shown conditionally for expressive emotions only
+            val showEyebrows = when (effectiveEmotion) {
+                AvatarEmotion.THINKING,
+                AvatarEmotion.ENRAGED,
+                AvatarEmotion.SAD,
+                AvatarEmotion.LISTENING,
+                AvatarEmotion.SURPRISED,
+                AvatarEmotion.BORED -> true
+                else -> false
+            } && trickBlend < 0.999f
 
-            scale(scaleX = anticipationSquashX, scaleY = anticipationSquashY, pivot = Offset(faceCenterX, eyeCenterY)) {
-                // 4. Dynamic Eyebrows (Brows) - Shown conditionally for expressive emotions only
-                val showEyebrows = when (effectiveEmotion) {
-                    AvatarEmotion.THINKING,
-                    AvatarEmotion.ENRAGED,
-                    AvatarEmotion.SAD,
-                    AvatarEmotion.LISTENING,
-                    AvatarEmotion.SURPRISED,
-                    AvatarEmotion.BORED -> true
-                    else -> false
-                } && state.faceState.eyeTrick == EyeTrickState.NONE
+            if (showEyebrows) withLayerAlpha(1f - trickBlend) {
+                val browW = baseEyeW * 0.95f
+                val browH = 9.dp.toPx()
+                val browBaseY = eyes.y - baseEyeH * 0.65f
 
-                if (showEyebrows) {
-                    val browW = baseEyeW * 0.95f
-                    val browH = 9.dp.toPx()
-                    val browBaseY = eyeCenterY - baseEyeH * 0.65f
-
-                    // Brow angles and offsets depending on emotion
-                    val (leftBrowAngle, rightBrowAngle, browOffsetY) = when (effectiveEmotion) {
-                        AvatarEmotion.THINKING -> Triple(6f, -14f, -4.dp.toPx())
-                        AvatarEmotion.ANGRY -> Triple(18f * eyeSlantProgress, -18f * eyeSlantProgress, 6.dp.toPx() * eyeSlantProgress)
-                        AvatarEmotion.ENRAGED -> Triple(24f, -24f, 8.dp.toPx()) // Deeply furrowed menacing V-brows
-                        AvatarEmotion.SAD -> Triple(-15f * sadProgress, 15f * sadProgress, 2.dp.toPx() * sadProgress)
-                        AvatarEmotion.LISTENING -> Triple(0f, 0f, -12.dp.toPx()) // Raised in attention
-                        AvatarEmotion.SURPRISED -> Triple(-6f, 6f, -14.dp.toPx()) // High arched up (shock!)
-                        AvatarEmotion.BORED -> Triple(-8f, 8f, 6.dp.toPx()) // Flat drooping down (tired)
-                        else -> Triple(0f, 0f, 0f)
-                    }
-
-                    // Draw Left Eyebrow
-                    rotate(degrees = leftBrowAngle, pivot = Offset(leftEyeCenterX, browBaseY + browOffsetY)) {
-                        drawRoundRect(
-                            color = eyeColor.copy(alpha = if (effectiveEmotion == AvatarEmotion.LISTENING) 0.95f else 0.65f),
-                            topLeft = Offset(leftEyeCenterX - browW / 2f, browBaseY + browOffsetY - browH / 2f),
-                            size = Size(browW, browH),
-                            cornerRadius = CornerRadius(browH / 2f, browH / 2f)
-                        )
-                    }
-
-                    // Draw Right Eyebrow
-                    rotate(degrees = rightBrowAngle, pivot = Offset(rightEyeCenterX, browBaseY + browOffsetY)) {
-                        drawRoundRect(
-                            color = eyeColor.copy(alpha = if (effectiveEmotion == AvatarEmotion.LISTENING) 0.95f else 0.65f),
-                            topLeft = Offset(rightEyeCenterX - browW / 2f, browBaseY + browOffsetY - browH / 2f),
-                            size = Size(browW, browH),
-                            cornerRadius = CornerRadius(browH / 2f, browH / 2f)
-                        )
-                    }
+                // Brow angles and offsets depending on emotion
+                val (leftBrowAngle, rightBrowAngle, browOffsetY) = when (effectiveEmotion) {
+                    AvatarEmotion.THINKING -> Triple(6f, -14f, -4.dp.toPx())
+                    AvatarEmotion.ENRAGED -> Triple(24f, -24f, 8.dp.toPx()) // Deeply furrowed menacing V-brows
+                    AvatarEmotion.SAD -> Triple(-15f * sadProgress, 15f * sadProgress, 2.dp.toPx() * sadProgress)
+                    AvatarEmotion.LISTENING -> Triple(0f, 0f, -12.dp.toPx()) // Raised in attention
+                    AvatarEmotion.SURPRISED -> Triple(-6f, 6f, -14.dp.toPx()) // High arched up (shock!)
+                    AvatarEmotion.BORED -> Triple(-8f, 8f, 6.dp.toPx()) // Flat drooping down (tired)
+                    else -> Triple(0f, 0f, 0f)
                 }
+                val browColor = eyeColor.copy(alpha = if (effectiveEmotion == AvatarEmotion.LISTENING) 0.95f else 0.65f)
 
-                // 5. Render Active Emotion Eyes & Screensaver Tricks with Seamless Transition
-                if (transitionProg < 1f && previousEmotion != displayedEmotion) {
-                    // Outgoing emotion fading out
-                    renderPetEmotion(
-                        emotion = previousEmotion,
-                        eyeTrick = state.faceState.eyeTrick,
-                        trickProgress = trickProgress.value,
-                        centerX = faceCenterX,
-                        centerY = faceCenterY,
-                        visorW = canvasW,
-                        visorH = canvasH,
-                        blinkFactor = effectiveBlink,
-                        dizzyAngle = dizzyAngle,
-                        zzzFloat = zzzFloat,
-                        tearProgress = tearProgress,
-                        leftEyeCenterX = leftEyeCenterX,
-                        rightEyeCenterX = rightEyeCenterX,
-                        eyeCenterY = eyeCenterY,
-                        baseEyeW = baseEyeW,
-                        baseEyeH = baseEyeH,
-                        leftEyeScaleX = leftEyeScaleX,
-                        rightEyeScaleX = rightEyeScaleX,
-                        gazeX = gazeX,
-                        gazeY = gazeY,
-                        eyeColor = eyeColor,
-                        audioLevel = state.audioLevel,
-                        isSpeaking = state.isSpeaking || previousEmotion == AvatarEmotion.SPEAKING,
-                        alpha = (1f - transitionProg).coerceIn(0f, 1f),
-                        eyeSlantProgress = eyeSlantProgress,
-                        fangsProgress = fangsProgress,
-                        angerVeinProgress = angerVeinProgress,
-                        sadProgress = sadProgress,
-                        sleepProgress = sleepProgress,
-                        surpriseProgress = surpriseProgress,
-                        happyProgress = happyProgress,
-                        living = living,
-                        particles = particles,
-                        leftEyeParams = animatedLeftParams,
-                        rightEyeParams = animatedRightParams,
-                        detailLevel = localDetailLevel,
-                        kinematics = kinematics
-                    )
-                    // Incoming emotion fading in
-                    renderPetEmotion(
-                        emotion = displayedEmotion,
-                        eyeTrick = state.faceState.eyeTrick,
-                        trickProgress = trickProgress.value,
-                        centerX = faceCenterX,
-                        centerY = faceCenterY,
-                        visorW = canvasW,
-                        visorH = canvasH,
-                        blinkFactor = effectiveBlink,
-                        dizzyAngle = dizzyAngle,
-                        zzzFloat = zzzFloat,
-                        tearProgress = tearProgress,
-                        leftEyeCenterX = leftEyeCenterX,
-                        rightEyeCenterX = rightEyeCenterX,
-                        eyeCenterY = eyeCenterY,
-                        baseEyeW = baseEyeW,
-                        baseEyeH = baseEyeH,
-                        leftEyeScaleX = leftEyeScaleX,
-                        rightEyeScaleX = rightEyeScaleX,
-                        gazeX = gazeX,
-                        gazeY = gazeY,
-                        eyeColor = eyeColor,
-                        audioLevel = state.audioLevel,
-                        isSpeaking = state.isSpeaking || displayedEmotion == AvatarEmotion.SPEAKING,
-                        alpha = transitionProg.coerceIn(0f, 1f),
-                        eyeSlantProgress = eyeSlantProgress,
-                        fangsProgress = fangsProgress,
-                        angerVeinProgress = angerVeinProgress,
-                        sadProgress = sadProgress,
-                        sleepProgress = sleepProgress,
-                        surpriseProgress = surpriseProgress,
-                        happyProgress = happyProgress,
-                        living = living,
-                        particles = particles,
-                        leftEyeParams = animatedLeftParams,
-                        rightEyeParams = animatedRightParams,
-                        detailLevel = localDetailLevel,
-                        kinematics = kinematics
-                    )
-                } else {
-                    renderPetEmotion(
-                        emotion = displayedEmotion,
-                        eyeTrick = state.faceState.eyeTrick,
-                        trickProgress = trickProgress.value,
-                        centerX = faceCenterX,
-                        centerY = faceCenterY,
-                        visorW = canvasW,
-                        visorH = canvasH,
-                        blinkFactor = effectiveBlink,
-                        dizzyAngle = dizzyAngle,
-                        zzzFloat = zzzFloat,
-                        tearProgress = tearProgress,
-                        leftEyeCenterX = leftEyeCenterX,
-                        rightEyeCenterX = rightEyeCenterX,
-                        eyeCenterY = eyeCenterY,
-                        baseEyeW = baseEyeW,
-                        baseEyeH = baseEyeH,
-                        leftEyeScaleX = leftEyeScaleX,
-                        rightEyeScaleX = rightEyeScaleX,
-                        gazeX = gazeX,
-                        gazeY = gazeY,
-                        eyeColor = eyeColor,
-                        audioLevel = state.audioLevel,
-                        isSpeaking = state.isSpeaking || displayedEmotion == AvatarEmotion.SPEAKING,
-                        alpha = 1f,
-                        eyeSlantProgress = eyeSlantProgress,
-                        fangsProgress = fangsProgress,
-                        angerVeinProgress = angerVeinProgress,
-                        sadProgress = sadProgress,
-                        sleepProgress = sleepProgress,
-                        surpriseProgress = surpriseProgress,
-                        happyProgress = happyProgress,
-                        living = living,
-                        particles = particles,
-                        leftEyeParams = animatedLeftParams,
-                        rightEyeParams = animatedRightParams,
-                        detailLevel = localDetailLevel,
-                        kinematics = kinematics
+                rotate(degrees = leftBrowAngle, pivot = Offset(eyes.leftX, browBaseY + browOffsetY)) {
+                    drawRoundRect(
+                        color = browColor,
+                        topLeft = Offset(eyes.leftX - browW / 2f, browBaseY + browOffsetY - browH / 2f),
+                        size = Size(browW, browH),
+                        cornerRadius = CornerRadius(browH / 2f, browH / 2f)
                     )
                 }
-
+                rotate(degrees = rightBrowAngle, pivot = Offset(eyes.rightX, browBaseY + browOffsetY)) {
+                    drawRoundRect(
+                        color = browColor,
+                        topLeft = Offset(eyes.rightX - browW / 2f, browBaseY + browOffsetY - browH / 2f),
+                        size = Size(browW, browH),
+                        cornerRadius = CornerRadius(browH / 2f, browH / 2f)
+                    )
+                }
             }
-        }
+
+            // Render the emotion face (cross-faded) and the screensaver trick (faded) on top
+            fun drawEmotion(emotion: AvatarEmotion) = renderPetEmotion(
+                emotion = emotion,
+                centerX = faceCenterX,
+                centerY = faceCenterY,
+                visorW = canvasW,
+                visorH = canvasH,
+                blinkFactor = effectiveBlink,
+                blinkSquashX = blinkSquashX,
+                zzzFloat = zzzFloat,
+                tearProgress = tearProgress,
+                eyes = eyes,
+                baseEyeW = baseEyeW,
+                baseEyeH = baseEyeH,
+                gazeX = pupilGazeX,
+                gazeY = pupilGazeY,
+                eyeColor = eyeColor,
+                audioLevel = state.audioLevel,
+                isSpeaking = state.isSpeaking || emotion == AvatarEmotion.SPEAKING,
+                eyeSlantProgress = eyeSlantProgress,
+                fangsProgress = fangsProgress,
+                angerVeinProgress = angerVeinProgress,
+                sadProgress = sadProgress,
+                sleepProgress = sleepProgress,
+                surpriseProgress = surpriseProgress,
+                living = living,
+                particles = particles,
+                detailLevel = localDetailLevel,
+                kinematics = kinematics
+            )
+
+            val faceAlpha = 1f - trickBlend
+            val transitionProg = emotionTransition.value
+            if (transitionProg < 1f && fromEmotion != toEmotion) {
+                withLayerAlpha(faceAlpha * (1f - transitionProg)) { drawEmotion(fromEmotion) }
+                withLayerAlpha(faceAlpha * transitionProg) { drawEmotion(toEmotion) }
+            } else {
+                withLayerAlpha(faceAlpha) { drawEmotion(toEmotion) }
+            }
+
+            if (trickBlend > 0.001f && shownTrick != EyeTrickState.NONE) {
+                withLayerAlpha(trickBlend) {
+                    renderEyeTrick(
+                        trick = shownTrick,
+                        progress = trickProgress.value,
+                        eyes = eyes,
+                        eyeW = baseEyeW,
+                        eyeH = baseEyeH,
+                        visorW = canvasW,
+                        color = eyeColor
+                    )
+                }
+            }
+            }
         }
     }
 }
 
 /**
- * อารมณ์ที่มีฟังก์ชันเรนเดอร์ดวงตาและใบหน้าเฉพาะตัว
- * ต้องไม่วาด parametric squircle eye ซ้อนทับด้านล่าง เพื่อป้องกันปัญหาเลเยอร์ตาซ้อนกัน 2 ชุด
+ * ตำแหน่งดวงตาที่ส่งให้ renderer ทุกตัว
+ * - [leftX]/[rightX]/[y]: จุดวางทั้งดวงตา (lookCenter) — ขยับตามสายตาทั้ง X และ Y
+ *   ใช้กับตาที่ไม่มีชั้นลูกตาแยก (หัวใจ, ตาเฉียง, moodset, พร็อพรอบตา)
+ * - [leftSocketX]/[rightSocketX]/[socketY]: เบ้าตา (ไม่รวมสายตา) — ใช้กับ [drawDualCircleEye]
+ *   แบบพิกัดเดิมที่บวกสายตาให้ลูกตาเอง เพื่อไม่ให้สายตาถูกบวกซ้ำสองครั้ง
  */
-private val emotionsWithDedicatedEyeRenderer: Set<AvatarEmotion> = setOf(
-    AvatarEmotion.IDLE,
-    AvatarEmotion.LISTENING,
-    AvatarEmotion.SPEAKING,
-    AvatarEmotion.HAPPY,
-    AvatarEmotion.ANGRY,
-    AvatarEmotion.SLEEPING,
-    AvatarEmotion.CONFUSED,
-    AvatarEmotion.EATING,
-    AvatarEmotion.DRINKING,
-    AvatarEmotion.WINK,
-    AvatarEmotion.DEAD,
-    AvatarEmotion.LAUGHING,
-    AvatarEmotion.MUSIC,
-    AvatarEmotion.VR_MODE,
-    AvatarEmotion.DIVING,
-    AvatarEmotion.EVIL,
-    AvatarEmotion.FOCUSED,
-    AvatarEmotion.EXCITED,
-    AvatarEmotion.SHY,
-    AvatarEmotion.SURPRISED,
-    AvatarEmotion.DISGUSTED,
-    AvatarEmotion.CAMERA_MODE,
-    AvatarEmotion.SAD,
-    AvatarEmotion.LOVE,
-    AvatarEmotion.THINKING,
-    AvatarEmotion.POUT,
-    AvatarEmotion.ENRAGED,
-    AvatarEmotion.PUZZLED,
-    AvatarEmotion.SICK,
-    AvatarEmotion.RICH,
-    AvatarEmotion.CRYING,
-    AvatarEmotion.READING,
-    AvatarEmotion.GAMING,
-    AvatarEmotion.TRAVELING,
-    AvatarEmotion.WORKING,
-    AvatarEmotion.COLD,
-    AvatarEmotion.HOT,
-    AvatarEmotion.DETECTIVE,
-    AvatarEmotion.COOKING,
-    AvatarEmotion.ART_MODE,
-    AvatarEmotion.SPACE,
-    AvatarEmotion.PARTY,
-    AvatarEmotion.DREAMING,
-    AvatarEmotion.EXHAUSTED,
-    AvatarEmotion.ELECTRIC,
-    AvatarEmotion.SNEAKY,
-    AvatarEmotion.HERO,
-    AvatarEmotion.GLITCHED,
-    AvatarEmotion.MAGIC,
-    AvatarEmotion.SPORTY,
-    AvatarEmotion.SCIENTIST,
-    AvatarEmotion.SCARED,
-    AvatarEmotion.WARRIOR,
-    AvatarEmotion.LOW_BATTERY,
-    AvatarEmotion.ROMANTIC,
-    AvatarEmotion.DIZZY,
-    AvatarEmotion.BORED
+@Immutable
+internal data class EyeAnchors(
+    val leftX: Float,
+    val rightX: Float,
+    val y: Float,
+    val leftSocketX: Float,
+    val rightSocketX: Float,
+    val socketY: Float
 )
 
 /**
- * วาดดวงตา ปาก และองค์ประกอบดิจิทัล 11 อารมณ์เป๊ะตามแบบ LOOI Living Face
- * พร้อม Squash & Stretch physics และ Idle Screensaver Tricks
+ * วาด [block] ผ่าน offscreen layer ที่มีความโปร่งใส [alpha] — ใช้ทำ crossfade ของทั้งใบหน้า
+ * (ทุกชิ้นในใบหน้าจางพร้อมกันโดยไม่ต้องคูณ alpha ในแต่ละ helper ซึ่งเคยทำให้ alpha ถูกคูณซ้ำ)
+ * layer ถูกสร้างเฉพาะตอนจางจริง (0 < alpha < 1) ในเฟรมปกติวาดตรงไม่มีค่าใช้จ่ายเพิ่ม
+ */
+internal inline fun DrawScope.withLayerAlpha(alpha: Float, block: DrawScope.() -> Unit) {
+    if (alpha <= 0.001f) return
+    if (alpha >= 0.999f) {
+        block()
+        return
+    }
+    val paint = Paint().apply { this.alpha = alpha }
+    // bounds ใหญ่กว่าจอเผื่อ transform (หมุน/ย่อ) — ระบบจะตัดเหลือแค่พื้นที่ clip จริง
+    val bounds = Rect(-size.width, -size.height, size.width * 2f, size.height * 2f)
+    drawIntoCanvas { it.saveLayer(bounds, paint) }
+    try {
+        block()
+    } finally {
+        drawIntoCanvas { it.restore() }
+    }
+}
+
+/**
+ * Screensaver Idle Eye Tricks (Ping-Pong, Tired Bounce, Snooker Shot)
+ * ทุกท่าใช้ easing ต่อเนื่อง และตำแหน่งตาถูก clamp ให้อยู่ในจอเสมอ
+ */
+private fun DrawScope.renderEyeTrick(
+    trick: EyeTrickState,
+    progress: Float,
+    eyes: EyeAnchors,
+    eyeW: Float,
+    eyeH: Float,
+    visorW: Float,
+    color: Color
+) {
+    val p = progress.coerceIn(0f, 1f)
+    val pi = PI.toFloat()
+    fun smooth(t: Float): Float = t * t * (3f - 2f * t)
+    // Keep a squashed eye of width w fully on screen
+    fun clampX(x: Float, w: Float): Float {
+        val half = w / 2f
+        return if (visorW <= w) visorW / 2f else x.coerceIn(half, visorW - half)
+    }
+    when (trick) {
+        EyeTrickState.PING_PONG_BOUNCE -> {
+            val maxTravel = visorW * 0.35f
+            val pingPongX: Float
+            val squashX: Float
+            val squashY: Float
+            when {
+                p < 0.25f -> {
+                    val sub = p / 0.25f
+                    pingPongX = -maxTravel * smooth(sub)
+                    squashX = 1f - 0.25f * sin(sub * pi)
+                    squashY = 1f + 0.20f * sin(sub * pi)
+                }
+                p < 0.50f -> {
+                    val sub = (p - 0.25f) / 0.25f
+                    pingPongX = -maxTravel + 2f * maxTravel * smooth(sub)
+                    squashX = 1f + 0.30f * sin(sub * pi)
+                    squashY = 1f - 0.20f * sin(sub * pi)
+                }
+                p < 0.75f -> {
+                    val sub = (p - 0.50f) / 0.25f
+                    pingPongX = maxTravel * (1f - smooth(sub))
+                    squashX = 1f
+                    squashY = 1f
+                }
+                else -> {
+                    pingPongX = 0f
+                    squashX = 1f
+                    squashY = 1f
+                }
+            }
+            val w = eyeW * squashX
+            drawSquircleEye(color, clampX(eyes.leftSocketX + pingPongX, w), eyes.socketY, eyeW, eyeH, squashX, squashY)
+            drawSquircleEye(color, clampX(eyes.rightSocketX + pingPongX, w), eyes.socketY, eyeW, eyeH, squashX, squashY)
+        }
+        EyeTrickState.TIRED_BOUNCE -> {
+            val bouncePhase = (p * 4f) % 1f
+            val bounceY = -abs(sin(bouncePhase * pi)) * 18.dp.toPx()
+            val squashY = 1f - 0.30f * sin(bouncePhase * pi)
+            val squashX = 1f + 0.20f * sin(bouncePhase * pi)
+            drawSquircleEye(color, eyes.leftSocketX, eyes.socketY + bounceY, eyeW, eyeH, squashX, squashY)
+            drawSquircleEye(color, eyes.rightSocketX, eyes.socketY + bounceY, eyeW, eyeH, squashX, squashY)
+        }
+        EyeTrickState.SNOOKER_SHOT -> {
+            val shotX = when {
+                p < 0.35f -> 0f
+                p < 0.65f -> visorW * 0.42f * smooth((p - 0.35f) / 0.30f)
+                else -> visorW * 0.42f * (1f - smooth((p - 0.65f) / 0.35f))
+            }
+            // aiming eye squints in over the first 10% instead of snapping shut
+            val aim = smooth((p / 0.10f).coerceIn(0f, 1f))
+            val aimSquashX = 1f + 0.2f * aim
+            val aimSquashY = 1f - 0.9f * aim
+            drawSquircleEye(color, eyes.leftSocketX, eyes.socketY, eyeW, eyeH, aimSquashX, aimSquashY)
+            drawSquircleEye(color, clampX(eyes.rightSocketX + shotX, eyeW), eyes.socketY, eyeW, eyeH, 1f, 1f)
+        }
+        EyeTrickState.NONE -> Unit
+    }
+}
+
+/**
+ * วาดดวงตา ปาก และองค์ประกอบดิจิทัลของทุกอารมณ์ใน [AvatarEmotion] ตามแบบ LOOI Living Face
+ * alpha ของทั้งใบหน้าจัดการโดย [withLayerAlpha] ภายนอก — ในนี้วาดทึบเสมอ
  */
 private fun DrawScope.renderPetEmotion(
     emotion: AvatarEmotion,
-    eyeTrick: EyeTrickState,
-    trickProgress: Float,
     centerX: Float,
     centerY: Float,
     visorW: Float,
     visorH: Float,
     blinkFactor: Float,
-    dizzyAngle: Float,
+    blinkSquashX: Float,
     zzzFloat: Float,
     tearProgress: Float,
-    leftEyeCenterX: Float,
-    rightEyeCenterX: Float,
-    eyeCenterY: Float,
+    eyes: EyeAnchors,
     baseEyeW: Float,
     baseEyeH: Float,
-    leftEyeScaleX: Float,
-    rightEyeScaleX: Float,
     gazeX: Float,
     gazeY: Float,
     eyeColor: Color,
     audioLevel: Float,
     isSpeaking: Boolean,
-    alpha: Float = 1f,
-    eyeSlantProgress: Float = 1f,
-    fangsProgress: Float = 1f,
-    angerVeinProgress: Float = 1f,
-    sadProgress: Float = 1f,
-    sleepProgress: Float = 0f,
-    surpriseProgress: Float = 0f,
-    happyProgress: Float = 0f,
-    living: LivingMotionState = LivingMotionState(),
-    particles: PetParticleMotionState = PetParticleMotionState(),
-    leftEyeParams: EyeShapeParams? = null,
-    rightEyeParams: EyeShapeParams? = null,
-    detailLevel: AvatarDetailLevel = AvatarDetailLevel.RICH,
-    kinematics: DualEyeKinematicsResult? = null
+    eyeSlantProgress: Float,
+    fangsProgress: Float,
+    angerVeinProgress: Float,
+    sadProgress: Float,
+    sleepProgress: Float,
+    surpriseProgress: Float,
+    living: LivingMotionState,
+    particles: PetParticleMotionState,
+    detailLevel: AvatarDetailLevel,
+    kinematics: DualEyeKinematicsResult
 ) {
-    val effAlpha = alpha.coerceIn(0f, 1f)
-    val cyanLed = eyeColor.copy(alpha = (eyeColor.alpha * effAlpha).coerceIn(0f, 1f))
-    val redLed = Color(0xFFFF3B5C).copy(alpha = effAlpha)
-    val pinkLed = Color(0xFFFF4081).copy(alpha = effAlpha)
-    val mouthY = eyeCenterY + baseEyeH * 0.75f
-
-    // ─── 0. Screensaver Idle Eye Tricks (Ping-Pong, Tired Bounce, Snooker Shot) ─
-    if (eyeTrick != EyeTrickState.NONE) {
-        val p = trickProgress.coerceIn(0f, 1f)
-        when (eyeTrick) {
-            EyeTrickState.PING_PONG_BOUNCE -> {
-                val maxTravel = visorW * 0.35f
-                val pingPongX: Float
-                val squashX: Float
-                val squashY: Float
-                if (p < 0.25f) {
-                    val sub = p / 0.25f
-                    pingPongX = -maxTravel * sub
-                    squashX = 1f - 0.25f * sin(sub * PI.toFloat())
-                    squashY = 1f + 0.20f * sin(sub * PI.toFloat())
-                } else if (p < 0.50f) {
-                    val sub = (p - 0.25f) / 0.25f
-                    pingPongX = -maxTravel * (1f - sub) + maxTravel * sub
-                    squashX = 1f + 0.30f * sin(sub * PI.toFloat())
-                    squashY = 1f - 0.20f * sin(sub * PI.toFloat())
-                } else if (p < 0.75f) {
-                    val sub = (p - 0.50f) / 0.25f
-                    pingPongX = maxTravel * (1f - sub)
-                    squashX = 1f
-                    squashY = 1f
-                } else {
-                    pingPongX = 0f
-                    squashX = 1f
-                    squashY = 1f
-                }
-                drawSquircleEye(cyanLed, leftEyeCenterX + pingPongX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH, squashX, squashY, alpha = effAlpha)
-                drawSquircleEye(cyanLed, rightEyeCenterX + pingPongX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, squashX, squashY, alpha = effAlpha)
-                return
-            }
-            EyeTrickState.TIRED_BOUNCE -> {
-                val bouncePhase = (p * 4f) % 1f
-                val bounceY = -abs(sin(bouncePhase * PI.toFloat())) * 18.dp.toPx()
-                val squashY = 1f - 0.30f * sin(bouncePhase * PI.toFloat())
-                val squashX = 1f + 0.20f * sin(bouncePhase * PI.toFloat())
-                drawSquircleEye(cyanLed, leftEyeCenterX, eyeCenterY + bounceY, baseEyeW * leftEyeScaleX, baseEyeH, squashX, squashY, alpha = effAlpha)
-                drawSquircleEye(cyanLed, rightEyeCenterX, eyeCenterY + bounceY, baseEyeW * rightEyeScaleX, baseEyeH, squashX, squashY, alpha = effAlpha)
-                return
-            }
-            EyeTrickState.SNOOKER_SHOT -> {
-                val shotX = if (p < 0.35f) {
-                    0f
-                } else if (p < 0.65f) {
-                    val sub = (p - 0.35f) / 0.30f
-                    visorW * 0.42f * sub
-                } else {
-                    val sub = (p - 0.65f) / 0.35f
-                    visorW * 0.42f * (1f - sub)
-                }
-                drawSquircleEye(cyanLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH * 0.25f, 1.2f, 0.4f, alpha = effAlpha)
-                drawSquircleEye(cyanLed, rightEyeCenterX + shotX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, 1f, 1f, alpha = effAlpha)
-                return
-            }
-            EyeTrickState.NONE -> Unit
-        }
-    }
-
-    // Dynamic Eye Rendering:
-    val isDedicatedRenderer = emotion in emotionsWithDedicatedEyeRenderer
-    if (!isDedicatedRenderer && leftEyeParams != null && rightEyeParams != null) {
-        val leftEyePath = buildParametricEyePath(
-            params = leftEyeParams,
-            centerX = leftEyeCenterX,
-            centerY = eyeCenterY,
-            baseW = baseEyeW * leftEyeScaleX,
-            baseH = baseEyeH,
-            isLeft = true
-        )
-        val rightEyePath = buildParametricEyePath(
-            params = rightEyeParams,
-            centerX = rightEyeCenterX,
-            centerY = eyeCenterY,
-            baseW = baseEyeW * rightEyeScaleX,
-            baseH = baseEyeH,
-            isLeft = false
-        )
-
-        val shadowColor = getEyeDeepShadowColor(cyanLed)
-        val maxGazeShiftX = 4.dp.toPx()
-        val maxGazeShiftY = 3.dp.toPx()
-        val backOffsetX = 0.8.dp.toPx() - gazeX * (maxGazeShiftX * 0.60f)
-        val backOffsetY = 4.dp.toPx() - gazeY * (maxGazeShiftY * 0.60f)
-
-        drawParametricEye(
-            color = cyanLed,
-            path = leftEyePath,
-            shadowColor = shadowColor,
-            shadowOffsetX = backOffsetX,
-            shadowOffsetY = backOffsetY,
-            alpha = effAlpha
-        )
-        drawParametricEye(
-            color = cyanLed,
-            path = rightEyePath,
-            shadowColor = shadowColor,
-            shadowOffsetX = backOffsetX,
-            shadowOffsetY = backOffsetY,
-            alpha = effAlpha
-        )
-    }
+    val effAlpha = 1f
+    val cyanLed = eyeColor
+    val redLed = NeonRed
+    val pinkLed = NeonPink
+    val leftEyeCenterX = eyes.leftX
+    val rightEyeCenterX = eyes.rightX
+    val eyeCenterY = eyes.y
+    val leftSocketX = eyes.leftSocketX
+    val rightSocketX = eyes.rightSocketX
+    val socketY = eyes.socketY
+    val mouthY = eyeCenterY + baseEyeH * EyeMetrics.MOUTH_Y
 
     when (emotion) {
         // ─── 1. IDLE / NORMAL (ดวงตา 2 วงกลมซ้อนเยื้องกัน LOOI Dual-Circle Offset สะอาดตา ไร้ปาก) ───
         AvatarEmotion.IDLE -> {
-            val blinkSquashX = if (blinkFactor < 1f) 1f + (1f - blinkFactor) * 0.15f else 1f
-            val leftH = baseEyeH * blinkFactor.coerceAtLeast(0.08f)
-            val rightH = baseEyeH * blinkFactor.coerceAtLeast(0.08f)
-            val leftW = baseEyeW * leftEyeScaleX
-            val rightW = baseEyeW * rightEyeScaleX
-
-            if (kinematics != null) {
-                drawDualCircleEye(
-                    color = cyanLed,
-                    backCenter = kinematics.leftEye.backCenter,
-                    frontCenter = kinematics.leftEye.frontCenter,
-                    discSize = kinematics.leftEye.discSize,
-                    alpha = effAlpha
-                )
-                drawDualCircleEye(
-                    color = cyanLed,
-                    backCenter = kinematics.rightEye.backCenter,
-                    frontCenter = kinematics.rightEye.frontCenter,
-                    discSize = kinematics.rightEye.discSize,
-                    alpha = effAlpha
-                )
-            } else {
-                drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, leftW, leftH, gazeX, gazeY, blinkSquashX, blinkFactor, alpha = effAlpha)
-                drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, rightW, rightH, gazeX, gazeY, blinkSquashX, blinkFactor, alpha = effAlpha)
-            }
+            drawKinematicEyes(cyanLed, kinematics)
 
             if (isSpeaking) {
                 drawWaveformMouth(cyanLed, centerX, mouthY, baseEyeW * 1.6f, 32.dp.toPx(), audioLevel)
@@ -836,28 +712,18 @@ private fun DrawScope.renderPetEmotion(
 
         // ─── 2. HAPPY (ยิ้มตาหยีโค้ง ⌒ ⌒ สไตล์ LOOI Minimalist + ปากโค้งยิ้ม) ─────────────────
         AvatarEmotion.HAPPY -> {
-            val leftW = baseEyeW * leftEyeScaleX
-            val rightW = baseEyeW * rightEyeScaleX
-
-            if (kinematics != null) {
-                drawHappyEye(
-                    color = cyanLed,
-                    backCenter = kinematics.leftEye.backCenter,
-                    frontCenter = kinematics.leftEye.frontCenter,
-                    discSize = kinematics.leftEye.discSize,
-                    alpha = effAlpha
-                )
-                drawHappyEye(
-                    color = cyanLed,
-                    backCenter = kinematics.rightEye.backCenter,
-                    frontCenter = kinematics.rightEye.frontCenter,
-                    discSize = kinematics.rightEye.discSize,
-                    alpha = effAlpha
-                )
-            } else {
-                drawHappyEye(cyanLed, leftEyeCenterX, eyeCenterY, leftW, baseEyeH, gazeX, gazeY, alpha = effAlpha)
-                drawHappyEye(cyanLed, rightEyeCenterX, eyeCenterY, rightW, baseEyeH, gazeX, gazeY, alpha = effAlpha)
-            }
+            drawHappyEye(
+                color = cyanLed,
+                backCenter = kinematics.leftEye.backCenter,
+                frontCenter = kinematics.leftEye.frontCenter,
+                discSize = kinematics.leftEye.discSize
+            )
+            drawHappyEye(
+                color = cyanLed,
+                backCenter = kinematics.rightEye.backCenter,
+                frontCenter = kinematics.rightEye.frontCenter,
+                discSize = kinematics.rightEye.discSize
+            )
 
             // LOOI sheet: Happy is eyes-only (no static mouth) — mouth appears only while speaking
             if (isSpeaking) {
@@ -871,8 +737,8 @@ private fun DrawScope.renderPetEmotion(
             val angryJitterY = living.angerJitterY * 1.2.dp.toPx()
             val dynamicSlant = eyeSlantProgress * (1f + living.angerBrowSlant / 22f).coerceIn(0.75f, 1.35f)
 
-            drawAngryEye(redLed, leftEyeCenterX + angryJitterX, eyeCenterY + angryJitterY, baseEyeW * leftEyeScaleX, baseEyeH, true, slantProgress = dynamicSlant, alpha = effAlpha)
-            drawAngryEye(redLed, rightEyeCenterX - angryJitterX, eyeCenterY + angryJitterY, baseEyeW * rightEyeScaleX, baseEyeH, false, slantProgress = dynamicSlant, alpha = effAlpha)
+            drawAngryEye(redLed, leftEyeCenterX + angryJitterX, eyeCenterY + angryJitterY, baseEyeW, baseEyeH, true, slantProgress = dynamicSlant, alpha = effAlpha)
+            drawAngryEye(redLed, rightEyeCenterX - angryJitterX, eyeCenterY + angryJitterY, baseEyeW, baseEyeH, false, slantProgress = dynamicSlant, alpha = effAlpha)
 
             // Red grimace outline with sharp white fangs v v
             val angryMouthY = eyeCenterY + baseEyeH * 0.72f + angryJitterY * 0.5f
@@ -993,8 +859,8 @@ private fun DrawScope.renderPetEmotion(
                 }
             }
 
-            drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH * eyeSquint, gazeX, eatingGazeY, alpha = effAlpha)
-            drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH * eyeSquint, gazeX, eatingGazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, leftSocketX, socketY, baseEyeW, baseEyeH * eyeSquint, gazeX, eatingGazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, rightSocketX, socketY, baseEyeW, baseEyeH * eyeSquint, gazeX, eatingGazeY, alpha = effAlpha)
 
             val burgerW = baseEyeW * 0.58f
             drawLooiBurgerWithHands(centerX, currentBurgerY, burgerW, p, living.loopFast, alpha = effAlpha, detailLevel = detailLevel)
@@ -1070,8 +936,8 @@ private fun DrawScope.renderPetEmotion(
 
             // 1. วาดตาที่เอียงตามองศาหน้า (เหมือนเอียงหน้ายกดื่ม)
             rotate(degrees = headTiltDeg, pivot = Offset(centerX, eyeCenterY)) {
-                drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH * eyeSquint, drinkGazeX, drinkGazeY, alpha = effAlpha)
-                drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH * eyeSquint, -drinkGazeX, drinkGazeY, alpha = effAlpha)
+                drawDualCircleEye(cyanLed, leftSocketX, socketY, baseEyeW, baseEyeH * eyeSquint, drinkGazeX, drinkGazeY, alpha = effAlpha)
+                drawDualCircleEye(cyanLed, rightSocketX, socketY, baseEyeW, baseEyeH * eyeSquint, -drinkGazeX, drinkGazeY, alpha = effAlpha)
             }
 
             // 2. วาดแก้วเบียร์ที่เอียงระดับปาก (Pivot อยู่ที่ขอบปากแก้วด้านบนซ้าย)
@@ -1092,15 +958,15 @@ private fun DrawScope.renderPetEmotion(
         // ─── 8. WINK (ตาซ้ายตอบรับ + ตาขวาขยิบตา 2 ครั้งติด + ประกายดาว ✦ Pop) ───────────
         AvatarEmotion.WINK -> {
             val winkScaleY = living.winkEyeScaleY
-            val isWinkClosed = winkScaleY <= 0.18f
+            val isWinkClosed = winkScaleY <= EyeMetrics.WINK_CLOSED
             val leftEyeReaction = if (isWinkClosed) 1.04f else 1.0f
 
             // ตาซ้ายเปิดกลมโต พร้อมขยับรับเล็กน้อยเวลากระพริบตาขวา
             drawDualCircleEye(
                 color = cyanLed,
-                centerX = leftEyeCenterX,
-                centerY = eyeCenterY,
-                width = baseEyeW * leftEyeScaleX * leftEyeReaction,
+                centerX = leftSocketX,
+                centerY = socketY,
+                width = baseEyeW * leftEyeReaction,
                 height = baseEyeH * leftEyeReaction,
                 gazeX = gazeX,
                 gazeY = gazeY,
@@ -1114,7 +980,7 @@ private fun DrawScope.renderPetEmotion(
                     centerX = rightEyeCenterX,
                     centerY = eyeCenterY,
                     width = baseEyeW * 1.04f,
-                    barHeight = 14.dp.toPx(),
+                    barHeight = EyeMetrics.SLIT_THICKNESS_DP.dp.toPx(),
                     alpha = effAlpha
                 )
             } else {
@@ -1122,9 +988,9 @@ private fun DrawScope.renderPetEmotion(
                 val rightH = baseEyeH * winkScaleY.coerceAtLeast(0.12f)
                 drawDualCircleEye(
                     color = cyanLed,
-                    centerX = rightEyeCenterX,
-                    centerY = eyeCenterY,
-                    width = baseEyeW * rightEyeScaleX,
+                    centerX = rightSocketX,
+                    centerY = socketY,
+                    width = baseEyeW,
                     height = rightH,
                     gazeX = gazeX,
                     gazeY = gazeY,
@@ -1142,7 +1008,7 @@ private fun DrawScope.renderPetEmotion(
                     centerX = rightEyeCenterX + baseEyeW * 0.42f,
                     centerY = eyeCenterY - baseEyeH * 0.38f,
                     size = 30.dp.toPx() * sparkleScale,
-                    rotationDeg = living.sparkleRot * 1.8f,
+                    rotationDeg = living.sparkleRot * 2f,
                     alpha = effAlpha * sparkleScale.coerceIn(0f, 1f)
                 )
 
@@ -1152,7 +1018,7 @@ private fun DrawScope.renderPetEmotion(
                     centerX = rightEyeCenterX + baseEyeW * 0.52f,
                     centerY = eyeCenterY - baseEyeH * 0.18f,
                     size = 14.dp.toPx() * sparkleScale,
-                    rotationDeg = -living.sparkleRot * 2.2f,
+                    rotationDeg = -living.sparkleRot * 2f,
                     alpha = effAlpha * sparkleScale.coerceIn(0f, 1f) * 0.85f
                 )
             }
@@ -1203,8 +1069,8 @@ private fun DrawScope.renderPetEmotion(
             val headH = baseEyeH * 1.05f
             val beatBob = sin(living.loopFast * 2f * PI.toFloat()) * 3.dp.toPx()
 
-            drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, leftSocketX, socketY, baseEyeW, baseEyeH, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
+            drawDualCircleEye(cyanLed, rightSocketX, socketY, baseEyeW, baseEyeH, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
 
             drawLooiHeadphones(centerX, eyeCenterY + beatBob, headSpan, headH, alpha = effAlpha)
 
@@ -1252,22 +1118,26 @@ private fun DrawScope.renderPetEmotion(
             val vrEyeAlpha = 0.42f * effAlpha
             drawDualCircleEye(
                 color = cyanLed,
-                centerX = leftEyeCenterX,
-                centerY = vrCenterY,
-                width = vrEyeW * leftEyeScaleX,
+                centerX = leftSocketX,
+                centerY = socketY + vrBob,
+                width = vrEyeW,
                 height = vrEyeH,
                 gazeX = gazeX,
                 gazeY = gazeY,
+                squashX = blinkSquashX,
+                squashY = blinkFactor,
                 alpha = vrEyeAlpha
             )
             drawDualCircleEye(
                 color = cyanLed,
-                centerX = rightEyeCenterX,
-                centerY = vrCenterY,
-                width = vrEyeW * rightEyeScaleX,
+                centerX = rightSocketX,
+                centerY = socketY + vrBob,
+                width = vrEyeW,
                 height = vrEyeH,
                 gazeX = gazeX,
                 gazeY = gazeY,
+                squashX = blinkSquashX,
+                squashY = blinkFactor,
                 alpha = vrEyeAlpha
             )
 
@@ -1297,8 +1167,8 @@ private fun DrawScope.renderPetEmotion(
             val diveBob = sin(living.loopSlow * 2f * PI.toFloat()) * 3.dp.toPx()
             drawLooiSnorkelMask(centerX, eyeCenterY + diveBob, dynamicSpacing, baseEyeW, baseEyeH, alpha = effAlpha)
 
-            drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY + diveBob, baseEyeW * leftEyeScaleX, baseEyeH, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY + diveBob, baseEyeW * rightEyeScaleX, baseEyeH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, leftSocketX, socketY + diveBob, baseEyeW, baseEyeH, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
+            drawDualCircleEye(cyanLed, rightSocketX, socketY + diveBob, baseEyeW, baseEyeH, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
 
             // Dynamic rising bubbles
             for (i in 0 until 3) {
@@ -1317,8 +1187,8 @@ private fun DrawScope.renderPetEmotion(
         AvatarEmotion.EVIL -> {
             val leftSlant = eyeSlantProgress * (1f + living.angerBrowSlant / 28f).coerceIn(0.85f, 1.25f)
             val rightSlant = eyeSlantProgress * (1f - living.angerBrowSlant / 35f).coerceIn(0.70f, 1.15f)
-            drawAngryEye(redLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH, true, slantProgress = leftSlant, alpha = effAlpha)
-            drawAngryEye(redLed, rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, false, slantProgress = rightSlant, alpha = effAlpha)
+            drawAngryEye(redLed, leftEyeCenterX, eyeCenterY, baseEyeW, baseEyeH, true, slantProgress = leftSlant, alpha = effAlpha)
+            drawAngryEye(redLed, rightEyeCenterX, eyeCenterY, baseEyeW, baseEyeH, false, slantProgress = rightSlant, alpha = effAlpha)
 
             drawLooiFangs(centerX, eyeCenterY + baseEyeH * 0.55f, 11.dp.toPx(), progress = fangsProgress, alpha = effAlpha)
             val devilBob = sin(living.loopMedium * 2f * PI.toFloat()) * 3.dp.toPx()
@@ -1333,8 +1203,8 @@ private fun DrawScope.renderPetEmotion(
         // ─── 15. FOCUSED (มีสมาธิ/สแกน: ตารางแสกน กวาดขึ้นลง เหมือนกำลังแสกน) ──
         AvatarEmotion.FOCUSED -> {
             val gridSpan = (rightEyeCenterX - leftEyeCenterX) + baseEyeW * 2.2f
-            drawLooiFocusdWedge(cyanLed, Color(0xFF004D6B), leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH, true, alpha = effAlpha)
-            drawLooiFocusdWedge(cyanLed, Color(0xFF004D6B), rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, false, alpha = effAlpha)
+            drawLooiFocusdWedge(cyanLed, EyeMetrics.SHADOW_CYAN, leftEyeCenterX, eyeCenterY, baseEyeW, baseEyeH, true, alpha = effAlpha)
+            drawLooiFocusdWedge(cyanLed, EyeMetrics.SHADOW_CYAN, rightEyeCenterX, eyeCenterY, baseEyeW, baseEyeH, false, alpha = effAlpha)
 
             // Dynamic up-and-down laser scanning beam & grid sweep (ตารางแสกน กวาดขึ้นลง เหมือนกำลังแสกน)
             val scanProg = sin(living.loopMedium * 2f * PI.toFloat()) * 0.5f + 0.5f
@@ -1380,7 +1250,7 @@ private fun DrawScope.renderPetEmotion(
             val yellowShadow = Color(0xFF664400)
 
             // Cycle: Start from full yellow circle -> smoothly shrink/squash into half-circle -> hold -> spring back
-            val excT = (living.loopSlow * 1.35f) % 1f
+            val excT = living.loopWink
             val shrinkProgress = when {
                 excT < 0.22f -> 0f // Full circle
                 excT < 0.48f -> {
@@ -1399,7 +1269,7 @@ private fun DrawScope.renderPetEmotion(
                 shadowColor = yellowShadow,
                 centerX = leftEyeCenterX,
                 centerY = eyeCenterY,
-                width = baseEyeW * leftEyeScaleX,
+                width = baseEyeW,
                 height = baseEyeH,
                 isLeft = true,
                 shrinkProgress = shrinkProgress,
@@ -1410,7 +1280,7 @@ private fun DrawScope.renderPetEmotion(
                 shadowColor = yellowShadow,
                 centerX = rightEyeCenterX,
                 centerY = eyeCenterY,
-                width = baseEyeW * rightEyeScaleX,
+                width = baseEyeW,
                 height = baseEyeH,
                 isLeft = false,
                 shrinkProgress = shrinkProgress,
@@ -1435,8 +1305,8 @@ private fun DrawScope.renderPetEmotion(
         AvatarEmotion.SHY -> {
             val shyGazeX = sin(living.loopSlow * PI.toFloat()) * 0.22f
             val shyGazeY = 0.35f + cos(living.loopSlow * PI.toFloat()) * 0.10f
-            drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, baseEyeW * leftEyeScaleX, baseEyeH, shyGazeX, shyGazeY, alpha = effAlpha)
-            drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, baseEyeW * rightEyeScaleX, baseEyeH, shyGazeX, shyGazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, leftSocketX, socketY, baseEyeW, baseEyeH, shyGazeX, shyGazeY, squashX = blinkSquashX, squashY = blinkFactor)
+            drawDualCircleEye(cyanLed, rightSocketX, socketY, baseEyeW, baseEyeH, shyGazeX, shyGazeY, squashX = blinkSquashX, squashY = blinkFactor)
 
             // Blush slashes moved down onto cheeks
             val blushPulse = 1f + sin(living.loopMedium * 2f * PI.toFloat()) * 0.15f
@@ -1455,8 +1325,8 @@ private fun DrawScope.renderPetEmotion(
             val shockJitterY = cos(living.loopFast * 36f * PI.toFloat()) * 1.0.dp.toPx()
             val surpriseW = baseEyeW * (1f + 0.25f * surpriseProgress)
             val surpriseH = baseEyeH * (1f + 0.25f * surpriseProgress)
-            drawDualCircleEye(cyanLed, leftEyeCenterX + shockJitterX, eyeCenterY + shockJitterY, surpriseW * leftEyeScaleX, surpriseH, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(cyanLed, rightEyeCenterX + shockJitterX, eyeCenterY + shockJitterY, surpriseW * rightEyeScaleX, surpriseH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, leftSocketX + shockJitterX, socketY + shockJitterY, surpriseW, surpriseH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(cyanLed, rightSocketX + shockJitterX, socketY + shockJitterY, surpriseW, surpriseH, gazeX, gazeY, alpha = effAlpha)
 
             // Large bouncing and scaling exclamation mark !
             val exclBounceScale = 1.35f + sin(living.loopFast * 6f * PI.toFloat()) * 0.25f
@@ -1507,30 +1377,7 @@ private fun DrawScope.renderPetEmotion(
 
         // ─── 21. LISTENING / SPEAKING (ยูทิลิตีระบบ: พร้อมรับคำสั่ง / กำลังพูด) ───
         AvatarEmotion.LISTENING, AvatarEmotion.SPEAKING -> {
-            val leftH = baseEyeH * blinkFactor.coerceAtLeast(0.08f)
-            val rightH = baseEyeH * blinkFactor.coerceAtLeast(0.08f)
-            val leftW = baseEyeW * leftEyeScaleX
-            val rightW = baseEyeW * rightEyeScaleX
-
-            if (kinematics != null) {
-                drawDualCircleEye(
-                    color = cyanLed,
-                    backCenter = kinematics.leftEye.backCenter,
-                    frontCenter = kinematics.leftEye.frontCenter,
-                    discSize = kinematics.leftEye.discSize,
-                    alpha = effAlpha
-                )
-                drawDualCircleEye(
-                    color = cyanLed,
-                    backCenter = kinematics.rightEye.backCenter,
-                    frontCenter = kinematics.rightEye.frontCenter,
-                    discSize = kinematics.rightEye.discSize,
-                    alpha = effAlpha
-                )
-            } else {
-                drawDualCircleEye(cyanLed, leftEyeCenterX, eyeCenterY, leftW, leftH, gazeX, gazeY, 1f, blinkFactor, alpha = effAlpha)
-                drawDualCircleEye(cyanLed, rightEyeCenterX, eyeCenterY, rightW, rightH, gazeX, gazeY, 1f, blinkFactor, alpha = effAlpha)
-            }
+            drawKinematicEyes(cyanLed, kinematics)
 
             if (isSpeaking || emotion == AvatarEmotion.SPEAKING) {
                 drawWaveformMouth(cyanLed, centerX, mouthY, baseEyeW * 1.5f, 28.dp.toPx(), audioLevel)
@@ -1541,15 +1388,15 @@ private fun DrawScope.renderPetEmotion(
         AvatarEmotion.SAD -> {
             val droopY = 7.dp.toPx() * sadProgress
             val tiltAngle = 8f * sadProgress
-            val eyeH = baseEyeH * (1f - 0.15f * sadProgress) * blinkFactor.coerceAtLeast(0.15f)
+            val eyeH = baseEyeH * (1f - 0.15f * sadProgress) * blinkFactor.coerceAtLeast(EyeMetrics.BLINK_CLOSED)
             val eyeW = baseEyeW * 0.90f
 
-            rotate(degrees = -tiltAngle, pivot = Offset(leftEyeCenterX, eyeCenterY + droopY)) {
+            rotate(degrees = -tiltAngle, pivot = Offset(leftSocketX, socketY + droopY)) {
                 drawDualCircleEye(
                     color = Color(0xFF80D8FF),
-                    centerX = leftEyeCenterX,
-                    centerY = eyeCenterY + droopY,
-                    width = eyeW * leftEyeScaleX,
+                    centerX = leftSocketX,
+                    centerY = socketY + droopY,
+                    width = eyeW,
                     height = eyeH,
                     gazeX = gazeX,
                     gazeY = gazeY,
@@ -1557,12 +1404,12 @@ private fun DrawScope.renderPetEmotion(
                     alpha = effAlpha
                 )
             }
-            rotate(degrees = tiltAngle, pivot = Offset(rightEyeCenterX, eyeCenterY + droopY)) {
+            rotate(degrees = tiltAngle, pivot = Offset(rightSocketX, socketY + droopY)) {
                 drawDualCircleEye(
                     color = Color(0xFF80D8FF),
-                    centerX = rightEyeCenterX,
-                    centerY = eyeCenterY + droopY,
-                    width = eyeW * rightEyeScaleX,
+                    centerX = rightSocketX,
+                    centerY = socketY + droopY,
+                    width = eyeW,
                     height = eyeH,
                     gazeX = gazeX,
                     gazeY = gazeY,
@@ -1641,8 +1488,8 @@ private fun DrawScope.renderPetEmotion(
 
         // ─── 24. THINKING (กำลังคิด: ขยับตา + ไอคอนมือแตะคาง + ฟองความคิด ... 💭) ────
         AvatarEmotion.THINKING -> {
-            drawDualCircleEye(eyeColor, leftEyeCenterX, eyeCenterY, baseEyeW * 0.8f * leftEyeScaleX, baseEyeH * 0.65f, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(eyeColor, rightEyeCenterX, eyeCenterY, baseEyeW * 1.05f * rightEyeScaleX, baseEyeH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(eyeColor, leftSocketX, socketY, baseEyeW * 0.8f, baseEyeH * 0.65f, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
+            drawDualCircleEye(eyeColor, rightSocketX, socketY, baseEyeW * 1.05f, baseEyeH, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
 
             val handX = centerX + baseEyeW * 0.15f
             drawThinkingHand(eyeColor, handX, mouthY + 10.dp.toPx(), 45.dp.toPx(), alpha = effAlpha)
@@ -1668,8 +1515,8 @@ private fun DrawScope.renderPetEmotion(
 
         // ─── 25. POUT (แก้มป่อง ปากจู๋) ───────────────────────────────────────
         AvatarEmotion.POUT -> {
-            drawDualCircleEye(eyeColor, leftEyeCenterX, eyeCenterY, baseEyeW * 0.9f, baseEyeH * 0.9f, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(eyeColor, rightEyeCenterX, eyeCenterY, baseEyeW * 0.9f, baseEyeH * 0.9f, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(eyeColor, leftSocketX, socketY, baseEyeW * 0.9f, baseEyeH * 0.9f, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
+            drawDualCircleEye(eyeColor, rightSocketX, socketY, baseEyeW * 0.9f, baseEyeH * 0.9f, gazeX, gazeY, squashX = blinkSquashX, squashY = blinkFactor)
 
             val cheekRadius = 22.dp.toPx()
             val cheekY = eyeCenterY + baseEyeH * 0.45f
@@ -1701,7 +1548,7 @@ private fun DrawScope.renderPetEmotion(
             drawCrossEye(eyeColor, rightEyeCenterX, eyeCenterY, baseEyeW * 0.85f, alpha = effAlpha)
 
             val mouthW = baseEyeW * 1.2f
-            val wavePath = Path().apply {
+            val wavePath = EyePaths.obtain().apply {
                 moveTo(centerX - mouthW / 2f, mouthY)
                 val seg = mouthW / 4f
                 cubicTo(
@@ -1724,8 +1571,8 @@ private fun DrawScope.renderPetEmotion(
             val boredH = baseEyeH * 0.42f
             val boredYShift = 6.dp.toPx()
 
-            drawDualCircleEye(eyeColor, leftEyeCenterX, eyeCenterY + boredYShift, boredW * leftEyeScaleX, boredH, gazeX, gazeY, alpha = effAlpha)
-            drawDualCircleEye(eyeColor, rightEyeCenterX, eyeCenterY + boredYShift, boredW * rightEyeScaleX, boredH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(eyeColor, leftSocketX, socketY + boredYShift, boredW, boredH, gazeX, gazeY, alpha = effAlpha)
+            drawDualCircleEye(eyeColor, rightSocketX, socketY + boredYShift, boredW, boredH, gazeX, gazeY, alpha = effAlpha)
 
             val lidStroke = 4.dp.toPx()
             drawLine(
@@ -1771,11 +1618,11 @@ private fun DrawScope.renderPetEmotion(
                 center = Offset(rightEyeCenterX, eyeCenterY)
             )
 
-            drawEnragedEye(fierceRed, darkCrimson, leftEyeCenterX, eyeCenterY, rageW * leftEyeScaleX, rageH, true, alpha = effAlpha)
-            drawEnragedEye(fierceRed, darkCrimson, rightEyeCenterX, eyeCenterY, rageW * rightEyeScaleX, rageH, false, alpha = effAlpha)
+            drawEnragedEye(fierceRed, darkCrimson, leftEyeCenterX, eyeCenterY, rageW, rageH, true, alpha = effAlpha)
+            drawEnragedEye(fierceRed, darkCrimson, rightEyeCenterX, eyeCenterY, rageW, rageH, false, alpha = effAlpha)
 
             val mouthW = baseEyeW * 1.45f
-            val zigzagPath = Path().apply {
+            val zigzagPath = EyePaths.obtain().apply {
                 val seg = mouthW / 6f
                 moveTo(centerX - mouthW / 2f, mouthY)
                 lineTo(centerX - mouthW / 2f + seg * 1f, mouthY - 10.dp.toPx())
@@ -1788,7 +1635,7 @@ private fun DrawScope.renderPetEmotion(
             drawPath(zigzagPath, fierceRed.copy(alpha = effAlpha), style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Miter))
 
             val steamColor = Color.White.copy(alpha = 0.65f * effAlpha)
-            val steamJitter = sin(living.loopFast * 20f) * 2.dp.toPx()
+            val steamJitter = sin(living.loopFast * 6f * PI.toFloat()) * 2.dp.toPx()
             drawSteamPuff(steamColor, centerX - baseEyeW * 1.5f + steamJitter, eyeCenterY - baseEyeH * 0.8f, 16.dp.toPx())
             drawSteamPuff(steamColor, centerX + baseEyeW * 1.5f - steamJitter, eyeCenterY - baseEyeH * 0.8f, 16.dp.toPx())
         }
@@ -2022,22 +1869,34 @@ private fun DrawScope.renderPetEmotion(
 // ─── HELPER DRAW FUNCTIONS ───────────────────────────────────────────────────
 
 /**
+ * Path ที่ใช้ซ้ำในการวาดตาทุกเฟรม (วาดบน UI thread เท่านั้น)
+ * drawPath บันทึกสำเนาของ path ลง display list จึง reset แล้วใช้ต่อได้ทันที — ไม่ต้องสร้าง Path ใหม่ทุกเฟรม
+ * pool แบบวนรอบ [POOL_SIZE] ตัว: helper ตัวใดต้องวาด path ก่อนจะมีการ obtain ครบรอบ (ห้ามเก็บ path ข้ามเฟรม)
+ */
+internal object EyePaths {
+    private const val POOL_SIZE = 32
+    private val pool = Array(POOL_SIZE) { Path() }
+    private var next = 0
+
+    fun obtain(): Path {
+        val path = pool[next]
+        next = (next + 1) % pool.size
+        path.reset()
+        return path
+    }
+}
+
+/**
  * วาดดวงตาแบบ 2 วงกลมซ้อนเยื้องกันแท้จริง (Authentic LOOI Dual-Circle Offset Engine)
  * ตรงตามภาพอ้างอิงหุ่นยนต์ LOOI Robot และคำสั่งเฉพาะของผู้ใช้:
  * "ต้นฉบับ จะใช้ วางกลม 2 วงที่เคลื่อนไหวเยื้องกัน"
  *
  * โครงสร้างทางเรขาคณิต:
- * 1. Disc 1 (Back Disc - เลเยอร์ล่าง): วงกลมสีน้ำเงินครามลึก (Deep Cobalt Royal Blue #0D25B9)
- *    เยื้องลงล่าง-ขวาเล็กน้อยที่จุดพัก (Resting Offset)
- * 2. Disc 2 (Front Disc - เลเยอร์บน): วงกลมตาสีนีออนไซแอนสว่างสดใส (#38D5FF / color)
- *    พร้อม Outer Bloom Halo ละมุนตา เปล่งประกายบนจอ OLED ดำสนิท
- * 3. Parallax Differential Motion (การเคลื่อนไหวเยื้องกัน):
- *    เลเยอร์หน้าเคลื่อนที่ตาม Gaze อย่างคล่องแคล่ว (100% Gaze Travel)
- *    เลเยอร์หลังเคลื่อนที่ด้วยระยะความลึกที่น้อยกว่า (Parallax ~40% Gaze Travel)
- *    ทำให้เสี้ยววงกลมสีน้ำเงินด้านล่างขยับขยาย/หด/เปลี่ยนมุมมองตามทิศทางการมองอย่างมีชีวิตชีวา
- * 4. Squash & Blink:
- *    เมื่อกะพริบตาหรือกระดอน (Squash) ทั้งสองวงกลมจะบีบอัดเป็นรูปทรงแคปซูล/วงรี (Oval) นุ่มนวล
- *    พร้อมบีบระยะเยื้องแนวดิ่งให้ได้สัดส่วน ไม่หลุดลอย
+ * 1. Disc 1 (Back Disc - เลเยอร์ล่าง): เบ้าตาสีเงาเข้มจาก [getEyeDeepShadowColor]
+ *    (cyan → deep teal #0A5C6B) เยื้องลงล่าง-ขวาเล็กน้อยที่จุดพัก (Resting Offset)
+ * 2. Disc 2 (Front Disc - เลเยอร์บน): ลูกตาสีนีออนสว่าง (color) พร้อม Soft Bloom บนจอ OLED ดำสนิท
+ * 3. ลูกตาขยับตามสายตา ส่วนเบ้าตาขยับเฉพาะเมื่อหัวหัน — ตำแหน่งคำนวณโดย [VirtualHeadKinematics]
+ * 4. Squash & Blink: ทั้งสองวงบีบเป็นวงรีพร้อมกัน และระยะเยื้องแนวดิ่งถูกบีบตามสัดส่วน
  */
 internal fun DrawScope.drawDualCircleEye(
     color: Color,
@@ -2056,7 +1915,7 @@ internal fun DrawScope.drawDualCircleEye(
     val backTopLeft = Offset(backCenter.x - effW / 2f, backCenter.y - effH / 2f)
     val frontTopLeft = Offset(frontCenter.x - effW / 2f, frontCenter.y - effH / 2f)
 
-    // สีเลเยอร์หลัง: สีน้ำเงินครามเข้มรอยัลบลู (LOOI Authentic Cobalt Royal Blue #0D25B9)
+    // สีเลเยอร์หลัง: เงาเข้มตามสีตา (cyan → deep teal)
     val backColor = (backColorOverride ?: getEyeDeepShadowColor(color)).copy(
         alpha = (0.98f * effAlpha).coerceIn(0f, 1f)
     )
@@ -2064,14 +1923,14 @@ internal fun DrawScope.drawDualCircleEye(
     // ─── เลเยอร์ที่ 0: รัศมีเรืองแสงนุ่ม (Soft OLED Bloom) ตามภาพ LOOI 40 Moodset ───
     drawSoftBloom(color = color, center = frontCenter, size = discSize, alpha = effAlpha)
 
-    // ─── เลเยอร์ที่ 1: วงกลมหลัง (Back Base Disc - ขอบเงาเทาเขียวเข้มด้านล่าง ขนาดเท่ากัน 100%) ───
+    // ─── เลเยอร์ที่ 1: วงกลมหลัง (Back Base Disc - เบ้าตาเงาเข้ม ขนาดเท่ากัน 100%) ───
     drawOval(
         color = backColor,
         topLeft = backTopLeft,
         size = discSize
     )
 
-    // ─── เลเยอร์ที่ 2: วงกลมหน้าแท้ (Front Core Disc - ลูกตาสีนีออนไซแอน ขนาดเท่ากัน 100%) ───
+    // ─── เลเยอร์ที่ 2: วงกลมหน้าแท้ (Front Core Disc - ลูกตาสีนีออน ขนาดเท่ากัน 100%) ───
     drawOval(
         color = color.copy(alpha = 0.98f * effAlpha),
         topLeft = frontTopLeft,
@@ -2079,9 +1938,16 @@ internal fun DrawScope.drawDualCircleEye(
     )
 }
 
+/** วาดตาคู่ปกติ (IDLE / LISTENING / SPEAKING) ตรงจากผลลัพธ์ [VirtualHeadKinematics] */
+internal fun DrawScope.drawKinematicEyes(color: Color, kinematics: DualEyeKinematicsResult) {
+    drawDualCircleEye(color, kinematics.leftEye.backCenter, kinematics.leftEye.frontCenter, kinematics.leftEye.discSize)
+    drawDualCircleEye(color, kinematics.rightEye.backCenter, kinematics.rightEye.frontCenter, kinematics.rightEye.discSize)
+}
+
 /**
- * วาดดวงตาแบบ 2 วงกลมซ้อนเยื้องกันแท้จริง (Authentic LOOI Dual-Circle Offset Engine)
- * รองรับการเรียกแบบพิกัดเดิม โดยแยกการเคลื่อนไหวเบ้าตา (อยู่นิ่งเมื่อกลอกตา) กับลูกตาหน้า
+ * วาดดวงตา 2 วงกลมจากตำแหน่ง "เบ้าตา" ([centerX], [centerY]) — ลูกตาเยื้องตาม resting offset
+ * และกลอกตาม [gazeX]/[gazeY] ด้วยสัดส่วนเดียวกับ [VirtualHeadKinematics] (ค่าใน [EyeMetrics])
+ * ผู้เรียกต้องส่งพิกัดเบ้าตา (ไม่รวมสายตา) มิฉะนั้นสายตาจะถูกบวกซ้ำ
  */
 internal fun DrawScope.drawDualCircleEye(
     color: Color,
@@ -2094,35 +1960,22 @@ internal fun DrawScope.drawDualCircleEye(
     squashX: Float = 1f,
     squashY: Float = 1f,
     backColorOverride: Color? = null,
-    alpha: Float = 1f,
-    headYaw: Float = 0f,
-    headPitch: Float = 0f
+    alpha: Float = 1f
 ) {
     val effW = width * squashX
     val effH = height * squashY
-    val blinkCompress = squashY.coerceIn(0.12f, 1f)
-    val defaultOffsetX = effW * 0.025f
-    val defaultOffsetY = effH * 0.065f * blinkCompress
+    val blinkCompress = squashY.coerceIn(EyeMetrics.BLINK_OFFSET_FLOOR, 1f)
+    val restOffsetX = effW * EyeMetrics.REST_OFFSET_X
+    val restOffsetY = effH * EyeMetrics.REST_OFFSET_Y * blinkCompress
 
-    // เบ้าตา (Back Disc) ขยับเฉพาะเมื่อหันหน้า/เงย-ก้มหน้า
-    val maxHeadShiftX = effW * 0.25f
-    val maxHeadShiftY = effH * 0.20f
-    val backCenter = Offset(
-        centerX + headYaw * maxHeadShiftX,
-        centerY - headPitch * maxHeadShiftY
-    )
-
-    // ลูกตา (Front Disc) ขยับกลอกสายตาได้กว้างกว่า
-    val maxPupilShiftX = effW * 0.14f
-    val maxPupilShiftY = effH * 0.10f
     val frontCenter = Offset(
-        backCenter.x - defaultOffsetX + gazeX * maxPupilShiftX + headYaw * (effW * 0.05f),
-        backCenter.y - defaultOffsetY + gazeY * maxPupilShiftY - headPitch * (effH * 0.04f)
+        centerX - restOffsetX + gazeX.coerceIn(-1f, 1f) * effW * EyeMetrics.PUPIL_TRAVEL_X,
+        centerY - restOffsetY + gazeY.coerceIn(-1f, 1f) * effH * EyeMetrics.PUPIL_TRAVEL_Y
     )
 
     drawDualCircleEye(
         color = color,
-        backCenter = backCenter,
+        backCenter = Offset(centerX, centerY),
         frontCenter = frontCenter,
         discSize = Size(effW, effH),
         backColorOverride = backColorOverride,
@@ -2158,11 +2011,9 @@ internal fun DrawScope.drawSquircleEye(
 }
 
 /**
- * วาดตายิ้มทรงโดม 2 ชั้นเยื้องกัน (Authentic LOOI Dome Smile Eye ⌒)
- * ตรงตามภาพถ่ายเครื่องจริง LOOI Robot (media_1789619891154.jpg):
- * - รูปทรงโดม ⌒ (ฐานล่างตรง มนมุมเล็กน้อย ด้านบนโค้งมนสมบูรณ์)
- * - เลเยอร์ล่าง: โดมสีน้ำเงินครามลึก (#0D25B9) เยื้องลงล่าง
- * - เลเยอร์บน: โดมสว่างสดใสนีออนไซแอน (#38D5FF)
+ * วาดตายิ้มเส้นโค้ง ⌒ 2 ชั้นเยื้องกัน (Authentic LOOI Happy Eye)
+ * - เลเยอร์ล่าง: เส้นโค้งสีเงาเข้ม ([getEyeDeepShadowColor]) ที่ตำแหน่งเบ้าตา
+ * - เลเยอร์บน: เส้นโค้งนีออนสว่างที่ตำแหน่งลูกตา
  */
 internal fun DrawScope.drawHappyEye(
     color: Color,
@@ -2182,18 +2033,17 @@ internal fun DrawScope.drawHappyEye(
     fun buildArch(cx: Float, cy: Float): Path {
         val baseY = cy + archH * 0.45f
         val topY = cy - archH * 0.55f
-        return Path().apply {
+        return EyePaths.obtain().apply {
             moveTo(cx - hw, baseY)
             cubicTo(cx - hw * 0.80f, topY - archH * 0.30f, cx + hw * 0.80f, topY - archH * 0.30f, cx + hw, baseY)
         }
     }
 
     val stroke = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    val frontPath = buildArch(frontCenter.x, frontCenter.y)
 
     drawSoftBloom(color, Offset(frontCenter.x, frontCenter.y - archH * 0.1f), Size(hw * 2.3f, archH * 2.6f), spread = 0.45f, intensity = 0.34f, alpha = effAlpha)
     drawPath(buildArch(backCenter.x, backCenter.y), getEyeDeepShadowColor(color).copy(alpha = 0.98f * effAlpha), style = stroke)
-    drawPath(frontPath, color.copy(alpha = 0.98f * effAlpha), style = stroke)
+    drawPath(buildArch(frontCenter.x, frontCenter.y), color.copy(alpha = 0.98f * effAlpha), style = stroke)
 }
 
 internal fun DrawScope.drawHappyEye(
@@ -2226,13 +2076,14 @@ internal fun DrawScope.drawHappyEye(
 
 /**
  * วาดตาหลับขีดมน (—) สไตล์ LOOI Neon Cyan (2-Layer Flat Neon)
+ * @param barHeight ความหนาของขีด (px) — ค่าเริ่มต้นคือ [EyeMetrics.SLIT_THICKNESS_DP]
  */
 internal fun DrawScope.drawSleepingEye(
     color: Color,
     centerX: Float,
     centerY: Float,
     width: Float,
-    barHeight: Float = 14.dp.toPx(),
+    barHeight: Float = EyeMetrics.SLIT_THICKNESS_DP.dp.toPx(),
     alpha: Float = 1f
 ) {
     val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
@@ -2278,10 +2129,10 @@ internal fun DrawScope.drawExcitedEye(
     val sizeH = height * 0.65f
     val strokeW = 14.dp.toPx()
     val shadowOffsetY = 5.dp.toPx()
-    val shadowColor = Color(0xFF004D6B).copy(alpha = effAlpha)
+    val shadowColor = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha)
 
     val dir = if (isLeft) 1f else -1f
-    fun buildChevronPath(offsetY: Float) = Path().apply {
+    fun buildChevronPath(offsetY: Float) = EyePaths.obtain().apply {
         moveTo(centerX - dir * sizeW * 0.45f, centerY - sizeH * 0.45f + offsetY)
         lineTo(centerX + dir * sizeW * 0.45f, centerY + offsetY)
         lineTo(centerX - dir * sizeW * 0.45f, centerY + sizeH * 0.45f + offsetY)
@@ -2289,12 +2140,20 @@ internal fun DrawScope.drawExcitedEye(
 
     // Soft bloom
     drawSoftBloom(color, Offset(centerX, centerY), Size(sizeW * 1.1f, sizeH * 1.1f), spread = 0.40f, intensity = 0.26f, alpha = effAlpha)
-    drawPath(buildChevronPath(0f), effColor.copy(alpha = 0.16f * effAlpha), style = Stroke(width = strokeW + 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    val front = buildChevronPath(0f)
+    drawPath(front, effColor.copy(alpha = 0.16f * effAlpha), style = Stroke(width = strokeW + 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     // Shallow 2D Shadow Underneath
     drawPath(buildChevronPath(shadowOffsetY), shadowColor, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
     // Front Chevron
-    drawPath(buildChevronPath(0f), effColor, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(front, effColor, style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
+
+/**
+ * ระยะเฉียงของขอบบนตาโกรธ — จำกัดไม่เกิน 45% ของความสูงตา ขอบบนจึงไม่เลยขอบล่างจนรูปพลิก
+ * (ตาเล็กบนจอเล็กเคยพลิกเมื่อ maxSlant คงที่เป็น dp)
+ */
+internal fun angryEyeSlant(maxSlantPx: Float, eyeHeight: Float, slantProgress: Float): Float =
+    (maxSlantPx * slantProgress.coerceAtLeast(0f)).coerceAtMost(eyeHeight * 0.45f)
 
 /**
  * วาดตาโกรธเฉียงสีแดงเพลิงพร้อมเงา Shallow 2D Depth
@@ -2315,15 +2174,14 @@ internal fun DrawScope.drawAngryEye(
     val effW = width * 1.05f
     val effH = height * 0.85f
     val shadowOffsetY = 5.dp.toPx()
-    val shadowColor = Color(0xFF5C0018).copy(alpha = effAlpha)
-    val maxSlant = 16.dp.toPx()
-    val slant = (if (isLeft) maxSlant else -maxSlant) * slantProgress
+    val shadowColor = EyeMetrics.SHADOW_RED.copy(alpha = effAlpha)
+    val slant = angryEyeSlant(16.dp.toPx(), effH, slantProgress)
 
-    fun buildEyePath(offsetY: Float): Path = Path().apply {
+    fun buildEyePath(offsetY: Float): Path = EyePaths.obtain().apply {
         val leftX = centerX - effW / 2f
         val rightX = centerX + effW / 2f
-        val topL = centerY - effH * 0.42f + (if (isLeft) 0f else slant.absoluteValue) + offsetY
-        val topR = centerY - effH * 0.42f + (if (isLeft) slant.absoluteValue else 0f) + offsetY
+        val topL = centerY - effH * 0.42f + (if (isLeft) 0f else slant) + offsetY
+        val topR = centerY - effH * 0.42f + (if (isLeft) slant else 0f) + offsetY
         val bottomY = centerY + effH * 0.46f + offsetY
 
         moveTo(leftX, topL)
@@ -2338,11 +2196,12 @@ internal fun DrawScope.drawAngryEye(
 
     // Soft bloom + glow
     drawSoftBloom(color, Offset(centerX, centerY), Size(effW, effH * 0.9f), spread = 0.45f, intensity = 0.34f, alpha = effAlpha)
-    drawPath(buildEyePath(0f), effColor.copy(alpha = 0.25f * effAlpha), style = Stroke(width = 8.dp.toPx(), join = StrokeJoin.Round))
+    val front = buildEyePath(0f)
+    drawPath(front, effColor.copy(alpha = 0.25f * effAlpha), style = Stroke(width = 8.dp.toPx(), join = StrokeJoin.Round))
     // Shallow 2D Shadow Underneath
     drawPath(buildEyePath(shadowOffsetY), shadowColor)
     // Front Eye
-    drawPath(buildEyePath(0f), effColor)
+    drawPath(front, effColor)
 }
 
 /**
@@ -2361,7 +2220,7 @@ internal fun DrawScope.drawCrossEye(
     val strokeW = 14.dp.toPx()
     val arm = size * 0.38f
     val shadowOffsetY = 5.dp.toPx()
-    val shadowColor = Color(0xFF004D6B).copy(alpha = effAlpha)
+    val shadowColor = EyeMetrics.SHADOW_CYAN.copy(alpha = effAlpha)
 
     // Soft bloom
     drawSoftBloom(color, Offset(centerX, centerY), Size(arm * 2.2f, arm * 2.2f), spread = 0.40f, intensity = 0.24f, alpha = effAlpha)
@@ -2412,13 +2271,13 @@ internal fun DrawScope.drawLooiFangs(
     val fangH = size * 1.1f * progress
     val gap = size * 1.2f
 
-    val leftPath = Path().apply {
+    val leftPath = EyePaths.obtain().apply {
         moveTo(centerX - gap / 2f - fangW / 2f, centerY + slideY)
         lineTo(centerX - gap / 2f + fangW / 2f, centerY + slideY)
         lineTo(centerX - gap / 2f, centerY + slideY + fangH)
         close()
     }
-    val rightPath = Path().apply {
+    val rightPath = EyePaths.obtain().apply {
         moveTo(centerX + gap / 2f - fangW / 2f, centerY + slideY)
         lineTo(centerX + gap / 2f + fangW / 2f, centerY + slideY)
         lineTo(centerX + gap / 2f, centerY + slideY + fangH)
@@ -2558,7 +2417,7 @@ internal fun DrawScope.drawLooiBurgerWithHands(
     }
 
     // ── 5. Crisp Fresh Wavy Lettuce ──
-    val lettucePath = Path().apply {
+    val lettucePath = EyePaths.obtain().apply {
         moveTo(centerX - width * 0.53f, cy - h * 0.02f)
         var lx = centerX - width * 0.53f
         val segW = width * 1.06f / 5f
@@ -2581,7 +2440,7 @@ internal fun DrawScope.drawLooiBurgerWithHands(
     )
 
     // ── 7. Dripping Melted Cheddar Cheese ──
-    val cheesePath = Path().apply {
+    val cheesePath = EyePaths.obtain().apply {
         moveTo(centerX - width * 0.48f, cy + h * 0.16f)
         lineTo(centerX + width * 0.48f, cy + h * 0.16f)
         lineTo(centerX + width * 0.30f, cy + h * 0.36f) // right drip
@@ -2632,7 +2491,7 @@ internal fun DrawScope.drawChewingMouth(
         chewCycle < 0.32f -> {
             // Chomp! Mouth opens wide to bite
             val openH = 16.dp.toPx() * sin(chewCycle / 0.32f * PI.toFloat())
-            val chompPath = Path().apply {
+            val chompPath = EyePaths.obtain().apply {
                 moveTo(centerX - mouthW * 0.4f, mouthY - openH * 0.5f)
                 quadraticTo(centerX, mouthY - openH * 0.9f, centerX + mouthW * 0.4f, mouthY - openH * 0.5f)
                 quadraticTo(centerX, mouthY + openH * 0.9f, centerX - mouthW * 0.4f, mouthY - openH * 0.5f)
@@ -2644,7 +2503,7 @@ internal fun DrawScope.drawChewingMouth(
             // Munching & Chewing (เคี้ยวแก้มตุ่ย)
             val chewShift = sin((chewCycle - 0.32f) / 0.50f * 4f * PI.toFloat()) * 4.dp.toPx()
             val chewCurve = cos((chewCycle - 0.32f) / 0.50f * 4f * PI.toFloat()) * 3.dp.toPx()
-            val chewPath = Path().apply {
+            val chewPath = EyePaths.obtain().apply {
                 moveTo(centerX - mouthW * 0.42f + chewShift, mouthY)
                 quadraticTo(centerX - mouthW * 0.15f, mouthY + chewCurve, centerX + chewShift * 0.5f, mouthY)
                 quadraticTo(centerX + mouthW * 0.25f, mouthY - chewCurve, centerX + mouthW * 0.42f + chewShift, mouthY)
@@ -2653,7 +2512,7 @@ internal fun DrawScope.drawChewingMouth(
         }
         else -> {
             // Delicious smile ˘◡˘
-            val smilePath = Path().apply {
+            val smilePath = EyePaths.obtain().apply {
                 moveTo(centerX - mouthW * 0.38f, mouthY - 2.dp.toPx())
                 quadraticTo(centerX, mouthY + 8.dp.toPx(), centerX + mouthW * 0.38f, mouthY - 2.dp.toPx())
             }
@@ -2686,7 +2545,7 @@ internal fun DrawScope.drawLooiBeerSteinWithDrinking(
     val glassBottomY = centerY + h * 0.50f
 
     // Golden Beer Fill inside tapered glass
-    val beerPath = Path().apply {
+    val beerPath = EyePaths.obtain().apply {
         moveTo(centerX - topW * 0.46f, glassTopY + 4.dp.toPx())
         lineTo(centerX + topW * 0.46f, glassTopY + 4.dp.toPx())
         lineTo(centerX + bottomW * 0.46f, glassBottomY)
@@ -2696,7 +2555,7 @@ internal fun DrawScope.drawLooiBeerSteinWithDrinking(
     drawPath(beerPath, Color(0xFFFFB300).copy(alpha = 0.95f * effAlpha))
 
     // Amber gradient depth in lower half
-    val amberPath = Path().apply {
+    val amberPath = EyePaths.obtain().apply {
         moveTo(centerX - (topW * 0.46f + (bottomW * 0.46f - topW * 0.46f) * 0.5f), centerY + 2.dp.toPx())
         lineTo(centerX + (topW * 0.46f + (bottomW * 0.46f - topW * 0.46f) * 0.5f), centerY + 2.dp.toPx())
         lineTo(centerX + bottomW * 0.46f, glassBottomY)
@@ -2737,7 +2596,7 @@ internal fun DrawScope.drawLooiBeerSteinWithDrinking(
     drawCircle(Color.White.copy(alpha = effAlpha), radius = 3.dp.toPx(), center = Offset(centerX + topW * 0.48f, glassTopY + 6.dp.toPx()))
 
     // ── 4. Glass Outline (Pint Tumbler) ──
-    val glassOutline = Path().apply {
+    val glassOutline = EyePaths.obtain().apply {
         moveTo(centerX - topW * 0.48f, glassTopY)
         lineTo(centerX + topW * 0.48f, glassTopY)
         lineTo(centerX + bottomW * 0.48f, glassBottomY)
@@ -2885,7 +2744,7 @@ internal fun DrawScope.drawLooiVrHeadset(
     val halfH = visorH / 2f
     val r = visorH * 0.42f
 
-    val visorPath = Path().apply {
+    val visorPath = EyePaths.obtain().apply {
         moveTo(centerX - halfW + r, centerY - halfH)
         lineTo(centerX + halfW - r, centerY - halfH)
         quadraticTo(centerX + halfW, centerY - halfH, centerX + halfW, centerY)
@@ -2951,7 +2810,7 @@ internal fun DrawScope.drawLooiPopcornBucket(
     val h = width * 1.15f
 
     // ── 1. Striped Cinema Bucket ──
-    val bucketPath = Path().apply {
+    val bucketPath = EyePaths.obtain().apply {
         moveTo(centerX - width * 0.50f, centerY)
         lineTo(centerX + width * 0.50f, centerY)
         lineTo(centerX + width * 0.36f, centerY + h)
@@ -3020,7 +2879,7 @@ internal fun DrawScope.drawLooiSnorkelMask(
     val halfH = maskH / 2f
     val r = maskH * 0.38f
 
-    val gogglePath = Path().apply {
+    val gogglePath = EyePaths.obtain().apply {
         moveTo(centerX - halfW + r, centerY - halfH)
         lineTo(centerX + halfW - r, centerY - halfH)
         quadraticTo(centerX + halfW, centerY - halfH, centerX + halfW, centerY)
@@ -3051,7 +2910,7 @@ internal fun DrawScope.drawLooiSnorkelMask(
     val tubeStartY = centerY + halfH * 0.35f
     val tubeTopX = centerX + halfW + 14.dp.toPx()
     val tubeTopY = centerY - halfH * 0.75f
-    val tubePath = Path().apply {
+    val tubePath = EyePaths.obtain().apply {
         moveTo(tubeStartX, tubeStartY)
         cubicTo(
             centerX + halfW + 18.dp.toPx(), tubeStartY + 8.dp.toPx(),
@@ -3084,13 +2943,13 @@ internal fun DrawScope.drawLooiPurpleDevilIcon(
     val black = Color.Black.copy(alpha = effAlpha)
     val r = size / 2f
     drawCircle(purple, r, Offset(centerX, centerY))
-    val leftHorn = Path().apply {
+    val leftHorn = EyePaths.obtain().apply {
         moveTo(centerX - r * 0.7f, centerY - r * 0.4f)
         lineTo(centerX - r * 1.05f, centerY - r * 1.2f)
         lineTo(centerX - r * 0.3f, centerY - r * 0.8f)
         close()
     }
-    val rightHorn = Path().apply {
+    val rightHorn = EyePaths.obtain().apply {
         moveTo(centerX + r * 0.7f, centerY - r * 0.4f)
         lineTo(centerX + r * 1.05f, centerY - r * 1.2f)
         lineTo(centerX + r * 0.3f, centerY - r * 0.8f)
@@ -3124,7 +2983,7 @@ internal fun DrawScope.drawLooiFocusdWedge(
     val effH = height * 0.35f
     val shadowOffsetY = 4.dp.toPx()
 
-    fun makeWedge(offsetY: Float) = Path().apply {
+    fun makeWedge(offsetY: Float) = EyePaths.obtain().apply {
         if (isLeft) {
             moveTo(centerX - effW / 2f, centerY + effH / 2f + offsetY)
             lineTo(centerX + effW / 2f, centerY - effH / 2f + offsetY)
@@ -3213,35 +3072,19 @@ internal fun DrawScope.drawLooiExcitedEye(
         val effH = height * (0.90f - 0.22f * shrinkProgress)
         val shadowOffsetY = 5.dp.toPx()
 
-        fun makeEyePath(offsetY: Float) = Path().apply {
+        // One shape for the whole cycle: the top is a half-ellipse cubic (controls at 4/3 of the
+        // half-height put its peak exactly at hh) and the bottom control height shrinks to 0,
+        // so circle -> half-circle morphs continuously (no oval/cubic/line switches).
+        fun makeEyePath(offsetY: Float) = EyePaths.obtain().apply {
             val hw = effW / 2f
             val hh = effH / 2f
             val cy = centerY + offsetY
-            if (shrinkProgress <= 0.02f) {
-                // Full round oval / circle
-                addOval(Rect(centerX - hw, cy - hh, centerX + hw, cy + hh))
-            } else {
-                val bottomFlatten = shrinkProgress.coerceIn(0f, 1f)
-                moveTo(centerX - hw, cy)
-                // Top half curve (convex dome arc)
-                cubicTo(
-                    centerX - hw, cy - hh * 1.18f,
-                    centerX + hw, cy - hh * 1.18f,
-                    centerX + hw, cy
-                )
-                // Bottom half: flattens from round curve to flat horizontal line
-                if (bottomFlatten >= 0.92f) {
-                    lineTo(centerX - hw, cy)
-                } else {
-                    val bottomControlY = cy + hh * (1.18f * (1f - bottomFlatten))
-                    cubicTo(
-                        centerX + hw, bottomControlY,
-                        centerX - hw, bottomControlY,
-                        centerX - hw, cy
-                    )
-                }
-                close()
-            }
+            val arc = hh * (4f / 3f)
+            val bottomArc = arc * (1f - shrinkProgress.coerceIn(0f, 1f))
+            moveTo(centerX - hw, cy)
+            cubicTo(centerX - hw, cy - arc, centerX + hw, cy - arc, centerX + hw, cy)
+            cubicTo(centerX + hw, cy + bottomArc, centerX - hw, cy + bottomArc, centerX - hw, cy)
+            close()
         }
 
         drawPath(makeEyePath(shadowOffsetY), effShadowColor)
@@ -3317,7 +3160,7 @@ internal fun DrawScope.drawLooiTrashBin(
     val darkSilver = Color(0xFF78909C).copy(alpha = effAlpha)
     val h = width * 1.15f
 
-    val binPath = Path().apply {
+    val binPath = EyePaths.obtain().apply {
         moveTo(centerX - width * 0.45f, centerY)
         lineTo(centerX + width * 0.45f, centerY)
         lineTo(centerX + width * 0.35f, centerY + h)
@@ -3463,30 +3306,6 @@ internal fun DrawScope.drawWaveformMouth(
     }
 }
 
-internal fun DrawScope.drawGlowCircle(
-    color: Color,
-    center: Offset,
-    radiusX: Float,
-    radiusY: Float
-) {
-    // Outer Ambient Glow
-    drawOval(
-        brush = Brush.radialGradient(
-            colors = listOf(color.copy(alpha = 0.55f), Color.Transparent),
-            center = center,
-            radius = radiusX * 1.7f
-        ),
-        topLeft = Offset(center.x - radiusX * 1.7f, center.y - radiusY * 1.7f),
-        size = Size(radiusX * 3.4f, radiusY * 3.4f)
-    )
-    // Core Bright LED Dot
-    drawOval(
-        color = color,
-        topLeft = Offset(center.x - radiusX, center.y - radiusY),
-        size = Size(radiusX * 2f, radiusY * 2f)
-    )
-}
-
 internal fun DrawScope.drawSmileArc(
     color: Color,
     centerX: Float,
@@ -3549,7 +3368,7 @@ internal fun DrawScope.drawQuestionMark(
     if (alpha <= 0.01f) return
     val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
     val effColor = color.copy(alpha = effAlpha)
-    val qPath = Path().apply {
+    val qPath = EyePaths.obtain().apply {
         val w = height * 0.55f
         moveTo(centerX - w * 0.45f, centerY - height * 0.35f)
         cubicTo(
@@ -3586,7 +3405,7 @@ internal fun DrawScope.drawThinkingHand(
     if (alpha <= 0.01f) return
     val effAlpha = (color.alpha * alpha).coerceIn(0f, 1f)
     val effColor = color.copy(alpha = effAlpha)
-    val handPath = Path().apply {
+    val handPath = EyePaths.obtain().apply {
         val r = size * 0.4f
         moveTo(centerX + r * 0.3f, centerY - r * 1.1f)
         lineTo(centerX + r * 0.3f, centerY - r * 0.2f)
@@ -3626,18 +3445,18 @@ internal fun DrawScope.drawEnragedEye(
     val effBackColor = backColor.copy(alpha = (backColor.alpha * alpha).coerceIn(0f, 1f))
     val effW = width * 1.10f
     val effH = height * 0.90f
-    val slant = if (isLeft) 20.dp.toPx() else -20.dp.toPx()
+    val slant = angryEyeSlant(20.dp.toPx(), effH, 1f).let { if (isLeft) it else -it }
     val shadowOffsetY = 6.dp.toPx()
 
     // Angry angular shape with steep inward tilt (ตาขวางดุดัน)
-    val path = Path().apply {
+    val path = EyePaths.obtain().apply {
         moveTo(centerX - effW / 2f, centerY - effH / 2f + (if (isLeft) 0f else slant.absoluteValue))
         lineTo(centerX + effW / 2f, centerY - effH / 2f + (if (isLeft) slant.absoluteValue else 0f))
         lineTo(centerX + effW * 0.35f, centerY + effH / 2f)
         lineTo(centerX - effW * 0.35f, centerY + effH / 2f)
         close()
     }
-    val shadowPath = Path().apply {
+    val shadowPath = EyePaths.obtain().apply {
         moveTo(centerX - effW / 2f, centerY - effH / 2f + (if (isLeft) 0f else slant.absoluteValue) + shadowOffsetY)
         lineTo(centerX + effW / 2f, centerY - effH / 2f + (if (isLeft) slant.absoluteValue else 0f) + shadowOffsetY)
         lineTo(centerX + effW * 0.35f, centerY + effH / 2f + shadowOffsetY)
@@ -3664,7 +3483,7 @@ internal fun DrawScope.drawSteamPuff(
     centerY: Float,
     size: Float
 ) {
-    val puffPath = Path().apply {
+    val puffPath = EyePaths.obtain().apply {
         moveTo(centerX, centerY)
         cubicTo(centerX - size * 0.4f, centerY - size * 0.5f, centerX - size * 0.2f, centerY - size * 1.1f, centerX + size * 0.1f, centerY - size * 1.4f)
         cubicTo(centerX + size * 0.5f, centerY - size * 1.1f, centerX + size * 0.4f, centerY - size * 0.5f, centerX, centerY)
@@ -3708,7 +3527,7 @@ internal fun DrawScope.drawNeonMusicNote(
             cap = StrokeCap.Round
         )
         // Flag curve
-        val flagPath = Path().apply {
+        val flagPath = EyePaths.obtain().apply {
             moveTo(stemX, centerY - stemH)
             cubicTo(
                 stemX + size * 0.45f, centerY - stemH * 0.85f,

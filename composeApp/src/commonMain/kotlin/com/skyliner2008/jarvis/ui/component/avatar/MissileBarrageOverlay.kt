@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.unit.dp
 import com.skyliner2008.jarvis.sound.RobotSoundPlayer
+import kotlinx.coroutines.launch
 import kotlin.math.*
 import kotlin.random.Random
 
@@ -95,37 +96,47 @@ fun MissileBarrageOverlay(
         list
     }
 
+    val totalDurationMs = 5000f
+    val currentOnScreenShake by rememberUpdatedState(onScreenShake)
+    val currentOnFinished by rememberUpdatedState(onFinished)
+
     LaunchedEffect(isActive) {
         explosionSoundPlayed = false
         animTime.snapTo(0f)
+        // Screen shake & explosion sound follow the timeline from one collector
+        // (the old LaunchedEffect(currentMs) relaunched a coroutine on every frame)
+        val timeline = launch {
+            snapshotFlow { animTime.value * totalDurationMs }.collect { currentMs ->
+                if (currentMs >= 2400f && !explosionSoundPlayed) {
+                    explosionSoundPlayed = true
+                    RobotSoundPlayer.playExplosion()
+                }
+                if (currentMs in 2350f..3800f) {
+                    val impactDecay = ((3800f - currentMs) / 1450f).coerceIn(0f, 1f)
+                    currentOnScreenShake(impactDecay * 18f)
+                } else {
+                    currentOnScreenShake(0f)
+                }
+            }
+        }
         animTime.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 5000, easing = LinearEasing)
+            animationSpec = tween(durationMillis = totalDurationMs.toInt(), easing = LinearEasing)
         )
-        onFinished()
+        timeline.cancel()
+        currentOnScreenShake(0f)
+        currentOnFinished()
     }
 
-    val progress = animTime.value
-    val totalDurationMs = 5000f
-    val currentMs = progress * totalDurationMs
-
-    // Trigger Screen Shake & Explosion Sound when first missile impacts (~2400ms)
-    LaunchedEffect(currentMs) {
-        if (currentMs >= 2400f && !explosionSoundPlayed) {
-            explosionSoundPlayed = true
-            RobotSoundPlayer.playExplosion()
-        }
-        if (currentMs in 2350f..3800f) {
-            val impactDecay = ((3800f - currentMs) / 1450f).coerceIn(0f, 1f)
-            onScreenShake(impactDecay * 18f)
-        } else {
-            onScreenShake(0f)
-        }
+    // Leaving mid-barrage (isActive -> false, or the screen closes) must never leave the screen shaking
+    DisposableEffect(Unit) {
+        onDispose { currentOnScreenShake(0f) }
     }
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
+        val currentMs = animTime.value * totalDurationMs
 
         // ─── 1. Screen Blast Flash Overlay ─────────────────────────────────────
         if (currentMs in 2400f..3600f) {

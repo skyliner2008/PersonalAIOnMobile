@@ -40,11 +40,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarLayoutInfo
-import com.skyliner2008.jarvis.ui.component.avatar.GazeStabilizer
+import com.skyliner2008.jarvis.ui.component.avatar.EyeMetrics
+import com.skyliner2008.jarvis.ui.component.avatar.EyeTrickState
 import com.skyliner2008.jarvis.ui.component.avatar.LocalAvatarLayout
 import com.skyliner2008.jarvis.ui.component.avatar.calculateAvatarLayout
 import com.skyliner2008.jarvis.camera.BoundingBoxOverlay
@@ -222,6 +224,21 @@ internal fun PetModeContent(
         }
     }
 
+    // ─── Eye tricks are one-shot (~4.2 s). The idle screensaver clears its own trick, but a trick
+    // set from elsewhere (AI face tool, RobotFaceState.fromArgs) would otherwise freeze the face on
+    // the trick's last frame and hide the emotion, mouth and props until something replaced it.
+    val currentEyeTrick = activeAvatarState.faceState.eyeTrick
+    val activeAvatarStateState = rememberUpdatedState(activeAvatarState)
+    LaunchedEffect(currentEyeTrick) {
+        if (currentEyeTrick != EyeTrickState.NONE) {
+            delay(4_800L)
+            val latest = activeAvatarStateState.value
+            if (latest.faceState.eyeTrick == currentEyeTrick) {
+                onUpdateActiveAvatarState(latest.copy(faceState = latest.faceState.copy(eyeTrickName = "none")))
+            }
+        }
+    }
+
     val targetFaceOffsetX = if (hasMessage) {
         if (isLandscape) -0.24f else 0f
     } else 0f
@@ -264,36 +281,32 @@ internal fun PetModeContent(
                 calculateAvatarLayout(faceWidthPx, faceHeightPx, isLandscape)
             }
 
-            // Screen-level gaze stabilizer for 2.5D Parallax & Head-aligned Props
-            val screenGazeStabilizer = remember { GazeStabilizer() }
-            val (screenFilteredGazeX, screenFilteredGazeY) = remember(
-                activeAvatarState.gazeOffsetX,
-                activeAvatarState.gazeOffsetY
-            ) {
-                screenGazeStabilizer.update(activeAvatarState.gazeOffsetX, activeAvatarState.gazeOffsetY)
-            }
-
+            // Screen-level gaze for 2.5D Parallax & Head-aligned Props.
+            // Camera gaze is already stabilised in PetVisionDetector; the spring alone smooths
+            // touch/idle gaze and always settles on the target (so the scene recentres on release).
+            val screenGazeX = activeAvatarState.gazeOffsetX.coerceIn(-1f, 1f)
+            val screenGazeY = activeAvatarState.gazeOffsetY.coerceIn(-1f, 1f)
             val screenSmoothedGazeX by animateFloatAsState(
-                targetValue = screenFilteredGazeX,
+                targetValue = screenGazeX,
                 animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
                 label = "screen_smoothed_gaze_x"
             )
             val screenSmoothedGazeY by animateFloatAsState(
-                targetValue = screenFilteredGazeY,
+                targetValue = screenGazeY,
                 animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
                 label = "screen_smoothed_gaze_y"
             )
 
-            val targetRotationY = screenSmoothedGazeX.coerceIn(-1f, 1f) * 35f
-            val targetRotationX = -screenSmoothedGazeY.coerceIn(-1f, 1f) * 20f
+            // targets come from the state, not from the animating springs above, so this
+            // composable does not recompose on every frame of a gaze move
             val screenAnimatedRotationY by animateFloatAsState(
-                targetValue = targetRotationY,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                targetValue = screenGazeX * 35f,
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
                 label = "screen_3d_yaw"
             )
             val screenAnimatedRotationX by animateFloatAsState(
-                targetValue = targetRotationX,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                targetValue = -screenGazeY * 20f,
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
                 label = "screen_3d_pitch"
             )
 
@@ -301,7 +314,7 @@ internal fun PetModeContent(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                .pointerInput(isLandscape, animatedFaceOffsetX, animatedFaceOffsetY, animatedFaceScale) {
+                .pointerInput(isLandscape) {
                     coroutineScope {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
@@ -373,7 +386,7 @@ internal fun PetModeContent(
                         }
                     }
                 }
-                .pointerInput(isLandscape, animatedFaceOffsetX, animatedFaceOffsetY, animatedFaceScale) {
+                .pointerInput(isLandscape) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
                             val boxW = size.width.toFloat()
@@ -478,19 +491,16 @@ internal fun PetModeContent(
                     }
             )
 
-            // Dynamic screen shake offset during missile explosions
-            val shakeX = if (screenShakeIntensity > 0.05f) {
-                (kotlin.random.Random.nextFloat() * 2f - 1f) * screenShakeIntensity * 36f
-            } else 0f
-            val shakeY = if (screenShakeIntensity > 0.05f) {
-                (kotlin.random.Random.nextFloat() * 2f - 1f) * screenShakeIntensity * 36f
-            } else 0f
-
             // Face & Props Container
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
+                        // missile-explosion screen shake: jitter is picked in the layer phase,
+                        // which re-runs whenever screenShakeIntensity changes (every overlay frame)
+                        val shake = screenShakeIntensity
+                        val shakeX = if (shake > 0.05f) (kotlin.random.Random.nextFloat() * 2f - 1f) * shake * 36f else 0f
+                        val shakeY = if (shake > 0.05f) (kotlin.random.Random.nextFloat() * 2f - 1f) * shake * 36f else 0f
                         translationX = animatedFaceOffsetX * size.width + shakeX
                         translationY = animatedFaceOffsetY * size.height + shakeY
                         scaleX = animatedFaceScale
@@ -517,7 +527,10 @@ internal fun PetModeContent(
                 )
 
                 // Layer 2: Robot Head Avatar
-                val gestureModifier = rememberGestureModifier(activeAvatarState.faceState.gesture)
+                val gestureModifier = rememberGestureModifier(
+                    gesture = activeAvatarState.faceState.gesture,
+                    replayKey = activeAvatarState.faceState.sceneId
+                )
                 // Rive: the 500x500 artboard is placed so its eye row lands on the upper
                 // third of the pet area (portrait ~40% down, landscape ~42%) and fills more
                 // of it -- no padding, and a little larger than the area (edges may crop).
@@ -551,8 +564,8 @@ internal fun PetModeContent(
                     isScanning = isCameraPipOpen,
                     isFrontCamera = isFrontCam,
                     detectedObjects = detectedObjects,
-                    gazeX = activeAvatarState.gazeOffsetX,
-                    gazeY = activeAvatarState.gazeOffsetY,
+                    gazeX = { screenSmoothedGazeX },
+                    gazeY = { screenSmoothedGazeY },
                     onFrameCapture = { jpegBase64, rawBytes ->
                         petVisionProcessor?.processFrame(rawBytes, isFrontCamera = isFrontCam)
                         val now = Clock.System.now().toEpochMilliseconds()
@@ -1200,8 +1213,8 @@ internal fun PetEyeScannerOverlay(
     isScanning: Boolean,
     isFrontCamera: Boolean,
     detectedObjects: List<DetectedObject>,
-    gazeX: Float = 0f,
-    gazeY: Float = 0f,
+    gazeX: () -> Float = { 0f },
+    gazeY: () -> Float = { 0f },
     onFrameCapture: (jpegBase64: String, rawBytes: ByteArray) -> Unit,
     onSwitchCamera: () -> Unit,
     onClose: () -> Unit,
@@ -1249,26 +1262,31 @@ internal fun PetEyeScannerOverlay(
             minOf(widthDp * 0.38f, heightDp * 0.24f)
         }
 
-        val baseSpacing = if (isLandscape) eyeDiameter * 0.72f else widthDp / 5f
-        val gazeDisplacementX = widthDp * (0.16f * gazeX.coerceIn(-1f, 1f))
-        val gazeDisplacementY = heightDp * (0.12f * gazeY.coerceIn(-1f, 1f))
-        val spacingFactor = 1f - 0.06f * kotlin.math.abs(gazeX)
-        val dynamicSpacing = baseSpacing * spacingFactor
-
+        // Same eye line, spacing and gaze travel as the avatar (calculateAvatarLayout +
+        // VirtualHeadKinematics), so the scanner rings stay centred on the drawn eyes.
+        val avatarEyeDiameter = if (isLandscape) minOf(heightDp * 0.50f, widthDp * 0.28f) else minOf(widthDp * 0.24f, heightDp * 0.20f)
+        val baseSpacing = if (isLandscape) avatarEyeDiameter * 0.72f else widthDp / 5f
         val centerX = widthDp / 2f
-        val centerY = heightDp / 2f
+        val centerY = heightDp * (if (isLandscape) 0.42f else 0.40f)
+        val density = LocalDensity.current
 
-        val leftEyeCenterX = centerX + gazeDisplacementX - dynamicSpacing
-        val rightEyeCenterX = centerX + gazeDisplacementX + dynamicSpacing
-        val eyeCenterY = centerY + gazeDisplacementY
+        // Gaze is read in the layout phase (offset lambda) so gaze motion does not recompose this overlay
+        fun eyeOffset(isLeft: Boolean): IntOffset = with(density) {
+            val gx = gazeX().coerceIn(-1f, 1f)
+            val gy = gazeY().coerceIn(-1f, 1f)
+            // head yaw/pitch (gaze * 0.55 / 0.40) + pupil travel + parallax, as in VirtualHeadKinematics
+            val shiftX = avatarEyeDiameter * (gx * 0.55f * EyeMetrics.HEAD_SHIFT_X + gx * EyeMetrics.PUPIL_TRAVEL_X)
+            val shiftY = avatarEyeDiameter * (gy * 0.40f * EyeMetrics.HEAD_SHIFT_Y + gy * EyeMetrics.PUPIL_TRAVEL_Y)
+            val spacing = baseSpacing * kotlin.math.cos(gx * 0.55f * 0.35f)
+            val eyeX = centerX + shiftX + (if (isLeft) -spacing else spacing)
+            val eyeY = centerY + shiftY
+            IntOffset((eyeX - eyeDiameter / 2f).roundToPx(), (eyeY - eyeDiameter / 2f).roundToPx())
+        }
 
         // ─── LEFT EYE: Holographic Cyber Radar Scanner ───
         Box(
             modifier = Modifier
-                .offset(
-                    x = leftEyeCenterX - eyeDiameter / 2f,
-                    y = eyeCenterY - eyeDiameter / 2f
-                )
+                .offset { eyeOffset(isLeft = true) }
                 .size(eyeDiameter)
                 .clip(CircleShape)
                 .background(Color(0xFF041422).copy(alpha = 0.94f))
@@ -1377,10 +1395,7 @@ internal fun PetEyeScannerOverlay(
         // ─── RIGHT EYE: Circular Cyber Optical Lens Viewfinder ───
         Box(
             modifier = Modifier
-                .offset(
-                    x = rightEyeCenterX - eyeDiameter / 2f,
-                    y = eyeCenterY - eyeDiameter / 2f
-                )
+                .offset { eyeOffset(isLeft = false) }
                 .size(eyeDiameter)
                 .clip(CircleShape)
                 .background(Color.Black)

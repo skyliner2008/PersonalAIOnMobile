@@ -183,7 +183,7 @@ fun AvatarState.effectiveEmotion(): AvatarEmotion = when {
     faceState.eyeStyle == EyeStyle.STAR -> AvatarEmotion.EXCITED
     faceState.eyeStyle == EyeStyle.WINK -> AvatarEmotion.WINK
     faceState.eyeStyle == EyeStyle.CROSS -> AvatarEmotion.DEAD
-    faceState.eyeStyle == EyeStyle.CRYING -> AvatarEmotion.SAD
+    faceState.eyeStyle == EyeStyle.CRYING -> AvatarEmotion.CRYING
     faceState.eyeStyle == EyeStyle.QUESTION -> AvatarEmotion.CONFUSED
     faceState.eyeStyle == EyeStyle.SPIRAL -> AvatarEmotion.DIZZY
     faceState.eyeStyle == EyeStyle.HAPPY -> AvatarEmotion.HAPPY

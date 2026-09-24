@@ -113,11 +113,7 @@ private fun DefaultBackground() {
 @Composable
 private fun RainyBackground() {
     val transition = rememberInfiniteTransition(label = "rainy_bg")
-    val rainProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
-        label = "rain"
-    )
+    val layerClock = rememberLayerClock()
     val drops = remember {
         List(30) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.6f + 0.9f, Random.nextFloat() * 0.35f + 0.25f, Random.nextFloat() * 18f + 14f)
@@ -125,9 +121,10 @@ private fun RainyBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val rainProgressCycles = layerClock.cycles(900)
         drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF2C3E50), Color(0xFF1A252F))))
         drops.forEach { drop ->
-            val y = ((drop.y + rainProgress * drop.speed) % 1f) * (size.height + drop.size) - drop.size
+            val y = loopFrac(drop.y, rainProgressCycles, drop.speed) * (size.height + drop.size) - drop.size
             val x = drop.x * size.width
             drawLine(
                 color = Color(0xCCE0E6ED).copy(alpha = drop.alpha),
@@ -219,11 +216,7 @@ private fun NightBackground() {
 @Composable
 private fun SakuraBackground() {
     val transition = rememberInfiniteTransition(label = "sakura_bg")
-    val progress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(8000, easing = LinearEasing), RepeatMode.Restart),
-        label = "sakura"
-    )
+    val layerClock = rememberLayerClock()
     val petals = remember {
         List(15) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.45f + 0.3f, Random.nextFloat() * 0.35f + 0.6f, Random.nextFloat() * 7f + 9f, Random.nextFloat() * 360f)
@@ -231,11 +224,13 @@ private fun SakuraBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val progressCycles = layerClock.cycles(8000)
+        val progress = (progressCycles % 1.0).toFloat()
         drawRect(brush = Brush.verticalGradient(listOf(Color(0xFFFCE4EC), Color(0xFFF8BBD0))))
         petals.forEach { petal ->
-            val y = ((petal.y + progress * petal.speed) % 1f) * (size.height + petal.size * 3) - petal.size
-            val sway = sin(progress * 2f * PI.toFloat() * 2.5f + petal.extra) * 24f
-            val x = (petal.x * size.width + progress * size.width * 0.35f + sway) % size.width
+            val y = loopFrac(petal.y, progressCycles, petal.speed) * (size.height + petal.size * 3) - petal.size
+            val sway = sin(loopFrac(0f, progressCycles, 2.5f) * 2f * PI.toFloat() + petal.extra) * 24f
+            val x = (loopFrac(petal.x, progressCycles, 0.35f) * size.width + sway) % size.width
             val angle = (petal.extra + progress * 360f * (if (petal.speed > 0.5f) 1f else -1f)) % 360f
 
             rotate(degrees = angle, pivot = Offset(x, y)) {
@@ -261,11 +256,7 @@ private fun SakuraBackground() {
 @Composable
 private fun MatrixBackground() {
     val transition = rememberInfiniteTransition(label = "matrix_bg")
-    val progress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
-        label = "matrix"
-    )
+    val layerClock = rememberLayerClock()
     val columns = remember {
         List(20) { index ->
             Particle((index + 0.5f) / 20f, Random.nextFloat(), Random.nextFloat() * 0.7f + 0.6f, 1f, Random.nextFloat() * 1.5f + 3f, Random.nextInt(5, 10).toFloat())
@@ -273,11 +264,12 @@ private fun MatrixBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val progressCycles = layerClock.cycles(2200)
         drawRect(color = Color.Black)
         val dotSpacing = 14f
         columns.forEach { col ->
             val colX = col.x * size.width
-            val headY = ((col.y + progress * col.speed) % 1f) * (size.height + 120f) - 60f
+            val headY = loopFrac(col.y, progressCycles, col.speed) * (size.height + 120f) - 60f
             val trailCount = col.extra.toInt()
             for (t in 0 until trailCount) {
                 val dotY = headY - t * dotSpacing
@@ -300,11 +292,7 @@ private fun MatrixBackground() {
 @Composable
 private fun LoveBackground() {
     val transition = rememberInfiniteTransition(label = "love_bg")
-    val progress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(5500, easing = LinearEasing), RepeatMode.Restart),
-        label = "love"
-    )
+    val layerClock = rememberLayerClock()
     val hearts = remember {
         List(8) {
             Particle(Random.nextFloat() * 0.84f + 0.08f, Random.nextFloat(), Random.nextFloat() * 0.35f + 0.35f, Random.nextFloat() * 0.35f + 0.55f, Random.nextFloat() * 8f + 12f, Random.nextFloat() * 2f * PI.toFloat())
@@ -312,11 +300,13 @@ private fun LoveBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val progressCycles = layerClock.cycles(5500)
+        val progress = (progressCycles % 1.0).toFloat()
         val maxDim = max(size.width, size.height)
         drawRect(brush = Brush.radialGradient(listOf(Color(0xFFFFCDD2), Color(0xFFF06292), Color(0xFFE91E63)), center, maxDim * 0.85f))
         hearts.forEach { heart ->
-            val y = ((heart.y - progress * heart.speed) % 1f + 1f) % 1f * (size.height + 60f) - 30f
-            val sway = sin(progress * 2f * PI.toFloat() * 1.5f + heart.extra) * 16f
+            val y = loopFrac(heart.y, progressCycles, -heart.speed) * (size.height + 60f) - 30f
+            val sway = sin(loopFrac(0f, progressCycles, 1.5f) * 2f * PI.toFloat() + heart.extra) * 16f
             drawPetHeart(Offset(heart.x * size.width + sway, y), heart.size, Color.White.copy(alpha = heart.alpha))
         }
     }
@@ -347,11 +337,7 @@ private fun ThunderBackground() {
         ),
         label = "flash"
     )
-    val rainProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(600, easing = LinearEasing), RepeatMode.Restart),
-        label = "rain"
-    )
+    val layerClock = rememberLayerClock()
     val rainDrops = remember {
         List(25) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.8f + 1.2f, Random.nextFloat() * 0.3f + 0.2f, Random.nextFloat() * 22f + 16f)
@@ -359,9 +345,10 @@ private fun ThunderBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val rainProgressCycles = layerClock.cycles(600)
         drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF37474F), Color(0xFF263238))))
         rainDrops.forEach { drop ->
-            val y = ((drop.y + rainProgress * drop.speed) % 1f) * (size.height + drop.size) - drop.size
+            val y = loopFrac(drop.y, rainProgressCycles, drop.speed) * (size.height + drop.size) - drop.size
             val x = drop.x * size.width
             drawLine(Color(0x99CFD8DC).copy(alpha = drop.alpha), Offset(x, y), Offset(x - 6f, y + drop.size), 1.8f, StrokeCap.Round)
         }
@@ -411,6 +398,7 @@ private fun CyberGridBackground() {
         infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
         label = "grid"
     )
+    val layerClock = rememberLayerClock()
     val particles = remember {
         List(20) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.4f + 0.2f, Random.nextFloat() * 0.4f + 0.2f, Random.nextFloat() * 2f + 1.5f)
@@ -449,7 +437,7 @@ private fun CyberGridBackground() {
 
         // Digital floating data particles
         particles.forEach { p ->
-            val py = ((p.y - gridProgress * p.speed) % 1f + 1f) % 1f * size.height
+            val py = loopFrac(p.y, layerClock.cycles(2400), -p.speed) * size.height
             val px = p.x * size.width
             drawCircle(
                 color = Color(0xFF00F5FF).copy(alpha = p.alpha * 0.7f),
@@ -531,6 +519,7 @@ private fun MagicMysticBackground() {
         infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Restart),
         label = "rune_rot"
     )
+    val layerClock = rememberLayerClock()
     val runePulse by transition.animateFloat(
         0.1f, 0.28f,
         infiniteRepeatable(tween(2500, easing = EaseInOutSine), RepeatMode.Reverse),
@@ -566,7 +555,7 @@ private fun MagicMysticBackground() {
 
         // Floating mystic sparkles
         particles.forEach { p ->
-            val py = ((p.y - (rot / 360f) * p.speed) % 1f + 1f) % 1f * size.height
+            val py = loopFrac(p.y, layerClock.cycles(20000), -p.speed) * size.height
             val px = p.x * size.width + sin((py * 0.05f).toDouble()).toFloat() * 14f
             drawCircle(
                 color = if (p.speed > 0.5f) Color(0xFFFFD54F) else Color(0xFFE040FB),
@@ -621,11 +610,7 @@ private fun CinemaCozyBackground() {
 @Composable
 private fun WinterBlizzardBackground() {
     val transition = rememberInfiniteTransition(label = "winter_blizzard")
-    val snowProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
-        label = "snow"
-    )
+    val layerClock = rememberLayerClock()
     val flakes = remember {
         List(35) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.7f + 0.8f, Random.nextFloat() * 0.5f + 0.3f, Random.nextFloat() * 3.5f + 1.5f, Random.nextFloat() * 6.28f)
@@ -633,10 +618,11 @@ private fun WinterBlizzardBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val snowProgressCycles = layerClock.cycles(1600)
         drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF071524), Color(0xFF020912))))
 
         flakes.forEach { flake ->
-            val prog = (flake.y + snowProgress * flake.speed) % 1f
+            val prog = loopFrac(flake.y, snowProgressCycles, flake.speed)
             val fy = prog * size.height
             val fx = (flake.x * size.width + sin((prog * 4f * PI + flake.extra).toDouble()).toFloat() * 18f - prog * 28f) % size.width
             drawCircle(
@@ -696,11 +682,7 @@ private fun SummerHeatBackground() {
 @Composable
 private fun WarriorDojoBackground() {
     val transition = rememberInfiniteTransition(label = "warrior_dojo")
-    val fireProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
-        label = "fire"
-    )
+    val layerClock = rememberLayerClock()
     val sparks = remember {
         List(25) {
             Particle(Random.nextFloat(), Random.nextFloat(), Random.nextFloat() * 0.6f + 0.4f, Random.nextFloat() * 0.6f + 0.4f, Random.nextFloat() * 3f + 1f, Random.nextFloat() * 6.28f)
@@ -708,11 +690,12 @@ private fun WarriorDojoBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val fireProgressCycles = layerClock.cycles(2200)
         drawRect(brush = Brush.verticalGradient(listOf(Color(0xFF240306), Color(0xFF0B0002), Color(0xFF000000))))
 
         // Rising fire sparks & embers
         sparks.forEach { s ->
-            val prog = ((s.y - fireProgress * s.speed) % 1f + 1f) % 1f
+            val prog = loopFrac(s.y, fireProgressCycles, -s.speed)
             val sy = prog * size.height
             val sx = s.x * size.width + sin((prog * 3f * PI + s.extra).toDouble()).toFloat() * 20f
             val color = if (s.speed > 0.6f) Color(0xFFFFAB00) else Color(0xFFFF3D00)
@@ -768,11 +751,7 @@ private fun PartyConfettiBackground() {
 @Composable
 private fun GoldenVaultBackground() {
     val transition = rememberInfiniteTransition(label = "golden_vault")
-    val coinProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
-        label = "coins"
-    )
+    val layerClock = rememberLayerClock()
     val shinePulse by transition.animateFloat(
         0.05f, 0.18f,
         infiniteRepeatable(tween(1800, easing = EaseInOutSine), RepeatMode.Reverse),
@@ -785,6 +764,7 @@ private fun GoldenVaultBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val coinProgressCycles = layerClock.cycles(2600)
         drawRect(brush = Brush.radialGradient(
             colors = listOf(Color(0xFF2E2002), Color(0xFF0E0A00), Color(0xFF000000)),
             center = center,
@@ -802,7 +782,7 @@ private fun GoldenVaultBackground() {
 
         // Falling gold coin particles
         coins.forEach { coin ->
-            val prog = (coin.y + coinProgress * coin.speed) % 1f
+            val prog = loopFrac(coin.y, coinProgressCycles, coin.speed)
             val cy = prog * size.height
             val cx = coin.x * size.width
             val coinSquash = kotlin.math.abs(cos((prog * 8f * PI + coin.extra).toDouble())).toFloat()
@@ -821,11 +801,7 @@ private fun GoldenVaultBackground() {
 @Composable
 private fun SickLabBackground() {
     val transition = rememberInfiniteTransition(label = "sick_lab")
-    val bubbleProgress by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart),
-        label = "bubbles"
-    )
+    val layerClock = rememberLayerClock()
     val glowPulse by transition.animateFloat(
         0.06f, 0.16f,
         infiniteRepeatable(tween(2200, easing = EaseInOutSine), RepeatMode.Reverse),
@@ -838,6 +814,7 @@ private fun SickLabBackground() {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val bubbleProgressCycles = layerClock.cycles(2400)
         drawRect(brush = Brush.radialGradient(
             colors = listOf(Color(0xFF022413), Color(0xFF000D06), Color(0xFF000000)),
             center = Offset(size.width * 0.5f, size.height * 0.7f),
@@ -855,7 +832,7 @@ private fun SickLabBackground() {
 
         // Rising chemical bubbles
         bubbles.forEach { b ->
-            val prog = ((b.y - bubbleProgress * b.speed) % 1f + 1f) % 1f
+            val prog = loopFrac(b.y, bubbleProgressCycles, -b.speed)
             val by = prog * size.height
             val bx = b.x * size.width + sin((prog * 4f * PI + b.extra).toDouble()).toFloat() * 12f
             drawCircle(

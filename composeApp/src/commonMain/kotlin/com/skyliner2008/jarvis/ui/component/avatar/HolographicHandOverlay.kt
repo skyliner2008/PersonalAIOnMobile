@@ -63,17 +63,6 @@ fun HolographicHandOverlay(
         onFinished()
     }
 
-    val progress = animatable.value
-
-    // Alpha: fade-in (0-20%), action (20-80%), fade-out (80-100%)
-    val alpha = when {
-        progress < 0.15f -> (progress / 0.15f) * 0.75f
-        progress > 0.80f -> ((1f - progress) / 0.20f) * 0.75f
-        else -> 0.75f
-    }
-
-    if (alpha <= 0.01f) return
-
     // ─── Sparkle Particles ────────────────────────────────────────────────
     val infiniteTransition = rememberInfiniteTransition(label = "holoSparkle")
     val sparklePhase by infiniteTransition.animateFloat(
@@ -87,6 +76,17 @@ fun HolographicHandOverlay(
     val glowColor = Color(0xFF00F0FF).copy(alpha = 0.3f)
 
     Canvas(modifier = modifier.fillMaxSize()) {
+        // progress is read in the draw phase so the animation redraws without recomposing
+        val progress = animatable.value
+
+        // Alpha: fade-in (0-15%), action (15-80%), fade-out (80-100%)
+        val alpha = when {
+            progress < 0.15f -> (progress / 0.15f) * 0.75f
+            progress > 0.80f -> ((1f - progress) / 0.20f) * 0.75f
+            else -> 0.75f
+        }
+        if (alpha <= 0.01f) return@Canvas
+
         val cx = touchPosition.x.coerceIn(0f, size.width)
         val cy = touchPosition.y.coerceIn(0f, size.height)
 
