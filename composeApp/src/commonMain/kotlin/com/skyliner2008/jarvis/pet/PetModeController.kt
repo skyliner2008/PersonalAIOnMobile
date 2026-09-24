@@ -236,73 +236,45 @@ class PetModeController(
         notifyInteraction()
         logDebug(TAG, "🖐️ [HandGesture] Received: ${gesture.name}")
 
-        when (gesture) {
+        // gesture reactions are momentary: return to IDLE (only if nothing else took over),
+        // otherwise the idle life (gaze wander, sleep, screensaver) stays frozen on this face.
+        // showTransientEmotion bumps emotionGeneration so an older timer cannot end a newer reaction.
+        val (emotion, status) = when (gesture) {
             HandGesture.HIGH_FIVE -> {
                 RobotSoundPlayer.playHappy()
                 _needsState.value = _needsState.value.interactLove()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.HAPPY,
-                    statusText = "เย้! แปะมือกันฮับ High-Five! ✋✨"
-                ))
+                AvatarEmotion.HAPPY to "เย้! แปะมือกันฮับ High-Five! ✋✨"
             }
             HandGesture.OK -> {
                 RobotSoundPlayer.playSparkle()
                 _needsState.value = _needsState.value.interactLove()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.EXCITED,
-                    statusText = "รับทราบฮับเจ้านาย! 👌✨"
-                ))
+                AvatarEmotion.EXCITED to "รับทราบฮับเจ้านาย! 👌✨"
             }
             HandGesture.BYE -> {
                 RobotSoundPlayer.playPurr()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.WINK,
-                    statusText = "บ๊ายบายฮับ แล้วรีบกลับมาหาน้องน้า 👋💕"
-                ))
+                AvatarEmotion.WINK to "บ๊ายบายฮับ แล้วรีบกลับมาหาน้องน้า 👋💕"
             }
             HandGesture.NO -> {
                 RobotSoundPlayer.playConfused()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.POUT,
-                    statusText = "ม่ายยย น้องไม่ได้ดื้อน้าา 🥺"
-                ))
+                AvatarEmotion.POUT to "ม่ายยย น้องไม่ได้ดื้อน้าา 🥺"
             }
             HandGesture.V_SIGN -> {
                 RobotSoundPlayer.playHappy()
                 _needsState.value = _needsState.value.interactLove()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.EXCITED,
-                    statusText = "สู้ๆ ฮับ! ชูสองนิ้วเย้ๆ ✌️🎉"
-                ))
+                AvatarEmotion.EXCITED to "สู้ๆ ฮับ! ชูสองนิ้วเย้ๆ ✌️🎉"
             }
             HandGesture.THUMBS_UP -> {
                 RobotSoundPlayer.playSparkle()
                 _needsState.value = _needsState.value.interactLove()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.HAPPY,
-                    statusText = "ขอบคุณฮับเจ้านาย ดีที่สุดเลย! 👍🥰"
-                ))
+                AvatarEmotion.HAPPY to "ขอบคุณฮับเจ้านาย ดีที่สุดเลย! 👍🥰"
             }
             HandGesture.THUMBS_DOWN -> {
                 RobotSoundPlayer.playConfused()
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.SAD,
-                    statusText = "งื้ออ น้องขอโทษฮับ อย่าเพิ่งดุน้า 🥺👎"
-                ))
+                AvatarEmotion.SAD to "งื้ออ น้องขอโทษฮับ อย่าเพิ่งดุน้า 🥺👎"
             }
-            HandGesture.NONE -> {}
+            HandGesture.NONE -> return
         }
-
-        // gesture reactions are momentary: return to IDLE (only if nothing else took over),
-        // otherwise the idle life (gaze wander, sleep, screensaver) stays frozen on this face
-        val shown = avatarStateProvider().emotion
-        scope.launch {
-            delay(2800)
-            val cur = avatarStateProvider()
-            if (cur.emotion == shown) {
-                onUpdateAvatarState(cur.copy(emotion = AvatarEmotion.IDLE, statusText = null))
-            }
-        }
+        showTransientEmotion(emotion, status, 2800L)
     }
 
     /** Show an emotion for a moment, then return to IDLE if it is still the one on screen. */
@@ -762,7 +734,9 @@ class PetModeController(
                 // ─── Tamagotchi Needs Decay & Passive Emotion Loop (Every ~20s) ───
                 if (now - lastDecayTime >= 20_000L) {
                     val elapsed = now - lastDecayTime
-                    _needsState.value = _needsState.value.decay(
+                    // a long gap here means the process was frozen (Doze / clock change):
+                    // decayLive treats the excess like offline time instead of hours of awake hunger
+                    _needsState.value = _needsState.value.decayLive(
                         elapsed,
                         isSleeping = current.emotion == AvatarEmotion.SLEEPING
                     )
@@ -935,15 +909,19 @@ class PetModeController(
         applyStateMachineResult(result, InteractionType.PAT, TouchZone.FACE_CENTER)
     }
 
-    /** สไลด์นิ้วตามหน้าจอ (Gaze Following Touch) */
-    fun onGazeTouch(normX: Float, normY: Float, faceScaleFactor: Float = 1f) {
+    /**
+     * สไลด์นิ้วตามหน้าจอ / สายตาจากกล้อง (Gaze Following)
+     * @param faceScaleFactor null = คงค่าเดิม — กล้องส่งระยะใบหน้าแยกผ่าน [onFaceDistance]
+     *        (เดิมค่าเริ่มต้น 1f รีเซ็ตขนาดตาทุกเฟรมกล้อง ทำให้ตากระพริบขนาด)
+     */
+    fun onGazeTouch(normX: Float, normY: Float, faceScaleFactor: Float? = null) {
         notifyInteraction()
         val current = avatarStateProvider()
         if (current.emotion != AvatarEmotion.SLEEPING && !current.isDizzy) {
             onUpdateAvatarState(current.copy(
                 gazeOffsetX = normX.coerceIn(-1f, 1f),
                 gazeOffsetY = normY.coerceIn(-1f, 1f),
-                faceScaleFactor = faceScaleFactor
+                faceScaleFactor = faceScaleFactor ?: current.faceScaleFactor
             ))
         }
     }
@@ -1081,38 +1059,14 @@ class PetModeController(
     fun onPout() {
         notifyInteraction()
         RobotSoundPlayer.playConfused()
-        onUpdateAvatarState(avatarStateProvider().copy(
-            emotion = AvatarEmotion.POUT,
-            statusText = "งอนแล้วน้าา... Hmph! 😤"
-        ))
-        scope.launch {
-            delay(2500)
-            if (avatarStateProvider().emotion == AvatarEmotion.POUT) {
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.IDLE,
-                    statusText = null
-                ))
-            }
-        }
+        showTransientEmotion(AvatarEmotion.POUT, "งอนแล้วน้าา... Hmph! 😤", 2500L)
     }
 
     /** แอบขยิบตา */
     fun onWink() {
         notifyInteraction()
         RobotSoundPlayer.playHappy()
-        onUpdateAvatarState(avatarStateProvider().copy(
-            emotion = AvatarEmotion.WINK,
-            statusText = "แอบขยิบตาให้คุณน้าา 😉✨"
-        ))
-        scope.launch {
-            delay(2200)
-            if (avatarStateProvider().emotion == AvatarEmotion.WINK) {
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.IDLE,
-                    statusText = null
-                ))
-            }
-        }
+        showTransientEmotion(AvatarEmotion.WINK, "แอบขยิบตาให้คุณน้าา 😉✨", 2200L)
     }
 
     // ─── Mini-Game: Copycat Face Mimic ─────────────────────────────────────────
@@ -1141,19 +1095,7 @@ class PetModeController(
         logDebug(TAG, "🎉 [Copycat] Mimic success! Challenge: ${_copycatTarget.value}")
         _copycatTarget.value = null
         RobotSoundPlayer.playWakeUp()
-        onUpdateAvatarState(avatarStateProvider().copy(
-            emotion = AvatarEmotion.EXCITED,
-            statusText = "🎉 ถูกต้องค่าา! เก่งมากกก ชนะเกมเลียนแบบแล้ว! ✨"
-        ))
-        scope.launch {
-            delay(3000)
-            if (avatarStateProvider().emotion == AvatarEmotion.EXCITED) {
-                onUpdateAvatarState(avatarStateProvider().copy(
-                    emotion = AvatarEmotion.IDLE,
-                    statusText = null
-                ))
-            }
-        }
+        showTransientEmotion(AvatarEmotion.EXCITED, "🎉 ถูกต้องค่าา! เก่งมากกก ชนะเกมเลียนแบบแล้ว! ✨", 3000L)
     }
 
     // ─── 3. Desk Sentry Mode ───────────────────────────────────────────────────

@@ -171,6 +171,20 @@ data class PetNeedsState(
      * เวลาที่ปิดแอปไป: นับเป็นช่วงหลับ และไม่ปล่อยให้หิว/สกปรกจนติดศูนย์เพราะปิดแอปข้ามคืน
      * (เดิมปิดแอป ~3.5 ชม. เปิดมาอิ่ม 0% เครียด 59% แล้วโกรธหิววนทุก 20 วินาที)
      */
+    /**
+     * Decay while the app is running. The idle loop ticks every ~20 s, so a much longer gap
+     * means the process was frozen (Doze, clock change): only [maxAwakeMs] counts as awake time
+     * and the rest is treated like time away ([decayOffline]), so the pet does not wake up
+     * starving and furious.
+     */
+    fun decayLive(elapsedMs: Long, isSleeping: Boolean = false, maxAwakeMs: Long = MAX_LIVE_DECAY_MS): PetNeedsState {
+        if (elapsedMs <= 0L) return this
+        val awake = minOf(elapsedMs, maxAwakeMs)
+        val live = decay(awake, isSleeping)
+        val excess = elapsedMs - awake
+        return if (excess > 0L) live.decayOffline(excess) else live
+    }
+
     fun decayOffline(elapsedMs: Long): PetNeedsState {
         val slept = decay(elapsedMs, isSleeping = true)
         return slept.copy(
@@ -181,6 +195,8 @@ data class PetNeedsState(
 
     companion object {
         const val OFFLINE_SATIETY_FLOOR = 25f
+        /** Longest gap between idle-loop decays that still counts as awake time */
+        const val MAX_LIVE_DECAY_MS = 60_000L
         const val OFFLINE_HYGIENE_FLOOR = 30f
     }
 

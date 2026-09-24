@@ -186,18 +186,27 @@ class PetVisionTargetTracker(
                     track.isLocked = true
                 }
             } else {
-                // เพิ่ม Track ใหม่หากยังไม่เต็มโควต้า
-                if (activeTracks.size < maxActiveTargets) {
-                    val newTrack = TrackedState(
-                        category = candCategory,
-                        label = cand.label,
-                        confidence = cand.confidence,
-                        color = cand.color,
-                        box = candBox,
-                        lastSeenMs = currentTimeMs,
-                        consecutiveFrames = 1,
-                        isLocked = false
-                    )
+                val newTrack = TrackedState(
+                    category = candCategory,
+                    label = cand.label,
+                    confidence = cand.confidence,
+                    color = cand.color,
+                    box = candBox,
+                    lastSeenMs = currentTimeMs,
+                    consecutiveFrames = 1,
+                    isLocked = false
+                )
+                // filterCandidates keeps at most one target per category, so an unmatched track of
+                // the same category is this target's stale position (it jumped too far to match):
+                // replace it instead of showing two boxes until the old one expires
+                val staleIdx = activeTracks.indices.firstOrNull { idx ->
+                    idx !in matchedTrackIndices && activeTracks[idx].category == candCategory
+                }
+                if (staleIdx != null) {
+                    activeTracks[staleIdx] = newTrack
+                    matchedTrackIndices.add(staleIdx)
+                } else if (activeTracks.size < maxActiveTargets) {
+                    // เพิ่ม Track ใหม่หากยังไม่เต็มโควต้า
                     activeTracks.add(newTrack)
                     matchedTrackIndices.add(activeTracks.lastIndex)
                 }
