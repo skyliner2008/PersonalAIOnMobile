@@ -35,6 +35,7 @@
 | [[JarvisViewModel]] | State orchestration ฝั่ง UI |
 | [[LocalEmbeddingSystem]] | Embedding ฝั่ง local สำหรับ vector memory |
 | [[Always_AI_Live_Mode]] | ระบบ Always AI Live (Full-screen, Mini Robot Overlay, Wake-on-voice) |
+| [[Pet_Avatar_Canvas]] | หน้าสัตว์เลี้ยงแบบ Compose Canvas: การวาดดวงตา, kinematics, การเคลื่อนไหว, กฎ performance |
 
 ### 03 Tools — เครื่องมือ
 | ไฟล์ | หน้าที่ |

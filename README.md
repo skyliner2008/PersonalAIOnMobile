@@ -6,6 +6,15 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Pet Eye Drawing & Motion Audit (2026-09-24):** a full review of the Compose Canvas pet face, with every finding fixed.
+> - **Eyes:** the gaze now returns to centre after a drag or idle wander, and follows on both axes without being applied twice. Emotions without a separate pupil move as a whole eye. More emotions blink. DREAMING shows slit eyes, and angry eyes no longer flip on small screens. The EXCITED shape morphs smoothly, and eye tricks stay on screen.
+> - **Motion:** emotion changes now cross-fade (280 ms), and head tilt is ±12° (it was being applied twice). Gestures blend instead of snapping, and JUMP can replay. Loops and background particles no longer jump when a cycle restarts, and the screen shake can no longer get stuck.
+> - **Performance:** the avatar no longer recomposes every frame, because animated values are read only while drawing. Paths and bloom brushes are reused, and the gesture handlers no longer restart while the face slides.
+> - **Cleanup:** the unused parametric-eye system (`PetRobotParametricEye.kt`) is removed. Shared eye constants now live in `EyeMetrics`.
+> - **Sensors:** motion detection moved into a pure `PetMotionClassifier`, with a real shake cooldown and no stale face-down timer. Short reactions use a generation-guarded timer, and needs decay is capped after Doze.
+>
+> Details: `.obsidian-wiki/02_Components/Pet_Avatar_Canvas.md`.
+
 > **Chat Message Timestamp (LINE Style) & 24-Hour Active History Retention Filter (2026-09-23):**
 > - **ตัวแสดงเวลาส่งข้อความมุมขวาล่างสไตล์ LINE**: บับเบิลข้อความทั้งฝั่งผู้ใช้และ AI มีตัวแสดงเวลาส่งข้อความ (`HH:mm` เช่น `14:32`) ขนาดตัวเล็กกระชับ (`fontSize = 9.5.sp`, Monospace) จัดวางชิดมุมขวาล่าง (`Alignment.End`) สวยงาม เป็นระเบียบ ไม่เกะกะสายตา
 > - **ตัวกรองประวัติแชทไม่เกิน 24 ชั่วโมง**: ช่องแชทกำหนดเงื่อนไขเวลาแสดงเฉพาะข้อความที่ยังไม่ครบ 24 ชั่วโมง (`< 24 ชม.`) เมื่อข้อความมีอายุครบ 24 ชั่วโมง จะไม่แสดงในช่องแชท (แต่ยังคงถูกเก็บรักษาไว้ในคลังความรู้และประวัติฐานข้อมูลอย่างปลอดภัย) พร้อมระบบ Real-time ticker ที่ตัดข้อความเก่าออกอัตโนมัติขณะเปิดแอปทิ้งไว้ — โหลดสูงสุด 300 ข้อความล่าสุดในช่วง 24 ชม. และมี index `idx_chat_message_ts` (migration `18.sqm`) กันการ์ดระบบปลุก AI ที่เข้ามาถี่ทำให้เปิดแอปช้า (ตรวจ query ที่ generate ทุกตัวด้วย `python tools/verify_sqldelight_queries.py` หลังแก้ไฟล์ .sq)

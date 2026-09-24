@@ -1,3 +1,36 @@
+## 2026-09-24 — ตรวจระบบสัตว์เลี้ยง: การวาดดวงตา + การเคลื่อนไหว (branch `fix/pet-eye-motion-audit`)
+- **User Request**: "ตรวจสอบ ระบบสัตว์เลี้ยง การวาด ดวงตา และการแสดงโมชั่นเคลื่อนใหว" → ตรวจพบ ~40 จุด, ผู้ใช้เลือกแก้ทั้งหมด + ล้างโค้ดตาย
+- **สายตา/ตำแหน่งตา**:
+  - สายตาไม่กลับศูนย์: `GazeStabilizer.update()` อยู่ใน `remember(key)` กรองแค่ 1 ก้าวต่อการเปลี่ยนค่า (ปล่อยนิ้ว/idle wander ค้าง 20–55%) → ลบออกจาก avatar และ `PetModeScreen` ใช้ spring อย่างเดียว
+  - สายตาถูกบวกซ้ำแกน X และไม่มีแกน Y: renderer ส่วนใหญ่ได้ `frontCenter.x` แต่ `headCenter.y` → เพิ่ม `EyeLayerPosition.lookCenter` + `EyeAnchors` (look vs socket)
+  - `onGazeTouch` รีเซ็ต `faceScaleFactor = 1f` ทุกเฟรมกล้อง (ตากระพริบขนาด) → nullable; faceScale ขยายระยะห่างตาด้วย (ตาไม่ชนกัน)
+  - scanner overlay ใช้ layout/gaze ของตัวเอง → ใช้เส้นสายตาและระยะกลอกเดียวกับ avatar (อ่าน gaze ใน `offset {}`)
+- **รูปตา**: DREAMING ส่ง `baseEyeH` เป็น `barHeight` (ตาเป็นแท่งเต็ม) → ขีด 14dp; ตาโกรธ/ENRAGED เฉียงเกินจนพลิกบนจอเล็ก → `angryEyeSlant` ≤45% ความสูง;
+  EXCITED สลับ oval/cubic/line กระตุก → cubic เดียวต่อเนื่อง; eye trick หลุดจอ → clamp + ease; `EyeStyle.CRYING` → CRYING (เดิม SAD); ANGRY ลบมุมคิ้วที่ไม่เคยแสดง;
+  MUSIC/SHY/THINKING/POUT/VR/DIVING กะพริบตาได้แล้ว
+- **การเคลื่อนไหว**:
+  - crossfade อารมณ์ไม่เคยทำงาน (`snapTo(1f)` เสมอ) → 280 ms ผ่าน offscreen layer (แก้ alpha ถูกคูณซ้ำไปด้วย); ใช้ `effectiveEmotion` ตรง ไม่ล่าช้า 1 เฟรม
+  - TILT หมุนซ้อน 2 ชั้น (±24°) → หมุนใน avatar ที่เดียว (±12°); gesture ทุกท่าผสมน้ำหนัก ไม่ snap; JUMP เล่นซ้ำตาม `sceneId`
+  - tween ที่ถูกเล็งใหม่ทุกเฟรม (DIZZY tilt, gaze tilt, nod/shake) → บวกใน draw phase พร้อม weight
+  - ลูปวาร์ป (`x * 1.35f % 1f` ฯลฯ): ลูปเฉพาะใน `LivingMotionSource`; อนุภาคฉากหลัง/หน้า 19 จุด → `LayerClock` + `loopFrac` (Double, จำกัด dt 100ms)
+  - screen shake ค้างเมื่อ barrage ถูกยกเลิก → reset ใน `onDispose`; random ย้ายเข้า `graphicsLayer`
+- **Performance**: avatar เคย recompose ทุกเฟรมเสมอ (`rememberLivingMotionState` / particle อ่านค่าใน composition) → `LivingMotionSource`/`PetParticleMotionSource.snapshot()` ใน Canvas;
+  `pointerInput` เคย key ด้วยค่าที่กำลังแอนิเมต (ยกเลิก tap ตอนหน้าเลื่อน) → key `isLandscape`; `MissileBarrageOverlay` เลิก `LaunchedEffect(currentMs)` ทุกเฟรม;
+  `HolographicHandOverlay` อ่าน progress ใน draw; Path ต่อเฟรม → `EyePaths` pool; bloom brush cache; `RobotFaceState` parse ครั้งเดียว (`by lazy`)
+- **ลบโค้ดตาย**: `PetRobotParametricEye.kt` ทั้งไฟล์ (ไม่เคยถูกวาด — ทุกอารมณ์อยู่ใน dedicated set; 24 animation วิ่งเปล่า), `emotionsWithDedicatedEyeRenderer`,
+  `dizzyAngle`, `happyProgress`, particle 8 ตัวที่ไม่มีใครอ่าน, `drawNeonRoundRect`, `drawNeonEyeRoundRect`, `getEyeHighlightColor`, `drawGlowCircle`, fallback `kinematics == null`
+- **ค่ากลาง**: `EyeMetrics` (blink floor, travel, parallax, สีเงา `0xFF004D6B`/`0xFF5C0018` → ค่าเดียวกับ `getEyeDeepShadowColor`, wink threshold 0.18)
+- **Sensor/controller**: shake cooldown เดิม `lastShakeTime = now + 900` กลับทำให้หน้าต่างนับยาวขึ้น → `PetMotionClassifier` (pure) มี cooldown จริง;
+  face-down timer ค้างเมื่อ z อยู่ระหว่าง -8.2..-3 → reset; ใช้ `SensorEvent.timestamp`; นิ่ง ≥900ms แทน 15 เฟรม;
+  hand gesture/pout/wink/mimic ใช้ `showTransientEmotion` (generation guard); `decayLive` กัน Doze ทำหิว/โกรธทันที; tracker ไม่สร้างกรอบซ้อนเมื่อเป้ากระโดด;
+  eye trick จาก AI tool ถูกล้างหลัง 4.8 วิ; `eyeTrick`/`gesture` รับ "ping pong bounce"
+- **เอกสารเก่าที่ถูกแทนที่**: รายการ 2026-09-17 ด้านล่างที่ระบุ `baseSpacing = width / 6f`, landscape `0.60f`, resting offset 0.075/0.080 และ `glowRadiusDp = 0.dp`
+  **ไม่ตรงกับโค้ดแล้ว** — ค่าปัจจุบัน: portrait `width / 5f` (ตา 30%/70%), landscape `eyeDiameter * 0.72f`, resting 0.025/0.065 (`EyeMetrics`)
+- **Verify**: unit test ทั้งหมด 558 ผ่าน (ใหม่ `PetEyeMotionAuditTest` 15 เคส); `compileDebugKotlinAndroid` ผ่าน ไม่มี warning ใหม่
+  **ยังไม่ได้ทดสอบบนเครื่องจริง** — checklist: ปล่อยนิ้วแล้วตากลับกลาง / ANGRY-LOVE-CONFUSED ขยับตาแนวตั้ง / MUSIC-SHY-THINKING กะพริบ / DREAMING ตาขีด /
+  เปลี่ยนอารมณ์จาง ~280ms / TILT ±12° / PING_PONG-SNOOKER อยู่ในจอ / เขย่า 1 ครั้งได้ DIZZY 1 ครั้ง / ฝน-หิมะไม่วาร์ป / Layout Inspector: avatar ไม่ recompose ทุกเฟรม
+- หน้าอ้างอิง: [[Pet_Avatar_Canvas]]
+
 ## 2026-09-24 — ✅ ถาม 4 ข้อ + ขัดจังหวะระหว่างรายงาน ได้ครบ; แก้ทักทายซ้ำในเทิร์นรับงาน
 - **User Request**: "รอบที่ 2 พูดขัดจังหวะตอนกำลังรายงานผล ให้วิเคราะห์ SMC เพิ่ม ตอบได้หมด 4 อย่าง แต่ยังมีกล่าวทักทายซ้ำหลายรอบ"
 - **logcat 03:44–03:47**: ปฏิทิน → ราคาทอง → BTC 5 มิติ ถามรัว + "SMC ทองคำ M15" แทรกระหว่างรายงาน
@@ -863,7 +896,7 @@ IndicatorFieldContractTest, TradingToolReachabilityTest)
     - **แนวตั้ง (Portrait)**: วางเส้นระดับสายตาที่ **40% ของความสูงจอ** (`cY = height * 0.40f` ซึ่งขอบบนของดวงตาจะแตะเส้น 1/3 หรือ 33.3% พอดี) สอดคล้องกับมาตรฐานการถ่ายภาพพอร์ตเทรตและค่า `RIVE_PORTRAIT_EYE_LINE = 0.40f`
     - **แนวนอน (Landscape)**: วางเส้นระดับสายตาที่ **42% ของความสูงจอ** (`cY = height * 0.42f` สอดคล้องกับ `RIVE_LANDSCAPE_EYE_LINE = 0.42f`)
   - **ตำแหน่งแนวนอนของดวงตาซ้าย-ขวา (X-Axis Eye Columns)**:
-    - **แนวตั้ง (Portrait)**: กำหนด `baseSpacing = width / 6f` (16.67% จากกึ่งกลาง)
+    - **แนวตั้ง (Portrait)**: กำหนด `baseSpacing = width / 6f` (16.67% จากกึ่งกลาง) — ⚠️ ถูกแทนที่: ปัจจุบัน `width / 5f` (ดูรายการ 2026-09-24)
       - ตาซ้าย: `cX - baseSpacing = width / 3f` (33.33% ของความกว้างจอ)
       - ตาขวา: `cX + baseSpacing = 2f * width / 3f` (66.67% ของความกว้างจอ)
       - **ผลลัพธ์**: จุดศูนย์กลางดวงตาทั้งสองข้างตรงกับ **จุดตัด 9 ช่อง ด้านบนทั้ง 2 จุด (Upper-Left & Upper-Right Intersection Points)** พอดีเป๊ะ 100%!
