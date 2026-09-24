@@ -6,20 +6,34 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
-import app.rive.runtime.kotlin.RiveAnimationView
-import app.rive.runtime.kotlin.core.Rive
-import app.rive.runtime.kotlin.core.ViewModelBooleanProperty
-import app.rive.runtime.kotlin.core.ViewModelInstance
-import app.rive.runtime.kotlin.core.ViewModelNumberProperty
+import app.rive.Fit
+import app.rive.Result
+import app.rive.Rive
+import app.rive.RiveFileSource
+import app.rive.RivePointerInputMode
+import app.rive.ViewModelInstance
+import app.rive.ViewModelSource
+import app.rive.rememberArtboardResult
+import app.rive.rememberRiveFile
+import app.rive.rememberRiveWorkerOrNull
+import app.rive.rememberStateMachineResult
+import app.rive.rememberViewModelInstanceResult
 import com.skyliner2008.jarvis.R
 
 private const val TAG = "RiveAvatarView"
@@ -28,73 +42,112 @@ private const val STATE_MACHINE = "State Machine 1"
 actual val isRiveRuntimeSupported: Boolean = true
 
 /**
- * Android Rive pet: RiveAnimationView bound to the `Avatar` view model (autoBind),
- * written from [RiveAvatarInputs] (see rive_avatar/AVATAR_CONTRACT.md).
- * If the native library cannot load, flips [RiveRuntime.failed] and renders the
- * Compose Canvas pet instead.
+ * Android Rive pet on the Compose-native `app.rive` API: a Rive worker loads `R.raw.avatar`,
+ * the default artboard / "State Machine 1" run with the artboard's default `Avatar` view-model
+ * instance, and [RiveAvatarInputs] are written into it (see rive_avatar/AVATAR_CONTRACT.md).
+ *
+ * Any failure (native library, worker, file, artboard, state machine or view model) flips
+ * [RiveRuntime.failed] and the Compose Canvas pet is shown instead.
  */
 @Composable
 actual fun RiveAvatarView(
     modifier: Modifier,
-    inputs: RiveAvatarInputs,
+    inputs: () -> RiveAvatarInputs,
     fallbackState: AvatarState
 ) {
     val context = LocalContext.current
+    // Rive's auto initializer is removed in the library manifest: the native library must be
+    // loaded with Rive.init before a worker can start (MainActivity also does this early).
     val ready = remember { initRive(context) }
-
     if (!ready || RiveRuntime.failed) {
-        PetRobotHeadAvatar(
-            state = fallbackState,
-            modifier = modifier,
-            engineType = AvatarEngineType.COMPOSE_CANVAS
-        )
+        RiveFallback(modifier, fallbackState, "native library")
         return
+    }
+
+    val workerError = remember { mutableStateOf<Throwable?>(null) }
+    val worker = rememberRiveWorkerOrNull(workerError)
+    if (worker == null) {
+        RiveFallback(modifier, fallbackState, "worker", workerError.value)
+        return
+    }
+
+    val source = remember(context) { RiveFileSource.RawRes(R.raw.avatar, context.resources) }
+    val file = when (val r = rememberRiveFile(source, worker)) {
+        is Result.Success -> r.value
+        is Result.Error -> { RiveFallback(modifier, fallbackState, "file", r.throwable); return }
+        Result.Loading -> { Box(modifier); return }
+    }
+    val artboard = when (val r = rememberArtboardResult(file)) {
+        is Result.Success -> r.value
+        is Result.Error -> { RiveFallback(modifier, fallbackState, "artboard", r.throwable); return }
+        Result.Loading -> { Box(modifier); return }
+    }
+    val stateMachine = when (val r = rememberStateMachineResult(artboard, STATE_MACHINE)) {
+        is Result.Success -> r.value
+        is Result.Error -> { RiveFallback(modifier, fallbackState, "state machine", r.throwable); return }
+        Result.Loading -> { Box(modifier); return }
+    }
+    val vmiSource = remember(artboard) { ViewModelSource.DefaultForArtboard(artboard).defaultInstance() }
+    val viewModel = when (val r = rememberViewModelInstanceResult(file, vmiSource)) {
+        is Result.Success -> r.value
+        is Result.Error -> { RiveFallback(modifier, fallbackState, "view model", r.throwable); return }
+        Result.Loading -> { Box(modifier); return }
     }
 
     // gyro tilt -> tiltX / tiltY (the face slides and banks against the tilt)
     val tilt = rememberDeviceTilt(context)
     // jelly: the face follows the tilt on an under-damped spring (a little wobble)
-    val tiltSpring = androidx.compose.animation.core.spring<Float>(
-        dampingRatio = 0.5f, stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-    )
-    val tiltX by androidx.compose.animation.core.animateFloatAsState(tilt.first, tiltSpring, label = "rive_gyro_x")
-    val tiltY by androidx.compose.animation.core.animateFloatAsState(tilt.second, tiltSpring, label = "rive_gyro_y")
-    val binder = remember { RiveViewModelBinder() }
+    val tiltSpring = spring<Float>(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)
+    val tiltX = animateFloatAsState(tilt.first, tiltSpring, label = "rive_gyro_x")
+    val tiltY = animateFloatAsState(tilt.second, tiltSpring, label = "rive_gyro_y")
+    val latestInputs by rememberUpdatedState(inputs)
 
-    AndroidView(
+    // The input provider (with its gaze / tilt springs) and the gyro spring are read inside
+    // snapshotFlow, so moving values only write to the view model — they never recompose this
+    // composable or the Rive surface. As before the migration, the gyro drives tiltX / tiltY.
+    LaunchedEffect(viewModel) {
+        val writer = RiveInputWriter(viewModel)
+        snapshotFlow {
+            latestInputs().copy(
+                tiltX = tiltX.value.coerceIn(-1.15f, 1.15f),
+                tiltY = tiltY.value.coerceIn(-1.15f, 1.15f)
+            )
+        }.collect { writer.write(it) }
+    }
+
+    Rive(
+        file = file,
         modifier = modifier,
-        factory = { ctx ->
-            try {
-                RiveAnimationView(ctx).apply {
-                    // The pet screen's Compose gesture detectors (poke / pat / chin / gaze drag)
-                    // sit above this view. Without pass-through the view absorbs every touch
-                    // and no pet reaction fires on the Rive engine (found on device). The .riv
-                    // has no Rive listeners of its own, so nothing is lost.
-                    touchPassThrough = true
-                    setRiveResource(
-                        resId = R.raw.avatar,
-                        stateMachineName = STATE_MACHINE,
-                        autoplay = true,
-                        autoBind = true
-                    )
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to create RiveAnimationView", t)
-                RiveRuntime.failed = true
-                android.view.View(ctx)
-            }
-        },
-        update = { view ->
-            if (view is RiveAnimationView) {
-                binder.write(view, inputs.copy(tiltX = tiltX.coerceIn(-1.15f, 1.15f), tiltY = tiltY.coerceIn(-1.15f, 1.15f)))
-            }
-        },
-        onRelease = { binder.clear() }
+        playing = true,
+        artboard = artboard,
+        stateMachine = stateMachine,
+        viewModelInstance = viewModel,
+        fit = Fit.Contain(),
+        // The pet screen's Compose gesture detectors (poke / pat / chin / gaze drag) sit above
+        // this view. Rive must not consume touches or no pet reaction fires on this engine.
+        // The .riv has no Rive listeners of its own, so nothing is lost.
+        pointerInputMode = RivePointerInputMode.PassThrough
+    )
+}
+
+/** Marks the Rive engine as failed (once) and shows the Compose Canvas pet instead. */
+@Composable
+private fun RiveFallback(modifier: Modifier, fallbackState: AvatarState, reason: String, error: Throwable? = null) {
+    SideEffect {
+        if (!RiveRuntime.failed) {
+            Log.e(TAG, "Rive unavailable ($reason) - showing the Canvas pet", error)
+            RiveRuntime.failed = true
+        }
+    }
+    PetRobotHeadAvatar(
+        state = fallbackState,
+        modifier = modifier,
+        engineType = AvatarEngineType.COMPOSE_CANVAS
     )
 }
 
 private fun initRive(context: Context): Boolean = try {
-    Rive.init(context.applicationContext)
+    app.rive.runtime.kotlin.core.Rive.init(context.applicationContext)
     true
 } catch (t: Throwable) {
     Log.e(TAG, "Rive native library initialization failed", t)
@@ -103,102 +156,49 @@ private fun initRive(context: Context): Boolean = try {
 }
 
 /**
- * Looks the view-model properties up once and writes only values that changed,
- * so `seq` / `react` are never re-sent every recomposition.
- * `getNumberProperty` throws on an unknown name — any failure is logged once and
- * that property is skipped, never crashing the pet screen.
+ * Writes [RiveAvatarInputs] into the view model, sending only values that changed so the
+ * one-shot channels (`seq` / `react`) are never re-sent. A failing property is logged once and
+ * skipped — it never crashes the pet screen.
  */
-private class RiveViewModelBinder {
-    private var vmi: ViewModelInstance? = null
-    private val numbers = HashMap<String, ViewModelNumberProperty?>()
-    private var speaking: ViewModelBooleanProperty? = null
-    private var speakingResolved = false
+private class RiveInputWriter(private val vmi: ViewModelInstance) {
     private val lastNumbers = HashMap<String, Float>()
     private var lastSpeaking: Boolean? = null
+    private val failed = HashSet<String>()
 
-    fun clear() {
-        vmi = null
-        numbers.clear()
-        speaking = null
-        speakingResolved = false
-        lastNumbers.clear()
-        lastSpeaking = null
-    }
-
-    fun write(view: RiveAnimationView, inputs: RiveAvatarInputs) {
-        val instance = resolveInstance(view) ?: return
-        try {
-            if (!view.isPlaying) view.play()
-        } catch (_: Throwable) {
-        }
-        setNumber(instance, "face", inputs.face.toFloat())
-        setNumber(instance, "prop", inputs.prop.toFloat())
-        setNumber(instance, "bg", inputs.bg.toFloat())
-        setNumber(instance, "fg", inputs.fg.toFloat())
-        setNumber(instance, "eyeAct", inputs.eyeAct.toFloat())
-        setNumber(instance, "state", inputs.state.toFloat())
-        setNumber(instance, "item", inputs.item.toFloat())
-        setNumber(instance, "seq", inputs.seq.toFloat())
-        setNumber(instance, "react", inputs.react.toFloat())
-        setNumber(instance, "gazeX", inputs.gazeX)
-        setNumber(instance, "gazeY", inputs.gazeY)
-        setNumber(instance, "tiltX", inputs.tiltX)
-        setNumber(instance, "tiltY", inputs.tiltY)
-        setNumber(instance, "audioLevel", inputs.audioLevel)
-        setSpeaking(instance, inputs.isSpeaking)
-    }
-
-    private fun resolveInstance(view: RiveAnimationView): ViewModelInstance? {
-        val current = try {
-            view.controller.stateMachines.firstOrNull()?.viewModelInstance
-                ?: view.controller.activeArtboard?.viewModelInstance
-        } catch (_: Throwable) {
-            null
-        }
-        if (current !== vmi) {
-            // a new file / artboard was bound: drop cached handles
-            clear()
-            vmi = current
-        }
-        return current
-    }
-
-    private fun setNumber(instance: ViewModelInstance, name: String, value: Float) {
-        if (lastNumbers[name] == value) return
-        val prop = if (numbers.containsKey(name)) numbers[name] else try {
-            instance.getNumberProperty(name)
-        } catch (t: Throwable) {
-            Log.w(TAG, "View model has no number property '$name'", t)
-            null
-        }.also { numbers[name] = it }
-        if (prop != null) {
+    fun write(inputs: RiveAvatarInputs) {
+        setNumber("face", inputs.face.toFloat())
+        setNumber("prop", inputs.prop.toFloat())
+        setNumber("bg", inputs.bg.toFloat())
+        setNumber("fg", inputs.fg.toFloat())
+        setNumber("eyeAct", inputs.eyeAct.toFloat())
+        setNumber("state", inputs.state.toFloat())
+        setNumber("item", inputs.item.toFloat())
+        setNumber("seq", inputs.seq.toFloat())
+        setNumber("react", inputs.react.toFloat())
+        setNumber("gazeX", inputs.gazeX)
+        setNumber("gazeY", inputs.gazeY)
+        setNumber("tiltX", inputs.tiltX)
+        setNumber("tiltY", inputs.tiltY)
+        setNumber("audioLevel", inputs.audioLevel)
+        if (lastSpeaking != inputs.isSpeaking && "isSpeaking" !in failed) {
             try {
-                prop.value = value
-                lastNumbers[name] = value
+                vmi.setBoolean("isSpeaking", inputs.isSpeaking)
+                lastSpeaking = inputs.isSpeaking
             } catch (t: Throwable) {
-                Log.w(TAG, "Failed to write '$name'", t)
-            }
-        }
-    }
-
-    private fun setSpeaking(instance: ViewModelInstance, value: Boolean) {
-        if (lastSpeaking == value) return
-        if (!speakingResolved) {
-            speaking = try {
-                instance.getBooleanProperty("isSpeaking")
-            } catch (t: Throwable) {
-                Log.w(TAG, "View model has no boolean property 'isSpeaking'", t)
-                null
-            }
-            speakingResolved = true
-        }
-        speaking?.let {
-            try {
-                it.value = value
-                lastSpeaking = value
-            } catch (t: Throwable) {
+                failed += "isSpeaking"
                 Log.w(TAG, "Failed to write 'isSpeaking'", t)
             }
+        }
+    }
+
+    private fun setNumber(name: String, value: Float) {
+        if (lastNumbers[name] == value || name in failed) return
+        try {
+            vmi.setNumber(name, value)
+            lastNumbers[name] = value
+        } catch (t: Throwable) {
+            failed += name
+            Log.w(TAG, "Failed to write '$name'", t)
         }
     }
 }

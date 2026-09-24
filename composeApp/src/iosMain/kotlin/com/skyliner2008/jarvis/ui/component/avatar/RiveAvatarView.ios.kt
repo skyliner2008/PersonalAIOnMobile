@@ -13,7 +13,7 @@ actual val isRiveRuntimeSupported: Boolean = false
 @Composable
 actual fun RiveAvatarView(
     modifier: Modifier,
-    inputs: RiveAvatarInputs,
+    inputs: () -> RiveAvatarInputs,
     fallbackState: AvatarState
 ) {
     PetRobotHeadAvatar(

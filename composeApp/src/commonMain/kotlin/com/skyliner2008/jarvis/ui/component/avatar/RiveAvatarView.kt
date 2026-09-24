@@ -22,13 +22,16 @@ import kotlinx.datetime.Clock
 
 /**
  * Renders the Rive pet (`R.raw.avatar`) and writes [inputs] into its view model.
- * On Android this is a RiveAnimationView bound with autoBind; where the native
+ * On Android this is the Compose-native `app.rive` Rive composable; where the native
  * runtime is unavailable it falls back to the Compose Canvas pet using [fallbackState].
+ *
+ * [inputs] is a provider read outside composition (in a snapshotFlow), so animated values
+ * inside it (gaze / tilt springs) update the view model without recomposing every frame.
  */
 @Composable
 expect fun RiveAvatarView(
     modifier: Modifier = Modifier,
-    inputs: RiveAvatarInputs,
+    inputs: () -> RiveAvatarInputs,
     fallbackState: AvatarState
 )
 
@@ -224,16 +227,13 @@ fun RivePetAvatar(
     // jelly: gaze and tilt follow an under-damped spring, so a look overshoots a
     // touch and settles back instead of snapping stiffly to the target
     val jelly = spring<Float>(dampingRatio = 0.52f, stiffness = Spring.StiffnessMediumLow)
-    val gazeX by animateFloatAsState(base.gazeX, jelly, label = "rive_gaze_x")
-    val gazeY by animateFloatAsState(base.gazeY, jelly, label = "rive_gaze_y")
-    val tiltX by animateFloatAsState(base.tiltX, jelly, label = "rive_tilt_x")
-    val tiltY by animateFloatAsState(base.tiltY, jelly, label = "rive_tilt_y")
+    val gazeX = animateFloatAsState(base.gazeX, jelly, label = "rive_gaze_x")
+    val gazeY = animateFloatAsState(base.gazeY, jelly, label = "rive_gaze_y")
+    val tiltX = animateFloatAsState(base.tiltX, jelly, label = "rive_tilt_x")
+    val tiltY = animateFloatAsState(base.tiltY, jelly, label = "rive_tilt_y")
 
-    val inputs = base.copy(
-        gazeX = gazeX.coerceIn(-1.15f, 1.15f),
-        gazeY = gazeY.coerceIn(-1.15f, 1.15f),
-        tiltX = tiltX.coerceIn(-1.15f, 1.15f),
-        tiltY = tiltY.coerceIn(-1.15f, 1.15f),
+    // discrete channels change only with the state; the springs are read by the provider below
+    val discrete = base.copy(
         react = if (base.seq != RiveSeq.NONE) RiveReact.NONE else react,
         seq = when {
             sceneRestarting -> RiveSeq.NONE
@@ -244,6 +244,17 @@ fun RivePetAvatar(
         },
         state = if (isDetected && base.state == RiveState.IDLE) RiveState.DETECTED else base.state
     )
+    val latestDiscrete by rememberUpdatedState(discrete)
+    val inputs = remember {
+        {
+            latestDiscrete.copy(
+                gazeX = gazeX.value.coerceIn(-1.15f, 1.15f),
+                gazeY = gazeY.value.coerceIn(-1.15f, 1.15f),
+                tiltX = tiltX.value.coerceIn(-1.15f, 1.15f),
+                tiltY = tiltY.value.coerceIn(-1.15f, 1.15f)
+            )
+        }
+    }
 
     // distance scaling (face close to the camera → bigger eyes), like the Canvas pet
     val faceScale by animateFloatAsState(
