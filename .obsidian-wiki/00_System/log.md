@@ -1,3 +1,18 @@
+## 2026-09-25 — Rive: แยก generator รายไฟล์ + ตา morph + story เศร้า→ร้องไห้ใหม่ (branch `feat/rive-eye-morph`)
+- **User feedback**: ตายังไม่เหมือนต้นฉบับ แข็ง ไม่เป็นธรรมชาติ, story เศร้า/ร้องไห้ไม่มีความสั่นเครือ, เปลี่ยนรูปทรงไม่พริ้ว, ตา 2 ข้างขยับเหมือนกันทางเดียวกัน
+- **ต้นเหตุ**: ตาแต่ละอารมณ์เป็นรูปแยก 21 แบบใน `Solo` → เปลี่ยนอารมณ์ = สลับรูปทันที; `_eyes(key, kl, kr=None)` ใส่ key ชุดเดียวกันให้ 2 ตา;
+  เศร้าใช้ `osc()` บีบขึ้นลงสม่ำเสมอ (เหมือนกะพริบรัว ไม่ใช่สั่น)
+- **1. แยกไฟล์** `tools/build_scene.py` (5,100 บรรทัด) → `tools/avatar/` (core, parts, faces, motion, scenes 1 ไฟล์/ฉาก, moods 1 ไฟล์/อารมณ์, machine)
+  รันตาม `ORDER.txt` ใน namespace เดียว — ยืนยัน `scene.rml`/`presets.json` เหมือนเดิมทุกไบต์; `build_scene.py` เหลือเป็น shim; คู่มือ `tools/avatar/README.md`
+- **2. ตา morph** (`parts/morph.py`): ตาแต่ละข้าง (หน้า+หลัง) = path ปิด 8 vertex; รูปทรง round / arc / droop / melt / angry / small มีจุดลำดับเดียวกัน
+  → Face layer ผสมกัน 220 ms (ease), beat ใน story ใช้ jelly 16 เฟรม, สีตามรูป (angry แดง); หน้าที่ใช้: Neutral, Listening, Happy, Sad, Crying, Angry
+  - **pop** ทุกครั้งที่เปลี่ยนหน้า/beat: ย่อ→เด้งเลย→นิ่ง บนโหนด `EyePop` ตาขวาช้ากว่า 3 เฟรมและเบากว่า (ตา 2 ข้างไม่ขยับพร้อมกันเป๊ะ)
+- **3. motion helpers** (`motion/motion.py`): `tremble` (สุ่มแบบกำหนด seed, จังหวะ/ขนาดไม่เท่ากัน + envelope), `lagged`, `sniffs`, `vertex_quiver` (ขอบตาสั่น)
+- **4. MoodSad ใหม่** (เข้า→แสดง→ออก): ปกติ → ตาตกเศร้า (สั่นไม่เท่ากัน 2 ข้าง, ขอบตาล่าง/บนสั่นระริก, สะอื้น 2 ครั้ง) → ตาละลายร้องไห้
+  (สั่นแรงขึ้น, สะอื้น 3 ครั้งพร้อมหัวกระตุก, สายน้ำตา `StreamL/R` ใหม่, หยดน้ำตา) → กลับเศร้า สูดจมูก สั่นค่อยๆ หาย; ซ่อน Pool เดิม (วางทับกลางตา)
+- **Verify**: `rive . --verify` 0 error/0 warning; จับภาพ headless ทุกหน้า/ทุกช่วง story; บน SM-S908E เล่นครบ ปกติ→เศร้า→ร้องไห้→เศร้า→ปกติ
+- **ต้องทำต่อ**: `avatar.riv` 530 KB → 1.28 MB (story ที่ใช้หน้า morph key vertex ทุกตัว) ควรลด; ย้ายหน้า/story ที่เหลือเข้าระบบใหม่ทีละกลุ่มหลังผู้ใช้ยืนยันแนวทาง
+
 ## 2026-09-25 — ย้าย Rive ไปใช้ API ใหม่ `app.rive` (branch `feat/rive-app-api`)
 - **User Request**: "ปรับเป็น ใช้แพ็กเกจ app.rive ได้เลยหรือไม่" → "เริ่มทำได้"
 - ไม่ต้องอัปเกรด library: `app.rive:rive-android` 11.12.0 มี Compose API ใหม่ครบ (`Rive`, `rememberRiveWorker*`, `rememberRiveFile`, `rememberArtboardResult`, `rememberStateMachineResult`, `rememberViewModelInstanceResult`, `ViewModelInstance.setNumber/setBoolean`) — ไม่ใช่ experimental

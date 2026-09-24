@@ -40,7 +40,7 @@ Weather, Alarm, Calendar, StandbyClock (ตัวเลขจาก VM), Drawing
 
 | ไฟล์ | บทบาท |
 |---|---|
-| `tools/build_scene.py` | **แหล่งความจริง** — เจน `scene.rml` + `presets.json` และมี self-check ที่ทำ build ล้ม |
+| `tools/avatar/` | **แหล่งความจริง** (2026-09-25 แยกจาก `build_scene.py` เดิม) — 1 ไฟล์ต่อ 1 ฉาก / 1 อารมณ์ + ตา morph (`parts/morph.py`) + motion helpers; รัน `python tools/avatar/build.py` → `scene.rml` + `presets.json` (มี self-check); คู่มือ `tools/avatar/README.md` · `tools/build_scene.py` เหลือเป็น shim |
 | `scene.rml` | ผลลัพธ์ที่เจน ~36k บรรทัด **ห้ามแก้มือ** |
 | `presets.json` | ชื่อ/ดัชนีของทุกช่อง + `durationMs` ของ seq/state/react + `selfPlay` |
 | `AVATAR_CONTRACT.md` | สัญญาข้อมูลฉบับเต็ม (ภาษาอังกฤษ) |
