@@ -6,6 +6,8 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Rive on the new `app.rive` API (2026-09-25):** the pet's Rive engine now uses the Compose-native `Rive` composable from `app.rive` (rive-android 11.12.0) instead of the deprecated `RiveAnimationView`. Every loading step falls back to the Canvas pet on error. Gaze and tilt springs are written to the view model without recomposing; on the phone the Rive surface went from ~30 recompositions per second to 3 in 5 seconds. Touch reactions were confirmed on the phone.
+
 > **Pet Eye Drawing & Motion Audit (2026-09-24):** a full review of the Compose Canvas pet face, with every finding fixed.
 > - **Eyes:** the gaze now returns to centre after a drag or idle wander, and follows on both axes without being applied twice. Emotions without a separate pupil move as a whole eye. More emotions blink. DREAMING shows slit eyes, and angry eyes no longer flip on small screens. The EXCITED shape morphs smoothly, and eye tricks stay on screen.
 > - **Motion:** emotion changes now cross-fade (280 ms), and head tilt is ±12° (it was being applied twice). Gestures blend instead of snapping, and JUMP can replay. Loops and background particles no longer jump when a cycle restarts, and the screen shake can no longer get stuck.

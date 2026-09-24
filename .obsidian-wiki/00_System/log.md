@@ -1,3 +1,15 @@
+## 2026-09-25 — ย้าย Rive ไปใช้ API ใหม่ `app.rive` (branch `feat/rive-app-api`)
+- **User Request**: "ปรับเป็น ใช้แพ็กเกจ app.rive ได้เลยหรือไม่" → "เริ่มทำได้"
+- ไม่ต้องอัปเกรด library: `app.rive:rive-android` 11.12.0 มี Compose API ใหม่ครบ (`Rive`, `rememberRiveWorker*`, `rememberRiveFile`, `rememberArtboardResult`, `rememberStateMachineResult`, `rememberViewModelInstanceResult`, `ViewModelInstance.setNumber/setBoolean`) — ไม่ใช่ experimental
+- `RiveAvatarView.android.kt`: เลิก `AndroidView { RiveAnimationView }` (deprecated) → composable `Rive(...)`; `touchPassThrough` → `RivePointerInputMode.PassThrough`; binder ที่ lookup property → `RiveInputWriter` (`setNumber` ตามชื่อ, ส่งเฉพาะค่าที่เปลี่ยน, property ที่ล้มข้ามและ log ครั้งเดียว)
+- ทุกขั้น (worker / file / artboard / state machine / view model) เป็น `Result` — Error ⇒ `RiveRuntime.failed` + Canvas
+- `Rive.init` ยังต้องเรียก: library ลบ `RiveInitializer` ออกจาก manifest เอง native lib จึงต้องโหลดด้วยมือ (ไม่ deprecated)
+- **Performance**: `RiveAvatarView` รับ `inputs: () -> RiveAvatarInputs` — spring gaze/tilt อ่านใน `snapshotFlow`; บนเครื่องจริง `setRequestedFrameRate` (สัญญาณ recompose ของ Rive surface) จาก ~30 ครั้ง/วินาที → 3 ครั้ง/5 วินาที
+- คงพฤติกรรมเดิม: บน Android ไจโรกำหนด `tiltX/Y` (แทนค่า tilt จาก mapper เหมือนก่อนย้าย)
+- **Verify บน SM-S908E**: เปิดโหมดสัตว์เลี้ยงด้วย `adb shell am broadcast -a com.skyliner2008.jarvis.TEST_EMOTION --es emotion 1`
+  → ใช้ `app.rive.RiveTextureView` เรนเดอร์ตาถูกต้อง, แตะแก้ม → `PetModeController Cheek Poke` + ตาบีบ + นิ้วโฮโลแกรมของ Rive (react ถึง state machine), ไม่มี error/crash; unit test 558 ผ่าน
+- ยังไม่ได้ทดสอบ: mood story 19 เรื่อง / ฉาก 18 ฉาก / isSpeaking ผ่าน API ใหม่ ครบทุกอัน
+
 ## 2026-09-24 — ตรวจระบบสัตว์เลี้ยง: การวาดดวงตา + การเคลื่อนไหว (branch `fix/pet-eye-motion-audit`)
 - **User Request**: "ตรวจสอบ ระบบสัตว์เลี้ยง การวาด ดวงตา และการแสดงโมชั่นเคลื่อนใหว" → ตรวจพบ ~40 จุด, ผู้ใช้เลือกแก้ทั้งหมด + ล้างโค้ดตาย
 - **สายตา/ตำแหน่งตา**:

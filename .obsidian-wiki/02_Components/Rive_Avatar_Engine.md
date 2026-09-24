@@ -114,7 +114,7 @@ PropLoops → State → BlinkGate → Seq → React → GazeYaw → GazePitch �
 |---|---|
 | `RiveAvatarBinding.kt` | ค่าคงที่ดัชนีตรงกับ `presets.json` · `AvatarState.effectiveEmotion()` (ใช้ร่วมกับ Canvas) · `RiveAvatarMapper.plan()` แปลงสถานะ → ช่อง Rive + รายการที่ต้องให้ Compose วาดต่อ · `reactFor()` |
 | `RiveAvatarView.kt` | `expect RiveAvatarView(inputs, fallbackState)` · `RiveRuntime` (สถานะ native) · `RivePetAvatar` ตัวจับเวลา react / seq / Detected |
-| `RiveAvatarView.android.kt` | `RiveAnimationView` + `autoBind = true` + `touchPassThrough = true` (ไม่งั้นกินทุก touch — พบบนเครื่องจริง) · cache property + เขียนเฉพาะค่าที่เปลี่ยน · ไจโร → `tiltX/Y` · ล้มแล้วถอยไป Canvas |
+| `RiveAvatarView.android.kt` | API ใหม่ `app.rive` (2026-09-25): `rememberRiveWorkerOrNull` → `rememberRiveFile(RawRes)` → artboard / "State Machine 1" / view model เริ่มต้นของ artboard → composable `Rive(...)` + `RivePointerInputMode.PassThrough` (ไม่งั้นกินทุก touch) · `RiveInputWriter` เขียน `vmi.setNumber` เฉพาะค่าที่เปลี่ยน ใน `snapshotFlow` · ไจโร → `tiltX/Y` · ขั้นไหนล้ม (Result.Error) ถอยไป Canvas · ยังต้อง `Rive.init` เพื่อโหลด native lib (library ปิด auto initializer ไว้) |
 | `PetRobotHeadAvatar.kt` | สลับ Engine + ส่ง `riveReaction` / `isMissileBarrageActive` / `lastShakeTime` / `lastFaceTime` |
 | `PetModeScreen.kt` | จำ Engine ที่เลือก (`pet.avatar_engine`) · แปลงมือโฮโลแกรม → `RiveReactionEvent` · ฉาก/พร๊อพที่ Rive ไม่มีให้ Compose วาดต่อ · ปิด overlay มือ/มิสซายของ Canvas เมื่อใช้ Rive |
 
@@ -148,7 +148,8 @@ scripts\build_rive_avatar.ps1     REM เจน → verify → inspect → test 
 
 ## 7. การผสานรวมเข้ากับ Compose Multiplatform
 - `gradle/libs.versions.toml`: `app.rive:rive-android:11.12.0`
-- Expect/Actual: `commonMain/RiveAvatarView.kt` · `androidMain/RiveAvatarView.android.kt` (AndroidView + RiveAnimationView) · `iosMain` ฟอลแบ็ก Canvas
+- Expect/Actual: `commonMain/RiveAvatarView.kt` · `androidMain/RiveAvatarView.android.kt` (Compose `Rive` จาก `app.rive`) · `iosMain` ฟอลแบ็ก Canvas
+- `RiveAvatarView(inputs: () -> RiveAvatarInputs)` เป็นฟังก์ชัน — spring ของ gaze/tilt ถูกอ่านใน `snapshotFlow` ไม่ใช่ใน composition (เดิม recompose ~30 ครั้ง/วินาที วัดบนเครื่องเหลือ 3 ครั้ง/5 วินาที)
 - Dual-Engine Toggle: `AvatarEngineType` ใน `PetRobotHeadAvatar.kt`, สลับจาก `PetSettingsDialog.kt` (บันทึกค่าใน `pet.avatar_engine`)
 
 ## 8. งานที่ยังเหลือ
