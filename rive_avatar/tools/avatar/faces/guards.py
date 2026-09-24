@@ -12,6 +12,8 @@ _EYE_HALF_W_AUTHORED = {  # half of each variant's width, as authored (radius 54
     V_BAR: 46, V_BARTILT: 47, V_CROSS: 60, V_CHEV: 46, V_HEART: 53,
     V_ARC: 61, V_ARCDOWN: 61, V_HALFLID: EYE_R, V_SPIRAL: 55,
     V_DOLLAR: 33, V_STAREYE: 59, V_EMPTY: 0, V_RING: 51,
+    # the morph eye -- every shape in parts/morph.py stays within the round eye's width
+    V_MORPH: EYE_R * EYE_OX,
     # slabs are rotated, so the bounding half-width grows
     V_WEDGE: (2 * EYE_R * math.cos(.30) + 42 * math.sin(.30)) / 2,
     V_ANGRY: ((2 * EYE_R + 8) * math.cos(.34) + 72 * math.sin(.34)) / 2,

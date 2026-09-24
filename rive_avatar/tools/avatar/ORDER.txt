@@ -1,6 +1,7 @@
 core/base.py
 core/layout.py
 parts/eyes.py
+parts/morph.py
 parts/brows.py
 parts/mouths.py
 parts/props_common.py
@@ -10,8 +11,10 @@ parts/props_catalog.py
 parts/backgrounds.py
 parts/foregrounds.py
 faces/faces.py
+faces/morph_faces.py
 faces/eye_acts.py
 faces/guards.py
+motion/motion.py
 stories/auto.py
 scenes/_common.py
 scenes/01_eating.py

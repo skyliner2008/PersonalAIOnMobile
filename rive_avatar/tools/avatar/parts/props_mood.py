@@ -110,6 +110,11 @@ def emit_mood_prop(dd, p):
             mover(dd, "Drop" + nm, lambda k, ex=ex: [neon(k, "D%d" % i, lambda q, s=s: g_rect(q, s, s, r=2), TEAR,
                                                           ex - 22, EY + 50 + i * 16, feather=8)
                                                      for i, s in enumerate((12, 10, 8))], anchor=(ex - 22, EY + 60))
+            # crying: a tear stream running from the bottom of the melted eye; it grows
+            # downward from its top (the anchor), like the Crying cell of the LOOI sheet
+            sx = ex + (-18 if nm == "L" else 18)
+            mover(dd, "Stream" + nm, lambda k, sx=sx: neon(k, "S", lambda q: g_rect(q, 16, 130, r=8), TEAR,
+                                                            sx, EY + 170, feather=10), anchor=(sx, EY + 105))
 
     elif name == "MoodCurious":
         mover(dd, "Q", lambda k: _q_mark(k, "Q", GOLD, 432, 70), anchor=(432, 80))

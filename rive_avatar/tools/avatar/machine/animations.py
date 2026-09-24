@@ -71,14 +71,25 @@ def intro_tracks(kind, idx, offset=0, skip=()):
 
 
 # ---- face ------------------------------------------------------------
+# the morph eye vertices rest as the round eye whenever no layer keys them
+for _ok, _v in MORPH_REST.items():
+    ANIMATED.setdefault(_ok, _v)
 face_anims = []
 for i, (fn, el, er, br, mo, noblink) in enumerate(FACES):
     aid = nid()
     face_anims.append(aid)
-    w(2, '<LinearAnimation duration="1" fps="60" name="Face%02d_%s" id="%s">' % (i, fn, aid))
+    # long enough for the pop (squash, overshoot, settle) every face change plays
+    w(2, '<LinearAnimation duration="%d" fps="60" name="Face%02d_%s" id="%s">'
+      % (POP_KEYS[-1][0] + POP_LAG + 1, i, fn, aid))
     for solo, val in ((eyeL_solo, eye_ids["L"][el]), (eyeR_solo, eye_ids["R"][er]),
                       (brow_solo, brow_ids[br]), (mouth_solo, mouth_ids[mo])):
         keyed_id(3, solo, val)
+    if fn in MORPH_FACE:
+        # the eye shape itself: the Face layer's eased mix morphs between faces
+        shape_keys = [(0, MORPH_FACE[fn], "hold")]
+        emit_tracks(3, morph_tracks(shape_keys))
+        emit_color_frames(3, morph_color_frames(shape_keys), interp="hold")
+    emit_tracks(3, pop_tracks(0))
     if noblink:
         # the Face layer is declared after Blink, so pinning scaleY here wins
         emit_tracks(3, {(b, 17): [(0, 1, "hold")] for b in (eyeL_blink, eyeR_blink)})
@@ -163,6 +174,10 @@ SEQ_NODES = {"blink": (eyeL_blink, eyeR_blink), "blinkL": (eyeL_blink,),
 
 
 def seq_targets(nkey):
+    # "vtxL:3" -> vertex 3 of the left morph eye, front and back layers together
+    if nkey.startswith("vtx"):
+        tag, idx = nkey[3], int(nkey.split(":")[1])
+        return tuple(MORPH_VERTS[(tag, part)][idx] for part in ("front", "back"))
     if nkey.startswith("prop:"):
         _p, idx, nm = nkey.split(":")
         node = PROP_NODES.get(int(idx), {}).get(nm)
@@ -177,6 +192,7 @@ IRIS_X, IRIS_Y, IRIS_GAIN = 13.0, 13.0, 0.45
 IRIS_FROM = {"blink": (irisL_look, irisR_look), "blinkL": (irisL_look,), "blinkR": (irisR_look,),
              "sblink": (irisL_look, irisR_look), "sblinkL": (irisL_look,), "sblinkR": (irisR_look,)}
 explicit_iris = set()
+MORPH_STORY_COLORS = {}   # story animation id -> morph eye colour frames
 
 
 def emit_one_story(i, sn, dur, beats, extra, label, loop):
@@ -191,7 +207,10 @@ def emit_one_story(i, sn, dur, beats, extra, label, loop):
             itp = "jelly"
         for oid in seq_targets(nkey):
             note(oid, key)
-            tracks[(oid, key)] = [(fr, vv, itp) for fr, vv in rebase(oid, key, kfs)]
+            # a keyframe may carry its own interpolation: (frame, value, interp)
+            own = [k[2] if len(k) > 2 else itp for k in kfs]
+            vals = rebase(oid, key, [(k[0], k[1]) for k in kfs])
+            tracks[(oid, key)] = [(fr, vv, ow) for (fr, vv), ow in zip(vals, own)]
         # where the story moves an eye, its front shape leans the same way
         if key in (13, 14) and nkey in IRIS_FROM:
             lim = IRIS_X if key == 13 else IRIS_Y
@@ -199,7 +218,8 @@ def emit_one_story(i, sn, dur, beats, extra, label, loop):
                 if (oid, key) in explicit_iris:
                     continue
                 note(oid, key)
-                tracks[(oid, key)] = [(fr, max(-lim, min(lim, vv * IRIS_GAIN)), itp) for fr, vv in kfs]
+                tracks[(oid, key)] = [(k[0], max(-lim, min(lim, k[1] * IRIS_GAIN)), k[2] if len(k) > 2 else itp)
+                                      for k in kfs]
     if beats:
         chans = {eyeL_solo: [], eyeR_solo: [], brow_solo: [], mouth_solo: [],
                  prop_solo: [], bg_solo: [], fg_solo: []}
@@ -221,6 +241,36 @@ def emit_one_story(i, sn, dur, beats, extra, label, loop):
             for kind, v in (("prop", pr), ("bg", bgv), ("fg", fgv)):
                 if not shown[kind] or shown[kind][-1][1] != v:
                     shown[kind].append((fr, v))
+        # beats onto morph faces reshape the eyes (jelly) instead of swapping them;
+        # a story's own vertex keys (quiver, melt) win over the beat morph
+        morph_keys = []
+        prev_shape = None
+        for fr, fname, _pr, _bgv, _fgv in beats:
+            shape_name = MORPH_FACE.get(fname)
+            if shape_name is None:
+                prev_shape = None
+                continue
+            if prev_shape is not None and prev_shape != shape_name and fr > 0:
+                morph_keys += [(fr, prev_shape, "jelly"), (fr + MORPH_F, shape_name, "hold")]
+            else:
+                morph_keys.append((fr, shape_name, "hold"))
+            prev_shape = shape_name
+        # every beat that changes the face pops the eyes (right eye a beat later)
+        pops = {}
+        last_face = None
+        for fr, fname, _pr, _bgv, _fgv in beats:
+            if last_face is not None and fname != last_face and fr > 0:
+                for ok, kfs in pop_tracks(fr).items():
+                    if ok not in tracks:
+                        pops.setdefault(ok, []).extend(kfs)
+            last_face = fname
+        for ok, kfs in pops.items():
+            tracks[ok] = [(min(f, dur), v, itp) for f, v, itp in kfs]
+            note(*ok)
+        if morph_keys:
+            for ok, kfs in morph_tracks(morph_keys, skip=set(tracks)).items():
+                tracks[ok] = [(min(f, dur), v, itp) for f, v, itp in kfs]
+            MORPH_STORY_COLORS[aid] = morph_color_frames(morph_keys)
         for solo, kfs in chans.items():
             w(3, '<KeyedObject objectId="%s">' % solo)
             w(4, '<KeyedProperty propertyKey="296">')
@@ -243,7 +293,12 @@ def emit_one_story(i, sn, dur, beats, extra, label, loop):
                         # hold the previous entrance's end until this one starts
                         prev[-1] = (prev[-1][0], prev[-1][1], "hold")
                     tracks[ok] = prev + kfs
+    for ok in tracks:
+        if ok in MORPH_REST:
+            note(*ok)
     emit_tracks(3, tracks)
+    if aid in MORPH_STORY_COLORS:
+        emit_color_frames(3, MORPH_STORY_COLORS[aid], interp="hold")
     w(2, '</LinearAnimation>')
     return aid
 

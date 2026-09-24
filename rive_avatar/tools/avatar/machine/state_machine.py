@@ -13,15 +13,19 @@ def cond_number(d, prop_id, value):
     w(d, '</TransitionViewModelCondition>')
 
 
-def channel_layer(lname, prop_id, anims, y0, duration=140):
+def channel_layer(lname, prop_id, anims, y0, duration=140, ease=None):
     """AnyState -> one AnimationState per index, selected by a view model number.
     reset="true": re-entering a state restarts its timeline instead of resuming
-    wherever it was cut off last time."""
+    wherever it was cut off last time. ease: an EASES name for the mix curve."""
     states = [nid() for _ in anims]
     w(3, '<StateMachineLayer name="%s" id="%s">' % (lname, nid()))
     w(4, '<AnyState x="-40" y="%d">' % y0)
     for i, sid in enumerate(states):
-        w(5, '<StateTransition stateToId="%s" duration="%d">' % (sid, duration))
+        if ease:
+            w(5, '<StateTransition stateToId="%s" duration="%d" interpolationType="cubic">' % (sid, duration))
+            w(6, '<CubicEaseInterpolator x1="%g" y1="%g" x2="%g" y2="%g"/>' % EASES[ease])
+        else:
+            w(5, '<StateTransition stateToId="%s" duration="%d">' % (sid, duration))
         cond_number(6, prop_id, i)
         w(5, '</StateTransition>')
     w(4, '</AnyState>')
@@ -85,7 +89,8 @@ simple_layer("RestPose", rest_anim, -1600)
 simple_layer("Blink", blink_anim, 40)          # before Face: a noblink face pins it
 simple_layer("Breathe", breathe_anim, 130)
 w(3, '')
-channel_layer("Face", VP_FACE, face_anims, -1400)
+# the morph eyes reshape over this mix (parts/morph.py)
+channel_layer("Face", VP_FACE, face_anims, -1400, duration=FACE_MIX_MS, ease="cubic")
 channel_layer("EyeAct", VP_EYEACT, act_anims, -1150)
 # Items that carry props switch in on the frame they are asked for: a blended
 # transition mixes their movers from the REST pose (a scene's climax, everything

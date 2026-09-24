@@ -36,6 +36,9 @@ fg_solo, prop_solo = nid(), nid()
 face_tilt = nid()
 face_yaw, face_pitch, face_speak = nid(), nid(), nid()
 eyeL_yaw, eyeL_pitch, eyeL_blink, eyeL_sblink, eyeL_solo = nid(), nid(), nid(), nid(), nid()
+# EyePop: only face changes / story reshape beats key it -- the squash & overshoot
+# as an eye becomes a new shape (parts/morph.py)
+eyeL_pop, eyeR_pop = nid(), nid()
 eyeR_yaw, eyeR_pitch, eyeR_blink, eyeR_sblink, eyeR_solo = nid(), nid(), nid(), nid(), nid()
 # iris: the front shape's own offset. Gaze poses write IrisGaze, stories /
 # states / reactions write IrisLook (derived from where they move the eye).
@@ -84,13 +87,14 @@ w(8, '</Node>')
 w(7, '</Node>')
 
 eye_ids = {}
-for tag, dx, s, yaw, pitch, blink, sblink, solo, back_solo, igaze, ilook in (
-        ("L", -EYE_DX, 1, eyeL_yaw, eyeL_pitch, eyeL_blink, eyeL_sblink, eyeL_solo, eyeL_back, irisL_gaze, irisL_look),
-        ("R", EYE_DX, -1, eyeR_yaw, eyeR_pitch, eyeR_blink, eyeR_sblink, eyeR_solo, eyeR_back, irisR_gaze, irisR_look)):
+for tag, dx, s, yaw, pitch, blink, sblink, solo, back_solo, igaze, ilook, pop in (
+        ("L", -EYE_DX, 1, eyeL_yaw, eyeL_pitch, eyeL_blink, eyeL_sblink, eyeL_solo, eyeL_back, irisL_gaze, irisL_look, eyeL_pop),
+        ("R", EYE_DX, -1, eyeR_yaw, eyeR_pitch, eyeR_blink, eyeR_sblink, eyeR_solo, eyeR_back, irisR_gaze, irisR_look, eyeR_pop)):
     w(7, '<Node x="%g" y="%g" name="%sEyeYaw" id="%s">' % (dx, EYE_Y, tag, yaw))
     w(8, '<Node name="%sEyePitch" id="%s">' % (tag, pitch))
     w(9, '<Node name="%sBlink" id="%s">' % (tag, blink))
     w(10, '<Node name="%sStateBlink" id="%s">' % (tag, sblink))
+    w(10, '<Node name="%sEyePop" id="%s">' % (tag, pop))
     # earlier in the file = drawn on top: front first, back after it
     w(11, '<Node name="%sIrisGaze" id="%s">' % (tag, igaze))
     w(12, '<Node name="%sIrisLook" id="%s">' % (tag, ilook))
@@ -104,6 +108,7 @@ for tag, dx, s, yaw, pitch, blink, sblink, solo, back_solo, igaze, ilook in (
     w(11, '</Solo>')
     EYE_BACK.update(zip(eye_ids[tag], backs))
     BACK_SOLO[solo] = back_solo
+    w(10, '</Node>')
     w(10, '</Node>')
     w(9, '</Node>')
     w(8, '</Node>')

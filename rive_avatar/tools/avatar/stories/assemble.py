@@ -9,7 +9,7 @@ def _check_mood_frames():
             bad.append("%s beats" % sn)
         seen = set()
         for ex in extra:
-            fs = [f for f, _v in ex[2]]
+            fs = [k[0] for k in ex[2]]
             if fs != sorted(set(fs)) or fs[-1] > dur:
                 bad.append("%s %s/%s %s" % (sn, ex[0], ex[1], fs))
             k = (ex[0], ex[1])
