@@ -63,6 +63,9 @@
   .slider > span b { font-family: var(--mono); font-weight: 500; color: var(--text); }
   .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
   .sliders.one { grid-template-columns: 1fr; }
+  .zoom { display: inline-flex; gap: 4px; align-items: center; }
+  .zoom #zoomLabel { min-width: 44px; text-align: center; font-size: 12px; color: var(--muted); }
+  .zoom #btnZoomIn, .zoom #btnZoomOut { width: 30px; padding: 4px 0; }
   details.cat.sub { background: var(--panel-2); }
   details.cat.sub > summary { padding: 7px 10px; font-weight: 500; font-size: 13px; }
   .sub-h { margin: 4px 0 -4px; font-size: 12px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: baseline; }
@@ -286,6 +289,11 @@
       </select></label>
       <span class="sep"></span>
       <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)">ย้อนกลับ</button>
+      <span class="sep"></span>
+      <span class="zoom" title="ล้อเมาส์บนภาพ = ซูมตรงเคอร์เซอร์ · ลากพื้นที่ว่างตอนซูม = เลื่อนภาพ · ปุ่ม + − 0 บนคีย์บอร์ด">
+        <button id="btnZoomOut" aria-label="ซูมออก">−</button><span id="zoomLabel" class="mono">100%</span><button id="btnZoomIn" aria-label="ซูมเข้า">+</button>
+        <button id="btnZoomEyes" title="ซูมเข้าไปที่ดวงตาที่กำลังแก้จุด">ซูมตาที่แก้</button><button id="btnZoomFit">พอดีจอ</button>
+      </span>
     </div>
     <div class="stage" id="stage"></div>
     <p class="fit-warn" id="fitWarn" hidden></p>
@@ -536,12 +544,31 @@
     layerGhost = el("g", {}, svg), layerCompare = el("g", {}, svg), layerPanel = el("g", {}, svg), layerHandles = el("g", {}, svg);
   let screenMode = "none";
   try { screenMode = localStorage.getItem("eyelab.screen") || "none"; } catch { /* private window */ }
+  // zoom 1 = the whole base view (the artboard area, or the phone frame); pan keeps the centre
+  const zoomView = { z: 1, cx: null, cy: null, base: [0, 0, W, H] };
+  function applyView() {
+    const [bx, by, bw, bh] = zoomView.base, w = bw / zoomView.z, h = bh / zoomView.z;
+    if (zoomView.cx == null || zoomView.z <= 1) { zoomView.cx = bx + bw / 2; zoomView.cy = by + bh / 2; }
+    // never pan the picture fully away
+    zoomView.cx = Math.min(bx + bw, Math.max(bx, zoomView.cx)); zoomView.cy = Math.min(by + bh, Math.max(by, zoomView.cy));
+    svg.setAttribute("viewBox", `${zoomView.cx - w / 2} ${zoomView.cy - h / 2} ${w} ${h}`);
+    const lab = document.getElementById("zoomLabel"); if (lab) lab.textContent = Math.round(zoomView.z * 100) + "%";
+    stage.style.cursor = zoomView.z > 1 ? "grab" : "";
+  }
+  function setZoom(z, px, py) {
+    z = Math.max(1, Math.min(8, z));
+    if (px != null && z > 1) {        // keep the point under the cursor where it is
+      zoomView.cx = px - (px - zoomView.cx) * zoomView.z / z; zoomView.cy = py - (py - zoomView.cy) * zoomView.z / z;
+    }
+    zoomView.z = z; applyView(); renderView();
+  }
   function applyScreen() {
     layerScreen.replaceChildren(); layerPanel.replaceChildren();
     stage.className = "stage" + (screenMode === "none" ? "" : " framed " + screenMode);
-    if (screenMode === "none") { svg.setAttribute("viewBox", `0 0 ${W} ${H}`); return; }
+    zoomView.cx = null;
+    if (screenMode === "none") { zoomView.base = [0, 0, W, H]; applyView(); return; }
     const sr = screenRect(screenMode), pad = 6;
-    svg.setAttribute("viewBox", `${sr.x - pad} ${sr.y - pad} ${sr.w + pad * 2} ${sr.h + pad * 2}`);
+    zoomView.base = [sr.x - pad, sr.y - pad, sr.w + pad * 2, sr.h + pad * 2]; applyView();
     el("rect", { x: sr.x, y: sr.y, width: sr.w, height: sr.h, rx: 14, fill: "#000" }, layerScreen);
     // where the artboard ends (Rive draws nothing outside it)
     el("rect", { x: 0, y: -40, width: 500, height: 500, fill: "none", stroke: "#33485c", "stroke-dasharray": "4 6", "vector-effect": "non-scaling-stroke" }, layerScreen);
@@ -636,9 +663,10 @@
           const hi = toScreen(eye, frame, v.x + Math.cos(v.inRot) * v.inDist, v.y + Math.sin(v.inRot) * v.inDist);
           el("line", { x1: hi[0], y1: hi[1], x2: hx[0], y2: hx[1], stroke: "#f5b841", "stroke-opacity": .7 }, layerHandles);
         }
-        const c = el("circle", { cx: sx, cy: sy, r: sel ? 7 : 5.5, fill: sel ? "#f5b841" : "#0b0f14", stroke: "#f5b841", "stroke-width": 2, "data-eye": eye, "data-i": i, tabindex: 0, style: "cursor:grab" }, layerHandles);
+        const zk = 1 / zoomView.z;
+        const c = el("circle", { cx: sx, cy: sy, r: (sel ? 7 : 5.5) * zk, fill: sel ? "#f5b841" : "#0b0f14", stroke: "#f5b841", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "data-eye": eye, "data-i": i, tabindex: 0, style: "cursor:grab" }, layerHandles);
         c.setAttribute("aria-label", `จุด ${i} ตา${eye === "L" ? "ซ้าย" : "ขวา"}`);
-        el("text", { x: sx + 9, y: sy - 8, fill: "#8599a8", "font-size": 10, "font-family": "IBM Plex Mono, monospace" }, layerHandles).textContent = i;
+        el("text", { x: sx + 9 * zk, y: sy - 8 * zk, fill: "#8599a8", "font-size": 10 * zk, "font-family": "IBM Plex Mono, monospace" }, layerHandles).textContent = i;
       });
     }
   }
@@ -716,14 +744,26 @@
       pushHistory(); state.dragging = { kind: "point", eye: c.dataset.eye, i: +c.dataset.i };
       state.point = { eye: c.dataset.eye, i: +c.dataset.i }; svg.setPointerCapture(e.pointerId); e.preventDefault(); renderView(); renderPointInfo(); return;
     }
-    if (e.target.closest("[data-prop]")) {
-      const pr = workFrame().prop; if (!pr) return;
+    if (!e.target.closest("[data-prop]") || !workFrame().prop) {
+      if (zoomView.z > 1) {           // empty space while zoomed: pan
+        state.dragging = { kind: "pan", x: e.clientX, y: e.clientY, cx: zoomView.cx, cy: zoomView.cy };
+        try { svg.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        stage.style.cursor = "grabbing"; e.preventDefault();
+      }
+      return;
+    }
+    {
+      const pr = workFrame().prop;
       pushHistory(); const p = svgPoint(e);
       state.dragging = { kind: "prop", sx: p.x, sy: p.y, dx0: pr.dx, dy0: pr.dy }; svg.setPointerCapture(e.pointerId); e.preventDefault();
     }
   });
   svg.addEventListener("pointermove", (e) => {
     const d = state.dragging; if (!d) return;
+    if (d.kind === "pan") {
+      const m = svg.getScreenCTM();
+      zoomView.cx = d.cx - (e.clientX - d.x) / m.a; zoomView.cy = d.cy - (e.clientY - d.y) / m.d; applyView(); return;
+    }
     const p = svgPoint(e), fr = workFrame();
     if (d.kind === "point") {
       const tg = editTarget(), [lx, ly] = fromScreen(d.eye, fr, p.x, p.y);
@@ -736,9 +776,27 @@
   });
   const endDrag = () => {
     const d = state.dragging; if (!d) return; state.dragging = null;
+    if (d.kind === "pan") { applyView(); return; }
     if (d.kind === "point") editTarget().save(); else saveHolder();
   };
   svg.addEventListener("pointerup", endDrag); svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault(); const p = svgPoint(e);
+    setZoom(zoomView.z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), p.x, p.y);
+  }, { passive: false });
+  // "ซูมตาที่แก้": fit the eye whose point is selected (the one being drawn), with room around it
+  function zoomToEyes() {
+    const fr = viewingTime() ? storyFrame(state.t) : workFrame(), e = frameBoxes(fr)[state.point.eye] || frameBoxes(fr).L;
+    const x0 = e[0], x1 = e[1], y0 = e[2] - ART_DY, y1 = e[3] - ART_DY;
+    const [, , bw, bh] = zoomView.base;
+    zoomView.z = 1; applyView();
+    const z = Math.min(bw / (Math.max(20, x1 - x0) * 1.6), bh / (Math.max(20, y1 - y0) * 1.6));
+    zoomView.cx = (x0 + x1) / 2; zoomView.cy = (y0 + y1) / 2; setZoom(z);
+  }
+  document.getElementById("btnZoomIn").addEventListener("click", () => setZoom(zoomView.z * 1.25));
+  document.getElementById("btnZoomOut").addEventListener("click", () => setZoom(zoomView.z / 1.25));
+  document.getElementById("btnZoomFit").addEventListener("click", () => setZoom(1));
+  document.getElementById("btnZoomEyes").addEventListener("click", zoomToEyes);
   svg.addEventListener("keydown", (e) => {
     const c = e.target.closest("circle[data-i]"); const dd = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
     if (!c || !dd) return; e.preventDefault(); pushHistory();
@@ -780,6 +838,11 @@
   document.addEventListener("keydown", (e) => {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === "+" || e.key === "=") setZoom(zoomView.z * 1.25);
+      else if (e.key === "-" || e.key === "_") setZoom(zoomView.z / 1.25);
+      else if (e.key === "0") setZoom(1);
+    }
     if (e.key === " " && document.activeElement === document.body) { e.preventDefault(); togglePlay(); }
   });
   on("optRef", "change", (e) => { state.showRef = e.target.checked; renderView(); });
