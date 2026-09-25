@@ -199,6 +199,10 @@
       <summary>พร็อพ <small id="propNow">ไม่มี</small></summary>
       <div class="cat-body">
         <p class="hint" id="propHint">เลือกได้ 1 ชิ้นต่อคีย์ ลากพร็อพในพื้นที่แก้รูปเพื่อย้าย (ในแอปพร็อพอยู่หน้าดวงตา)</p>
+        <div class="mode-switch" role="group" aria-label="หมวดพร็อพ" id="propKinds">
+          <button data-kind="item" aria-pressed="true">สิ่งของ</button><button data-kind="wear" aria-pressed="false">ของสวม·เอฟเฟกต์</button><button data-kind="set" aria-pressed="false">ชุดฉาก</button>
+        </div>
+        <p class="hint" id="propKindHint"></p>
         <input type="text" id="propFilter" placeholder="ค้นหาพร็อพ" aria-label="ค้นหาพร็อพ">
         <div class="prop-grid" id="propGrid"></div>
         <div class="sliders" id="propSliders"></div>
@@ -959,7 +963,26 @@
     const h = holder(); if (!h) return setStatus("พร็อพใช้ได้ในโหมดจัดท่าหรือตอนแก้คีย์", "error");
     pushHistory(); h.prop = pr; saveHolder(); renderAll();
   }
+  // The prop library mixes three things: single objects, things worn on / around the face,
+  // and whole scene sets (Scene* / Mood*: every piece of an old story's staging in one prop)
+  const WEAR_PROPS = new Set(["Headphones", "VR", "Snorkel", "Devil", "Sparkles", "Blush", "Hearts", "Tears", "Questions",
+    "Steam", "DizzyStars", "Shiver", "Sunglasses", "Missiles", "SLTag", "Turrets", "Snore", "HoloPat", "HoloChin",
+    "FaceBrackets", "Cracked", "UpdateArrows", "SoundWave", "Sweat", "Zzz", "ThinkDots"]);
+  const SET_PROPS = new Set(["AlarmClock", "Curtains"]);
+  const propKind = (name) => /^(Scene|Mood)/.test(name) || SET_PROPS.has(name) ? "set" : WEAR_PROPS.has(name) ? "wear" : "item";
+  const PROP_KIND_HINT = {
+    item: "สิ่งของชิ้นเดียว วางตรงไหนก็ได้",
+    wear: "ของสวมหรือเอฟเฟกต์รอบหน้า ออกแบบให้อยู่ตำแหน่งเดิมคู่กับหน้า ขยับนิดหน่อยได้",
+    set: "ชุดฉากของ story เดิม (หลายชิ้นรวมกันเต็มจอ) ใช้ได้ทั้งชุดเท่านั้น ย้าย/ย่อ/หมุนทีละชิ้นไม่ได้",
+  };
+  state.propKind = "item";
+  document.querySelectorAll("#propKinds button").forEach((b) => b.addEventListener("click", () => {
+    state.propKind = b.dataset.kind;
+    document.querySelectorAll("#propKinds button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    renderPropGrid();
+  }));
   function renderPropGrid() {
+    document.getElementById("propKindHint").textContent = PROP_KIND_HINT[state.propKind];
     const grid = document.getElementById("propGrid"), q = document.getElementById("propFilter").value.trim().toLowerCase(), cur = currentProp();
     grid.replaceChildren();
     const usable = !!holder();
@@ -967,7 +990,7 @@
     document.getElementById("btnPropNone").disabled = !usable || !cur;
     document.getElementById("propNow").textContent = cur ? (propMeta(cur.index) || {}).name || cur.index : "ไม่มี";
     for (const m of state.props) {
-      if (q && !m.name.toLowerCase().includes(q)) continue;
+      if (q ? !m.name.toLowerCase().includes(q) : propKind(m.name) !== state.propKind) continue;   // a search looks in every group
       const b = document.createElement("button"); b.className = "prop-cell"; b.setAttribute("aria-pressed", !!cur && cur.index === m.index); b.title = m.name; b.disabled = !usable;
       const img = document.createElement("img"); img.src = `props/${m.index}.png`; img.alt = ""; img.loading = "lazy";
       const s = document.createElement("span"); s.textContent = m.name; b.append(img, s);
