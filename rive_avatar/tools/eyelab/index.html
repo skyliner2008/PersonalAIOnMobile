@@ -63,6 +63,12 @@
   .slider > span b { font-family: var(--mono); font-weight: 500; color: var(--text); }
   .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
   .sliders.one { grid-template-columns: 1fr; }
+  details.cat.sub { background: var(--panel-2); }
+  details.cat.sub > summary { padding: 7px 10px; font-weight: 500; font-size: 13px; }
+  .sub-h { margin: 4px 0 -4px; font-size: 12px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: baseline; }
+  .sub-h small, .scope { font-weight: 400; font-size: 11px; color: var(--muted); opacity: .8; }
+  .pose-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .rot-head { font-size: 12px; color: var(--text); font-weight: 600; }
 
   .shape-list { display: grid; gap: 4px; }
   .shape-item { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left; padding: 4px 6px; background: transparent; border: 1px solid transparent; width: 100%; }
@@ -165,11 +171,64 @@
     </details>
 
     <details class="cat" open>
-      <summary>จุดที่เลือก · สีตา</summary>
+      <summary>รูปทรงตา <small>รูป/ท่าที่แก้อยู่</small></summary>
       <div class="cat-body">
+        <p class="hint">คลิกจุดบนภาพแล้วลาก · ลูกศรขยับทีละ 1 (Shift = 5)</p>
         <dl class="kv mono" id="pointInfo"></dl>
-        <label class="slider"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)<b id="vSmooth"></b></span><input type="range" id="smooth" min="0" max="1.6" step="0.05"></label>
-        <label class="row">สีตา <select id="color"><option value="cyan">ฟ้า</option><option value="red">แดง</option><option value="pink">ชมพู</option><option value="gold">ทอง</option></select></label>
+        <label class="slider"><span>ความโค้งของจุดนี้ (0 = มุมแหลม, 1 = กลม)<b id="vSmooth"></b></span><input type="range" id="smooth" min="0" max="1.6" step="0.05"></label>
+        <label class="row"><input type="checkbox" id="optMirror" checked> ตาขวาสะท้อนจากตาซ้าย</label>
+        <div class="row"><button id="btnResetRound" title="ตาวงรีตั้งต้นของ LOOI (กว้าง 49 สูง 57)">ตั้งเป็นตาตั้งต้น</button><button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button></div>
+        <details class="cat sub">
+          <summary>สร้างจากวงรี / วงกลม</summary>
+          <div class="cat-body">
+            <div class="sliders" id="ellSliders"></div>
+            <p class="hint">เส้นประในพื้นที่แก้รูปคือรูปที่จะได้</p>
+            <button class="primary" id="btnEllApply">ใช้รูปนี้กับตา</button>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>สีและแสง</summary>
+      <div class="cat-body">
+        <label class="row">สีตา <select id="color"><option value="cyan">ฟ้า</option><option value="red">แดง</option><option value="pink">ชมพู</option><option value="gold">ทอง</option></select><small class="scope">รูป/ท่าที่แก้อยู่</small></label>
+        <h4 class="sub-h">วงหลังเหลื่อม <small>ทุกหน้าในแอป</small></h4>
+        <div class="sliders" id="backSliders"></div>
+        <h4 class="sub-h">ออร่ารอบตา <small>ทุกหน้าในแอป</small></h4>
+        <div class="sliders" id="glowSliders"></div>
+        <button id="btnLookReset">คืนค่าเริ่มต้น (วงหลัง + ออร่า)</button>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>ขนาด ระยะ และมุมตา</summary>
+      <div class="cat-body">
+        <h4 class="sub-h">ขนาดและระยะห่าง <small>ทุกหน้าในแอป</small></h4>
+        <div class="sliders" id="sizeSliders"></div>
+        <button id="btnSizeReset">คืนขนาดและระยะเริ่มต้น</button>
+        <h4 class="sub-h">หมุนตาแต่ละข้าง <small id="rotScope"></small></h4>
+        <label class="row"><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
+        <div class="sliders" id="rotSliders"></div>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>ท่าหัว 3D <small>หัน ก้ม เอียง</small></summary>
+      <div class="cat-body">
+        <div class="pose-row">
+          <div class="pad" role="group" aria-label="มองไปทิศต่างๆ">
+            <button data-look="-1,-1" aria-label="มองซ้ายบน">↖</button><button data-look="0,-1" aria-label="เงยหน้า">↑</button><button data-look="1,-1" aria-label="มองขวาบน">↗</button>
+            <button data-look="-1,0" aria-label="หันซ้าย">←</button><button class="home" data-look="0,0" aria-label="มองตรง">ตรง</button><button data-look="1,0" aria-label="หันขวา">→</button>
+            <button data-look="-1,1" aria-label="มองซ้ายล่าง">↙</button><button data-look="0,1" aria-label="ก้มหน้า">↓</button><button data-look="1,1" aria-label="มองขวาล่าง">↘</button>
+          </div>
+          <div class="sliders one" id="poseSliders"></div>
+        </div>
+        <label class="row"><input type="checkbox" id="optWander"> มองรอบๆ เอง (ลองดู ไม่บันทึก)</label>
+        <details class="cat sub">
+          <summary>โมเดลหัว <small>ทุกหน้าในแอป</small></summary>
+          <div class="cat-body"><div class="sliders" id="headSliders"></div></div>
+        </details>
       </div>
     </details>
 
@@ -180,50 +239,6 @@
         <select id="refCell" aria-label="ช่องในชีทอ้างอิง"></select>
         <p class="hint">จัดตำแหน่งชีท</p>
         <div class="sliders" id="fitSliders"></div>
-      </div>
-    </details>
-
-    <details class="cat">
-      <summary>ค่าหลัก <small>ทุกรูป</small></summary>
-      <div class="cat-body">
-        <div class="sliders" id="rigSliders"></div>
-        <button id="btnRigReset">คืนค่าเริ่มต้น</button>
-      </div>
-    </details>
-
-    <details class="cat" open>
-      <summary>หัว 3D <small>ท่าหัว</small></summary>
-      <div class="cat-body">
-        <div class="row" style="align-items:start;gap:12px">
-          <div class="pad" role="group" aria-label="มองไปทิศต่างๆ">
-            <button data-look="-1,-1" aria-label="มองซ้ายบน">↖</button><button data-look="0,-1" aria-label="เงยหน้า">↑</button><button data-look="1,-1" aria-label="มองขวาบน">↗</button>
-            <button data-look="-1,0" aria-label="หันซ้าย">←</button><button class="home" data-look="0,0" aria-label="มองตรง">ตรง</button><button data-look="1,0" aria-label="หันขวา">→</button>
-            <button data-look="-1,1" aria-label="มองซ้ายล่าง">↙</button><button data-look="0,1" aria-label="ก้มหน้า">↓</button><button data-look="1,1" aria-label="มองขวาล่าง">↘</button>
-          </div>
-          <div class="sliders one" id="poseSliders" style="flex:1;min-width:140px"></div>
-        </div>
-        <label class="row"><input type="checkbox" id="optWander"> มองรอบๆ เอง (ลองดู ไม่บันทึก)</label>
-        <details class="cat" style="background:var(--panel-2)">
-          <summary>โมเดลหัว <small>ใช้ในแอป</small></summary>
-          <div class="cat-body"><div class="sliders" id="headSliders"></div></div>
-        </details>
-      </div>
-    </details>
-
-    <details class="cat">
-      <summary>หมุนดวงตา <small id="rotScope">X / Y / Z</small></summary>
-      <div class="cat-body">
-        <label class="row"><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
-        <div class="sliders" id="rotSliders"></div>
-      </div>
-    </details>
-
-    <details class="cat">
-      <summary>สร้างรูปจากวงรี</summary>
-      <div class="cat-body">
-        <div class="sliders" id="ellSliders"></div>
-        <p class="hint">เส้นประในพื้นที่แก้รูปคือวงรีที่จะได้</p>
-        <button class="primary" id="btnEllApply">ใช้วงรีนี้กับตา</button>
       </div>
     </details>
 
@@ -264,7 +279,6 @@
   <main class="view">
     <div class="editing" id="editing"></div>
     <div class="row">
-      <label><input type="checkbox" id="optMirror" checked> ตาขวาสะท้อนจากตาซ้าย</label>
       <label><input type="checkbox" id="optGhost"> เงาตาปกติ</label>
       <span class="sep"></span>
       <label>จอมือถือ <select id="screenMode" aria-label="แสดงกรอบจอมือถือ">
@@ -272,8 +286,6 @@
       </select></label>
       <span class="sep"></span>
       <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)">ย้อนกลับ</button>
-      <button id="btnResetRound" title="ตาวงรีตั้งต้นของ LOOI (กว้าง 49 สูง 57)">ตั้งเป็นตาตั้งต้น</button>
-      <button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button>
     </div>
     <div class="stage" id="stage"></div>
     <p class="fit-warn" id="fitWarn" hidden></p>
@@ -865,21 +877,27 @@
   });
 
   // ---- base rig
-  const RIG_SLIDERS = [
-    ["eyeDx", "ระยะห่างตา", 60, 160, 1, (v) => `${v}`], ["eyeScale", "ขนาดตา", 0.8, 1.8, 0.01, (v) => `${Math.round(v / 1.32 * 100)}%`],
-    ["backDx", "วงหลังเหลื่อม ซ้าย/ขวา", -15, 15, 0.5, (v) => `${v}`], ["backDy", "วงหลังเหลื่อม ขึ้น/ลง", -10, 20, 0.5, (v) => `${v}`],
-    ["glowFeather", "ออร่า: ความฟุ้ง", 0, 40, 1, (v) => `${v}`], ["glowWidth", "ออร่า: ความหนา", 0, 20, 0.5, (v) => `${v}`],
-    ["glowOpacity", "ออร่า: ความสว่าง", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`]];
+  // the app-wide rig values, shown in the group they belong to
+  const RIG_GROUPS = {
+    sizeSliders: [["eyeScale", "ขนาดตา", 0.8, 1.8, 0.01, (v) => `${Math.round(v / 1.32 * 100)}%`], ["eyeDx", "ระยะห่างตา", 60, 160, 1, (v) => `${v}`]],
+    backSliders: [["backDx", "ซ้าย/ขวา", -15, 15, 0.5, (v) => `${v}`], ["backDy", "ขึ้น/ลง", -10, 20, 0.5, (v) => `${v}`]],
+    glowSliders: [["glowFeather", "ความฟุ้ง", 0, 40, 1, (v) => `${v}`], ["glowWidth", "ความหนา", 0, 20, 0.5, (v) => `${v}`],
+                  ["glowOpacity", "ความสว่าง", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`]],
+  };
   function renderRig() {
-    if (busy("rigSliders")) return; const box = document.getElementById("rigSliders"); box.replaceChildren();
-    for (const [k, label, min, max, step, fmt] of RIG_SLIDERS) sliderRow(box, "rig_" + k, label, min, max, step, RIG[k] ?? DEFAULT_RIG[k], fmt, (v) => { RIG[k] = v; renderView(); saveRig(); });
+    for (const [id, rows] of Object.entries(RIG_GROUPS)) {
+      if (busy(id)) continue; const box = document.getElementById(id); box.replaceChildren();
+      for (const [k, label, min, max, step, fmt] of rows) sliderRow(box, "rig_" + k, label, min, max, step, RIG[k] ?? DEFAULT_RIG[k], fmt, (v) => { RIG[k] = v; renderView(); saveRig(); });
+    }
   }
-  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG, head: RIG.head, eyeRot: RIG.eyeRot }; renderAll(); saveRig(); });
+  const resetRig = (keys) => { for (const k of keys) RIG[k] = DEFAULT_RIG[k]; renderAll(); saveRig(); };
+  on("btnLookReset", "click", () => resetRig(["backDx", "backDy", "glowFeather", "glowWidth", "glowOpacity"]));
+  on("btnSizeReset", "click", () => resetRig(["eyeScale", "eyeDx"]));
 
   // ---- head: pose (key or live) + model
   function currentPose() { const h = holder(); return h ? h.pose : state.live.pose; }
   function poseChanged() { if (holder()) saveHolder(); renderView(); }
-  const POSE_SLIDERS = [["yaw", "หันซ้าย ↔ ขวา"], ["pitch", "เงย ↕ ก้ม"], ["roll", "เอียงคอ"]];
+  const POSE_SLIDERS = [["yaw", "หันซ้าย/ขวา"], ["pitch", "เงย/ก้ม"], ["roll", "เอียงคอ"]];
   function renderPose() {
     if (busy("poseSliders")) return; const box = document.getElementById("poseSliders"); box.replaceChildren(); const pose = currentPose();
     for (const [k, label] of POSE_SLIDERS) sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { currentPose()[k] = v; poseChanged(); }, () => pushHistory());
@@ -919,8 +937,9 @@
     const hh = holder(), link = hh ? hh.rotLink !== false : (RIG.eyeRot || {}).link !== false, rot = currentRot();
     document.getElementById("optRotLink").checked = link;
     document.getElementById("rotScope").textContent = hh ? "เฉพาะท่านี้" : "ทุกหน้าในแอป";
-    for (const eye of ["L", "R"]) for (const [ax, label] of [["x", "X ก้ม/เงยตา"], ["y", "Y หันตา"], ["z", "Z เอียงตา"]]) {
-      const inp = sliderRow(box, `rot_${eye}_${ax}`, `ตา${eye === "L" ? "ซ้าย" : "ขวา"} ${label}`, -60, 60, 1, rot[eye][ax], (v) => `${v}°`, (v) => {
+    for (const t of ["ตาซ้าย", "ตาขวา"]) { const h = document.createElement("div"); h.className = "rot-head"; h.textContent = t; box.appendChild(h); }
+    for (const [ax, label] of [["x", "X ก้ม/เงย"], ["y", "Y หัน"], ["z", "Z เอียง"]]) for (const eye of ["L", "R"]) {
+      const inp = sliderRow(box, `rot_${eye}_${ax}`, label, -60, 60, 1, rot[eye][ax], (v) => `${v}°`, (v) => {
         const kk = holder();
         if (kk) { kk.eyeRot[eye][ax] = v; if (eye === "L" && kk.rotLink !== false) kk.eyeRot.R = { x: kk.eyeRot.L.x, y: -kk.eyeRot.L.y, z: -kk.eyeRot.L.z }; saveHolder(); }
         else { const r = { link: true, L: { x: 0, y: 0, z: 0 }, R: { x: 0, y: 0, z: 0 }, ...(RIG.eyeRot || {}) }; r[eye] = { ...rigEyeRot()[eye], [ax]: v }; RIG.eyeRot = r; saveRig(); }

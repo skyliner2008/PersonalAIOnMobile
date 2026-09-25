@@ -83,9 +83,13 @@ on `unship`. A story without sounds must choose `--mute-cues` or `--keep-cues`.
   max yaw / pitch, tilt while turning, pupil lead, perspective, `core/head.py`) from which
   `machine/poses.py` builds the Rive look poses; `rig.eyeRot` = a fixed X/Y/Z turn per eye (`EyeTilt`)
 
-The page has three areas: tools by category on the left (library shapes, base rig, 3D head,
-eye rotation, ellipse, props, motion, app faces), the view on the right (drag the 8 points,
-reference sheet, eye colour, drag the prop) and the **timeline** at the bottom.
+The page has the tools on the left and the view with the **timeline** under it on the right.
+The eye tools are grouped by what they change: **รูปทรงตา** (the 8 points, smoothness, mirror,
+ellipse / circle maker), **สีและแสง** (eye colour; back-layer offset and aura for every face),
+**ขนาด ระยะ และมุมตา** (size and spacing for every face; per-eye X/Y/Z turn), **ท่าหัว 3D**
+(look pad, turn / nod / tilt; the head model for every face). Then the reference sheet, props,
+motion and the app's face table. Each group says whether it changes the shape / frame being
+edited or every face in the app.
 
 What the view edits (the switch above the view):
 
