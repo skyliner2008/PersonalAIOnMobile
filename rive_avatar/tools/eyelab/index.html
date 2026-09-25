@@ -100,6 +100,18 @@
   .stage svg { display: block; width: 100%; height: auto; max-height: 60vh; margin-inline: auto; }
   .stage.framed { background: var(--panel-2); }
   .stage.framed.portrait svg { max-height: 78vh; }
+  /* desktop: everything on one screen -- the view takes what the timeline leaves */
+  @media (min-width: 981px) and (min-height: 600px) {
+    body { height: 100vh; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; }
+    header.top { margin-bottom: 4px; }
+    .app-state { margin: 0 0 8px; }
+    .workbench { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+    .tools { max-height: none; min-height: 0; overflow: auto; }
+    .view { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+    .stage { flex: 1 1 0; min-height: 150px; display: flex; }
+    .stage svg, .stage.framed.portrait svg { width: 100%; height: 100%; max-height: none; }
+    .timeline { flex: 0 0 auto; max-height: 58%; overflow: auto; }
+  }
   .under { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
   .card h3 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .05em; }
@@ -107,15 +119,18 @@
   .kv dt { color: var(--muted); } .kv dd { margin: 0; }
 
   /* ---- timeline ---- */
-  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 10px; }
+  .timeline h2 + select { max-width: 220px; }
+  .timeline .story-notes textarea { min-height: 36px; }
+  .timeline > .hint:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; display: grid; gap: 8px; }
   .timeline h2 { font-size: 15px; }
   .track-wrap { overflow-x: auto; }
-  .track { position: relative; height: 104px; min-width: 560px; background: #0a0e13; border: 1px solid var(--line); border-radius: 8px; user-select: none; touch-action: none; }
+  .track { position: relative; height: 84px; min-width: 560px; background: #0a0e13; border: 1px solid var(--line); border-radius: 8px; user-select: none; touch-action: none; }
   .ruler { position: absolute; left: 0; right: 0; top: 0; height: 20px; border-bottom: 1px solid var(--line); }
   .tick { position: absolute; top: 0; height: 20px; border-left: 1px solid var(--line); font: 10px var(--mono); color: var(--muted); padding-left: 3px; }
-  .kf { position: absolute; top: 26px; width: 64px; margin-left: -32px; height: 70px; display: grid; justify-items: center; gap: 2px; cursor: grab;
+  .kf { position: absolute; top: 23px; width: 60px; margin-left: -30px; height: 56px; display: grid; justify-items: center; gap: 2px; cursor: grab;
         background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 3px 0; }
-  .kf svg { width: 56px; height: 28px; }
+  .kf svg { width: 52px; height: 22px; }
   .kf span { font: 10px var(--mono); color: var(--muted); }
   .kf[aria-current="true"] { border-color: var(--accent); background: #1a1409; }
   .kf .pdot { position: absolute; top: -7px; width: 10px; height: 10px; background: var(--accent); transform: rotate(45deg); }
@@ -295,7 +310,7 @@
     <label class="slider"><span>โน้ต story ถึง Claude</span><textarea id="storyNote" placeholder="เช่น อยากให้สะอื้นแรงขึ้นตอนท้าย แล้วค่อยๆ สงบ"></textarea></label>
     <div class="slider"><span>Claude ตอบ</span><p class="claude-note" id="storyClaudeNote">–</p></div>
   </div>
-  <p class="hint">จัดท่าแล้วกด "＋ เพิ่มท่านี้เป็นคีย์" ปรับต่ออีกนิดแล้วกดเพิ่มอีก (ท่าที่จัดไม่เปลี่ยนเมื่อเพิ่มคีย์) · คลิกคีย์เพื่อแก้คีย์นั้น · ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา · กดหรือลากบนไม้บรรทัดเพื่อดู story ที่เวลานั้น · เสียงของคีย์เล่นในแอปเท่านั้น (Lab เล่นเสียงไม่ได้)</p>
+  <p class="hint" title="จัดท่าแล้วกด ＋ เพิ่มท่านี้เป็นคีย์ ปรับต่ออีกนิดแล้วกดเพิ่มอีก · คลิกคีย์เพื่อแก้คีย์นั้น · ลากคีย์เพื่อเปลี่ยนเวลา · กด/ลากบนไม้บรรทัดเพื่อดู story ที่เวลานั้น · เสียงของคีย์เล่นในแอปเท่านั้น">จัดท่าแล้วกด "＋ เพิ่มท่านี้เป็นคีย์" ปรับต่ออีกนิดแล้วกดเพิ่มอีก (ท่าที่จัดไม่เปลี่ยนเมื่อเพิ่มคีย์) · คลิกคีย์เพื่อแก้คีย์นั้น · ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา · กดหรือลากบนไม้บรรทัดเพื่อดู story ที่เวลานั้น · เสียงของคีย์เล่นในแอปเท่านั้น (Lab เล่นเสียงไม่ได้)</p>
   </section>
   </main>
 </div>
