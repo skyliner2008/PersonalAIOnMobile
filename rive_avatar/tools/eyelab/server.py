@@ -14,13 +14,14 @@ Android app until Claude ships it (ship.py -> tools/avatar/data/, then builds th
 
 API (JSON):
     GET    /api/data              -> {"version", "shapes", "faces", "motion"}
-    GET    /api/version           -> {"version"}
+    GET    /api/version           -> {"version", "mtime"}
     PUT    /api/shapes/<key>      body = shape           -> {"version"}
     DELETE /api/shapes/<key>                             -> {"version"}
     PUT    /api/faces             body = {"map": {...}}  -> {"version"}
     PUT    /api/motion            body = motion          -> {"version"}
     PUT    /api/rig               body = rig (eye size, spacing, layer offset, glow) -> {"version"}
-    GET    /api/meta              -> {"props", "moods", "faces"}  (library props, mood stories a story may replace)
+    GET    /api/meta              -> {"props", "moods", "faces", "sounds"}  (library props; mood stories a
+                                     story may replace, with their Thai name, emotions and sound cues)
     GET    /api/stories           -> [{"name", "by", "basedOn", "intent", "keys", "durationMs", "mtime"}]
     GET    /api/stories/<name>    -> story (+ "mtime")  PUT = save (-> {"mtime"}), DELETE = remove
     GET    /api/app               -> what differs between the workspace and the app (ship.py status)
@@ -101,8 +102,11 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/meta":
             presets = json.load(open(PRESETS, encoding="utf-8"))
             props = json.load(open(PROPS_META, encoding="utf-8")) if os.path.exists(PROPS_META) else []
-            moods = [{"name": q["name"], "durationMs": q["durationMs"]} for q in presets["seqs"] if q["name"].startswith("Mood")]
-            return self._json(200, {"props": props, "moods": moods, "faces": presets["faces"]})
+            app = {m["name"]: m for m in ship.app_moods()}     # Thai name, emotions, sound cues
+            moods = [dict(app.get(q["name"], {}), name=q["name"], durationMs=q["durationMs"])
+                     for q in presets["seqs"] if q["name"].startswith("Mood")]
+            return self._json(200, {"props": props, "moods": moods, "faces": presets["faces"],
+                                    "sounds": ship.robot_sounds()})
         if self.path == "/api/stories":
             os.makedirs(STORIES, exist_ok=True)
             out = []
@@ -128,8 +132,9 @@ class Handler(SimpleHTTPRequestHandler):
             with LOCK:
                 return self._json(200, load())
         if self.path == "/api/version":
+            # the file time too: Claude may edit the JSON without bumping "version"
             with LOCK:
-                return self._json(200, {"version": load().get("version", 0)})
+                return self._json(200, {"version": load().get("version", 0), "mtime": os.path.getmtime(DATA)})
         return super().do_GET()
 
     def do_PUT(self):

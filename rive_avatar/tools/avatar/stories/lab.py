@@ -25,7 +25,7 @@ import json as _json
 import os as _os
 import sys as _sys
 
-_LAB_DIR = _os.path.join(AVATAR_DIR, "data", "stories")
+_LAB_DIR = STORY_DIR          # data/stories (shipped); ship.py check points it at the Lab's workspace
 _PROP_META = _os.path.join(AVATAR_DIR, "..", "eyelab", "props", "props.json")
 _LAB_EASE = {"jelly": "jelly", "smooth": "cubic", "soft": "soft", "linear": "linear", "hold": "hold"}
 _BEZ = {"jelly": (0.30, 0.0, 0.32, 1.28), "cubic": (0.42, 0.0, 0.58, 1.0), "soft": (0.25, 0.1, 0.25, 1.0)}
@@ -100,6 +100,48 @@ def _prop_centres():
                     for m in _json.load(fh)}
     except (OSError, ValueError):
         return {}
+
+
+def key_boxes(k):
+    """Where the two eyes of a key land on the artboard (anchor points, with the pose,
+    per-eye rotation, pupil lead and trembling -- the Eye Lab's eyeXform)
+    -> {"L"|"R": (x0, x1, y0, y1)}."""
+    h = EYE_HEAD
+    pose = k.get("pose", {})
+    yaw, pitch, roll = float(pose.get("yaw", 0)), float(pose.get("pitch", 0)), float(pose.get("roll", 0))
+    yw, pt = yaw * h["maxYaw"] * math.pi / 180, pitch * h["maxPitch"] * math.pi / 180
+    r = (roll * float(h.get("maxRoll", 10)) - yaw * h["yawRoll"]) * math.pi / 180
+    shake = float(k.get("tremble") or 0)
+    out_ = {}
+    for tag, bx in (("L", -EYE_DX), ("R", EYE_DX)):
+        dx, dy, sx, sy = head_project(bx, EYE_Y, yw, pt)
+        x, y = bx + dx + h["travelX"] * yaw, EYE_Y + dy + h["travelY"] * pitch
+        cx, cy = CX + x * math.cos(r) - y * math.sin(r), CY + x * math.sin(r) + y * math.cos(r)
+        er = k.get("eyeRot", {}).get(tag, {})
+        ssx = EYE_SCALE * sx * math.cos(math.radians(float(er.get("y", 0))))
+        ssy = EYE_SCALE * sy * math.cos(math.radians(float(er.get("x", 0))))
+        rot = r + math.radians(float(er.get("z", 0)))
+        ix, iy = h["pupil"] * yaw / EYE_SCALE, h["pupil"] * pitch / EYE_SCALE
+        xs, ys = [], []
+        for q in k["eyes"][tag]["pts"]:
+            u, v = (q[0] + ix) * ssx, (q[1] + iy) * ssy
+            xs.append(cx + u * math.cos(rot) - v * math.sin(rot))
+            ys.append(cy + u * math.sin(rot) + v * math.cos(rot))
+        out_[tag] = (min(xs) - shake, max(xs) + shake, min(ys) - shake, max(ys) + shake)
+    return out_
+
+
+def lab_story_warnings(target, st):
+    """Problems worth fixing before the story goes into the app (printed, not fatal)."""
+    out_ = []
+    for n, k in enumerate(sorted(st.get("keys", []), key=lambda q: q.get("t", 0))):
+        for msg in eye_fit_warnings(key_boxes(k)):
+            out_.append("คีย์ %d (%.2f s): %s" % (n + 1, float(k.get("t", 0)) / 1000.0, msg))
+    target_ms = int(round(MOOD_STORIES[target][0] * 1000 / 60.0))
+    if abs(int(st.get("durationMs", 7000)) - target_ms) > 20:
+        out_.append("ยาว %d ms แต่เรื่องเดิมยาว %d ms (แอปเล่นเรื่องนี้ %d ms เสมอ)"
+                    % (int(st.get("durationMs", 7000)), target_ms, target_ms))
+    return out_
 
 
 def lab_story(name, st):
@@ -246,9 +288,15 @@ for _path in sorted(_glob.glob(_os.path.join(_LAB_DIR, "*.json"))):
     _name = _os.path.splitext(_os.path.basename(_path))[0]
     with open(_path, encoding="utf-8") as _fh:
         _st = _json.load(_fh)
-    _target = _st.get("target")
+    _target = _st.get(STORY_TARGET_KEY)
     if not _target:
         continue                               # still a draft: not used in the app yet
+    if _target not in MOOD_STORIES:
+        _sys.stderr.write("Eye Lab story %s: ไม่รู้จักเรื่อง %s (ต้องเป็นชื่อ Mood... ใน presets.json)\n"
+                          % (_name, _target))
+        continue
+    for _msg in lab_story_warnings(_target, _st):
+        _sys.stderr.write("Eye Lab story %s: %s\n" % (_name, _msg))
     MOOD_STORIES[_target] = lab_story(_target, _st)
     LAB_STORIES.append((_name, _target))
 if LAB_STORIES:

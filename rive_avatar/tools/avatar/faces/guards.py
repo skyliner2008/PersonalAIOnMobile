@@ -1,6 +1,8 @@
 # Part of the avatar generator -- executed in order by tools/avatar/build.py
 # into one shared namespace (see tools/avatar/README.md). Not importable on its own.
 
+import sys
+
 # --------------------------------------------------------------- SAFETY GUARDS
 # 1) the two eyes must never touch, however far a story slides them together
 MIN_EYE_GAP = 22.0        # px between the inner edges
@@ -12,7 +14,7 @@ _EYE_HALF_W_AUTHORED = {  # half of each variant's width, as authored (radius 54
     V_BAR: 46, V_BARTILT: 47, V_CROSS: 60, V_CHEV: 46, V_HEART: 53,
     V_ARC: 61, V_ARCDOWN: 61, V_HALFLID: EYE_R, V_SPIRAL: 55,
     V_DOLLAR: 33, V_STAREYE: 59, V_EMPTY: 0, V_RING: 51,
-    # the morph eye -- every shape in parts/morph.py stays within the round eye's width
+    # the morph eye: measured from the shapes below (the Eye Lab can draw any width)
     V_MORPH: EYE_R * EYE_OX,
     # slabs are rotated, so the bounding half-width grows
     V_WEDGE: (2 * EYE_R * math.cos(.30) + 42 * math.sin(.30)) / 2,
@@ -20,8 +22,53 @@ _EYE_HALF_W_AUTHORED = {  # half of each variant's width, as authored (radius 54
     V_EVIL: ((2 * EYE_R + 4) * math.cos(.20) + 68 * math.sin(.20)) / 2,
     V_DROOP: (2 * EYE_R * math.cos(.30) + 62 * math.sin(.30)) / 2,
 }
+# The morph eye's inner half-width (toward the nose) is the widest of its shapes: +x of a
+# left-eye outline, -x of a separately drawn right eye. Only the inner side can touch the
+# other eye; the outer side is checked against the screen by eye_fit_warnings() below.
+_morph_inner = [max(p[0] for p in pts) for pts, _s in MORPH_SHAPES.values()]
+_morph_inner += [max(-p[0] for p in pts) for pts, _s in MORPH_SHAPES_R.values()]
+_EYE_HALF_W_AUTHORED[V_MORPH] = max([EYE_R * EYE_OX] + _morph_inner)
 # ...and as rendered, after the variant node's EYE_SCALE
 EYE_HALF_W = {v: hw * EYE_SCALE for v, hw in _EYE_HALF_W_AUTHORED.items()}
+
+
+# 1b) where an eye lands on the phone. The artboard is 500 x 500; in portrait the app
+#     makes it 1.10 x the screen width (PetModeScreen.kt RIVE_PORTRAIT_SCALE), so only
+#     x 23..477 is on screen whatever the phone's height.
+ART_W = ART_H = 500.0
+PORTRAIT_X = (ART_W / 2 - ART_W / 2 / 1.10, ART_W / 2 + ART_W / 2 / 1.10)
+
+
+def eye_fit_warnings(boxes):
+    """boxes: {"L" | "R": (x0, x1, y0, y1)} in artboard units -> problems, in Thai (the Eye
+    Lab and ship.py show them to the user)."""
+    out_ = []
+    (lx0, lx1, ly0, ly1), (rx0, rx1, ry0, ry1) = boxes["L"], boxes["R"]
+    gap = rx0 - lx1
+    if gap < MIN_EYE_GAP:
+        out_.append("ตา 2 ข้างชิดกันเกินไป (ห่าง %.0f, ควร >= %.0f)" % (gap, MIN_EYE_GAP))
+    x0, x1, y0, y1 = min(lx0, rx0), max(lx1, rx1), min(ly0, ry0), max(ly1, ry1)
+    if x0 < 0 or x1 > ART_W or y0 < 0 or y1 > ART_H:
+        out_.append("ตาเกินขอบภาพ Rive (ถูกตัด) %.0f px" % max(-x0, x1 - ART_W, -y0, y1 - ART_H))
+    elif x0 < PORTRAIT_X[0] or x1 > PORTRAIT_X[1]:
+        out_.append("ตาล้นจอแนวตั้ง %.0f px" % max(PORTRAIT_X[0] - x0, x1 - PORTRAIT_X[1]))
+    return out_
+
+
+def shape_boxes(left, right, scale=None, dx=None):
+    """Library shape at rest (no pose): left-eye points + right-eye points -> boxes."""
+    scale, dx = scale or EYE_SCALE, dx or EYE_DX
+    box = lambda pts, cx: (cx + min(p[0] for p in pts) * scale, cx + max(p[0] for p in pts) * scale,
+                           CY + EYE_Y + min(p[1] for p in pts) * scale, CY + EYE_Y + max(p[1] for p in pts) * scale)
+    return {"L": box(left, CX - dx), "R": box(right, CX + dx)}
+
+
+def check_morph_shapes():
+    """Warn (not fail) about library shapes that collide or leave the screen at rest."""
+    for name, (pts, smooth) in sorted(MORPH_SHAPES.items()):
+        right = MORPH_SHAPES_R[name][0] if name in MORPH_SHAPES_R else _mirror(pts, smooth)[0]
+        for msg in eye_fit_warnings(shape_boxes(pts, right)):
+            sys.stderr.write("eye shape %s: %s\n" % (name, msg))
 
 
 def max_eye_scale(eyeL, eyeR):
@@ -85,3 +132,4 @@ def check_faces():
 
 
 check_faces()
+check_morph_shapes()

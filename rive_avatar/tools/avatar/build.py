@@ -27,11 +27,15 @@ def main():
              if ln.strip() and not ln.startswith("#")]
     # the eye design Claude shipped from the Eye Lab (data/eye_app.json, see
     # tools/eyelab/ship.py) is loaded first: its "rig" sets the eye size,
-    # spacing, layer offset and glow that the layout and the eye parts read
-    lab_path = os.path.join(HERE, "data", "eye_app.json")
+    # spacing, layer offset and glow that the layout and the eye parts read.
+    # `ship.py check` builds the Lab's workspace instead (into a temp folder) through
+    # AVATAR_EYE_FILE / AVATAR_STORY_DIR / AVATAR_STORY_KEY, so the app is never touched.
+    lab_path = os.environ.get("AVATAR_EYE_FILE") or os.path.join(HERE, "data", "eye_app.json")
     lab = json.load(open(lab_path, encoding="utf-8")) if os.path.exists(lab_path) else {}
     ns = {"__name__": "avatar_build", "__builtins__": __builtins__, "AVATAR_DIR": HERE,
-          "EYE_LAB": lab, "EYE_RIG": lab.get("rig", {})}
+          "EYE_LAB": lab, "EYE_RIG": lab.get("rig", {}),
+          "STORY_DIR": os.environ.get("AVATAR_STORY_DIR") or os.path.join(HERE, "data", "stories"),
+          "STORY_TARGET_KEY": os.environ.get("AVATAR_STORY_KEY") or "target"}
     for rel in order:
         path = os.path.join(HERE, rel)
         code = compile(open(path, encoding="utf-8").read(), path, "exec")

@@ -51,11 +51,23 @@ their stories together. It is a **workspace**, separate from the app:
 
 ```
 python rive_avatar/tools/eyelab/ship.py status                  # what the app does not have yet (the page shows it too)
+python rive_avatar/tools/eyelab/ship.py check [--shots]         # build the WORKSPACE into a temp project (stories use
+                                                                # their intent), rive --verify, warnings, Rive shots per key
 python rive_avatar/tools/eyelab/ship.py eye [shapes faces motion rig]
-python rive_avatar/tools/eyelab/ship.py story <name> <MoodTarget>   # replaces that mood story
-python rive_avatar/tools/eyelab/ship.py unship <name>
+python rive_avatar/tools/eyelab/ship.py story <name> <MoodTarget> [--mute-cues|--keep-cues]
+python rive_avatar/tools/eyelab/ship.py unship <name>           # also restores that mood's old sound cues
 python rive_avatar/tools/eyelab/ship.py build                   # build.py + rive --once + copy the .riv
 ```
+
+Before shipping, run `check`: it prints every placement warning (eyes touching, past the
+artboard, past the portrait screen -- `eye_fit_warnings` in `faces/guards.py`, the same rule
+the page shows live) and a story whose length differs from the mood it replaces. `story`
+warns when the Lab's rig / motion differ from the app's (the story was designed with them).
+
+**Sounds.** The app plays timed sound cues with every mood story (`RiveMoodStories.kt`),
+written for the old story. A key's `sound` (a `RobotSound` name) becomes that mood's cue
+when the story ships; the old cues are kept in the shipped file (`oldCues`) and come back
+on `unship`. A story without sounds must choose `--mute-cues` or `--keep-cues`.
 
 `eye_lab.json` / `eye_app.json` hold:
 
@@ -68,8 +80,24 @@ python rive_avatar/tools/eyelab/ship.py build                   # build.py + riv
   `machine/poses.py` builds the Rive look poses; `rig.eyeRot` = a fixed X/Y/Z turn per eye (`EyeTilt`)
 
 The page has three areas: tools by category on the left (library shapes, base rig, 3D head,
-eye rotation, ellipse, props, motion defaults, app faces), the view on the right (drag the 8
-points, reference sheet, eye colour, drag the prop) and the **timeline** at the bottom.
+eye rotation, ellipse, props, motion, app faces), the view on the right (drag the 8 points,
+reference sheet, eye colour, drag the prop) and the **timeline** at the bottom.
+
+What the view edits (the switch above the view):
+
+- **แก้รูปในคลัง** -- a library shape. The app's faces use it, and here the eye rotation is
+  the app's fixed one (`rig.eyeRot`); the head pose is only a try-out; no props.
+- **จัดท่าสำหรับไทม์ไลน์** -- a scratch frame (kept in the browser) for composing keys. It never
+  touches the library or the app's values; clicking a library shape loads it into the frame.
+  "＋ เพิ่มท่านี้เป็นคีย์" snapshots it after the last key and leaves it as it is: adjust a
+  little, add again.
+- **a key** (click it on the timeline) -- edits go to that key; "จัดท่าต่อจากคีย์นี้" copies it
+  back into the scratch frame.
+
+Pressing / dragging on the ruler, and stopping playback, show the story at that moment
+(read-only). The warning line under the view uses the same placement rule as the generator.
+Props are drawn over the eyes, as in the app. `window.eyelabDebug` (storyFrame, frameBoxes,
+render) lets Claude compare the page with `check --shots`.
 "จอมือถือ" draws a rough guide of the phone screen (portrait: pet area on top, status panel
 below; landscape: full screen), placed with the `RIVE_*` constants of `PetModeScreen.kt` at a
 16:9 screen. Phones differ in shape, so it is an approximate area, not an exact frame.
@@ -79,9 +107,10 @@ below; landscape: full screen), placed with the `RIVE_*` constants of `PetModeSc
 Compose a moment in 2.5D (eye shapes, head pose, per-eye rotation, one library prop),
 press "เพิ่มท่านี้เป็นคีย์", adjust, add again. Each key stores the whole frame plus how it
 moves on (ease: jelly / smooth / soft / linear / hold) and its effects (pop on arrival,
-trembling and lower-lid quiver through the segment). With a key selected, every edit goes
-to that key. Play / stop / loop / scrub preview the story. The story format is documented
-at the top of `tools/eyelab/labstory.py`; `intent` is the mood story the user means it for.
+trembling and lower-lid quiver through the segment) and an optional sound. Undo covers key
+edits, adding, deleting and re-timing. Play / stop / loop / scrub preview the story. The story
+format is documented at the top of `tools/eyelab/labstory.py`; `intent` is the mood story the
+user means it for (the page shows when the app plays it and its current sounds).
 
 A shipped story (with `target`) replaces that mood story (for example `MoodSad`, 7 s).
 `stories/lab.py` maps a key onto the rig with the same maths as the page:
@@ -115,9 +144,9 @@ any two shapes blend vertex by vertex:
 Faces in `MORPH_FACE` (`faces/morph_faces.py`) use it: Neutral, Listening, Happy, Sad,
 Crying, Angry. The others still swap discrete variants (cross, chevron, spiral...).
 
-To add a shape: add 8 points (left eye, clockwise from the top) to `MORPH_SHAPES`, keep
-its half-width within the round eye's (`V_MORPH` in `faces/guards.py`), then map a face
-to it in `MORPH_FACE`.
+To add a shape: add 8 points (left eye, clockwise from the top) to `MORPH_SHAPES`, then map
+a face to it in `MORPH_FACE`. The eye-gap guard (`V_MORPH` in `faces/guards.py`) measures the
+widest inner side of all shapes, and every shape is checked against the screen at rest.
 
 ## Acting rules for stories
 

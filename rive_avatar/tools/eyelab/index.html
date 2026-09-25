@@ -88,6 +88,14 @@
   .editing.key { border-color: #7a5a14; background: #1a1409; }
   .editing.key b { color: var(--accent); }
   .editing.play b { color: var(--ok); }
+  .editing.view b { color: var(--ok); }
+  .editing .grow { flex: 1; min-width: 200px; }
+  .mode-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .mode-switch button { border: 0; border-radius: 0; background: transparent; padding: 5px 10px; }
+  .mode-switch button[aria-pressed="true"] { background: #123a40; color: #bff7fb; }
+  .fit-warn { margin: 0; padding: 6px 10px; border-left: 3px solid var(--warn); background: #1e0f0e; color: #ffb4aa; font-size: 13px; }
+  .kf.new { border-color: var(--ok); box-shadow: 0 0 0 2px #57d9a355; }
+  .kf .snd { position: absolute; top: 2px; right: 4px; font-size: 11px; color: var(--ok); }
   .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
   .stage svg { display: block; width: 100%; height: auto; max-height: 60vh; margin-inline: auto; }
   .stage.framed { background: var(--panel-2); }
@@ -171,7 +179,7 @@
     </details>
 
     <details class="cat">
-      <summary>หมุนดวงตา <small>X / Y / Z</small></summary>
+      <summary>หมุนดวงตา <small id="rotScope">X / Y / Z</small></summary>
       <div class="cat-body">
         <label class="row"><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
         <div class="sliders" id="rotSliders"></div>
@@ -190,7 +198,7 @@
     <details class="cat">
       <summary>พร็อพ <small id="propNow">ไม่มี</small></summary>
       <div class="cat-body">
-        <p class="hint">เลือกได้ 1 ชิ้นต่อคีย์ ลากพร็อพในพื้นที่แก้รูปเพื่อย้าย</p>
+        <p class="hint" id="propHint">เลือกได้ 1 ชิ้นต่อคีย์ ลากพร็อพในพื้นที่แก้รูปเพื่อย้าย (ในแอปพร็อพอยู่หน้าดวงตา)</p>
         <input type="text" id="propFilter" placeholder="ค้นหาพร็อพ" aria-label="ค้นหาพร็อพ">
         <div class="prop-grid" id="propGrid"></div>
         <div class="sliders" id="propSliders"></div>
@@ -199,8 +207,12 @@
     </details>
 
     <details class="cat">
-      <summary>การเคลื่อนไหว <small>ค่าเริ่มต้นของคีย์ใหม่</small></summary>
-      <div class="cat-body"><div class="sliders" id="motionSliders"></div></div>
+      <summary>การเคลื่อนไหว <small>ทั้งแอป</small></summary>
+      <div class="cat-body">
+        <div class="sliders" id="motionSliders"></div>
+        <p class="hint">เวลาเปลี่ยนรูป / การเด้ง / ตาขวาช้ากว่า: ใช้ตอนแอปเปลี่ยนหน้าอารมณ์ และในคีย์ของ story · สั่นทั้งดวงตา / ขอบตาล่างสั่น: ความแรงของ story ที่ Claude เขียนด้วยโค้ด (เช่น เศร้า) ส่วนคีย์ใน Lab ตั้งเองที่คีย์</p>
+        <label class="row">เส้นโค้งเริ่มต้นของคีย์ใหม่ <select id="defaultEase"></select></label>
+      </div>
     </details>
 
     <details class="cat">
@@ -225,10 +237,11 @@
       </select></label>
       <span class="sep"></span>
       <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)">ย้อนกลับ</button>
-      <button id="btnResetRound">ตั้งเป็นวงกลม</button>
+      <button id="btnResetRound" title="ตาวงรีตั้งต้นของ LOOI (กว้าง 49 สูง 57)">ตั้งเป็นตาตั้งต้น</button>
       <button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button>
     </div>
     <div class="stage" id="stage"></div>
+    <p class="fit-warn" id="fitWarn" hidden></p>
     <div class="under">
       <div class="card">
         <h3>จุดที่เลือก</h3>
@@ -246,7 +259,7 @@
         <h3>โน้ตถึง Claude</h3>
         <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้"></textarea>
         <p class="claude-note" id="claudeNote" hidden></p>
-        <p class="hint">โน้ตผูกกับรูปในคลัง หรือกับคีย์ที่เลือกอยู่</p>
+        <p class="hint">โน้ตผูกกับสิ่งที่กำลังแก้: รูปในคลัง, ท่าที่จัด (ติดไปกับคีย์ที่เพิ่ม) หรือคีย์ที่เลือก</p>
       </div>
     </div>
   </main>
@@ -265,6 +278,7 @@
     <button class="warn" id="btnStoryDel">ลบ story</button>
     <span id="storyDelConfirm" hidden><button class="warn" id="btnStoryDelYes">ยืนยันลบ</button> <button id="btnStoryDelNo">ยกเลิก</button></span>
   </div>
+  <p class="hint" id="intentInfo" hidden></p>
   <div class="row">
     <button class="primary" id="btnPlay">▶ เล่น</button>
     <label><input type="checkbox" id="optLoop" checked> วนซ้ำ</label>
@@ -274,7 +288,7 @@
     <button class="primary" id="btnAddKey">＋ เพิ่มท่านี้เป็นคีย์</button>
     <button id="btnDupKey">ทำซ้ำคีย์</button>
     <button class="warn" id="btnDelKey">ลบคีย์</button>
-    <button id="btnDeselect">เลิกเลือกคีย์</button>
+    <button id="btnDeselect">กลับไปจัดท่า</button>
   </div>
   <div class="track-wrap"><div class="track" id="track"><div class="ruler" id="ruler"></div><div class="playhead" id="playhead"></div></div></div>
   <div class="key-props" id="keyProps"></div>
@@ -282,7 +296,7 @@
     <label class="slider"><span>โน้ต story ถึง Claude</span><textarea id="storyNote" placeholder="เช่น อยากให้สะอื้นแรงขึ้นตอนท้าย แล้วค่อยๆ สงบ"></textarea></label>
     <div class="slider"><span>Claude ตอบ</span><p class="claude-note" id="storyClaudeNote">–</p></div>
   </div>
-  <p class="hint">คลิกคีย์เพื่อแก้ (รูปตา ท่าหัว หมุนตา พร็อพ จะแก้คีย์นั้น) ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา ลากบนไม้บรรทัดเพื่อดูทีละช่วง</p>
+  <p class="hint">จัดท่าแล้วกด "＋ เพิ่มท่านี้เป็นคีย์" ปรับต่ออีกนิดแล้วกดเพิ่มอีก (ท่าที่จัดไม่เปลี่ยนเมื่อเพิ่มคีย์) · คลิกคีย์เพื่อแก้คีย์นั้น · ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา · กดหรือลากบนไม้บรรทัดเพื่อดู story ที่เวลานั้น · เสียงของคีย์เล่นในแอปเท่านั้น (Lab เล่นเสียงไม่ได้)</p>
 </section>
 
 <script>
@@ -334,7 +348,16 @@
     stories: [], story: null, key: -1,              // the open story and the selected key (-1 = none)
     live: { pose: { yaw: 0, pitch: 0, roll: 0 }, prop: null },   // the workspace when no key is selected
     playing: false, t: 0,
+    // what the view edits: "shape" = a library shape (the app's faces use it), "compose" = a
+    // scratch frame for the timeline (never touches the library or the app's values); a
+    // selected key overrides both. viewTime = showing the story at the playhead (read-only).
+    mode: "shape", compose: null, viewTime: false, sounds: [], flash: null,
   };
+  try {
+    state.mode = localStorage.getItem("eyelab.mode") === "compose" ? "compose" : "shape";
+    const c = JSON.parse(localStorage.getItem("eyelab.compose") || "null");
+    if (c && c.eyes && c.eyes.L && c.eyes.R) state.compose = c;
+  } catch { /* storage blocked: start fresh */ }
   let RIG = { ...DEFAULT_RIG };
 
   // ================================================================ geometry
@@ -408,12 +431,27 @@
     const L = b.left, R = b.mirror === false && b.right ? b.right : mirror(b.left);
     return { L: { pts: L, color: b.color || "cyan" }, R: { pts: R, color: b.color || "cyan" } };
   }
-  function currentKey() { return state.story && state.key >= 0 ? state.story.keys[state.key] : null; }
-  function workFrame() {
-    const k = currentKey();
-    if (k) return { eyes: k.eyes, pose: k.pose, eyeRot: k.eyeRot, prop: k.prop, fx: { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] } };
-    return { eyes: libraryEyes(state.selected), pose: state.live.pose, eyeRot: rigEyeRot(), prop: state.live.prop, fx: { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] } };
+  function currentKey() { return state.story && state.key >= 0 ? state.story.keys[state.key] || null : null; }
+  const NO_FX = () => ({ sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] });
+  // the scratch frame of "จัดท่า": starts from the selected library shape, the app's eye rotation
+  function ensureCompose() {
+    if (!state.compose) {
+      state.compose = { eyes: clone(libraryEyes(state.selected)), mirror: (state.shapes[state.selected] || {}).mirror !== false,
+        from: state.selected, pose: { yaw: 0, pitch: 0, roll: 0 }, eyeRot: clone(rigEyeRot()),
+        rotLink: (RIG.eyeRot || {}).link !== false, prop: null, note: "" };
+    }
+    return state.compose;
   }
+  // the frame that edits go to when it is not a library shape: the selected key, or the composition
+  function holder() { return currentKey() || (state.mode === "compose" ? ensureCompose() : null); }
+  function saveCompose() { try { localStorage.setItem("eyelab.compose", JSON.stringify(state.compose)); } catch { /* ignore */ } }
+  function saveHolder() { if (currentKey()) saveStory(); else saveCompose(); }
+  function workFrame() {
+    const h = holder();
+    if (h) return { eyes: h.eyes, pose: h.pose, eyeRot: h.eyeRot, prop: h.prop, fx: NO_FX() };
+    return { eyes: libraryEyes(state.selected), pose: state.live.pose, eyeRot: rigEyeRot(), prop: null, fx: NO_FX() };
+  }
+  const viewingTime = () => !state.playing && state.viewTime && !!state.story && state.story.keys.length > 0 && !currentKey();
   function popAt(frame) {
     if (frame < 0 || frame > 20) return [1, 1];
     for (let k = 0; k < POP.length - 1; k++) { const [f0, x0, y0] = POP[k], [f1, x1, y1] = POP[k + 1]; if (frame <= f1) { const t = EASE.smooth((frame - f0) / (f1 - f0)); return [lerp(x0, x1, t), lerp(y0, y1, t)]; } }
@@ -448,7 +486,7 @@
     if (a.prop && b && b.prop && b.prop.index === a.prop.index) prop = { index: a.prop.index, dx: lerp(a.prop.dx, b.prop.dx, e), dy: lerp(a.prop.dy, b.prop.dy, e), scale: lerp(a.prop.scale, b.prop.scale, e), rot: lerp(a.prop.rot, b.prop.rot, e), opacity: lerp(a.prop.opacity, b.prop.opacity, e) };
     // effects of the segment: pop when the key lands, trembling / lid quiver through it
     const since = (t - a.t) * 60 / 1000, m = state.motion, fx = { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] };
-    if (a.pop) {
+    if (a.pop !== false) {
       [0, 1].forEach((j) => { const g = (j ? m.popGainR : 1) * m.pop, [px, py] = popAt(since - (j ? m.popLag : 0)); fx.sx[j] = 1 + (px - 1) * g; fx.sy[j] = 1 + (py - 1) * g; });
     }
     const secs = t / 1000;
@@ -464,7 +502,10 @@
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
   const defs = el("defs", {}, svg), filt = el("filter", { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
   const blur = el("feGaussianBlur", { stdDeviation: "7" }, filt);
-  const layerScreen = el("g", {}, svg), layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerCompare = el("g", {}, svg), layerPanel = el("g", {}, svg), layerHandles = el("g", {}, svg);
+  // stacking as in the app: props are drawn over the eyes (PropsSolo comes before the face in
+  // the Rive file); the reference sheet and the dashed guides go on top so they stay visible
+  const layerScreen = el("g", {}, svg), layerEyes = el("g", {}, svg), layerProp = el("g", {}, svg), layerRef = el("g", { style: "mix-blend-mode:screen" }, svg),
+    layerGhost = el("g", {}, svg), layerCompare = el("g", {}, svg), layerPanel = el("g", {}, svg), layerHandles = el("g", {}, svg);
   let screenMode = "none";
   try { screenMode = localStorage.getItem("eyelab.screen") || "none"; } catch { /* private window */ }
   function applyScreen() {
@@ -526,13 +567,13 @@
     }
     blur.setAttribute("stdDeviation", Math.max(0.01, RIG.glowFeather * 0.45));
     const body = state.shapes[state.selected];
-    if (editing && state.showRef && body && body.ref && !currentKey()) {
+    if (editing && state.showRef && body && body.ref && state.mode === "shape" && !currentKey()) {
       const rc = cellRect(body.ref), fit = { ...DEFAULT_FIT, ...(body.refFit || {}) }, sh = SHEETS[body.ref.sheet];
       const g = el("g", { transform: `translate(${CX + fit.dx} ${CY + fit.dy}) scale(${fit.scale}) translate(${-CX} ${-CY})`, opacity: fit.opacity }, layerRef);
       const inner = el("svg", { x: 0, y: CY - 160, width: W, height: 320, viewBox: `${rc.x} ${rc.y} ${rc.w} ${rc.h}`, preserveAspectRatio: "xMidYMid meet" }, g);
       el("image", { href: rc.src, x: 0, y: 0, width: sh.iw, height: sh.ih }, inner);
     }
-    drawProp(frame.prop, editing);
+    drawProp(frame.prop, editing && !!holder());
     for (const [j, eye] of [[0, "L"], [1, "R"]]) {
       const t = eyeXform(eye, frame);
       const verts = frame.verts ? frame.eyes[eye].verts : outline(frame.eyes[eye].pts);
@@ -547,7 +588,7 @@
     if (editing) drawHandles(frame);
   }
   function editEyes() { return workFrame().eyes; }
-  function mirrored() { const k = currentKey(); return k ? k.mirror !== false : (state.shapes[state.selected] || {}).mirror !== false; }
+  function mirrored() { const h = holder(); return h ? h.mirror !== false : (state.shapes[state.selected] || {}).mirror !== false; }
   function toScreen(eye, frame, x, y) {
     const t = eyeXform(eye, frame), r = t.rot * DEG, u = (x + t.ix) * t.sx, v = (y + t.iy) * t.sy;
     return [t.tx + u * Math.cos(r) - v * Math.sin(r), t.ty + u * Math.sin(r) + v * Math.cos(r)];
@@ -573,7 +614,39 @@
       });
     }
   }
-  function renderView() { const fr = workFrame(); if (!state.playing) render(fr, true); renderEditing(); }
+  function renderView() {
+    if (!state.playing) {
+      const fr = viewingTime() ? storyFrame(state.t) : workFrame();
+      render(fr, !viewingTime());
+      renderFitWarning(fr);
+    }
+    renderEditing();
+  }
+  // where the eyes land on the phone -- the same rules as the generator (faces/guards.py)
+  const MIN_EYE_GAP = 22, PORTRAIT_X = [250 - 250 / 1.10, 250 + 250 / 1.10];
+  function frameBoxes(fr) {
+    const out = {};
+    [["L", 0], ["R", 1]].forEach(([eye, j]) => {
+      const t = eyeXform(eye, fr), r = t.rot * DEG, kx = fr.fx.sx[j], ky = fr.fx.sy[j], [ddx, ddy] = fr.fx.d[j];
+      const verts = fr.verts ? fr.eyes[eye].verts : outline(fr.eyes[eye].pts);
+      const xs = [], ys = [];
+      for (const v of verts) {
+        const u = (v.x + t.ix) * t.sx * kx, w = (v.y + t.iy) * t.sy * ky;
+        xs.push(t.tx + ddx + u * Math.cos(r) - w * Math.sin(r)); ys.push(t.ty + ddy + u * Math.sin(r) + w * Math.cos(r) + ART_DY);
+      }
+      out[eye] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    });
+    return out;
+  }
+  function renderFitWarning(fr) {
+    const b = frameBoxes(fr), msgs = [], gap = b.R[0] - b.L[1];
+    const x0 = Math.min(b.L[0], b.R[0]), x1 = Math.max(b.L[1], b.R[1]), y0 = Math.min(b.L[2], b.R[2]), y1 = Math.max(b.L[3], b.R[3]);
+    if (gap < MIN_EYE_GAP) msgs.push(`ตา 2 ข้างชิดกันเกินไป (ห่าง ${gap.toFixed(0)})`);
+    if (x0 < 0 || x1 > 500 || y0 < 0 || y1 > 500) msgs.push(`ตาเกินขอบภาพ Rive ${Math.max(-x0, x1 - 500, -y0, y1 - 500).toFixed(0)} px (ในแอปจะถูกตัด)`);
+    else if (x0 < PORTRAIT_X[0] || x1 > PORTRAIT_X[1]) msgs.push(`ตาล้นจอแนวตั้ง ${Math.max(PORTRAIT_X[0] - x0, x1 - PORTRAIT_X[1]).toFixed(0)} px`);
+    const box = document.getElementById("fitWarn");
+    box.hidden = !msgs.length; box.textContent = msgs.length ? "⚠ " + msgs.join(" · ") : "";
+  }
 
   // ================================================================ reference sheets
   const images = {};
@@ -589,22 +662,30 @@
   // ================================================================ editing (points, colour, mirror)
   // every edit goes to the selected key when there is one, otherwise to the library shape
   function editTarget() {
-    const k = currentKey();
-    if (k) return { kind: "key", get L() { return k.eyes.L.pts; }, get R() { return k.eyes.R.pts; },
-      set(eye, pts) { k.eyes[eye].pts = pts; if (eye === "L" && k.mirror !== false) k.eyes.R.pts = mirror(pts); }, save: saveStory };
+    const h = holder();
+    if (h) return { kind: currentKey() ? "key" : "compose", get L() { return h.eyes.L.pts; }, get R() { return h.eyes.R.pts; },
+      set(eye, pts) { h.eyes[eye].pts = pts; if (eye === "L" && h.mirror !== false) h.eyes.R.pts = mirror(pts); }, save: saveHolder };
     const b = state.shapes[state.selected]; if (!b) return null;
     return { kind: "shape", get L() { return b.left; }, get R() { return b.mirror === false && b.right ? b.right : mirror(b.left); },
       set(eye, pts) { if (eye === "L") b.left = pts; else b.right = pts; }, save: () => scheduleSave(state.selected) };
   }
-  function pushHistory() {
-    const k = currentKey();
-    state.history.push(k ? { key: state.key, story: state.story.name, body: clone(k) } : { shape: state.selected, body: clone(state.shapes[state.selected]) });
-    if (state.history.length > 80) state.history.shift();
+  // one undo step = a snapshot of what an edit changes: a library shape, the composition, or the
+  // story's whole key list (so adding, deleting and re-timing keys undo correctly)
+  function pushHistory(kind) {
+    state.viewTime = false;
+    let h = null;
+    if (kind === "story" || (!kind && currentKey())) h = state.story ? { story: state.story.name, keys: clone(state.story.keys), key: state.key } : null;
+    else if (!kind && state.mode === "compose") h = { compose: clone(ensureCompose()) };
+    else if (state.selected && state.shapes[state.selected]) h = { shape: state.selected, body: clone(state.shapes[state.selected]) };
+    if (!h) return;
+    state.history.push(h); if (state.history.length > 80) state.history.shift();
   }
   function undo() {
-    const h = state.history.pop(); if (!h) return;
-    if (h.shape) { state.shapes[h.shape] = h.body; state.selected = h.shape; state.key = -1; scheduleSave(h.shape); }
-    else if (state.story && state.story.name === h.story && state.story.keys[h.key]) { state.story.keys[h.key] = h.body; state.key = h.key; saveStory(); }
+    const h = state.history.pop(); if (!h) return setStatus("ไม่มีอะไรให้ย้อนกลับ");
+    if (h.shape) { state.shapes[h.shape] = h.body; state.selected = h.shape; state.key = -1; state.mode = "shape"; scheduleSave(h.shape); }
+    else if (h.compose) { state.compose = h.compose; state.key = -1; state.mode = "compose"; saveCompose(); }
+    else if (h.story && state.story && state.story.name === h.story) { state.story.keys = h.keys; state.key = Math.min(h.key, state.story.keys.length - 1); saveStory(); }
+    else return setStatus("ย้อนกลับไม่ได้: story เปลี่ยนไปแล้ว", "error");
     renderAll();
   }
   function svgPoint(evt) { const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
@@ -635,7 +716,7 @@
   });
   const endDrag = () => {
     const d = state.dragging; if (!d) return; state.dragging = null;
-    if (d.kind === "point") editTarget().save(); else if (currentKey()) saveStory();
+    if (d.kind === "point") editTarget().save(); else saveHolder();
   };
   svg.addEventListener("pointerup", endDrag); svg.addEventListener("pointercancel", endDrag);
   svg.addEventListener("keydown", (e) => {
@@ -663,13 +744,13 @@
   });
   on("smooth", "change", () => { smoothPushed = false; });
   on("color", "change", (e) => {
-    pushHistory(); const k = currentKey();
-    if (k) { k.eyes.L.color = k.eyes.R.color = e.target.value; saveStory(); } else { state.shapes[state.selected].color = e.target.value; scheduleSave(state.selected); }
+    pushHistory(); const h = holder();
+    if (h) { h.eyes.L.color = h.eyes.R.color = e.target.value; saveHolder(); } else { state.shapes[state.selected].color = e.target.value; scheduleSave(state.selected); }
     renderAll();
   });
   on("optMirror", "change", (e) => {
-    pushHistory(); const k = currentKey();
-    if (k) { k.mirror = e.target.checked; if (k.mirror) k.eyes.R.pts = mirror(k.eyes.L.pts); saveStory(); }
+    pushHistory(); const h = holder();
+    if (h) { h.mirror = e.target.checked; if (h.mirror) h.eyes.R.pts = mirror(h.eyes.L.pts); saveHolder(); }
     else { const b = state.shapes[state.selected]; b.mirror = e.target.checked; if (!b.mirror) b.right = b.right && b.right.length === N ? b.right : mirror(b.left); scheduleSave(state.selected); }
     renderAll();
   });
@@ -684,24 +765,39 @@
   on("optRef", "change", (e) => { state.showRef = e.target.checked; renderView(); });
   on("optGhost", "change", (e) => { state.showGhost = e.target.checked; renderView(); });
   on("note", "input", (e) => {
-    const k = currentKey();
-    if (k) { k.note = e.target.value; saveStory(); } else if (state.shapes[state.selected]) { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); }
+    const h = holder();
+    if (h) { h.note = e.target.value; saveHolder(); } else if (state.shapes[state.selected]) { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); }
   });
   function renderEditing() {
-    const box = document.getElementById("editing"), k = currentKey();
-    box.className = "editing" + (state.playing ? " play" : k ? " key" : "");
+    const box = document.getElementById("editing"), k = currentKey(), viewing = viewingTime();
+    box.className = "editing" + (state.playing ? " play" : viewing ? " view" : k ? " key" : "");
     box.replaceChildren();
-    const s = document.createElement("span");
-    if (state.playing) s.innerHTML = `กำลังเล่น story <b></b>`;
-    else if (k) s.innerHTML = `กำลังแก้ <b></b> ของ story <b></b> (การแก้บันทึกลงคีย์นี้)`;
-    else s.innerHTML = `กำลังแก้รูปในคลัง <b></b> · ท่าหัวและพร็อพตอนนี้เป็นแค่การลอง จนกว่าจะเพิ่มเป็นคีย์`;
-    const bs = s.querySelectorAll("b");
-    if (state.playing) bs[0].textContent = state.story ? state.story.name : "";
-    else if (k) { bs[0].textContent = `คีย์ ${state.key + 1} (${(k.t / 1000).toFixed(2)} s)`; bs[1].textContent = state.story.name; }
-    else bs[0].textContent = state.selected || "–";
-    box.appendChild(s);
+    const s = document.createElement("span"); s.className = "grow";
+    const b = (t) => { const e = document.createElement("b"); e.textContent = t; return e; };
+    if (state.playing) s.append("กำลังเล่น story ", b(state.story ? state.story.name : ""));
+    else if (viewing) s.append("กำลังดู story ", b(state.story.name), " ที่ ", b((state.t / 1000).toFixed(2) + " s"), " (ดูอย่างเดียว คลิกคีย์เพื่อแก้ หรือเลือกโหมดทางขวา)");
+    else if (k) s.append("กำลังแก้ ", b(`คีย์ ${state.key + 1} (${(k.t / 1000).toFixed(2)} s)`), " ของ story ", b(state.story.name), " · การแก้บันทึกลงคีย์นี้");
+    else if (state.mode === "compose") s.append(b("จัดท่า"), " สำหรับไทม์ไลน์ · ไม่กระทบรูปในคลังและค่าในแอป · กด \"＋ เพิ่มท่านี้เป็นคีย์\" เพื่อเก็บลงไทม์ไลน์");
+    else {
+      const faces = Object.entries(state.faces).filter(([, v]) => v === state.selected).map(([f]) => f);
+      s.append("กำลังแก้รูปในคลัง ", b(state.selected || "–"), faces.length ? ` · ใช้กับหน้า ${faces.join(", ")} ในแอป` : " · ยังไม่มีหน้าในแอปใช้รูปนี้");
+    }
+    const sw = document.createElement("span"); sw.className = "mode-switch"; sw.setAttribute("role", "group"); sw.setAttribute("aria-label", "โหมดแก้");
+    for (const [m, label] of [["shape", "แก้รูปในคลัง"], ["compose", "จัดท่าสำหรับไทม์ไลน์"]]) {
+      const btn = document.createElement("button"); btn.textContent = label;
+      btn.setAttribute("aria-pressed", !state.playing && !viewing && !k && state.mode === m);
+      btn.addEventListener("click", () => setMode(m));
+      sw.appendChild(btn);
+    }
+    box.append(s, sw);
     document.getElementById("optMirror").checked = mirrored();
     document.getElementById("btnCopyL").hidden = mirrored();
+  }
+  function setMode(m) {
+    stopPlay(true); state.mode = m; state.key = -1; state.viewTime = false;
+    if (m === "compose") ensureCompose();
+    try { localStorage.setItem("eyelab.mode", m); } catch { /* ignore */ }
+    renderAll();
   }
 
   // ================================================================ tool panels
@@ -731,18 +827,18 @@
     const list = document.getElementById("shapeList"); list.replaceChildren();
     document.getElementById("libCount").textContent = `${Object.keys(state.shapes).length} รูป`;
     for (const key of sortedKeys()) {
-      const b = document.createElement("button"); b.className = "shape-item"; b.setAttribute("aria-current", key === state.selected && !currentKey());
+      const b = document.createElement("button"); b.className = "shape-item"; b.setAttribute("aria-current", key === state.selected && state.mode === "shape" && !currentKey());
       b.appendChild(thumbSvg(libraryEyes(key)));
       const txt = document.createElement("div"), nm = document.createElement("div"), sub = document.createElement("div"); sub.className = "sub";
       nm.textContent = state.shapes[key].label || key;
       const faces = Object.entries(state.faces).filter(([, s]) => s === key).map(([f]) => f);
       sub.textContent = faces.length ? faces.join(", ") : "ยังไม่มีหน้าใช้";
       txt.append(nm, sub); b.appendChild(txt);
-      b.title = currentKey() ? "ใส่รูปนี้ลงในคีย์ที่เลือก" : "แก้รูปนี้";
+      b.title = currentKey() ? "ใส่รูปนี้ลงในคีย์ที่เลือก" : state.mode === "compose" ? "ใช้รูปนี้ในท่าที่จัด (รูปในคลังไม่เปลี่ยน)" : "แก้รูปนี้";
       b.addEventListener("click", () => {
-        const k = currentKey();
-        if (k) { pushHistory(); const ey = libraryEyes(key); k.eyes = clone(ey); k.mirror = state.shapes[key].mirror !== false; k.from = key; saveStory(); }
-        else state.selected = key;
+        const h = holder();
+        if (h) { pushHistory(); h.eyes = clone(libraryEyes(key)); h.mirror = state.shapes[key].mirror !== false; h.from = key; saveHolder(); }
+        else { state.selected = key; state.viewTime = false; }
         state.point = { eye: "L", i: 0 }; renderAll();
       });
       list.appendChild(b);
@@ -754,7 +850,7 @@
     if (state.shapes[key]) return setStatus(`มีรูปชื่อ ${key} แล้ว`, "error");
     const ey = editEyes(), base = state.shapes[state.selected] || {};
     state.shapes[key] = { label: key, left: clone(ey.L.pts), right: clone(ey.R.pts), mirror: mirrored(), color: ey.L.color, ref: base.ref || null, refFit: base.refFit, note: "", order: Object.keys(state.shapes).length };
-    state.selected = key; state.key = -1; inp.value = ""; scheduleSave(key, 0); renderAll();
+    state.selected = key; state.key = -1; state.mode = "shape"; inp.value = ""; scheduleSave(key, 0); renderAll();
   });
   on("btnDelete", "click", () => { document.getElementById("deleteConfirm").hidden = false; });
   on("btnDeleteNo", "click", () => { document.getElementById("deleteConfirm").hidden = true; });
@@ -777,12 +873,12 @@
   on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG, head: RIG.head, eyeRot: RIG.eyeRot }; renderAll(); saveRig(); });
 
   // ---- head: pose (key or live) + model
-  function currentPose() { const k = currentKey(); return k ? k.pose : state.live.pose; }
-  function poseChanged() { if (currentKey()) saveStory(); renderView(); }
+  function currentPose() { const h = holder(); return h ? h.pose : state.live.pose; }
+  function poseChanged() { if (holder()) saveHolder(); renderView(); }
   const POSE_SLIDERS = [["yaw", "หันซ้าย ↔ ขวา"], ["pitch", "เงย ↕ ก้ม"], ["roll", "เอียงคอ"]];
   function renderPose() {
     if (busy("poseSliders")) return; const box = document.getElementById("poseSliders"); box.replaceChildren(); const pose = currentPose();
-    for (const [k, label] of POSE_SLIDERS) sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { currentPose()[k] = v; poseChanged(); }, () => currentKey() && pushHistory());
+    for (const [k, label] of POSE_SLIDERS) sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { currentPose()[k] = v; poseChanged(); }, () => pushHistory());
   }
   const HEAD_SLIDERS = [
     ["radius", "ความโค้งหัว", 150, 900, 5, (v) => `${v}`], ["maxYaw", "หันได้สุด", 0, 35, 0.5, (v) => `${v}°`], ["maxPitch", "ก้ม/เงยได้สุด", 0, 30, 0.5, (v) => `${v}°`],
@@ -794,8 +890,8 @@
   }
   let glide = null;
   function lookAt(yaw, pitch) {
+    if (holder()) pushHistory(); else state.viewTime = false;      // the library view's pose is only a try-out
     const pose = currentPose(), from = { ...pose }, t0 = performance.now(); cancelAnimationFrame(glide);
-    if (currentKey()) pushHistory();
     const step = (ts) => {
       const k = Math.min(1, (ts - t0) / 420), e = EASE.jelly(k);
       pose.yaw = lerp(from.yaw, yaw, e); pose.pitch = lerp(from.pitch, pitch, e); renderView(); renderPose();
@@ -807,30 +903,32 @@
   let wanderTimer = null;
   on("optWander", "change", (e) => {
     clearTimeout(wanderTimer);
-    const next = () => { if (!document.getElementById("optWander").checked || currentKey()) return; lookAt(+(Math.random() * 2 - 1).toFixed(2), +(Math.random() * 1.6 - .8).toFixed(2)); wanderTimer = setTimeout(next, 900 + Math.random() * 1400); };
+    if (e.target.checked && holder()) { e.target.checked = false; return setStatus("มองรอบๆ เอง ใช้ได้ในโหมดแก้รูปในคลัง (ไม่อยากให้ท่าที่จัดเปลี่ยนเอง)", "error"); }
+    const next = () => { if (!document.getElementById("optWander").checked || holder()) return; lookAt(+(Math.random() * 2 - 1).toFixed(2), +(Math.random() * 1.6 - .8).toFixed(2)); wanderTimer = setTimeout(next, 900 + Math.random() * 1400); };
     if (e.target.checked) next();
   });
 
   // ---- per-eye rotation (key or rig)
-  function currentRot() { const k = currentKey(); return k ? k.eyeRot : rigEyeRot(); }
+  function currentRot() { const h = holder(); return h ? h.eyeRot : rigEyeRot(); }
   function renderRot() {
     if (busy("rotSliders")) return; const box = document.getElementById("rotSliders"); box.replaceChildren();
-    const k = currentKey(), link = k ? k.rotLink !== false : (RIG.eyeRot || {}).link !== false, rot = currentRot();
+    const hh = holder(), link = hh ? hh.rotLink !== false : (RIG.eyeRot || {}).link !== false, rot = currentRot();
     document.getElementById("optRotLink").checked = link;
+    document.getElementById("rotScope").textContent = hh ? "เฉพาะท่านี้" : "ทุกหน้าในแอป";
     for (const eye of ["L", "R"]) for (const [ax, label] of [["x", "X ก้ม/เงยตา"], ["y", "Y หันตา"], ["z", "Z เอียงตา"]]) {
       const inp = sliderRow(box, `rot_${eye}_${ax}`, `ตา${eye === "L" ? "ซ้าย" : "ขวา"} ${label}`, -60, 60, 1, rot[eye][ax], (v) => `${v}°`, (v) => {
-        const kk = currentKey();
-        if (kk) { kk.eyeRot[eye][ax] = v; if (eye === "L" && kk.rotLink !== false) kk.eyeRot.R = { x: kk.eyeRot.L.x, y: -kk.eyeRot.L.y, z: -kk.eyeRot.L.z }; saveStory(); }
+        const kk = holder();
+        if (kk) { kk.eyeRot[eye][ax] = v; if (eye === "L" && kk.rotLink !== false) kk.eyeRot.R = { x: kk.eyeRot.L.x, y: -kk.eyeRot.L.y, z: -kk.eyeRot.L.z }; saveHolder(); }
         else { const r = { link: true, L: { x: 0, y: 0, z: 0 }, R: { x: 0, y: 0, z: 0 }, ...(RIG.eyeRot || {}) }; r[eye] = { ...rigEyeRot()[eye], [ax]: v }; RIG.eyeRot = r; saveRig(); }
         renderView(); if (eye === "L") renderRotRight();
-      }, () => currentKey() && pushHistory());
+      }, () => pushHistory());
       if (eye === "R" && link) inp.disabled = true;
     }
   }
   function renderRotRight() { const rot = currentRot(); for (const ax of ["x", "y", "z"]) { const i = document.getElementById(`rot_R_${ax}`); if (i) { i.value = rot.R[ax]; i.previousSibling.lastChild.textContent = `${Math.round(rot.R[ax])}°`; } } }
   on("optRotLink", "change", (e) => {
-    const k = currentKey();
-    if (k) { k.rotLink = e.target.checked; if (k.rotLink) k.eyeRot.R = { x: k.eyeRot.L.x, y: -k.eyeRot.L.y, z: -k.eyeRot.L.z }; saveStory(); }
+    const k = holder();
+    if (k) { k.rotLink = e.target.checked; if (k.rotLink) k.eyeRot.R = { x: k.eyeRot.L.x, y: -k.eyeRot.L.y, z: -k.eyeRot.L.z }; saveHolder(); }
     else { const r = { L: { x: 0, y: 0, z: 0 }, ...(RIG.eyeRot || {}) }; if (!e.target.checked) r.R = rigEyeRot().R; r.link = e.target.checked; RIG.eyeRot = r; saveRig(); }
     renderRot(); renderView();
   });
@@ -856,15 +954,21 @@
   on("btnEllApply", "click", () => { const tg = editTarget(); if (!tg) return; pushHistory(); tg.set("L", ellipsePts(ELL)); if (!mirrored()) tg.set("R", mirror(ellipsePts(ELL))); tg.save(); renderAll(); });
 
   // ---- props (one library prop per frame)
-  function currentProp() { const k = currentKey(); return k ? k.prop : state.live.prop; }
-  function setProp(pr) { const k = currentKey(); if (k) { pushHistory(); k.prop = pr; saveStory(); } else state.live.prop = pr; renderAll(); }
+  function currentProp() { const h = holder(); return h ? h.prop : null; }
+  function setProp(pr) {
+    const h = holder(); if (!h) return setStatus("พร็อพใช้ได้ในโหมดจัดท่าหรือตอนแก้คีย์", "error");
+    pushHistory(); h.prop = pr; saveHolder(); renderAll();
+  }
   function renderPropGrid() {
     const grid = document.getElementById("propGrid"), q = document.getElementById("propFilter").value.trim().toLowerCase(), cur = currentProp();
     grid.replaceChildren();
+    const usable = !!holder();
+    document.getElementById("propHint").textContent = usable ? "เลือกได้ 1 ชิ้นต่อคีย์ ลากพร็อพในพื้นที่แก้รูปเพื่อย้าย (ในแอปพร็อพอยู่หน้าดวงตา)" : "พร็อพใช้ได้ในโหมดจัดท่าหรือตอนแก้คีย์ (รูปในคลังไม่มีพร็อพ)";
+    document.getElementById("btnPropNone").disabled = !usable || !cur;
     document.getElementById("propNow").textContent = cur ? (propMeta(cur.index) || {}).name || cur.index : "ไม่มี";
     for (const m of state.props) {
       if (q && !m.name.toLowerCase().includes(q)) continue;
-      const b = document.createElement("button"); b.className = "prop-cell"; b.setAttribute("aria-pressed", !!cur && cur.index === m.index); b.title = m.name;
+      const b = document.createElement("button"); b.className = "prop-cell"; b.setAttribute("aria-pressed", !!cur && cur.index === m.index); b.title = m.name; b.disabled = !usable;
       const img = document.createElement("img"); img.src = `props/${m.index}.png`; img.alt = ""; img.loading = "lazy";
       const s = document.createElement("span"); s.textContent = m.name; b.append(img, s);
       b.addEventListener("click", () => setProp({ index: m.index, dx: 0, dy: 0, scale: 1, rot: 0, opacity: 1, ...(cur && cur.index === m.index ? cur : {}) }));
@@ -879,7 +983,7 @@
     if (busy("propSliders") && pr) { return; }
     box.replaceChildren(); if (!pr) return;
     for (const [k, label, min, max, step, fmt] of [["dx", "เลื่อน ซ้าย/ขวา", -300, 300, 1, (v) => `${v}`], ["dy", "เลื่อน ขึ้น/ลง", -300, 300, 1, (v) => `${v}`], ["scale", "ขนาด", 0.1, 3, 0.01, (v) => `${Math.round(v * 100)}%`], ["rot", "หมุน", -180, 180, 1, (v) => `${v}°`], ["opacity", "ความชัด", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`]])
-      sliderRow(box, "prop_" + k, label, min, max, step, pr[k], fmt, (v) => { currentProp()[k] = v; if (currentKey()) saveStory(); renderView(); }, () => currentKey() && pushHistory());
+      sliderRow(box, "prop_" + k, label, min, max, step, pr[k], fmt, (v) => { currentProp()[k] = v; saveHolder(); renderView(); }, () => pushHistory());
   }
 
   // ---- motion defaults for new keys
@@ -887,7 +991,11 @@
     if (busy("motionSliders")) return; const box = document.getElementById("motionSliders"); box.replaceChildren(); const m = state.motion;
     for (const [k, label, min, max, step, fmt] of [["morphMs", "เวลาเปลี่ยนรูป", 100, 1500, 10, (v) => `${v} ms`], ["popLag", "ตาขวาช้ากว่า", 0, 12, 1, (v) => `${v} เฟรม`], ["popGainR", "แรงเด้งตาขวา", 0, 1.2, .05, (v) => `${Math.round(v * 100)}%`], ["pop", "ความแรงการเด้ง", 0, 2, .05, (v) => `${Math.round(v * 100)}%`], ["tremble", "สั่นทั้งดวงตา", 0, 6, .1, (v) => (+v).toFixed(1)], ["quiver", "ขอบตาล่างสั่น", 0, 8, .1, (v) => (+v).toFixed(1)]])
       sliderRow(box, "mo_" + k, label, min, max, step, m[k], fmt, (v) => { m[k] = v; saveMotion(); });
+    const de = document.getElementById("defaultEase");
+    if (!de.options.length) for (const [v, n] of Object.entries(EASE_NAMES)) { const o = document.createElement("option"); o.value = v; o.textContent = n; de.appendChild(o); }
+    de.value = EASE[m.ease] ? m.ease : "jelly";
   }
+  on("defaultEase", "change", (e) => { state.motion.ease = e.target.value; saveMotion(); });
 
   // ---- faces
   function renderFaces() {
@@ -918,9 +1026,9 @@
   on("refCell", "change", (e) => { const b = state.shapes[state.selected]; if (!b) return; const v = e.target.value; b.ref = v ? { sheet: +v.split(":")[0], cell: +v.split(":")[1] } : null; scheduleSave(state.selected); renderAll(); });
   function renderRefPanel() {
     const b = state.shapes[state.selected], sel = document.getElementById("refCell");
-    sel.disabled = !!currentKey(); sel.value = b && b.ref ? `${b.ref.sheet}:${b.ref.cell}` : "";
+    sel.disabled = !!holder(); sel.value = b && b.ref ? `${b.ref.sheet}:${b.ref.cell}` : "";
     renderRefThumb();
-    if (busy("fitSliders")) return; const box = document.getElementById("fitSliders"); box.replaceChildren(); if (!b || currentKey()) return;
+    if (busy("fitSliders")) return; const box = document.getElementById("fitSliders"); box.replaceChildren(); if (!b || holder()) return;
     const fit = { ...DEFAULT_FIT, ...(b.refFit || {}) };
     for (const [k, label, min, max, step, fmt] of [["scale", "ขนาดชีท", .5, 2, .01, (v) => `${Math.round(v * 100)}%`], ["opacity", "ความจางชีท", 0, 1, .05, (v) => `${Math.round(v * 100)}%`], ["dx", "เลื่อน ซ้าย/ขวา", -150, 150, 1, (v) => `${v}`], ["dy", "เลื่อน ขึ้น/ลง", -150, 150, 1, (v) => `${v}`]])
       sliderRow(box, "fit_" + k, label, min, max, step, fit[k], fmt, (v) => { b.refFit = { ...DEFAULT_FIT, ...(b.refFit || {}), [k]: v }; renderView(); scheduleSave(state.selected); });
@@ -937,17 +1045,32 @@
     for (let t = 0; t <= dur; t += step) { const d = document.createElement("div"); d.className = "tick"; d.style.left = tToX(t) + "px"; d.textContent = (t / 1000).toFixed(t % 1000 ? 1 : 0) + "s"; ruler.appendChild(d); }
     if (!state.story) return;
     state.story.keys.forEach((k, i) => {
-      const d = document.createElement("div"); d.className = "kf"; d.style.left = tToX(k.t) + "px"; d.setAttribute("aria-current", i === state.key); d.tabIndex = 0;
+      const d = document.createElement("div"); d.className = "kf" + (k === state.flash ? " new" : ""); d.style.left = tToX(k.t) + "px"; d.setAttribute("aria-current", i === state.key); d.tabIndex = 0;
       d.setAttribute("aria-label", `คีย์ ${i + 1} ที่ ${(k.t / 1000).toFixed(2)} วินาที`);
       d.appendChild(thumbSvg(k.eyes));
       const s = document.createElement("span"); s.textContent = `${i + 1} · ${(k.t / 1000).toFixed(2)}`; d.appendChild(s);
       if (k.prop) { const pd = document.createElement("div"); pd.className = "pdot"; pd.title = "มีพร็อพ"; d.appendChild(pd); }
+      if (k.sound) { const sd = document.createElement("div"); sd.className = "snd"; sd.textContent = "♪"; sd.title = "เสียง " + k.sound; d.appendChild(sd); }
+      // press: select; drag: move in time. The track is re-rendered only on release, so the
+      // pressed element (and its pointer capture) stays alive while dragging.
       d.addEventListener("pointerdown", (e) => {
-        e.stopPropagation(); stopPlay(); selectKey(i);
-        const x0 = e.clientX, t0 = k.t; let moved = false; d.setPointerCapture(e.pointerId);
-        const mv = (ev) => { const dt = (ev.clientX - x0) / Math.max(1, track.clientWidth - 32) * storyDur(); if (Math.abs(ev.clientX - x0) > 3) { if (!moved) pushHistory(); moved = true; } if (moved) { k.t = Math.round(Math.max(0, Math.min(storyDur(), t0 + dt)) / 10) * 10; d.style.left = tToX(k.t) + "px"; s.textContent = `${i + 1} · ${(k.t / 1000).toFixed(2)}`; } };
-        const up = () => { d.removeEventListener("pointermove", mv); d.removeEventListener("pointerup", up); if (moved) { sortKeys(k); saveStory(); renderAll(); } };
-        d.addEventListener("pointermove", mv); d.addEventListener("pointerup", up);
+        e.stopPropagation(); stopPlay(true);
+        track.querySelectorAll(".kf").forEach((n) => n.setAttribute("aria-current", n === d));
+        const x0 = e.clientX, t0 = k.t; let moved = false;
+        try { d.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+        const mv = (ev) => {
+          if (!moved && Math.abs(ev.clientX - x0) > 3) { pushHistory("story"); moved = true; }
+          if (!moved) return;
+          const dt = (ev.clientX - x0) / Math.max(1, track.clientWidth - 32) * storyDur();
+          k.t = Math.round(Math.max(0, Math.min(storyDur(), t0 + dt)) / 10) * 10;
+          d.style.left = tToX(k.t) + "px"; s.textContent = `${i + 1} · ${(k.t / 1000).toFixed(2)}`;
+        };
+        const up = () => {
+          d.removeEventListener("pointermove", mv); d.removeEventListener("pointerup", up); d.removeEventListener("pointercancel", up);
+          if (moved) { state.story.keys.sort((a, b) => a.t - b.t); saveStory(); }
+          selectKey(state.story.keys.indexOf(k));
+        };
+        d.addEventListener("pointermove", mv); d.addEventListener("pointerup", up); d.addEventListener("pointercancel", up);
       });
       d.addEventListener("keydown", (e) => { if (e.key === "Enter") selectKey(i); if (e.key === "Delete") { selectKey(i); deleteKey(); } });
       track.appendChild(d);
@@ -956,33 +1079,70 @@
   }
   function sortKeys(keep) { state.story.keys.sort((a, b) => a.t - b.t); state.key = keep ? state.story.keys.indexOf(keep) : state.key; }
   function movePlayhead() { document.getElementById("playhead").style.left = tToX(state.t) + "px"; document.getElementById("timeNow").textContent = `${(state.t / 1000).toFixed(2)} s / ${(storyDur() / 1000).toFixed(1)} s`; }
+  // the ruler / empty track: show the story at that moment (read-only) until a key or a mode is picked
   track.addEventListener("pointerdown", (e) => {
-    if (e.target.closest(".kf")) return;
-    stopPlay(); state.key = -1; track.setPointerCapture(e.pointerId);
-    const scrub = (ev) => { const r = track.getBoundingClientRect(); state.t = xToT(ev.clientX - r.left + track.parentElement.scrollLeft * 0); movePlayhead(); if (state.story) render(storyFrame(state.t), false); renderEditing(); };
+    if (e.target.closest(".kf") || !state.story) return;
+    stopPlay(true); state.key = -1; state.viewTime = true;
+    try { track.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    const scrub = (ev) => { const r = track.getBoundingClientRect(); state.t = xToT(ev.clientX - r.left); movePlayhead(); renderView(); };
     scrub(e);
     const up = () => { track.removeEventListener("pointermove", scrub); track.removeEventListener("pointerup", up); renderAll(); };
     track.addEventListener("pointermove", scrub); track.addEventListener("pointerup", up);
   });
-  function selectKey(i) { state.key = i; if (state.story && state.story.keys[i]) { state.t = state.story.keys[i].t; } state.point = { eye: "L", i: 0 }; renderAll(); }
-  on("btnDeselect", "click", () => { state.key = -1; renderAll(); });
-  function snapshotKey(t) {
-    const fr = workFrame(), m = state.motion, k = currentKey();
-    return { t, ease: k ? k.ease : m.ease, pop: true, tremble: k ? k.tremble : 0, quiver: k ? k.quiver : 0,
-             eyes: clone(fr.eyes), mirror: mirrored(), from: k ? k.from : state.selected,
-             pose: clone(fr.pose), eyeRot: clone(fr.eyeRot), rotLink: k ? k.rotLink !== false : (RIG.eyeRot || {}).link !== false,
-             prop: fr.prop ? clone(fr.prop) : null, note: "" };
+  function selectKey(i) {
+    state.key = i; state.viewTime = false; state.flash = null;
+    if (state.story && state.story.keys[i]) state.t = state.story.keys[i].t;
+    state.point = { eye: "L", i: 0 }; renderAll();
   }
+  on("btnDeselect", "click", () => setMode("compose"));
+  // a free moment after `after` (and before the next key), or null when there is no room
+  function freeTime(after) {
+    const keys = state.story.keys, dur = storyDur(), gap = Math.max(200, state.motion.morphMs + 300);
+    if (!keys.length) return 0;
+    const next = keys.filter((q) => q.t > after + 1).reduce((m, q) => Math.min(m, q.t), Infinity);
+    let t = after + gap;
+    if (next < Infinity && t > next - 100) t = (after + next) / 2;     // squeeze in between
+    if (next === Infinity) t = Math.min(t, dur);
+    t = Math.round(t / 10) * 10;
+    if (t <= after + 30 || t > dur || keys.some((q) => Math.abs(q.t - t) < 30)) return null;
+    return t;
+  }
+  const lastKeyT = () => state.story.keys.reduce((m, q) => Math.max(m, q.t), -Infinity);
+  function snapshotKey(t) {
+    const h = holder() || ensureCompose(), m = state.motion, k = currentKey();
+    return { t, ease: k ? k.ease : EASE[m.ease] ? m.ease : "jelly", pop: k ? k.pop !== false : true,
+             tremble: k ? k.tremble || 0 : 0, quiver: k ? k.quiver || 0 : 0, sound: "",
+             eyes: clone(h.eyes), mirror: h.mirror !== false, from: h.from,
+             pose: clone(h.pose), eyeRot: clone(h.eyeRot), rotLink: h.rotLink !== false,
+             prop: h.prop ? clone(h.prop) : null, note: k ? "" : h.note || "" };
+  }
+  // "เพิ่มท่านี้เป็นคีย์": from the composition the key goes after the last key and the composition
+  // stays as it is (adjust a little, add again); from a selected key it inserts a copy after it
   on("btnAddKey", "click", () => {
     if (!state.story) return setStatus("สร้างหรือเลือก story ก่อน", "error");
-    const keys = state.story.keys, gap = Math.max(200, state.motion.morphMs + 300);
-    let t = state.key >= 0 ? keys[state.key].t + gap : (keys.length ? keys[keys.length - 1].t + gap : 0);
-    t = Math.min(storyDur(), Math.round(t / 10) * 10);
-    pushHistory(); const k = snapshotKey(t); keys.push(k); sortKeys(k); state.t = t; saveStory(); renderAll();
-    setStatus(`เพิ่มคีย์ ${state.key + 1} ที่ ${(t / 1000).toFixed(2)} s`);
+    const k = currentKey();
+    if (!k && state.mode === "shape") {
+      // what is on screen becomes the composition, and the view switches to composing
+      const fr = workFrame();
+      state.compose = { eyes: clone(fr.eyes), mirror: mirrored(), from: state.selected, pose: clone(fr.pose), eyeRot: clone(fr.eyeRot),
+                        rotLink: (RIG.eyeRot || {}).link !== false, prop: null, note: "" };
+      state.mode = "compose"; saveCompose(); try { localStorage.setItem("eyelab.mode", "compose"); } catch { /* ignore */ }
+    }
+    const t = k ? freeTime(k.t) : freeTime(state.story.keys.length ? lastKeyT() : -1);
+    if (t == null) return setStatus(k ? "ไม่มีที่ว่างหลังคีย์นี้: ลากคีย์ถัดไปออกไปก่อน" : "ไม่มีที่ว่างหลังคีย์สุดท้าย: ลากคีย์ให้ชิดกันขึ้น เพิ่มความยาว หรือเลือกคีย์แล้วกดเพิ่มเพื่อแทรก", "error");
+    pushHistory("story");
+    const nk = snapshotKey(t); state.story.keys.push(nk); state.story.keys.sort((a, b) => a.t - b.t);
+    state.key = k ? state.story.keys.indexOf(nk) : -1; state.flash = k ? null : nk; state.t = t; state.viewTime = false;
+    saveStory(); renderAll();
+    setStatus(`เพิ่มคีย์ ${state.story.keys.indexOf(nk) + 1} ที่ ${(t / 1000).toFixed(2)} s`);
   });
-  on("btnDupKey", "click", () => { const k = currentKey(); if (!k) return; const c = clone(k); c.t = Math.min(storyDur(), k.t + 300); state.story.keys.push(c); sortKeys(c); saveStory(); renderAll(); });
-  function deleteKey() { if (!currentKey()) return; pushHistory(); state.story.keys.splice(state.key, 1); state.key = -1; saveStory(); renderAll(); }
+  on("btnDupKey", "click", () => {
+    const k = currentKey(); if (!k) return setStatus("เลือกคีย์ที่จะทำซ้ำก่อน", "error");
+    const t = freeTime(k.t); if (t == null) return setStatus("ไม่มีที่ว่างหลังคีย์นี้", "error");
+    pushHistory("story"); const c = clone(k); c.t = t; state.story.keys.push(c); state.story.keys.sort((a, b) => a.t - b.t);
+    state.key = state.story.keys.indexOf(c); saveStory(); renderAll();
+  });
+  function deleteKey() { if (!currentKey()) return; pushHistory("story"); state.story.keys.splice(state.key, 1); state.key = -1; saveStory(); renderAll(); }
   on("btnDelKey", "click", deleteKey);
   function renderKeyProps() {
     const box = document.getElementById("keyProps"), k = currentKey();
@@ -990,7 +1150,11 @@
     if (!k) { const p = document.createElement("p"); p.className = "hint"; p.textContent = state.story ? "เลือกคีย์เพื่อตั้งเวลา เส้นโค้ง และเอฟเฟกต์" : "เลือกหรือสร้าง story เพื่อเริ่ม"; box.appendChild(p); return; }
     const tl = document.createElement("label"); tl.className = "row"; tl.textContent = "เวลา ";
     const ti = document.createElement("input"); ti.type = "number"; ti.min = 0; ti.max = storyDur(); ti.step = 10; ti.value = k.t; ti.id = "keyT";
-    ti.addEventListener("change", () => { pushHistory(); k.t = Math.max(0, Math.min(storyDur(), +ti.value || 0)); sortKeys(k); saveStory(); renderAll(); });
+    ti.addEventListener("change", () => {
+      const t = Math.round(Math.max(0, Math.min(storyDur(), +ti.value || 0)) / 10) * 10;
+      if (state.story.keys.some((q) => q !== k && Math.abs(q.t - t) < 30)) { ti.value = k.t; return setStatus("มีคีย์อื่นอยู่ที่เวลานั้นแล้ว", "error"); }
+      pushHistory("story"); k.t = t; sortKeys(k); saveStory(); renderAll();
+    });
     tl.append(ti, document.createTextNode(" ms")); box.appendChild(tl);
     const el_ = document.createElement("label"); el_.className = "row"; el_.textContent = "ไปคีย์ถัดไปแบบ ";
     const es = document.createElement("select"); es.id = "keyEase";
@@ -1003,23 +1167,43 @@
     pl.append(pc, document.createTextNode(" เด้งเมื่อถึงคีย์นี้")); box.appendChild(pl);
     sliderRow(box, "keyTremble", "สั่นทั้งดวงตา (ช่วงนี้)", 0, 6, .1, k.tremble || 0, (v) => (+v).toFixed(1), (v) => { k.tremble = v; saveStory(); });
     sliderRow(box, "keyQuiver", "ขอบตาล่างสั่น (ช่วงนี้)", 0, 8, .1, k.quiver || 0, (v) => (+v).toFixed(1), (v) => { k.quiver = v; saveStory(); });
+    // a sound when the key lands: becomes the app's cue (RiveMoodStories.kt) when Claude ships the story
+    const sl = document.createElement("label"); sl.className = "row"; sl.textContent = "เสียงตอนถึงคีย์ ";
+    const ss = document.createElement("select"); ss.id = "keySound";
+    for (const v of ["", ...state.sounds]) { const o = document.createElement("option"); o.value = v; o.textContent = v || "(ไม่มี)"; ss.appendChild(o); }
+    ss.value = k.sound || ""; ss.addEventListener("change", () => { pushHistory("story"); k.sound = ss.value; saveStory(); renderTrack(); renderStoryBar(); });
+    sl.appendChild(ss); box.appendChild(sl);
+    const cb = document.createElement("button"); cb.textContent = "จัดท่าต่อจากคีย์นี้";
+    cb.title = "คัดลอกคีย์นี้ไปเป็นท่าที่จัด แล้วปรับต่อ กดเพิ่มเป็นคีย์ใหม่ได้";
+    cb.addEventListener("click", () => {
+      const c = clone(k); state.compose = { eyes: c.eyes, mirror: c.mirror !== false, from: c.from, pose: c.pose, eyeRot: c.eyeRot, rotLink: c.rotLink !== false, prop: c.prop, note: "" };
+      saveCompose(); setMode("compose");
+    });
+    box.appendChild(cb);
   }
   // play / stop
   let raf = 0, playT0 = 0, playFrom = 0;
   function togglePlay() { state.playing ? stopPlay() : startPlay(); }
   function startPlay() {
     if (!state.story || !state.story.keys.length) return setStatus("ยังไม่มีคีย์ใน story นี้", "error");
-    state.playing = true; state.key = -1; playFrom = state.t >= storyDur() - 1 ? 0 : state.t; playT0 = performance.now();
+    state.playing = true; state.key = -1; state.flash = null; playFrom = state.t >= storyDur() - 1 ? 0 : state.t; playT0 = performance.now();
     document.getElementById("btnPlay").textContent = "⏸ หยุด"; renderAll();
     const tick = (ts) => {
       if (!state.playing) return;
       let t = playFrom + (ts - playT0);
       if (t > storyDur()) { if (document.getElementById("optLoop").checked) { playFrom = 0; playT0 = ts; t = 0; } else { state.t = storyDur(); stopPlay(); return; } }
+      renderFitWarning(storyFrame(t));
       state.t = t; render(storyFrame(t), false); movePlayhead(); raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
   }
-  function stopPlay() { if (!state.playing) return; state.playing = false; cancelAnimationFrame(raf); document.getElementById("btnPlay").textContent = "▶ เล่น"; renderAll(); }
+  // stop keeps showing the moment it stopped at (read-only) -- quiet = no re-render (the caller does it)
+  function stopPlay(quiet) {
+    if (!state.playing) return;
+    state.playing = false; cancelAnimationFrame(raf); document.getElementById("btnPlay").textContent = "▶ เล่น";
+    state.viewTime = true;
+    if (!quiet) renderAll();
+  }
   on("btnPlay", "click", togglePlay);
   // stories: list, open, create, target, delete
   function renderStoryBar() {
@@ -1029,7 +1213,7 @@
     sel.value = state.story ? state.story.name : "";
     const tg = document.getElementById("storyTarget"); tg.replaceChildren();
     const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "(ยังไม่ใช้ในแอป)"; tg.appendChild(o0);
-    for (const m of state.moods) { const o = document.createElement("option"); o.value = m.name; o.textContent = m.name; tg.appendChild(o); }
+    for (const m of state.moods) { const o = document.createElement("option"); o.value = m.name; o.textContent = m.nameTh ? `${m.nameTh} (${m.name})` : m.name; tg.appendChild(o); }
     tg.value = state.story ? state.story.intent || "" : ""; tg.disabled = !state.story;
     const du = document.getElementById("storyDur"); du.value = storyDur(); du.disabled = !state.story || !!(state.story && state.story.intent);
     du.title = state.story && state.story.intent ? "ความยาวเท่ากับ story เดิมที่จะแทน" : "";
@@ -1039,20 +1223,49 @@
     if (document.activeElement !== sn) sn.value = state.story ? state.story.note || "" : "";
     sn.disabled = !state.story;
     document.getElementById("storyClaudeNote").textContent = (state.story && state.story.claudeNote) || "–";
+    // when the app plays the intended story, and which sounds it plays today
+    const info = document.getElementById("intentInfo"), mood = state.story && state.moods.find((x) => x.name === state.story.intent);
+    info.hidden = !mood; info.textContent = "";
+    if (mood) {
+      const when = (mood.emotions || []).join(", ") + (mood.emotions && mood.emotions.includes("BORED") ? " (และสุ่มเล่นเองตอนว่างนาน)" : "");
+      const cues = (mood.cues || []).map((c) => `${(c.ms / 1000).toFixed(2)}s ${c.sound}`).join(", ");
+      const mine = state.story.keys.filter((q) => q.sound).length;
+      info.textContent = `แอปเล่นเรื่องนี้เมื่ออารมณ์เป็น ${when || "–"} · ยาว ${(mood.durationMs / 1000).toFixed(1)} วิ แล้วค้างท่าสุดท้าย 1.5 วิ ก่อนกลับหน้าอารมณ์ปกติ · เสียงเดิมในแอป: ${cues || "ไม่มี"}`
+        + (mine ? ` · story นี้มีเสียง ${mine} จุด (จะใช้แทนเสียงเดิม)` : " · story นี้ยังไม่มีเสียง (ตอนนำเข้า Claude จะถามว่าจะเงียบหรือใช้เสียงเดิม)");
+    }
   }
+  // keys written by hand / by Claude may leave fields out: fill them so every tool works
+  function normalizeKey(k) {
+    const z = { x: 0, y: 0, z: 0 }, rot = k.eyeRot || {};
+    k.t = +k.t || 0; k.ease = EASE[k.ease] ? k.ease : "jelly"; k.pop = k.pop !== false;
+    k.tremble = +k.tremble || 0; k.quiver = +k.quiver || 0; k.sound = k.sound || "";
+    k.pose = { yaw: 0, pitch: 0, roll: 0, ...(k.pose || {}) };
+    k.eyeRot = { L: { ...z, ...(rot.L || {}) }, R: { ...z, ...(rot.R || {}) } };
+    k.eyes = k.eyes || clone(libraryEyes(k.from || state.selected));
+    for (const e of ["L", "R"]) {
+      const ey = k.eyes[e] = k.eyes[e] || {};
+      if (!Array.isArray(ey.pts) || ey.pts.length !== N) ey.pts = e === "L" ? round() : mirror(round());
+      ey.color = COLORS[ey.color] ? ey.color : "cyan";
+    }
+    k.prop = k.prop && k.prop.index != null ? { dx: 0, dy: 0, scale: 1, rot: 0, opacity: 1, ...k.prop } : null;
+    return k;
+  }
+  function normalizeStory(st) { st.keys = (st.keys || []).map(normalizeKey).sort((a, b) => a.t - b.t); st.durationMs = +st.durationMs || 7000; return st; }
   async function openStory(name) {
     stopPlay();
     if (!name) { state.story = null; state.key = -1; renderAll(); return; }
-    try { state.story = await api("GET", "/api/stories/" + name); state.story.name = name; state.key = -1; state.t = 0; await loadBase(); renderAll(); } catch (err) { setStatus("เปิด story ไม่ได้: " + err.message, "error"); }
+    try { state.story = normalizeStory(await api("GET", "/api/stories/" + name)); state.story.name = name; state.key = -1; state.t = 0; state.viewTime = false; await loadBase(); renderAll(); } catch (err) { setStatus("เปิด story ไม่ได้: " + err.message, "error"); }
   }
   on("storySel", "change", (e) => openStory(e.target.value));
   on("btnStoryNew", "click", async () => {
     const inp = document.getElementById("storyNew"), name = inp.value.trim().toLowerCase();
     if (!/^[a-z0-9_]{2,24}$/.test(name)) return setStatus("ชื่อ story ใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error");
     if (state.stories.some((s) => s.name === name)) return setStatus(`มี story ชื่อ ${name} แล้ว`, "error");
-    stopPlay(); state.key = -1;
+    stopPlay(true); state.key = -1;
+    if (state.mode === "shape") { const fr = workFrame(); state.compose = { eyes: clone(fr.eyes), mirror: mirrored(), from: state.selected, pose: clone(fr.pose), eyeRot: clone(fr.eyeRot), rotLink: (RIG.eyeRot || {}).link !== false, prop: null, note: "" }; saveCompose(); }
+    state.mode = "compose"; try { localStorage.setItem("eyelab.mode", "compose"); } catch { /* ignore */ }
     state.story = { name, by: "user", intent: null, durationMs: 7000, keys: [] };
-    state.story.keys.push(snapshotKey(0)); state.key = 0;           // enter: the story starts from what is on screen now
+    state.story.keys.push(snapshotKey(0)); state.flash = state.story.keys[0];   // the story starts from what is on screen now
     inp.value = ""; await saveStoryNow(); await loadStories(); renderAll();
   });
   on("storyTarget", "change", (e) => {
@@ -1065,9 +1278,14 @@
   on("storyNote", "input", (e) => { if (state.story) { state.story.note = e.target.value; saveStory(); } });
   async function loadBase() {
     state.base = null; const b = state.story && state.story.basedOn;
-    if (b) try { state.base = await api("GET", "/api/stories/" + b); } catch { state.base = null; }
+    if (b) try { state.base = normalizeStory(await api("GET", "/api/stories/" + b)); } catch { state.base = null; }
   }
-  on("storyDur", "change", (e) => { if (!state.story) return; state.story.durationMs = Math.max(500, Math.min(20000, +e.target.value || 7000)); saveStory(); renderAll(); });
+  on("storyDur", "change", (e) => {
+    if (!state.story) return; pushHistory("story");
+    state.story.durationMs = Math.max(500, Math.min(20000, +e.target.value || 7000));
+    for (const k of state.story.keys) k.t = Math.min(k.t, state.story.durationMs);      // keys past the new end come back to it
+    saveStory(); renderAll();
+  });
   on("btnStoryDel", "click", () => { if (state.story) document.getElementById("storyDelConfirm").hidden = false; });
   on("btnStoryDelNo", "click", () => { document.getElementById("storyDelConfirm").hidden = true; });
   on("btnStoryDelYes", "click", async () => {
@@ -1080,7 +1298,7 @@
   const timers = {}, writing = {}, again = {}, dirtyUntil = {};
   const markDirty = (key, ms = 1500) => { dirtyUntil[key] = Date.now() + ms; };
   const isDirty = (key) => (dirtyUntil[key] || 0) > Date.now();
-  let version = 0;
+  let version = 0, dataMtime = 0;
   function setStatus(text, kind = "") { const s = document.getElementById("status"); s.textContent = text; s.className = "status " + kind; }
   async function api(method, path, body) {
     const r = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -1123,10 +1341,14 @@
     const changedList = names(list) !== names(state.stories);
     state.stories = list;
     const cur = state.story && list.find((s) => s.name === state.story.name);
+    if (state.story && !cur && !storyPending && state.story.mtime) {
+      setStatus("story " + state.story.name + " ถูกลบจากไฟล์แล้ว", "error");
+      state.story = null; state.key = -1; state.viewTime = false; renderAll(); return;
+    }
     if (cur && state.story.mtime && cur.mtime > state.story.mtime + 1e-3 && !storyPending && !state.dragging) {
       const keep = { key: state.key, t: state.t, name: state.story.name };
       try {
-        state.story = await api("GET", "/api/stories/" + keep.name); state.story.name = keep.name;
+        state.story = normalizeStory(await api("GET", "/api/stories/" + keep.name)); state.story.name = keep.name;
         state.key = keep.key < state.story.keys.length ? keep.key : -1; state.t = Math.min(keep.t, storyDur());
         await loadBase(); setStatus("Claude อัปเดต story " + keep.name + " แล้ว", "claude");
         if (!state.playing) renderAll();
@@ -1177,10 +1399,10 @@
   async function poll() {
     try {
       const v = await api("GET", "/api/version");
-      if (!online || v.version !== version) apply(await api("GET", "/api/data"));
+      if (!online || v.version !== version || (v.mtime && v.mtime !== dataMtime)) { dataMtime = v.mtime || 0; apply(await api("GET", "/api/data")); }
       if (!online) {
         online = true; setStatus("เชื่อมแล้ว แก้ได้เลย");
-        const meta = await api("GET", "/api/meta"); state.props = meta.props; state.moods = meta.moods; state.faceNames = meta.faces;
+        const meta = await api("GET", "/api/meta"); state.props = meta.props; state.moods = meta.moods; state.faceNames = meta.faces; state.sounds = meta.sounds || [];
         await loadStories(); if (state.stories.length && !state.story) await openStory(state.stories[0].name); renderAll();
       }
       await syncStories();
@@ -1193,14 +1415,16 @@
   function renderAll() {
     renderList(); renderRig(); renderPose(); renderHead(); renderRot(); renderPropGrid(); renderPropSliders(); renderMotion(); renderFaces();
     renderRefPanel(); renderPointInfo(); renderStoryBar(); renderTrack(); renderKeyProps();
-    const k = currentKey(), note = document.getElementById("note");
-    if (document.activeElement !== note) note.value = k ? k.note || "" : (state.shapes[state.selected] || {}).note || "";
-    const cn = document.getElementById("claudeNote"), ctext = k ? k.claudeNote : (state.shapes[state.selected] || {}).claudeNote;
+    const h = holder(), note = document.getElementById("note");
+    if (document.activeElement !== note) note.value = h ? h.note || "" : (state.shapes[state.selected] || {}).note || "";
+    const cn = document.getElementById("claudeNote"), ctext = h ? h.claudeNote : (state.shapes[state.selected] || {}).claudeNote;
     cn.hidden = !ctext; cn.textContent = ctext ? "Claude: " + ctext : "";
     document.getElementById("color").value = editEyes().L.color;
     if (state.playing) renderEditing(); else renderView();
   }
   fillRefSelect(); loadImages(); renderEll(); renderAll(); poll();
+  // for Claude's checks against the Rive render (ship.py check --shots): read-only helpers
+  window.eyelabDebug = { state, storyFrame, workFrame, frameBoxes, render: (fr) => render(fr, false), svg };
 })();
 </script>
 </body>
