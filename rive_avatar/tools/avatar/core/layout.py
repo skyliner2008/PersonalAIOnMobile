@@ -6,8 +6,8 @@ CX, CY = 250.0, 250.0
 # LOOI reads through the eyes alone, so they are big and sit close to the
 # middle. Eye geometry is authored at radius 54 and the variant node scales it
 # up by EYE_SCALE, which keeps every shape, glow and shadow in proportion.
-EYE_SCALE = 1.32
-EYE_DX = 100.0         # eye offset from face centre
+EYE_SCALE = float(EYE_RIG.get("eyeScale", 1.32))   # Eye Lab "ขนาดตา"
+EYE_DX = float(EYE_RIG.get("eyeDx", 100.0))         # eye offset from face centre (Eye Lab "ระยะห่างตา")
 EYE_Y = -20.0          # eye row, relative to face centre
 BROW_Y = -120.0
 MOUTH_Y = 100.0

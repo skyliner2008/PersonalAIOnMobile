@@ -92,7 +92,8 @@ def eye_color(v):
 # nodes (it shifts toward where the eye looks), the darker BACK shape stays put
 # a little below centre -- so the crescent of back that shows moves opposite to
 # the gaze instead of always sitting on one side.
-BACK_DY = 5.0
+BACK_DY = float(EYE_RIG.get("backDy", 5.0))   # Eye Lab: how far the back layer sits below the front
+BACK_DX = float(EYE_RIG.get("backDx", 0.0))   # ...and sideways
 EYE_BACK = {}        # front variant id -> back variant id
 
 
@@ -117,7 +118,7 @@ def emit_eye_variant(d, v, s, tag, part="front"):
         if v == V_DOLLAR:
             solid(d + 1, "Bar", lambda k: g_rect(k, 11, 116, r=5), main)
     else:
-        w(d + 1, '<Shape x="0" y="%g" name="Shadow">' % (BACK_DY / EYE_SCALE))
+        w(d + 1, '<Shape x="%g" y="%g" name="Shadow">' % (BACK_DX / EYE_SCALE, BACK_DY / EYE_SCALE))
         eye_geo(d + 2, v, s)
         if v in V_STROKED:
             p_stroke(d + 2, back, {V_SPIRAL: 13, V_DOLLAR: 13, V_RING: 17}.get(v, 22))

@@ -91,16 +91,14 @@ MORPH_COLOR = {"angry": (RED, RED_DEEP)}   # (front, back); everything else cyan
 # ---- shapes edited in the Eye Lab (tools/eyelab/, data/eye_lab.json) win ----
 # The JSON is the shared source of truth: the local page writes it, Claude edits it,
 # this generator reads it. The table above is only the fallback without the file.
-import json as _json
-import os as _os
-
-EYE_LAB_PATH = _os.path.join(AVATAR_DIR, "data", "eye_lab.json")
-EYE_LAB = {}
+# EYE_LAB / EYE_RIG are loaded by build.py before any part runs
 MORPH_SHAPES_R = {}            # shapes whose right eye is drawn on its own (not mirrored)
 _LAB_COLORS = {"cyan": (CYAN, BLUE), "red": (RED, RED_DEEP), "pink": (HEART, PINK_DEEP), "gold": (GOLD, GOLD_DEEP)}
-if _os.path.exists(EYE_LAB_PATH):
-    with open(EYE_LAB_PATH, encoding="utf-8") as _f:
-        EYE_LAB = _json.load(_f)
+# the morph eye's aura (Eye Lab "ออร่า"): feather size, glow line width, glow opacity
+MORPH_GLOW = float(EYE_RIG.get("glowFeather", GLOW))
+MORPH_GLOW_W = float(EYE_RIG.get("glowWidth", 5))
+MORPH_GLOW_A = max(0.0, min(1.0, float(EYE_RIG.get("glowOpacity", 1.0))))
+if EYE_LAB.get("shapes"):
     for _key, _sh in EYE_LAB.get("shapes", {}).items():
         MORPH_SHAPES[_key] = ([(p[0], p[1]) for p in _sh["left"]], [p[2] for p in _sh["left"]])
         if _sh.get("mirror") is False and _sh.get("right"):
@@ -131,6 +129,11 @@ def morph_shape(name, tag):
     return outline(pts, smooth)
 
 
+def glow_argb(color):
+    """The front colour at the Eye Lab glow opacity (ARGB hex, alpha first)."""
+    return "%02X%s" % (int(round(MORPH_GLOW_A * 255)), color[2:])
+
+
 def morph_colors(name):
     return MORPH_COLOR.get(name, (CYAN, BLUE))
 
@@ -153,7 +156,7 @@ def emit_eye_variant(d, v, s, tag, part="front"):
     if part == "front":
         w(d + 1, '<Shape name="Crisp">')
     else:
-        w(d + 1, '<Shape x="0" y="%g" name="Shadow">' % (BACK_DY / EYE_SCALE))
+        w(d + 1, '<Shape x="%g" y="%g" name="Shadow">' % (BACK_DX / EYE_SCALE, BACK_DY / EYE_SCALE))
     w(d + 2, '<PointsPath isClosed="true" name="P">')
     ids = []
     for i, vtx in enumerate(morph_shape("round", tag)):
@@ -168,14 +171,14 @@ def emit_eye_variant(d, v, s, tag, part="front"):
     paints = []
     if part == "front":
         glow_c, fill_c = nid(), nid()
-        w(d + 2, '<Stroke thickness="5" cap="round" join="round" name="Glow">')
-        w(d + 3, '<SolidColor colorValue="%s" name="C" id="%s"/>' % (front, glow_c))
-        w(d + 3, '<Feather strength="%g" name="F"/>' % GLOW)
+        w(d + 2, '<Stroke thickness="%g" cap="round" join="round" name="Glow">' % MORPH_GLOW_W)
+        w(d + 3, '<SolidColor colorValue="%s" name="C" id="%s"/>' % (glow_argb(front), glow_c))
+        w(d + 3, '<Feather strength="%g" name="F"/>' % MORPH_GLOW)
         w(d + 2, '</Stroke>')
         w(d + 2, '<Fill name="Fill">')
         w(d + 3, '<SolidColor colorValue="%s" name="C" id="%s"/>' % (front, fill_c))
         w(d + 2, '</Fill>')
-        paints = [(glow_c, "front"), (fill_c, "front")]
+        paints = [(glow_c, "glow"), (fill_c, "front")]
     else:
         fill_c = nid()
         w(d + 2, '<Fill name="Fill">')
@@ -215,7 +218,8 @@ def morph_color_frames(shape_keys, eyes=("L", "R")):
             for cid, role in MORPH_PAINT[(tag, part)]:
                 for fr, shape_name, _itp in shape_keys:
                     front, back = morph_colors(shape_name)
-                    frames.setdefault(cid, []).append((fr, front if role == "front" else back))
+                    argb = {"front": front, "glow": glow_argb(front)}.get(role, back)
+                    frames.setdefault(cid, []).append((fr, argb))
     return frames
 
 

@@ -68,7 +68,10 @@
   .shape-item:hover { border-color: var(--line); }
   .shape-item[aria-current="true"] { border-color: #1f6b73; background: #0c1b20; }
   .shape-item svg { width: 56px; height: 28px; display: block; }
+  .shape-item { width: 100%; min-width: 0; box-sizing: border-box; }
+  .shape-item > div { min-width: 0; }
   .shape-item .nm { font-weight: 500; }
+  .shape-item .sub { overflow-wrap: anywhere; }
   .shape-item .sub { font-size: 11px; color: var(--muted); }
   .new-row { display: flex; gap: 6px; }
   .new-row input { flex: 1; min-width: 0; }
@@ -79,7 +82,14 @@
   .toolbar .sep { width: 1px; height: 22px; background: var(--line); }
   .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
   .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
-  .stage svg { display: block; width: 100%; height: auto; }
+  .stage svg { display: block; width: 100%; height: auto; max-height: 62vh; margin-inline: auto; }
+  details.tool { border-top: 1px solid var(--line); padding-top: 8px; }
+  details.tool summary { cursor: pointer; color: var(--muted); font-size: 12px; letter-spacing: .04em; }
+  details.tool[open] summary { color: var(--text); margin-bottom: 8px; }
+  .slider { display: grid; gap: 2px; }
+  .slider > span { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .slider > span b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+  .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
   .hint { font-size: 12px; color: var(--muted); margin: 0; }
 
   /* right panel */
@@ -150,6 +160,13 @@
 
   <aside class="side-right">
     <section class="box">
+      <h2>ค่าหลัก (ใช้กับทุกรูป)</h2>
+      <div class="sliders" id="rigSliders"></div>
+      <p class="hint">ใช้กับตาทุกรูปในแอป ทั้งตาแบบ morph และแบบเดิม กด "สร้างไฟล์ Rive" เพื่อดูบนมือถือ</p>
+      <button id="btnRigReset">คืนค่าเริ่มต้น</button>
+    </section>
+
+    <section class="box">
       <h2>จุดที่เลือก</h2>
       <dl class="kv mono" id="pointInfo"><dt>จุด</dt><dd>–</dd></dl>
       <label class="field"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)</span>
@@ -176,6 +193,12 @@
         <label class="field"><span>เลื่อนชีท ซ้าย/ขวา</span><input type="range" id="fitDx" min="-150" max="150" step="1"></label>
         <label class="field"><span>เลื่อนชีท ขึ้น/ลง</span><input type="range" id="fitDy" min="-150" max="150" step="1"></label>
       </div>
+      <details class="tool" id="ellTool">
+        <summary>สร้างรูปจากวงรี / วงกลม</summary>
+        <div class="sliders" id="ellSliders"></div>
+        <p class="hint">เส้นประในพื้นที่แก้รูปคือวงรีที่จะได้ กด "ใช้วงรีนี้" เพื่อแทนที่ 8 จุดของรูปนี้</p>
+        <button class="primary" id="btnEllApply">ใช้วงรีนี้</button>
+      </details>
       <label class="field"><span>โน้ตถึง Claude (ต้องการให้ปรับอะไร)</span>
         <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้ ตาซ้ายควรเล็กกว่าขวา"></textarea></label>
       <button class="danger" id="btnDelete">ลบรูปนี้</button>
@@ -225,7 +248,9 @@
   "use strict";
   // ---------------------------------------------------------------- constants
   const N = 8;
-  const EYE_SCALE = 1.32, EYE_DX = 100, BACK_DY = 5;
+  // the "rig" (Eye Lab ค่าหลัก): read by the generator too (core/layout.py, parts/eyes.py, parts/morph.py)
+  const DEFAULT_RIG = { eyeDx: 100, eyeScale: 1.32, backDx: 0, backDy: 5, glowFeather: 16, glowWidth: 5, glowOpacity: 1 };
+  let RIG = { ...DEFAULT_RIG };
   const W = 500, H = 320, CX = 250, CY = 160;
   const K8 = 4 / 3 * Math.tan(Math.PI / 16) / (2 * Math.sin(Math.PI / 8));
   const COLORS = {
@@ -309,14 +334,15 @@
   function defs(svg, id) {
     const d = el("defs", {}, svg);
     const f = el("filter", { id, x: "-50%", y: "-50%", width: "200%", height: "200%" }, d);
-    el("feGaussianBlur", { stdDeviation: "7" }, f);
+    el("feGaussianBlur", { stdDeviation: "7", "data-glow": "1" }, f);
   }
   // one eye: back layer, glow, front layer -- the same layering as the Rive rig
   function drawEye(g, verts, color, glowId) {
     const [front, back] = COLORS[color] || COLORS.cyan;
     const d = pathD(verts);
-    el("path", { d, fill: back, transform: `translate(0 ${BACK_DY / EYE_SCALE})` }, g);
-    el("path", { d, fill: "none", stroke: front, "stroke-width": 6, filter: `url(#${glowId})`, opacity: .9 }, g);
+    el("path", { d, fill: back, transform: `translate(${RIG.backDx / RIG.eyeScale} ${RIG.backDy / RIG.eyeScale})` }, g);
+    if (RIG.glowOpacity > 0 && (RIG.glowWidth > 0 || RIG.glowFeather > 0))
+      el("path", { d, fill: "none", stroke: front, "stroke-width": Math.max(0.5, RIG.glowWidth), filter: `url(#${glowId})`, opacity: RIG.glowOpacity }, g);
     el("path", { d, fill: front }, g);
   }
 
@@ -337,8 +363,8 @@
   defs(svg, "glowE");
   const layerRef = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
 
-  function eyeCenter(eye) { return eye === "L" ? CX - EYE_DX : CX + EYE_DX; }
-  function toScreen(eye, x, y) { return [eyeCenter(eye) + x * EYE_SCALE, CY + y * EYE_SCALE]; }
+  function eyeCenter(eye) { return eye === "L" ? CX - RIG.eyeDx : CX + RIG.eyeDx; }
+  function toScreen(eye, x, y) { return [eyeCenter(eye) + x * RIG.eyeScale, CY + y * RIG.eyeScale]; }
 
   function renderStage() {
     for (const L of [layerRef, layerGhost, layerEyes, layerHandles]) L.replaceChildren();
@@ -355,13 +381,20 @@
     if (state.showGhost) {
       for (const eye of ["L", "R"]) {
         const pts = eye === "L" ? round() : mirror(round());
-        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${EYE_SCALE})` }, layerGhost);
+        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerGhost);
         el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#ffffff", "stroke-opacity": .35, "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke" }, g);
       }
     }
     for (const eye of ["L", "R"]) {
-      const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${EYE_SCALE})` }, layerEyes);
+      const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerEyes);
       drawEye(g, outline(eyePts(body, eye)), body.color, "glowE");
+    }
+    if (ellOpen()) {
+      for (const eye of ["L", "R"]) {
+        const pts = eye === "L" ? ellipsePts(ELL) : mirror(ellipsePts(ELL));
+        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerGhost);
+        el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#f5b841", "stroke-width": 2, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }, g);
+      }
     }
     // handles: always on the left eye; on the right too when it is drawn on its own
     const editable = body.mirror === false ? ["L", "R"] : ["L"];
@@ -404,7 +437,7 @@
     if (!state.dragging) return;
     const body = state.shapes[state.selected], { eye, i } = state.dragging;
     const p = svgPoint(e);
-    const x = +((p.x - eyeCenter(eye)) / EYE_SCALE).toFixed(1), y = +((p.y - CY) / EYE_SCALE).toFixed(1);
+    const x = +((p.x - eyeCenter(eye)) / RIG.eyeScale).toFixed(1), y = +((p.y - CY) / RIG.eyeScale).toFixed(1);
     const arr = eye === "L" ? body.left : body.right;
     arr[i] = [Math.max(-90, Math.min(90, x)), Math.max(-110, Math.min(140, y)), arr[i][2]];
     renderStage(); renderPointInfo(); renderThumb(state.selected);
@@ -669,7 +702,7 @@
     pg.replaceChildren();
     for (const eye of ["L", "R"]) {
       const s = eyeStateAt(eye, ms); if (!s) continue;
-      const g = el("g", { transform: `translate(${eyeCenter(eye) + s.dx} ${CY + s.dy}) scale(${EYE_SCALE * s.sx} ${EYE_SCALE * s.sy})` }, pg);
+      const g = el("g", { transform: `translate(${eyeCenter(eye) + s.dx} ${CY + s.dy}) scale(${RIG.eyeScale * s.sx} ${RIG.eyeScale * s.sy})` }, pg);
       drawEye(g, s.verts, s.color, "glowP");
     }
     const seq = seqShapes(), step = state.motion.holdMs + state.motion.morphMs;
@@ -707,8 +740,82 @@
   for (const [id, k, vid, fmt] of PARAMS) on(id, "input", (e) => { state.motion[k] = +e.target.value; document.getElementById(vid).textContent = fmt(state.motion[k]); saveMotion(); if (!play.on) renderPreview(0); });
   on("pEase", "change", (e) => { state.motion.ease = e.target.value; saveMotion(); });
 
+
+  // ---------------------------------------------------------------- rig (ค่าหลัก)
+  const RIG_SLIDERS = [
+    ["eyeDx", "ระยะห่างตา", 60, 160, 1, (v) => `${v}`],
+    ["eyeScale", "ขนาดตา", 0.8, 1.8, 0.01, (v) => `${Math.round(v / 1.32 * 100)}%`],
+    ["backDx", "วงหลังเหลื่อม ซ้าย/ขวา", -15, 15, 0.5, (v) => `${v}`],
+    ["backDy", "วงหลังเหลื่อม ขึ้น/ลง", -10, 20, 0.5, (v) => `${v}`],
+    ["glowFeather", "ออร่า: ความฟุ้ง", 0, 40, 1, (v) => `${v}`],
+    ["glowWidth", "ออร่า: ความหนา", 0, 20, 0.5, (v) => `${v}`],
+    ["glowOpacity", "ออร่า: ความสว่าง", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
+  ];
+  function sliderRow(box, id, label, min, max, step, value, fmt, oninput) {
+    const lab = document.createElement("label"); lab.className = "slider";
+    const head = document.createElement("span"); const t = document.createElement("span"); t.textContent = label;
+    const b = document.createElement("b"); b.textContent = fmt(value); head.append(t, b);
+    const inp = document.createElement("input"); Object.assign(inp, { type: "range", id, min, max, step, value });
+    inp.addEventListener("input", () => { b.textContent = fmt(+inp.value); oninput(+inp.value); });
+    lab.append(head, inp); box.appendChild(lab); return inp;
+  }
+  function applyGlowFilter() {
+    // Rive's Feather strength ~ blur radius; SVG blur is a standard deviation in the eye's own units
+    document.querySelectorAll('[data-glow]').forEach((f) => f.setAttribute("stdDeviation", Math.max(0.01, RIG.glowFeather * 0.45)));
+  }
+  let rigTimer = null;
+  function saveRig() {
+    if (!state.canWrite) return;
+    clearTimeout(rigTimer); markDirty("_rig", 2500); setStatus("กำลังบันทึก…", "saving");
+    rigTimer = setTimeout(async () => { markDirty("_rig"); try { await api("PUT", "/api/rig", { ...RIG }); savedNow(); } catch (err) { handleWriteError(err); } }, 400);
+  }
+  function renderRig() {
+    const box = document.getElementById("rigSliders"); if (box.contains(document.activeElement)) return;
+    box.replaceChildren();
+    for (const [k, label, min, max, step, fmt] of RIG_SLIDERS) {
+      sliderRow(box, "rig_" + k, label, min, max, step, RIG[k], fmt, (v) => { RIG[k] = v; applyGlowFilter(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
+    }
+    applyGlowFilter();
+  }
+  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG }; renderRig(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
+
+  // ---------------------------------------------------------------- ellipse / circle tool
+  const ELL = { rx: 48.6, ry: 57.2, cy: 0, square: 0, tilt: 0 };
+  const ELL_SLIDERS = [
+    ["rx", "ความกว้าง", 10, 80, 0.5, (v) => `${v}`],
+    ["ry", "ความสูง", 10, 100, 0.5, (v) => `${v}`],
+    ["cy", "เลื่อน ขึ้น/ลง", -40, 40, 0.5, (v) => `${v}`],
+    ["square", "ความเหลี่ยม", 0, 1, 0.02, (v) => `${Math.round(v * 100)}%`],
+    ["tilt", "เอียง (องศา)", -35, 35, 1, (v) => `${v}°`],
+  ];
+  // superellipse through 8 points (top, then clockwise): square 0 = ellipse, 1 = rounded box
+  function ellipsePts(e) {
+    const n = 2 + e.square * 6, a = e.tilt * Math.PI / 180;
+    return Array.from({ length: N }, (_, i) => {
+      const t = i * Math.PI / 4, sn = Math.sin(t), cs = Math.cos(t);
+      const x = e.rx * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n);
+      const y = e.cy - e.ry * Math.sign(cs) * Math.pow(Math.abs(cs), 2 / n);
+      const diag = i % 2 === 1;
+      const sm = diag ? 1 - 0.45 * e.square : 1 + 0.4 * e.square;
+      const rx_ = x * Math.cos(a) - (y - e.cy) * Math.sin(a), ry_ = e.cy + x * Math.sin(a) + (y - e.cy) * Math.cos(a);
+      return [+rx_.toFixed(2), +ry_.toFixed(2), +sm.toFixed(2)];
+    });
+  }
+  const ellOpen = () => document.getElementById("ellTool").open;
+  function renderEll() {
+    const box = document.getElementById("ellSliders"); box.replaceChildren();
+    for (const [k, label, min, max, step, fmt] of ELL_SLIDERS)
+      sliderRow(box, "ell_" + k, label, min, max, step, ELL[k], fmt, (v) => { ELL[k] = v; renderStage(); });
+  }
+  document.getElementById("ellTool").addEventListener("toggle", () => renderStage());
+  on("btnEllApply", "click", () => {
+    const b = state.shapes[state.selected]; if (!b) return; pushHistory();
+    b.left = ellipsePts(ELL); if (b.mirror === false) b.right = mirror(b.left);
+    renderAll(); scheduleSave(state.selected);
+  });
+
   // ---------------------------------------------------------------- render all
-  function renderAll() { renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
+  function renderAll() { renderRig(); renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
 
   // ---------------------------------------------------------------- data (polled from the local server)
   function normalize(body) {
@@ -731,6 +838,7 @@
     }
     if (!facesWriting && !isDirty("_faces")) state.faces = { ...(data.faces || {}) };
     if (!isDirty("_motion") && data.motion) state.motion = { ...DEFAULT_MOTION, ...data.motion };
+    if (!isDirty("_rig") && data.rig) RIG = { ...DEFAULT_RIG, ...data.rig };
     if (!state.selected || !state.shapes[state.selected]) state.selected = sortedKeys()[0] || null;
     renderAll();
   }
@@ -756,7 +864,7 @@
     btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
   });
 
-  fillRefSelect(); loadImages();
+  fillRefSelect(); loadImages(); renderEll();
   renderAll();
   poll();
 })();

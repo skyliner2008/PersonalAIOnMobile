@@ -17,6 +17,7 @@ API (JSON):
     DELETE /api/shapes/<key>                             -> {"version"}
     PUT    /api/faces             body = {"map": {...}}  -> {"version"}
     PUT    /api/motion            body = motion          -> {"version"}
+    PUT    /api/rig               body = rig (eye size, spacing, layer offset, glow) -> {"version"}
     POST   /api/build             run the generator + `rive . --once`, copy the .riv into the app
 Only listens on 127.0.0.1.
 """
@@ -115,6 +116,8 @@ class Handler(SimpleHTTPRequestHandler):
                 data["faces"] = {k: v for k, v in (body or {}).get("map", {}).items() if v in data.get("shapes", {})}
             elif self.path == "/api/motion":
                 data["motion"] = body
+            elif self.path == "/api/rig":
+                data["rig"] = body
             else:
                 return self._json(404, {"error": "ไม่รู้จัก " + self.path})
             return self._json(200, {"version": save(data)})
