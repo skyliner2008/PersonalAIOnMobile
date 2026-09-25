@@ -69,8 +69,9 @@ def _strip(story):
 
 # ---------------------------------------------------------------- the app's side (Kotlin)
 def _read(path):
+    """Text as it is on disk -- line endings untouched (the Kotlin sources use CRLF)."""
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", newline="") as f:
             return f.read()
     except OSError:
         return ""
@@ -117,7 +118,7 @@ def app_moods():
     return out
 
 
-def _format_cues(cues):
+def _format_cues(cues, nl="\n"):
     if not cues:
         return ""
     parts = ["%dL to %s" % (c["ms"], c["sound"]) for c in cues]
@@ -131,7 +132,7 @@ def _format_cues(cues):
         lines.append(cur)
     elif lines:
         lines[-1] = lines[-1].rstrip(",")
-    return "\n        " + "\n        ".join(lines)
+    return nl + "        " + (nl + "        ").join(lines)
 
 
 def set_cues(target, cues):
@@ -141,8 +142,9 @@ def set_cues(target, cues):
     if not m:
         sys.exit("cannot find the cues of %s in %s" % (target, MOODS_KT))
     old = [{"ms": int(ms), "sound": s} for ms, s in re.findall(r"(\d+)L to (\w+)", m.group(2))]
-    new_src = src[:m.start(2)] + _format_cues(cues) + src[m.end(2):]
-    with open(MOODS_KT, "w", encoding="utf-8", newline="\n") as f:
+    nl = "\r\n" if "\r\n" in src else "\n"          # keep the file's own line endings
+    new_src = src[:m.start(2)] + _format_cues(cues, nl) + src[m.end(2):]
+    with open(MOODS_KT, "w", encoding="utf-8", newline="") as f:
         f.write(new_src)
     return old
 
