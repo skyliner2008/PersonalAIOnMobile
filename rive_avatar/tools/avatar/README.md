@@ -44,6 +44,36 @@ A local page (no internet data, Python standard library only) that edits
   max yaw / pitch, tilt while turning, pupil lead, perspective) from which `machine/poses.py` builds the
   Rive look poses; `rig.eyeRot` = a fixed X/Y/Z turn per eye (the `EyeTilt` node)
 
+The page has three areas: tools by category on the left (library shapes, base rig, 3D head,
+eye rotation, ellipse, props, motion defaults, app faces), the view on the right (drag the 8
+points, reference sheet, eye colour, drag the prop) and the **timeline** at the bottom.
+
+### Timeline stories (`data/stories/<name>.json` -> `stories/lab.py`)
+
+Compose a moment in 2.5D (eye shapes, head pose, per-eye rotation, one library prop),
+press "เพิ่มท่านี้เป็นคีย์", adjust, add again. Each key stores the whole frame plus how it
+moves on (ease: jelly / smooth / soft / linear / hold) and its effects (pop on arrival,
+trembling and lower-lid quiver through the segment). With a key selected, every edit goes
+to that key. Play / stop / loop / scrub preview the story.
+
+A story whose "ใช้แทน" (target) is set replaces that mood story (for example `MoodSad`,
+7 s) when the generator runs; without a target it stays a draft. `stories/lab.py` maps a
+key onto the rig with the same maths as the page:
+
+| lab | rig |
+|---|---|
+| eye outline | `vtxL:i` / `vtxR:i` (front + back vertices, always keyed) |
+| head yaw / pitch / roll | `blinkL/R` x, y (eye offset from the centre), `sblinkL/R` scale, `face` x, y, rotation, `irisL/R` (pupil lead) |
+| eye rotation X / Y / Z | `tiltL/R` scaleY = cos x, scaleX = cos y, rotation = z |
+| pop | `popL/R` (`POP_KEYS`, right eye `POP_LAG` later) |
+| prop | the beat's prop + `props` (PropsSolo) x, y, rotation, scale, opacity about the prop's centre |
+| colour | `lab_color_frames` in `machine/animations.py` (crossfade over `MORPH_F` before the next key) |
+
+Beats use the face `LabMorph` (the morph eye with no shape of its own). Prop centres come
+from `tools/eyelab/props/props.json`, written by `tools/eyelab/make_prop_thumbs.py`
+(renders every prop from the real `.riv`; rerun it after changing props). One library prop
+per key; a prop moves / scales / turns / fades but cannot change shape.
+
 The page polls the file every 1.5 s, so an edit Claude makes to the JSON shows up live.
 "สร้างไฟล์ Rive" runs `build.py` + `rive . --once` and copies the `.riv` into the app
 (reinstall the app to see it on the phone). `parts/morph.py` and `faces/morph_faces.py`

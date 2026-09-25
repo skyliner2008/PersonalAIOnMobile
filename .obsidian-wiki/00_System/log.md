@@ -1,3 +1,14 @@
+## 2026-09-25 — Eye Lab 3 ส่วน + ไทม์ไลน์ story + พร็อพ (branch `feat/rive-eye-morph`)
+- **User Request**: จัด Eye Lab ใหม่เป็น 3 ส่วน (ซ้าย=เครื่องมือแยกหมวด, ขวา=view/8 จุด/ชีท/สีตา, ล่าง=timeline เล่น/หยุด) + พร็อพ; จัดท่า 2.5D แล้ว add เป็นคีย์เรื่อยๆ ให้ Claude แปลงไปใช้ในแอป
+  - เลือก: story แทนเรื่องอารมณ์เดิมได้, พร็อพเลือกจากคลังเดิม
+- `tools/eyelab/index.html` เขียนใหม่: คีย์ = เฟรมทั้งหมด (ตา 2 ข้าง 8 จุด+สี, ท่าหัว yaw/pitch/roll, หมุนตา XYZ, พร็อพ 1 ชิ้น) + ease / เด้ง / สั่น / ขอบตาสั่น;
+  เลือกคีย์แล้วการแก้ทุกอย่างลงคีย์นั้น, ลากคีย์เปลี่ยนเวลา, ลากไม้บรรทัดดูทีละช่วง, เล่น/หยุด/วนซ้ำ
+- `server.py`: `/api/meta` (พร็อพ, mood story ที่แทนได้, faces), `/api/stories` CRUD → `tools/avatar/data/stories/<name>.json`
+- `tools/eyelab/make_prop_thumbs.py`: render พร็อพทุกชิ้นจาก .riv จริง → `props/<i>.png` + `props.json` (กรอบในพิกัด artboard ใช้เป็นจุดหมุน)
+- generator: `stories/lab.py` แปลง story ที่มี target → `MOOD_STORIES[target]` (vertex, blink/sblink/face/iris ตามโมเดลหัว, EyeTilt, pop, PropsSolo transform, สี crossfade);
+  ย้าย `EYE_HEAD`/`head_project` ไป `core/head.py`; หน้าใหม่ `LabMorph` (ต่อท้าย FACES); `SEQ_NODES` เพิ่ม iris/tilt/pop/props
+- ข้อจำกัด: พร็อพ 1 ชิ้นต่อคีย์ เปลี่ยนรูปทรงพร็อพไม่ได้ (ย้าย/ย่อ/หมุน/จางได้), ความยาวเท่ากับ story เดิมที่แทน
+
 ## 2026-09-25 — LOOI Eye Lab: หน้าเว็บ local สำหรับแก้รูปตาร่วมกัน (branch `feat/rive-eye-morph`)
 - **User Request**: "มี tool หรือวิธีอื่นมั้ย ที่สร้างระบบตาที่ฉันกับคุณแก้ไขรูปร่วมกันได้ง่าย" → เลือกหน้าเว็บ → "เปลี่ยนเป็นหน้าเว็บส่วนตัวบน Local แทน"
 - `rive_avatar/tools/eyelab/server.py` (Python stdlib, 127.0.0.1:8765) + `index.html`: ลากจุด 8 จุดของตา ปรับความโค้ง, ซ้อนชีท LOOI ต้นฉบับ (`ref/sheet1.jpg`, `sheet2.jpg`) ปรับขนาด/เลื่อน/ความจาง,

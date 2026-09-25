@@ -18,6 +18,9 @@ API (JSON):
     PUT    /api/faces             body = {"map": {...}}  -> {"version"}
     PUT    /api/motion            body = motion          -> {"version"}
     PUT    /api/rig               body = rig (eye size, spacing, layer offset, glow) -> {"version"}
+    GET    /api/meta              -> {"props", "moods", "faces"}  (library props, mood stories a story may replace)
+    GET    /api/stories           -> [{"name", "target", "keys", "durationMs"}]
+    GET    /api/stories/<name>    -> story            PUT = save, DELETE = remove
     POST   /api/build             run the generator + `rive . --once`, copy the .riv into the app
 Only listens on 127.0.0.1.
 """
@@ -34,6 +37,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 RIVE_DIR = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA = os.path.join(RIVE_DIR, "tools", "avatar", "data", "eye_lab.json")
+STORIES = os.path.join(RIVE_DIR, "tools", "avatar", "data", "stories")   # one timeline story per file
+PRESETS = os.path.join(RIVE_DIR, "presets.json")
+PROPS_META = os.path.join(HERE, "props", "props.json")
 APP_RIV = os.path.abspath(os.path.join(RIVE_DIR, "..", "composeApp", "src", "androidMain", "res", "raw", "avatar.riv"))
 PORT = int(os.environ.get("EYELAB_PORT", "8765"))
 KEY_RE = re.compile(r"^[a-z0-9_]{2,24}$")
@@ -87,7 +93,30 @@ class Handler(SimpleHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n).decode("utf-8") or "null")
 
+    def _story_path(self, name):
+        return os.path.join(STORIES, name + ".json") if KEY_RE.match(name or "") else None
+
     def do_GET(self):
+        if self.path == "/api/meta":
+            presets = json.load(open(PRESETS, encoding="utf-8"))
+            props = json.load(open(PROPS_META, encoding="utf-8")) if os.path.exists(PROPS_META) else []
+            moods = [{"name": q["name"], "durationMs": q["durationMs"]} for q in presets["seqs"] if q["name"].startswith("Mood")]
+            return self._json(200, {"props": props, "moods": moods, "faces": presets["faces"]})
+        if self.path == "/api/stories":
+            os.makedirs(STORIES, exist_ok=True)
+            out = []
+            for f in sorted(os.listdir(STORIES)):
+                if f.endswith(".json"):
+                    st = json.load(open(os.path.join(STORIES, f), encoding="utf-8"))
+                    out.append({"name": f[:-5], "target": st.get("target"), "keys": len(st.get("keys", [])),
+                                "durationMs": st.get("durationMs")})
+            return self._json(200, out)
+        m = re.match(r"^/api/stories/([^/]+)$", self.path)
+        if m:
+            sp = self._story_path(m.group(1))
+            if not sp or not os.path.exists(sp):
+                return self._json(404, {"error": "ไม่มี story " + m.group(1)})
+            return self._json(200, json.load(open(sp, encoding="utf-8")))
         if self.path == "/api/data":
             with LOCK:
                 return self._json(200, load())
@@ -101,6 +130,21 @@ class Handler(SimpleHTTPRequestHandler):
             body = self._body()
         except ValueError:
             return self._json(400, {"error": "ข้อมูลไม่ใช่ JSON"})
+        ms = re.match(r"^/api/stories/([^/]+)$", self.path)
+        if ms:
+            sp = self._story_path(ms.group(1))
+            if not sp:
+                return self._json(400, {"error": "ชื่อ story ใช้ a-z, 0-9, _ ยาว 2-24 ตัว"})
+            if not isinstance(body, dict) or not isinstance(body.get("keys"), list):
+                return self._json(400, {"error": "story ต้องมี keys"})
+            os.makedirs(STORIES, exist_ok=True)
+            with LOCK:
+                tmp = sp + ".tmp"
+                with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(body, f, ensure_ascii=False, indent=1)
+                    f.write("\n")
+                os.replace(tmp, sp)
+            return self._json(200, {"ok": True})
         m = re.match(r"^/api/shapes/([^/]+)$", self.path)
         with LOCK:
             data = load()
@@ -123,6 +167,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(200, {"version": save(data)})
 
     def do_DELETE(self):
+        ms = re.match(r"^/api/stories/([^/]+)$", self.path)
+        if ms:
+            sp = self._story_path(ms.group(1))
+            if sp and os.path.exists(sp):
+                os.remove(sp)
+            return self._json(200, {"ok": True})
         m = re.match(r"^/api/shapes/([^/]+)$", self.path)
         if not m:
             return self._json(404, {"error": "ไม่รู้จัก " + self.path})

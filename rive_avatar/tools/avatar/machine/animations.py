@@ -170,7 +170,17 @@ for i, (an, kfs, lv, override) in enumerate(EYE_ACTS):
 SEQ_NODES = {"blink": (eyeL_blink, eyeR_blink), "blinkL": (eyeL_blink,),
              "blinkR": (eyeR_blink,), "sblink": (eyeL_sblink, eyeR_sblink),
              "sblinkL": (eyeL_sblink,), "sblinkR": (eyeR_sblink,),
-             "face": (face_breathe,), "mouth": (mouth_scale,)}
+             "face": (face_breathe,), "mouth": (mouth_scale,),
+             # Eye Lab timeline stories (stories/lab.py)
+             "irisL": (irisL_look,), "irisR": (irisR_look,),
+             "tiltL": (eyeL_tilt,), "tiltR": (eyeR_tilt,),
+             "popL": (eyeL_pop,), "popR": (eyeR_pop,), "props": (prop_solo,)}
+# the eye tilt nodes rest on the lab's fixed per-eye rotation, not on 0 / 1
+for _tn, _tg in ((eyeL_tilt, "L"), (eyeR_tilt, "R")):
+    _er = eye_rotation(_tg)
+    ANIMATED.setdefault((_tn, 16), math.cos(math.radians(_er["y"])))
+    ANIMATED.setdefault((_tn, 17), math.cos(math.radians(_er["x"])))
+    ANIMATED.setdefault((_tn, 15), math.radians(_er["z"]))
 
 
 def seq_targets(nkey):
@@ -195,6 +205,24 @@ IRIS_FROM = {"blink": (irisL_look, irisR_look), "blinkL": (irisL_look,), "blinkR
              "sblink": (irisL_look, irisR_look), "sblinkL": (irisL_look,), "sblinkR": (irisR_look,)}
 explicit_iris = set()
 MORPH_STORY_COLORS = {}   # story animation id -> morph eye colour frames
+
+
+def lab_color_frames(keys):
+    """Eye Lab story colours [(frame, {"L", "R"})] -> colour frames: each eye keeps its
+    colour, then crossfades into the next key's over the last MORPH_F frames before it."""
+    frames = {}
+    for tag in ("L", "R"):
+        for part in ("front", "back"):
+            for cid, role in MORPH_PAINT[(tag, part)]:
+                kk = []
+                for j, (fr, cols) in enumerate(keys):
+                    front, back = _LAB_COLORS.get(cols[tag], (CYAN, BLUE))
+                    argb = {"front": front, "glow": glow_argb(front)}.get(role, back)
+                    if kk and kk[-1][1] != argb:
+                        kk.append((max(kk[-1][0], fr - MORPH_F), kk[-1][1]))
+                    kk.append((fr, argb))
+                frames[cid] = kk
+    return frames
 
 
 def emit_one_story(i, sn, dur, beats, extra, label, loop):
@@ -301,6 +329,8 @@ def emit_one_story(i, sn, dur, beats, extra, label, loop):
     emit_tracks(3, tracks)
     if aid in MORPH_STORY_COLORS:
         emit_color_frames(3, MORPH_STORY_COLORS[aid], interp="hold")
+    if sn in LAB_COLOR_KEYS:
+        emit_color_frames(3, lab_color_frames(LAB_COLOR_KEYS[sn]))
     w(2, '</LinearAnimation>')
     return aid
 

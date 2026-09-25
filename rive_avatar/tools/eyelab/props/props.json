@@ -1,0 +1,892 @@
+[
+ {
+  "index": 1,
+  "name": "Zzz",
+  "box": [
+   341,
+   26,
+   135,
+   123
+  ]
+ },
+ {
+  "index": 2,
+  "name": "Question",
+  "box": [
+   372,
+   0,
+   102,
+   126
+  ]
+ },
+ {
+  "index": 3,
+  "name": "Burger",
+  "box": [
+   179,
+   317,
+   142,
+   142
+  ]
+ },
+ {
+  "index": 4,
+  "name": "Beer",
+  "box": [
+   205,
+   333,
+   129,
+   126
+  ]
+ },
+ {
+  "index": 5,
+  "name": "Sparkle",
+  "box": [
+   353,
+   4,
+   144,
+   138
+  ]
+ },
+ {
+  "index": 6,
+  "name": "Headphones",
+  "box": [
+   0,
+   55,
+   500,
+   236
+  ]
+ },
+ {
+  "index": 7,
+  "name": "VR",
+  "box": [
+   18,
+   141,
+   464,
+   311
+  ]
+ },
+ {
+  "index": 8,
+  "name": "Snorkel",
+  "box": [
+   58,
+   34,
+   417,
+   293
+  ]
+ },
+ {
+  "index": 9,
+  "name": "Devil",
+  "box": [
+   73,
+   16,
+   405,
+   144
+  ]
+ },
+ {
+  "index": 10,
+  "name": "Sparkles",
+  "box": [
+   10,
+   68,
+   468,
+   305
+  ]
+ },
+ {
+  "index": 11,
+  "name": "Blush",
+  "box": [
+   0,
+   278,
+   500,
+   84
+  ]
+ },
+ {
+  "index": 12,
+  "name": "Exclaim",
+  "box": [
+   392,
+   0,
+   72,
+   144
+  ]
+ },
+ {
+  "index": 13,
+  "name": "Trash",
+  "box": [
+   370,
+   333,
+   120,
+   135
+  ]
+ },
+ {
+  "index": 14,
+  "name": "Camera",
+  "box": [
+   371,
+   14,
+   117,
+   98
+  ]
+ },
+ {
+  "index": 15,
+  "name": "AngryMark",
+  "box": [
+   370,
+   2,
+   116,
+   115
+  ]
+ },
+ {
+  "index": 16,
+  "name": "Hearts",
+  "box": [
+   77,
+   0,
+   416,
+   147
+  ]
+ },
+ {
+  "index": 17,
+  "name": "Tears",
+  "box": [
+   141,
+   318,
+   218,
+   149
+  ]
+ },
+ {
+  "index": 18,
+  "name": "ThinkDots",
+  "box": [
+   324,
+   35,
+   176,
+   90
+  ]
+ },
+ {
+  "index": 19,
+  "name": "SoundWave",
+  "box": [
+   135,
+   325,
+   238,
+   165
+  ]
+ },
+ {
+  "index": 20,
+  "name": "Questions",
+  "box": [
+   0,
+   0,
+   500,
+   162
+  ]
+ },
+ {
+  "index": 21,
+  "name": "Steam",
+  "box": [
+   52,
+   289,
+   396,
+   66
+  ]
+ },
+ {
+  "index": 22,
+  "name": "DizzyStars",
+  "box": [
+   122,
+   34,
+   258,
+   97
+  ]
+ },
+ {
+  "index": 23,
+  "name": "Sweat",
+  "box": [
+   371,
+   22,
+   114,
+   154
+  ]
+ },
+ {
+  "index": 24,
+  "name": "Shiver",
+  "box": [
+   9,
+   52,
+   482,
+   214
+  ]
+ },
+ {
+  "index": 25,
+  "name": "Medal",
+  "box": [
+   389,
+   0,
+   78,
+   113
+  ]
+ },
+ {
+  "index": 26,
+  "name": "BatteryLow",
+  "box": [
+   344,
+   0,
+   156,
+   108
+  ]
+ },
+ {
+  "index": 27,
+  "name": "Mic",
+  "box": [
+   404,
+   284,
+   72,
+   216
+  ]
+ },
+ {
+  "index": 28,
+  "name": "Sunglasses",
+  "box": [
+   8,
+   139,
+   484,
+   190
+  ]
+ },
+ {
+  "index": 29,
+  "name": "Missiles",
+  "box": [
+   0,
+   145,
+   272,
+   226
+  ]
+ },
+ {
+  "index": 30,
+  "name": "SLTag",
+  "box": [
+   0,
+   49,
+   500,
+   295
+  ]
+ },
+ {
+  "index": 31,
+  "name": "Turrets",
+  "box": [
+   8,
+   291,
+   484,
+   159
+  ]
+ },
+ {
+  "index": 32,
+  "name": "Snore",
+  "box": [
+   263,
+   26,
+   213,
+   355
+  ]
+ },
+ {
+  "index": 33,
+  "name": "HoloPat",
+  "box": [
+   216,
+   0,
+   198,
+   181
+  ]
+ },
+ {
+  "index": 36,
+  "name": "HoloChin",
+  "box": [
+   145,
+   327,
+   191,
+   173
+  ]
+ },
+ {
+  "index": 37,
+  "name": "Bulb",
+  "box": [
+   269,
+   115,
+   210,
+   210
+  ]
+ },
+ {
+  "index": 38,
+  "name": "Bolt",
+  "box": [
+   368,
+   0,
+   120,
+   149
+  ]
+ },
+ {
+  "index": 39,
+  "name": "Barcode",
+  "box": [
+   82,
+   164,
+   336,
+   132
+  ]
+ },
+ {
+  "index": 40,
+  "name": "Gears",
+  "box": [
+   140,
+   137,
+   233,
+   210
+  ]
+ },
+ {
+  "index": 41,
+  "name": "UpdateArrows",
+  "box": [
+   128,
+   33,
+   338,
+   291
+  ]
+ },
+ {
+  "index": 42,
+  "name": "Magnifier",
+  "box": [
+   145,
+   29,
+   315,
+   320
+  ]
+ },
+ {
+  "index": 43,
+  "name": "SignalBars",
+  "box": [
+   129,
+   166,
+   242,
+   133
+  ]
+ },
+ {
+  "index": 44,
+  "name": "PointHand",
+  "box": [
+   306,
+   149,
+   137,
+   198
+  ]
+ },
+ {
+  "index": 45,
+  "name": "FaceBrackets",
+  "box": [
+   53,
+   59,
+   398,
+   300
+  ]
+ },
+ {
+  "index": 46,
+  "name": "Sun",
+  "box": [
+   106,
+   86,
+   288,
+   288
+  ]
+ },
+ {
+  "index": 47,
+  "name": "RainCloud",
+  "box": [
+   131,
+   115,
+   256,
+   338
+  ]
+ },
+ {
+  "index": 48,
+  "name": "AlarmClock",
+  "box": [
+   0,
+   12,
+   500,
+   284
+  ]
+ },
+ {
+  "index": 49,
+  "name": "Calendar",
+  "box": [
+   376,
+   0,
+   96,
+   105
+  ]
+ },
+ {
+  "index": 50,
+  "name": "Clock",
+  "box": [
+   105,
+   150,
+   347,
+   160
+  ]
+ },
+ {
+  "index": 51,
+  "name": "Pencil",
+  "box": [
+   422,
+   28,
+   78,
+   103
+  ]
+ },
+ {
+  "index": 52,
+  "name": "Warning",
+  "box": [
+   361,
+   0,
+   134,
+   99
+  ]
+ },
+ {
+  "index": 53,
+  "name": "Curtains",
+  "box": [
+   0,
+   0,
+   500,
+   500
+  ]
+ },
+ {
+  "index": 54,
+  "name": "BigBattery",
+  "box": [
+   94,
+   144,
+   292,
+   172
+  ]
+ },
+ {
+  "index": 55,
+  "name": "Cracked",
+  "box": [
+   337,
+   151,
+   107,
+   184
+  ]
+ },
+ {
+  "index": 56,
+  "name": "SceneFood",
+  "box": [
+   65,
+   124,
+   371,
+   337
+  ]
+ },
+ {
+  "index": 57,
+  "name": "SceneDrink",
+  "box": [
+   51,
+   86,
+   413,
+   336
+  ]
+ },
+ {
+  "index": 58,
+  "name": "SceneBath",
+  "box": [
+   46,
+   0,
+   412,
+   463
+  ]
+ },
+ {
+  "index": 59,
+  "name": "SceneGame",
+  "box": [
+   135,
+   3,
+   230,
+   469
+  ]
+ },
+ {
+  "index": 60,
+  "name": "SceneStudy",
+  "box": [
+   3,
+   13,
+   475,
+   463
+  ]
+ },
+ {
+  "index": 61,
+  "name": "SceneRain",
+  "box": [
+   45,
+   0,
+   410,
+   258
+  ]
+ },
+ {
+  "index": 62,
+  "name": "SceneThug",
+  "box": [
+   16,
+   14,
+   468,
+   465
+  ]
+ },
+ {
+  "index": 63,
+  "name": "SceneRich",
+  "box": [
+   51,
+   78,
+   411,
+   402
+  ]
+ },
+ {
+  "index": 64,
+  "name": "SceneRoyal",
+  "box": [
+   10,
+   31,
+   480,
+   469
+  ]
+ },
+ {
+  "index": 65,
+  "name": "SceneFire",
+  "box": [
+   37,
+   0,
+   430,
+   500
+  ]
+ },
+ {
+  "index": 66,
+  "name": "SceneThunder",
+  "box": [
+   2,
+   0,
+   497,
+   498
+  ]
+ },
+ {
+  "index": 67,
+  "name": "SceneSoul",
+  "box": [
+   161,
+   62,
+   288,
+   212
+  ]
+ },
+ {
+  "index": 68,
+  "name": "SceneLove",
+  "box": [
+   40,
+   0,
+   421,
+   400
+  ]
+ },
+ {
+  "index": 69,
+  "name": "SceneCry",
+  "box": [
+   165,
+   8,
+   310,
+   457
+  ]
+ },
+ {
+  "index": 70,
+  "name": "SceneParty",
+  "box": [
+   40,
+   0,
+   380,
+   500
+  ]
+ },
+ {
+  "index": 71,
+  "name": "SceneVR",
+  "box": [
+   18,
+   108,
+   464,
+   380
+  ]
+ },
+ {
+  "index": 72,
+  "name": "SceneMusic",
+  "box": [
+   0,
+   55,
+   500,
+   419
+  ]
+ },
+ {
+  "index": 73,
+  "name": "MoodBall",
+  "box": [
+   168,
+   28,
+   164,
+   164
+  ]
+ },
+ {
+  "index": 74,
+  "name": "MoodYoYo",
+  "box": [
+   76,
+   280,
+   99,
+   169
+  ]
+ },
+ {
+  "index": 75,
+  "name": "MoodStars",
+  "box": [
+   57,
+   26,
+   443,
+   329
+  ]
+ },
+ {
+  "index": 76,
+  "name": "MoodShock",
+  "box": [
+   1,
+   0,
+   498,
+   499
+  ]
+ },
+ {
+  "index": 77,
+  "name": "MoodSad",
+  "box": [
+   70,
+   231,
+   360,
+   247
+  ]
+ },
+ {
+  "index": 78,
+  "name": "MoodCurious",
+  "box": [
+   182,
+   0,
+   318,
+   361
+  ]
+ },
+ {
+  "index": 79,
+  "name": "MoodMissile",
+  "box": [
+   1,
+   1,
+   498,
+   498
+  ]
+ },
+ {
+  "index": 80,
+  "name": "MoodFume",
+  "box": [
+   0,
+   1,
+   500,
+   497
+  ]
+ },
+ {
+  "index": 81,
+  "name": "MoodGlitch",
+  "box": [
+   0,
+   14,
+   500,
+   369
+  ]
+ },
+ {
+  "index": 82,
+  "name": "MoodThink",
+  "box": [
+   182,
+   0,
+   317,
+   178
+  ]
+ },
+ {
+  "index": 83,
+  "name": "MoodHappy",
+  "box": [
+   29,
+   65,
+   445,
+   354
+  ]
+ },
+ {
+  "index": 84,
+  "name": "MoodLove",
+  "box": [
+   43,
+   315,
+   412,
+   185
+  ]
+ },
+ {
+  "index": 85,
+  "name": "MoodGlad",
+  "box": [
+   8,
+   89,
+   484,
+   397
+  ]
+ },
+ {
+  "index": 86,
+  "name": "MoodCool",
+  "box": [
+   34,
+   154,
+   444,
+   308
+  ]
+ },
+ {
+  "index": 87,
+  "name": "MoodShy",
+  "box": [
+   64,
+   158,
+   372,
+   193
+  ]
+ },
+ {
+  "index": 88,
+  "name": "MoodEmbarrassed",
+  "box": [
+   10,
+   10,
+   490,
+   489
+  ]
+ },
+ {
+  "index": 89,
+  "name": "MoodShowOff",
+  "box": [
+   22,
+   35,
+   458,
+   361
+  ]
+ },
+ {
+  "index": 90,
+  "name": "MoodListen",
+  "box": [
+   0,
+   14,
+   500,
+   303
+  ]
+ },
+ {
+  "index": 91,
+  "name": "MoodArrogant",
+  "box": [
+   163,
+   13,
+   316,
+   302
+  ]
+ }
+]

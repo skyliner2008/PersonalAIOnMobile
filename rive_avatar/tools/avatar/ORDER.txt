@@ -1,5 +1,6 @@
 core/base.py
 core/layout.py
+core/head.py
 parts/eyes.py
 parts/morph.py
 parts/brows.py
@@ -54,6 +55,7 @@ moods/16_embarrassed.py
 moods/17_show_off.py
 moods/18_listening.py
 moods/19_arrogant.py
+stories/lab.py
 stories/assemble.py
 machine/states.py
 machine/reactions.py

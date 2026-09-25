@@ -1,5 +1,5 @@
 {
-  "version": 169,
+  "version": 184,
   "shapes": {
     "round": {
       "label": "round",
@@ -91,7 +91,7 @@
       "color": "cyan",
       "ref": {
         "sheet": 1,
-        "cell": 0
+        "cell": 8
       },
       "refFit": {
         "scale": 1.47,
@@ -484,9 +484,9 @@
     "glowWidth": 0.5,
     "glowOpacity": 1,
     "head": {
-      "radius": 300,
+      "radius": 385,
       "maxYaw": 12,
-      "maxPitch": 9,
+      "maxPitch": 8,
       "maxRoll": 10,
       "yawRoll": 3.4,
       "travelX": 0,
@@ -497,9 +497,9 @@
     "eyeRot": {
       "link": true,
       "L": {
-        "x": 0,
-        "y": 0,
-        "z": 0
+        "x": -1,
+        "y": -1,
+        "z": -2
       },
       "R": {
         "x": 0,

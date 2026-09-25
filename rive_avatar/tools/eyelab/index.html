@@ -10,150 +10,208 @@
   /* Deliberately single-theme: the pet's face lives on a black OLED screen. */
   :root {
     color-scheme: dark;
-    --bg: #07090d;
-    --panel: #0e131a;
-    --panel-2: #131a23;
-    --line: #1f2a36;
-    --text: #dce6ec;
-    --muted: #8599a8;
-    --eye: #3fe7f5;
-    --eye-back: #1b34d8;
-    --accent: #f5b841;
-    --warn: #ff7a6b;
-    --ok: #57d9a3;
+    --bg: #07090d; --panel: #0e131a; --panel-2: #131a23; --line: #1f2a36;
+    --text: #dce6ec; --muted: #8599a8; --eye: #3fe7f5; --accent: #f5b841; --warn: #ff7a6b; --ok: #57d9a3;
     --sans: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   }
-  html, body { background: var(--bg); color: var(--text); }
+  html, body { background: var(--bg); color: var(--text); margin: 0; }
   body { font-family: var(--sans); font-size: 14px; line-height: 1.5; padding-inline: 16px; padding-block: 12px 24px; }
   h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
-  h1 { font-size: 18px; letter-spacing: .01em; }
-  h2 { font-size: 13px; color: var(--muted); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+  h1 { font-size: 18px; }
   button, select, input, textarea { font: inherit; color: var(--text); }
-  button {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-    padding: 6px 10px; cursor: pointer;
-  }
+  button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
   button:hover { border-color: #33485c; }
-  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   button.primary { background: #123a40; border-color: #1f6b73; color: #bff7fb; }
-  button.danger { color: var(--warn); }
+  button.warn { color: var(--warn); }
   button[disabled] { opacity: .45; cursor: default; }
-  select, input[type=text], textarea {
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
-  }
-  textarea { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; }
+  select, input[type=text], input[type=number], textarea { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  input[type=number] { width: 84px; }
+  textarea { width: 100%; min-height: 54px; resize: vertical; box-sizing: border-box; }
   input[type=range] { width: 100%; accent-color: var(--eye); }
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .row label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+  .sep { width: 1px; align-self: stretch; background: var(--line); }
 
-  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
-  header.top p { margin: 0; color: var(--muted); max-width: 70ch; }
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+  header.top p { margin: 0; color: var(--muted); max-width: 72ch; font-size: 13px; }
   .status { margin-left: auto; font-size: 12px; color: var(--muted); }
-  .status.saving { color: var(--accent); }
-  .status.error { color: var(--warn); }
+  .status.saving { color: var(--accent); } .status.error { color: var(--warn); }
 
-  .app { display: grid; gap: 12px; grid-template-columns: 200px minmax(0, 1fr) 280px; align-items: start; }
-  @media (max-width: 1100px) { .app { grid-template-columns: 170px minmax(0, 1fr); } .side-right { grid-column: 1 / -1; } }
-  @media (max-width: 720px) { .app { grid-template-columns: minmax(0, 1fr); } }
+  /* ---- layout: tools | view, timeline below ---- */
+  .workbench { display: grid; gap: 12px; grid-template-columns: 330px minmax(0, 1fr); align-items: start; }
+  @media (max-width: 980px) { .workbench { grid-template-columns: minmax(0, 1fr); } .tools { order: 2; } }
+  .tools { display: grid; gap: 8px; max-height: calc(100vh - 110px); overflow: auto; padding-right: 4px; }
+  @media (max-width: 980px) { .tools { max-height: none; } }
+  details.cat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  details.cat > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+  details.cat > summary::-webkit-details-marker { display: none; }
+  details.cat > summary::after { content: "▸"; color: var(--muted); }
+  details.cat[open] > summary::after { content: "▾"; }
+  details.cat > summary small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: auto; }
+  .cat-body { padding: 0 12px 12px; display: grid; gap: 10px; }
 
-  section.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
-
-  /* shape list */
-  .shape-list { display: grid; gap: 6px; }
-  @media (max-width: 720px) { .shape-list { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
-  .shape-item {
-    display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: center; text-align: left;
-    padding: 6px; background: transparent; border: 1px solid transparent;
-  }
-  .shape-item:hover { border-color: var(--line); }
-  .shape-item[aria-current="true"] { border-color: #1f6b73; background: #0c1b20; }
-  .shape-item svg { width: 56px; height: 28px; display: block; }
-  .shape-item { width: 100%; min-width: 0; box-sizing: border-box; }
-  .shape-item > div { min-width: 0; }
-  .shape-item .nm { font-weight: 500; }
-  .shape-item .sub { overflow-wrap: anywhere; }
-  .shape-item .sub { font-size: 11px; color: var(--muted); }
-  .new-row { display: flex; gap: 6px; }
-  .new-row input { flex: 1; min-width: 0; }
-
-  /* stage */
-  .stage-wrap { display: grid; gap: 8px; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .toolbar .sep { width: 1px; height: 22px; background: var(--line); }
-  .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
-  .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
-  .stage svg { display: block; width: 100%; height: auto; max-height: 62vh; margin-inline: auto; }
-  details.tool { border-top: 1px solid var(--line); padding-top: 8px; }
-  details.tool summary { cursor: pointer; color: var(--muted); font-size: 12px; letter-spacing: .04em; }
-  details.tool[open] summary { color: var(--text); margin-bottom: 8px; }
   .slider { display: grid; gap: 2px; }
-  .slider > span { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .slider > span { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); }
   .slider > span b { font-family: var(--mono); font-weight: 500; color: var(--text); }
   .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
-  .head3d { margin-top: 12px; display: grid; gap: 12px; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-  @media (max-width: 1100px) { .head3d { grid-template-columns: auto minmax(0, 1fr); } }
-  @media (max-width: 620px) { .head3d { grid-template-columns: minmax(0, 1fr); } }
-  .pad { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; }
-  .pad button { height: 44px; padding: 0; font-size: 18px; }
-  .pad button.home { font-size: 12px; }
-  .subh { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
-  .hint { font-size: 12px; color: var(--muted); margin: 0; }
+  .sliders.one { grid-template-columns: 1fr; }
 
-  /* right panel */
-  .field { display: grid; gap: 4px; }
-  .field > span { font-size: 12px; color: var(--muted); }
-  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
-  .kv dt { color: var(--muted); }
-  .kv dd { margin: 0; }
+  .shape-list { display: grid; gap: 4px; }
+  .shape-item { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left; padding: 4px 6px; background: transparent; border: 1px solid transparent; width: 100%; }
+  .shape-item:hover { border-color: var(--line); }
+  .shape-item[aria-current="true"] { border-color: #1f6b73; background: #0c1b20; }
+  .shape-item svg { width: 52px; height: 26px; display: block; }
+  .shape-item .sub { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+  .pad { display: grid; grid-template-columns: repeat(3, 40px); gap: 5px; }
+  .pad button { height: 40px; padding: 0; font-size: 17px; }
+  .pad button.home { font-size: 12px; }
+  .faces { display: grid; gap: 4px; max-height: 280px; overflow: auto; }
+  .faces label { display: grid; grid-template-columns: 1fr 120px; gap: 6px; align-items: center; font-size: 12px; }
+  .faces label.on span { color: var(--eye); }
+  .prop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; max-height: 250px; overflow: auto; }
+  .prop-cell { display: grid; gap: 2px; justify-items: center; padding: 4px; font-size: 10px; color: var(--muted); }
+  .prop-cell img { width: 40px; height: 40px; object-fit: contain; }
+  .prop-cell[aria-pressed="true"] { border-color: var(--accent); color: var(--text); }
+
+  /* ---- the view ---- */
+  .view { display: grid; gap: 8px; }
+  .editing { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+  .editing b { color: var(--eye); }
+  .editing.key { border-color: #7a5a14; background: #1a1409; }
+  .editing.key b { color: var(--accent); }
+  .editing.play b { color: var(--ok); }
+  .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
+  .stage svg { display: block; width: 100%; height: auto; max-height: 60vh; margin-inline: auto; }
+  .under { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
+  .card h3 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .05em; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12px; margin: 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; }
   .ref-thumb { background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .ref-thumb canvas { display: block; width: 100%; height: auto; }
-  .faces { display: grid; gap: 4px; max-height: 260px; overflow: auto; padding-right: 4px; }
-  .faces label { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: 12px; }
-  .faces label.on span { color: var(--eye); }
 
-  /* motion preview */
-  .motion { margin-top: 12px; display: grid; gap: 10px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
-  @media (max-width: 900px) { .motion { grid-template-columns: minmax(0, 1fr); } }
-  .seq { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .chip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); font-size: 12px; }
-  .chip.now { border-color: var(--eye); color: var(--eye); }
-  .chip button { padding: 0 4px; border: 0; background: transparent; color: var(--muted); }
-  .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .params .field b { font-family: var(--mono); font-weight: 500; color: var(--text); }
-  .preview-stage { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .preview-stage svg { display: block; width: 100%; height: auto; }
-  .readonly-note { color: var(--accent); font-size: 12px; }
+  /* ---- timeline ---- */
+  .timeline { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 10px; }
+  .timeline h2 { font-size: 15px; }
+  .track-wrap { overflow-x: auto; }
+  .track { position: relative; height: 104px; min-width: 560px; background: #0a0e13; border: 1px solid var(--line); border-radius: 8px; user-select: none; touch-action: none; }
+  .ruler { position: absolute; left: 0; right: 0; top: 0; height: 20px; border-bottom: 1px solid var(--line); }
+  .tick { position: absolute; top: 0; height: 20px; border-left: 1px solid var(--line); font: 10px var(--mono); color: var(--muted); padding-left: 3px; }
+  .kf { position: absolute; top: 26px; width: 64px; margin-left: -32px; height: 70px; display: grid; justify-items: center; gap: 2px; cursor: grab;
+        background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 3px 0; }
+  .kf svg { width: 56px; height: 28px; }
+  .kf span { font: 10px var(--mono); color: var(--muted); }
+  .kf[aria-current="true"] { border-color: var(--accent); background: #1a1409; }
+  .kf .pdot { position: absolute; top: -7px; width: 10px; height: 10px; background: var(--accent); transform: rotate(45deg); }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ok); pointer-events: none; }
+  .key-props { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+  .key-props .slider { min-width: 150px; }
   @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
 </style>
 </head>
 <body>
-
 <header class="top">
   <h1>LOOI Eye Lab</h1>
-  <p>ลากจุดสีเหลืองเพื่อแก้รูปตา กดจุดเพื่อปรับความโค้ง ทุกการแก้บันทึกลงไฟล์ tools/avatar/data/eye_lab.json ซึ่ง Claude แก้ไฟล์เดียวกันได้ และใช้สร้างไฟล์ Rive ให้แอป</p>
+  <p>ปรับรูปตาและท่าทางทางขวา ใช้เครื่องมือทางซ้าย แล้วกด "เพิ่มท่านี้เป็นคีย์" เพื่อเรียง story ในไทม์ไลน์ด้านล่าง ทุกอย่างบันทึกลงไฟล์ใน tools/avatar/data/ ที่ Claude ใช้สร้างไฟล์ Rive</p>
   <span class="status" id="status">กำลังเชื่อม server.py…</span>
   <button class="primary" id="btnBuild" title="รัน generator + rive . --once แล้วคัดลอก avatar.riv เข้าแอป">สร้างไฟล์ Rive</button>
 </header>
-
 <p class="hint" id="buildOut" hidden></p>
-<div class="app">
-  <aside class="side-left">
-    <section class="box">
-      <h2>รูปตา</h2>
-      <div class="shape-list" id="shapeList"></div>
-      <div class="new-row">
-        <input type="text" id="newName" placeholder="ชื่อรูปใหม่ เช่น sleepy" aria-label="ชื่อรูปตาใหม่">
-        <button id="btnNew" title="สร้างรูปใหม่โดยเริ่มจากรูปที่เลือกอยู่">สร้าง</button>
+
+<div class="workbench">
+  <!-- ================= 1. tools ================= -->
+  <aside class="tools" aria-label="เครื่องมือ">
+    <details class="cat" open>
+      <summary>รูปตาในคลัง <small id="libCount"></small></summary>
+      <div class="cat-body">
+        <div class="shape-list" id="shapeList"></div>
+        <div class="row">
+          <input type="text" id="newName" placeholder="ชื่อรูปใหม่ เช่น sleepy" aria-label="ชื่อรูปตาใหม่" style="flex:1;min-width:0">
+          <button id="btnNew">สร้าง</button>
+        </div>
+        <p class="hint">รูปใหม่เริ่มจากรูปที่กำลังแก้อยู่ ชื่อใช้ a–z, 0–9, _</p>
+        <div class="row"><button class="warn" id="btnDelete">ลบรูปนี้</button><span id="deleteConfirm" hidden><button class="warn" id="btnDeleteYes">ยืนยันลบ</button> <button id="btnDeleteNo">ยกเลิก</button></span></div>
       </div>
-      <p class="hint">ชื่อใช้ a–z, 0–9, _ เท่านั้น รูปใหม่จะเริ่มจากรูปที่เลือกอยู่</p>
-    </section>
+    </details>
+
+    <details class="cat">
+      <summary>ค่าหลัก <small>ทุกรูป</small></summary>
+      <div class="cat-body">
+        <div class="sliders" id="rigSliders"></div>
+        <button id="btnRigReset">คืนค่าเริ่มต้น</button>
+      </div>
+    </details>
+
+    <details class="cat" open>
+      <summary>หัว 3D <small>ท่าหัว</small></summary>
+      <div class="cat-body">
+        <div class="row" style="align-items:start;gap:12px">
+          <div class="pad" role="group" aria-label="มองไปทิศต่างๆ">
+            <button data-look="-1,-1" aria-label="มองซ้ายบน">↖</button><button data-look="0,-1" aria-label="เงยหน้า">↑</button><button data-look="1,-1" aria-label="มองขวาบน">↗</button>
+            <button data-look="-1,0" aria-label="หันซ้าย">←</button><button class="home" data-look="0,0" aria-label="มองตรง">ตรง</button><button data-look="1,0" aria-label="หันขวา">→</button>
+            <button data-look="-1,1" aria-label="มองซ้ายล่าง">↙</button><button data-look="0,1" aria-label="ก้มหน้า">↓</button><button data-look="1,1" aria-label="มองขวาล่าง">↘</button>
+          </div>
+          <div class="sliders one" id="poseSliders" style="flex:1;min-width:140px"></div>
+        </div>
+        <label class="row"><input type="checkbox" id="optWander"> มองรอบๆ เอง (ลองดู ไม่บันทึก)</label>
+        <details class="cat" style="background:var(--panel-2)">
+          <summary>โมเดลหัว <small>ใช้ในแอป</small></summary>
+          <div class="cat-body"><div class="sliders" id="headSliders"></div></div>
+        </details>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>หมุนดวงตา <small>X / Y / Z</small></summary>
+      <div class="cat-body">
+        <label class="row"><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
+        <div class="sliders" id="rotSliders"></div>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>สร้างรูปจากวงรี</summary>
+      <div class="cat-body">
+        <div class="sliders" id="ellSliders"></div>
+        <p class="hint">เส้นประในพื้นที่แก้รูปคือวงรีที่จะได้</p>
+        <button class="primary" id="btnEllApply">ใช้วงรีนี้กับตา</button>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>พร็อพ <small id="propNow">ไม่มี</small></summary>
+      <div class="cat-body">
+        <p class="hint">เลือกได้ 1 ชิ้นต่อคีย์ ลากพร็อพในพื้นที่แก้รูปเพื่อย้าย</p>
+        <input type="text" id="propFilter" placeholder="ค้นหาพร็อพ" aria-label="ค้นหาพร็อพ">
+        <div class="prop-grid" id="propGrid"></div>
+        <div class="sliders" id="propSliders"></div>
+        <button id="btnPropNone">เอาพร็อพออก</button>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>การเคลื่อนไหว <small>ค่าเริ่มต้นของคีย์ใหม่</small></summary>
+      <div class="cat-body"><div class="sliders" id="motionSliders"></div></div>
+    </details>
+
+    <details class="cat">
+      <summary>หน้าอารมณ์ในแอป → รูปตา</summary>
+      <div class="cat-body">
+        <p class="hint">หน้าที่เลือกรูปไว้ใช้ตาแบบ morph ในแอป "แบบเดิม" คือรูปวาดแยกแบบเก่า</p>
+        <div class="faces" id="faces"></div>
+      </div>
+    </details>
   </aside>
 
-  <main class="stage-wrap">
-    <div class="toolbar">
+  <!-- ================= 2. the view ================= -->
+  <main class="view">
+    <div class="editing" id="editing"></div>
+    <div class="row">
       <label><input type="checkbox" id="optMirror" checked> ตาขวาสะท้อนจากตาซ้าย</label>
-      <span class="sep"></span>
       <label><input type="checkbox" id="optRef" checked> ซ้อนชีทต้นฉบับ</label>
       <label><input type="checkbox" id="optGhost"> เงาตาปกติ</label>
       <span class="sep"></span>
@@ -162,175 +220,98 @@
       <button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button>
     </div>
     <div class="stage" id="stage"></div>
-    <p class="hint">ตัวเลข 0–7 คือลำดับจุด (0 = บนสุด แล้ววนตามเข็มนาฬิกา) ทุกรูปใช้ลำดับเดียวกัน ตาจึงเปลี่ยนรูปหากันได้ ถ้าจุดสลับลำดับ ตาจะบิดระหว่างเปลี่ยนรูป</p>
+    <div class="under">
+      <div class="card">
+        <h3>จุดที่เลือก</h3>
+        <dl class="kv mono" id="pointInfo"></dl>
+        <label class="slider"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)<b id="vSmooth"></b></span><input type="range" id="smooth" min="0" max="1.6" step="0.05"></label>
+        <label class="row">สีตา <select id="color"><option value="cyan">ฟ้า</option><option value="red">แดง</option><option value="pink">ชมพู</option><option value="gold">ทอง</option></select></label>
+      </div>
+      <div class="card">
+        <h3>ชีทอ้างอิง</h3>
+        <select id="refCell" aria-label="ช่องในชีทอ้างอิง"></select>
+        <div class="ref-thumb"><canvas id="refCanvas" width="268" height="158"></canvas></div>
+        <div class="sliders" id="fitSliders"></div>
+      </div>
+      <div class="card">
+        <h3>โน้ตถึง Claude</h3>
+        <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้"></textarea>
+        <p class="hint">โน้ตผูกกับรูปในคลัง หรือกับคีย์ที่เลือกอยู่</p>
+      </div>
+    </div>
   </main>
-
-  <aside class="side-right">
-    <section class="box">
-      <h2>ค่าหลัก (ใช้กับทุกรูป)</h2>
-      <div class="sliders" id="rigSliders"></div>
-      <p class="hint">ใช้กับตาทุกรูปในแอป ทั้งตาแบบ morph และแบบเดิม กด "สร้างไฟล์ Rive" เพื่อดูบนมือถือ</p>
-      <button id="btnRigReset">คืนค่าเริ่มต้น</button>
-    </section>
-
-    <section class="box">
-      <h2>จุดที่เลือก</h2>
-      <dl class="kv mono" id="pointInfo"><dt>จุด</dt><dd>–</dd></dl>
-      <label class="field"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)</span>
-        <input type="range" id="smooth" min="0" max="1.6" step="0.05" value="1"></label>
-    </section>
-
-    <section class="box">
-      <h2>รูปนี้</h2>
-      <div class="row2">
-        <label class="field"><span>สีตา</span>
-          <select id="color">
-            <option value="cyan">ฟ้า (ปกติ)</option>
-            <option value="red">แดง (โกรธ)</option>
-            <option value="pink">ชมพู (รัก)</option>
-            <option value="gold">ทอง</option>
-          </select></label>
-        <label class="field"><span>ชีทอ้างอิง</span>
-          <select id="refCell"></select></label>
-      </div>
-      <div class="ref-thumb"><canvas id="refCanvas" width="268" height="158"></canvas></div>
-      <div class="row2">
-        <label class="field"><span>ขนาดชีทที่ซ้อน</span><input type="range" id="fitScale" min="0.5" max="2" step="0.01"></label>
-        <label class="field"><span>ความจางชีท</span><input type="range" id="fitOpacity" min="0" max="1" step="0.05"></label>
-        <label class="field"><span>เลื่อนชีท ซ้าย/ขวา</span><input type="range" id="fitDx" min="-150" max="150" step="1"></label>
-        <label class="field"><span>เลื่อนชีท ขึ้น/ลง</span><input type="range" id="fitDy" min="-150" max="150" step="1"></label>
-      </div>
-      <details class="tool" id="ellTool">
-        <summary>สร้างรูปจากวงรี / วงกลม</summary>
-        <div class="sliders" id="ellSliders"></div>
-        <p class="hint">เส้นประในพื้นที่แก้รูปคือวงรีที่จะได้ กด "ใช้วงรีนี้" เพื่อแทนที่ 8 จุดของรูปนี้</p>
-        <button class="primary" id="btnEllApply">ใช้วงรีนี้</button>
-      </details>
-      <label class="field"><span>โน้ตถึง Claude (ต้องการให้ปรับอะไร)</span>
-        <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้ ตาซ้ายควรเล็กกว่าขวา"></textarea></label>
-      <button class="danger" id="btnDelete">ลบรูปนี้</button>
-      <div id="deleteConfirm" hidden>
-        <span class="readonly-note">ลบรูปนี้ถาวร?</span>
-        <button class="danger" id="btnDeleteYes">ลบ</button>
-        <button id="btnDeleteNo">ยกเลิก</button>
-      </div>
-    </section>
-
-    <section class="box">
-      <h2>หน้าอารมณ์ในแอป → รูปตา</h2>
-      <p class="hint">หน้าที่เลือกรูปไว้จะใช้ตาแบบเปลี่ยนรูปได้ (morph) หน้าที่ตั้งเป็น "แบบเดิม" ยังใช้รูปวาดแยกแบบเก่า</p>
-      <div class="faces" id="faces"></div>
-    </section>
-  </aside>
 </div>
 
-<section class="box head3d" aria-labelledby="h3d">
-  <div style="display:grid;gap:8px">
-    <h2 id="h3d">หัว 3D</h2>
-    <div class="pad" role="group" aria-label="มองไปทิศต่างๆ">
-      <button data-look="-1,-1" aria-label="มองซ้ายบน">↖</button><button data-look="0,-1" aria-label="เงยหน้า">↑</button><button data-look="1,-1" aria-label="มองขวาบน">↗</button>
-      <button data-look="-1,0" aria-label="หันซ้าย">←</button><button class="home" data-look="0,0" aria-label="มองตรง">ตรง</button><button data-look="1,0" aria-label="หันขวา">→</button>
-      <button data-look="-1,1" aria-label="มองซ้ายล่าง">↙</button><button data-look="0,1" aria-label="ก้มหน้า">↓</button><button data-look="1,1" aria-label="มองขวาล่าง">↘</button>
-    </div>
-    <label><input type="checkbox" id="optWander"> มองรอบๆ เอง</label>
+<!-- ================= 3. timeline ================= -->
+<section class="timeline" aria-labelledby="tlh">
+  <div class="row">
+    <h2 id="tlh">ไทม์ไลน์</h2>
+    <select id="storySel" aria-label="เลือก story"></select>
+    <input type="text" id="storyNew" placeholder="ชื่อ story ใหม่" aria-label="ชื่อ story ใหม่" style="width:150px">
+    <button id="btnStoryNew">สร้าง story</button>
+    <span class="sep"></span>
+    <label>ใช้แทน <select id="storyTarget" aria-label="story นี้แทนเรื่องไหนในแอป"></select></label>
+    <label>ยาว <input type="number" id="storyDur" min="500" max="20000" step="100" aria-label="ความยาว story (มิลลิวินาที)"> ms</label>
+    <button class="warn" id="btnStoryDel">ลบ story</button>
+    <span id="storyDelConfirm" hidden><button class="warn" id="btnStoryDelYes">ยืนยันลบ</button> <button id="btnStoryDelNo">ยกเลิก</button></span>
   </div>
-  <div>
-    <p class="subh">ลองท่า (ไม่บันทึก)</p>
-    <div class="sliders" id="poseSliders" style="grid-template-columns:1fr"></div>
+  <div class="row">
+    <button class="primary" id="btnPlay">▶ เล่น</button>
+    <label><input type="checkbox" id="optLoop" checked> วนซ้ำ</label>
+    <span class="mono" id="timeNow">0.00 s</span>
+    <span class="sep"></span>
+    <button class="primary" id="btnAddKey">＋ เพิ่มท่านี้เป็นคีย์</button>
+    <button id="btnDupKey">ทำซ้ำคีย์</button>
+    <button class="warn" id="btnDelKey">ลบคีย์</button>
+    <button id="btnDeselect">เลิกเลือกคีย์</button>
   </div>
-  <div>
-    <p class="subh">โมเดลหัว (บันทึก ใช้ในแอป)</p>
-    <div class="sliders" id="headSliders"></div>
-  </div>
-  <div>
-    <p class="subh">หมุนดวงตาแต่ละข้าง (องศา)</p>
-    <label><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
-    <div class="sliders" id="rotSliders"></div>
-  </div>
-</section>
-
-<section class="box motion">
-  <div class="preview-stage" id="preview"></div>
-  <div style="display:grid;gap:10px">
-    <h2>ดูการเปลี่ยนรูปทรง</h2>
-    <div class="seq" id="seq"></div>
-    <div class="toolbar">
-      <select id="seqAdd" aria-label="เพิ่มรูปในลำดับ"></select>
-      <button id="btnSeqAdd">เพิ่มในลำดับ</button>
-      <button class="primary" id="btnPlay">เล่น</button>
-      <label><input type="checkbox" id="optLoop" checked> วนซ้ำ</label>
-    </div>
-    <div class="params">
-      <label class="field"><span>เวลาเปลี่ยนรูป <b id="vMorph"></b></span><input type="range" id="pMorph" min="100" max="900" step="10"></label>
-      <label class="field"><span>ค้างแต่ละรูป <b id="vHold"></b></span><input type="range" id="pHold" min="200" max="2500" step="50"></label>
-      <label class="field"><span>ตาขวาช้ากว่า <b id="vLag"></b></span><input type="range" id="pLag" min="0" max="12" step="1"></label>
-      <label class="field"><span>แรงเด้งตาขวา <b id="vGain"></b></span><input type="range" id="pGain" min="0" max="1.2" step="0.05"></label>
-      <label class="field"><span>ความแรงการเด้ง <b id="vPop"></b></span><input type="range" id="pPop" min="0" max="2" step="0.05"></label>
-      <label class="field"><span>สั่นทั้งดวงตา <b id="vTremble"></b></span><input type="range" id="pTremble" min="0" max="6" step="0.1"></label>
-      <label class="field"><span>ขอบตาล่างสั่น <b id="vQuiver"></b></span><input type="range" id="pQuiver" min="0" max="8" step="0.1"></label>
-      <label class="field"><span>เส้นโค้งการเปลี่ยน</span>
-        <select id="pEase"><option value="jelly">เด้งเลยเป้า (jelly)</option><option value="smooth">นุ่ม (ease-in-out)</option></select></label>
-    </div>
-    <p class="hint">ค่าการเคลื่อนไหวชุดนี้บันทึกไว้ให้ Claude ใช้กับ story ในแอปด้วย</p>
-  </div>
+  <div class="track-wrap"><div class="track" id="track"><div class="ruler" id="ruler"></div><div class="playhead" id="playhead"></div></div></div>
+  <div class="key-props" id="keyProps"></div>
+  <p class="hint">คลิกคีย์เพื่อแก้ (รูปตา ท่าหัว หมุนตา พร็อพ จะแก้คีย์นั้น) ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา ลากบนไม้บรรทัดเพื่อดูทีละช่วง</p>
 </section>
 
 <script>
 (() => {
   "use strict";
-  // ---------------------------------------------------------------- constants
-  const N = 8;
-  // the "rig" (Eye Lab ค่าหลัก): read by the generator too (core/layout.py, parts/eyes.py, parts/morph.py)
-  const DEFAULT_RIG = { eyeDx: 100, eyeScale: 1.32, backDx: 0, backDy: 5, glowFeather: 16, glowWidth: 5, glowOpacity: 1 };
-  let RIG = { ...DEFAULT_RIG };
-  const W = 500, H = 320, CX = 250, CY = 160;
+  // ================================================================ constants
+  const N = 8, DEG = Math.PI / 180;
+  const W = 500, H = 420, CX = 250, CY = 190;       // view: the eye row sits at CY
+  const EYE_ROW_Y = -20;                             // eye row above the face centre (core/layout.py EYE_Y)
+  const ART_DY = 40;                                 // artboard y = view y + 40 (artboard eye row is at 230)
+  const FACE_CY = CY - EYE_ROW_Y;                    // the face centre / tilt pivot in the view
   const K8 = 4 / 3 * Math.tan(Math.PI / 16) / (2 * Math.sin(Math.PI / 8));
-  const COLORS = {
-    cyan: ["#3fe7f5", "#1b34d8"], red: ["#ff4d5e", "#8e0f26"],
-    pink: ["#ff5c8a", "#b0184a"], gold: ["#ffc53d", "#9a6a05"],
-  };
-  const FACES = ["Neutral", "Happy", "Angry", "Sleepy", "Curious", "Wink", "Dead", "Laughing", "Evil", "Focused",
-    "Excited", "Shy", "Shock", "Disgusted", "Love", "Crying", "Sad", "Thinking", "Listening", "Confused", "Pout",
-    "Dizzy", "Bored", "Scared", "Tired", "Blank", "Money", "Grin", "Smug", "Determined", "Calm", "Rage", "OneEye",
-    "Recognized", "Starry", "Weepy", "Quizzical", "Fume", "Beam", "Glad", "Bashful", "Fluster", "Haughty"];
-  // reference sheets: a regular grid of labelled cells
+  const COLORS = { cyan: ["#3fe7f5", "#1b34d8"], red: ["#ff4d5e", "#8e0f26"], pink: ["#ff5c8a", "#b0184a"], gold: ["#ffc53d", "#9a6a05"] };
   const SHEETS = {
     1: { src: "ref/sheet1.jpg", iw: 1224, ih: 864, x0: 28, y0: 58, pw: 303.5, ph: 163, w: 268, h: 158, cols: 4,
-         names: ["Normal", "Happy", "Angry", "Sleepy", "Curious", "Eating", "Drinking", "Wink", "Dead", "Laughing",
-                 "Music", "VR Mode", "Diving", "Evil", "Focused", "Excited", "Shy", "Shock", "Disgusted", "Camera Mode"] },
+         names: ["Normal", "Happy", "Angry", "Sleepy", "Curious", "Eating", "Drinking", "Wink", "Dead", "Laughing", "Music", "VR Mode", "Diving", "Evil", "Focused", "Excited", "Shy", "Shock", "Disgusted", "Camera Mode"] },
     2: { src: "ref/sheet2.jpg", iw: 1200, ih: 896, x0: 34, y0: 62, pw: 193.5, ph: 167, w: 178, h: 160, cols: 6,
-         names: ["Confused", "Sick", "Rich", "In Love", "Crying", "Thinking", "Reading", "Gaming", "Traveling", "Working",
-                 "Cold", "Hot", "Detective", "Cooking", "Art Mode", "Space", "Party", "Dreaming", "Exhausted", "Electric",
-                 "Sneaky", "Romantic", "Hero", "Glitched", "Magic", "Sporty", "Scientist", "Scared", "Warrior", "Low Battery"] },
+         names: ["Confused", "Sick", "Rich", "In Love", "Crying", "Thinking", "Reading", "Gaming", "Traveling", "Working", "Cold", "Hot", "Detective", "Cooking", "Art Mode", "Space", "Party", "Dreaming", "Exhausted", "Electric", "Sneaky", "Romantic", "Hero", "Glitched", "Magic", "Sporty", "Scientist", "Scared", "Warrior", "Low Battery"] },
   };
-  const DEFAULT_MOTION = { morphMs: 267, holdMs: 900, popLag: 3, popGainR: 0.8, pop: 1, tremble: 1.6, quiver: 2.4, ease: "jelly",
-                           sequence: ["round", "droop", "melt", "droop", "round"] };
+  const DEFAULT_RIG = { eyeDx: 100, eyeScale: 1.32, backDx: 0, backDy: 5, glowFeather: 16, glowWidth: 5, glowOpacity: 1 };
+  const DEFAULT_HEAD = { radius: 300, maxYaw: 12, maxPitch: 9, maxRoll: 10, yawRoll: 3.4, travelX: 0, travelY: 0, pupil: 13, persp: 0.15 };
+  const DEFAULT_MOTION = { morphMs: 267, popLag: 3, popGainR: 0.8, pop: 1, tremble: 1.6, quiver: 2.4, ease: "jelly" };
   const DEFAULT_FIT = { scale: 1, dx: 0, dy: 36, opacity: 0.45 };
+  const POP = [[0, 1, 1], [4, 1.09, .88], [10, .93, 1.08], [15, 1.02, .98], [20, 1, 1]];
 
-  // ---------------------------------------------------------------- state
+  // ================================================================ state
   const state = {
-    shapes: {},            // key -> body
-    selected: null,        // shape key
-    point: { eye: "L", i: 0 },
-    faces: {},             // face -> shape key
-    motion: { ...DEFAULT_MOTION },
+    shapes: {}, faces: {}, motion: { ...DEFAULT_MOTION }, selected: null,
+    point: { eye: "L", i: 0 }, dragging: null, history: [], canWrite: true,
     showRef: true, showGhost: false,
-    canWrite: true,
-    history: [],           // [{key, body}]
-    dragging: null,
+    props: [], moods: [], faceNames: [],
+    stories: [], story: null, key: -1,              // the open story and the selected key (-1 = none)
+    live: { pose: { yaw: 0, pitch: 0, roll: 0 }, prop: null },   // the workspace when no key is selected
+    playing: false, t: 0,
   };
-  const images = {};
+  let RIG = { ...DEFAULT_RIG };
 
-  // ---------------------------------------------------------------- geometry
+  // ================================================================ geometry
   const wrapNear = (a, ref) => { while (a - ref > Math.PI) a -= 2 * Math.PI; while (a - ref < -Math.PI) a += 2 * Math.PI; return a; };
   function outline(pts) {
     return pts.map((p, i) => {
-      const [px, py] = pts[(i + N - 1) % N], [nx, ny] = pts[(i + 1) % N];
-      const [x, y, s] = p;
-      const ref = i * 2 * Math.PI / N;
+      const [px, py] = pts[(i + N - 1) % N], [nx, ny] = pts[(i + 1) % N], [x, y, s] = p, ref = i * 2 * Math.PI / N;
       const ang = wrapNear(Math.atan2(ny - py, nx - px), ref);
-      return { x, y, outRot: ang, outDist: s * K8 * Math.hypot(nx - x, ny - y),
-               inRot: wrapNear(ang + Math.PI, ref + Math.PI), inDist: s * K8 * Math.hypot(x - px, y - py) };
+      return { x, y, outRot: ang, outDist: s * K8 * Math.hypot(nx - x, ny - y), inRot: wrapNear(ang + Math.PI, ref + Math.PI), inDist: s * K8 * Math.hypot(x - px, y - py) };
     });
   }
   const mirror = (pts) => Array.from({ length: N }, (_, i) => { const p = pts[(N - i) % N]; return [-p[0], p[1], p[2]]; });
@@ -339,282 +320,526 @@
     let d = `M${v[0].x.toFixed(2)},${v[0].y.toFixed(2)}`;
     for (let i = 0; i < N; i++) {
       const a = v[i], b = v[(i + 1) % N];
-      d += `C${(a.x + Math.cos(a.outRot) * a.outDist).toFixed(2)},${(a.y + Math.sin(a.outRot) * a.outDist).toFixed(2)} ` +
-           `${(b.x + Math.cos(b.inRot) * b.inDist).toFixed(2)},${(b.y + Math.sin(b.inRot) * b.inDist).toFixed(2)} ${b.x.toFixed(2)},${b.y.toFixed(2)}`;
+      d += `C${(a.x + Math.cos(a.outRot) * a.outDist).toFixed(2)},${(a.y + Math.sin(a.outRot) * a.outDist).toFixed(2)} ${(b.x + Math.cos(b.inRot) * b.inDist).toFixed(2)},${(b.y + Math.sin(b.inRot) * b.inDist).toFixed(2)} ${b.x.toFixed(2)},${b.y.toFixed(2)}`;
     }
     return d + "Z";
   }
   const lerp = (a, b, t) => a + (b - a) * t;
-  const lerpVerts = (A, B, t) => A.map((a, i) => { const b = B[i]; return {
-    x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), outRot: lerp(a.outRot, b.outRot, t), outDist: lerp(a.outDist, b.outDist, t),
-    inRot: lerp(a.inRot, b.inRot, t), inDist: lerp(a.inDist, b.inDist, t) }; });
-  function eyePts(body, eye) {
-    if (eye === "L" || body.mirror !== false || !body.right) return eye === "L" ? body.left : mirror(body.left);
-    return body.right;
-  }
-  // cubic-bezier easing (same curves as the generator's EASES)
+  const lerpVerts = (A, B, t) => A.map((a, i) => { const b = B[i]; return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), outRot: lerp(a.outRot, b.outRot, t), outDist: lerp(a.outDist, b.outDist, t), inRot: lerp(a.inRot, b.inRot, t), inDist: lerp(a.inDist, b.inDist, t) }; });
   function bezier(x1, y1, x2, y2) {
     const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
     const sx = (t) => ((ax * t + bx) * t + cx) * t, sy = (t) => ((ay * t + by) * t + cy) * t;
     return (x) => { let t = x; for (let k = 0; k < 8; k++) { const d = (3 * ax * t + 2 * bx) * t + cx; if (Math.abs(d) < 1e-6) break; t -= (sx(t) - x) / d; } return sy(Math.min(1, Math.max(0, t))); };
   }
-  const EASE = { jelly: bezier(0.30, 0, 0.32, 1.28), smooth: bezier(0.42, 0, 0.58, 1) };
+  // the same curves as the generator's EASES (core/base.py)
+  const EASE = { jelly: bezier(0.30, 0, 0.32, 1.28), smooth: bezier(0.42, 0, 0.58, 1), soft: bezier(0.25, 0.1, 0.25, 1), linear: (x) => x, hold: () => 0 };
+  const EASE_NAMES = { jelly: "เด้งเลยเป้า", smooth: "นุ่ม", soft: "นุ่มเร็ว", linear: "เส้นตรง", hold: "ค้างแล้วเปลี่ยน" };
+  const clone = (o) => JSON.parse(JSON.stringify(o));
 
-  // ---------------------------------------------------------------- 3D head
-  // The face is drawn on a sphere: each feature sits on it at its offset from the face
-  // centre, the head turns (yaw) / nods (pitch) and the result is projected back onto the
-  // screen. Features on the far side shrink (cos) and, with perspective, get smaller.
-  // tools/avatar/machine/poses.py builds the Rive look poses from the same maths.
-  const DEG = Math.PI / 180;
-  const EYE_ROW_Y = -20;          // the eye row sits 20 px above the face centre (core/layout.py EYE_Y)
-  const DEFAULT_HEAD = { radius: 300, maxYaw: 12, maxPitch: 9, maxRoll: 10, yawRoll: 3.4, travelX: 0, travelY: 0, pupil: 13, persp: 0.15 };
-  const DEFAULT_EYEROT = { link: true, L: { x: 0, y: 0, z: 0 }, R: { x: 0, y: 0, z: 0 } };
-  const pose = { yaw: 0, pitch: 0, roll: 0 };   // what the lab is looking at right now (-1..1), not saved
+  // ================================================================ 3D head (same maths as machine/poses.py head_project)
   const head = () => ({ ...DEFAULT_HEAD, ...(RIG.head || {}) });
-  function eyeRot(eye) {
-    const r = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
-    const L = { x: 0, y: 0, z: 0, ...(r.L || {}) };
-    if (eye === "L") return L;
-    return r.link ? { x: L.x, y: -L.y, z: -L.z } : { x: 0, y: 0, z: 0, ...(r.R || {}) };
+  function rigEyeRot() {
+    const r = RIG.eyeRot || {}, L = { x: 0, y: 0, z: 0, ...(r.L || {}) };
+    const R = r.link === false ? { x: 0, y: 0, z: 0, ...(r.R || {}) } : { x: L.x, y: -L.y, z: -L.z };
+    return { L, R };
   }
-  function headProject(x0, y0, yaw, pitch, H) {
-    const R = Math.max(H.radius, Math.abs(x0) + 1, Math.abs(y0) + 1);
-    const a = Math.asin(x0 / R), b = Math.asin(y0 / R);
+  function headProject(x0, y0, yaw, pitch, Hd) {
+    const R = Math.max(Hd.radius, Math.abs(x0) + 1, Math.abs(y0) + 1), a = Math.asin(x0 / R), b = Math.asin(y0 / R);
     const at = (yw, pt) => {
       const px = R * Math.sin(a) * Math.cos(b), py = R * Math.sin(b), pz = R * Math.cos(a) * Math.cos(b);
       const x1 = px * Math.cos(yw) + pz * Math.sin(yw), z1 = -px * Math.sin(yw) + pz * Math.cos(yw);
       const y2 = py * Math.cos(pt) + z1 * Math.sin(pt), z2 = -py * Math.sin(pt) + z1 * Math.cos(pt);
-      const k = 1 + H.persp * (z2 - R) / R;
-      const nx = x1 / R, ny = y2 / R;
+      const k = 1 + Hd.persp * (z2 - R) / R, nx = x1 / R, ny = y2 / R;
       return { x: x1 * k, y: y2 * k, fx: Math.sqrt(Math.max(0.05, 1 - nx * nx)) * k, fy: Math.sqrt(Math.max(0.05, 1 - ny * ny)) * k };
     };
     const b0 = at(0, 0), q = at(yaw, pitch);
     return { dx: q.x - b0.x, dy: q.y - b0.y, sx: q.fx / b0.fx, sy: q.fy / b0.fy };
   }
-  // where and how one eye is drawn at the current head pose
-  function eyeXform(eye) {
-    const H = head();
-    const bx = eye === "L" ? -RIG.eyeDx : RIG.eyeDx;
-    const pj = headProject(bx, EYE_ROW_Y, pose.yaw * H.maxYaw * DEG, pose.pitch * H.maxPitch * DEG, H);
-    const rollDeg = pose.roll * H.maxRoll - pose.yaw * H.yawRoll;
-    const x = bx + pj.dx + H.travelX * pose.yaw, y = pj.dy + H.travelY * pose.pitch;
-    const r = rollDeg * DEG, er = eyeRot(eye);
-    return {
-      tx: CX + x * Math.cos(r) - y * Math.sin(r), ty: CY + x * Math.sin(r) + y * Math.cos(r), rot: rollDeg + er.z,
-      sx: RIG.eyeScale * pj.sx * Math.cos(er.y * DEG), sy: RIG.eyeScale * pj.sy * Math.cos(er.x * DEG),
-      ix: H.pupil * pose.yaw / RIG.eyeScale, iy: H.pupil * pose.pitch / RIG.eyeScale,
-    };
+  // where one eye is drawn for a frame (pose + per-eye rotation)
+  function eyeXform(eye, fr) {
+    const Hd = head(), pose = fr.pose, bx = eye === "L" ? -RIG.eyeDx : RIG.eyeDx;
+    const pj = headProject(bx, EYE_ROW_Y, pose.yaw * Hd.maxYaw * DEG, pose.pitch * Hd.maxPitch * DEG, Hd);
+    const rollDeg = pose.roll * Hd.maxRoll - pose.yaw * Hd.yawRoll, r = rollDeg * DEG, er = fr.eyeRot[eye];
+    const x = bx + pj.dx + Hd.travelX * pose.yaw, y = EYE_ROW_Y + pj.dy + Hd.travelY * pose.pitch;
+    return { tx: CX + x * Math.cos(r) - y * Math.sin(r), ty: FACE_CY + x * Math.sin(r) + y * Math.cos(r), rot: rollDeg + er.z,
+             sx: RIG.eyeScale * pj.sx * Math.cos(er.y * DEG), sy: RIG.eyeScale * pj.sy * Math.cos(er.x * DEG),
+             ix: Hd.pupil * pose.yaw / RIG.eyeScale, iy: Hd.pupil * pose.pitch / RIG.eyeScale };
   }
   const xformAttr = (t, kx = 1, ky = 1, dx = 0, dy = 0) => `translate(${t.tx + dx} ${t.ty + dy}) rotate(${t.rot}) scale(${t.sx * kx} ${t.sy * ky})`;
 
-  // ---------------------------------------------------------------- svg helpers
-  const NS = "http://www.w3.org/2000/svg";
-  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
-  function defs(svg, id) {
-    const d = el("defs", {}, svg);
-    const f = el("filter", { id, x: "-50%", y: "-50%", width: "200%", height: "200%" }, d);
-    el("feGaussianBlur", { stdDeviation: "7", "data-glow": "1" }, f);
+  // ================================================================ frames: what the view shows
+  // A frame is everything drawn at one moment: both eyes' points + colours, the head pose,
+  // the per-eye rotation and the prop. The workspace, every key and every playback moment
+  // are frames; a key IS a saved frame plus its timing and effects.
+  function libraryEyes(key) {
+    const b = state.shapes[key]; if (!b) return { L: { pts: round(), color: "cyan" }, R: { pts: mirror(round()), color: "cyan" } };
+    const L = b.left, R = b.mirror === false && b.right ? b.right : mirror(b.left);
+    return { L: { pts: L, color: b.color || "cyan" }, R: { pts: R, color: b.color || "cyan" } };
   }
-  // one eye: back layer, glow, front layer -- the same layering as the Rive rig
-  function drawEye(g, verts, color, glowId, ix = 0, iy = 0) {
-    const [front, back] = COLORS[color] || COLORS.cyan;
-    const d = pathD(verts);
+  function currentKey() { return state.story && state.key >= 0 ? state.story.keys[state.key] : null; }
+  function workFrame() {
+    const k = currentKey();
+    if (k) return { eyes: k.eyes, pose: k.pose, eyeRot: k.eyeRot, prop: k.prop, fx: { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] } };
+    return { eyes: libraryEyes(state.selected), pose: state.live.pose, eyeRot: rigEyeRot(), prop: state.live.prop, fx: { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] } };
+  }
+  function popAt(frame) {
+    if (frame < 0 || frame > 20) return [1, 1];
+    for (let k = 0; k < POP.length - 1; k++) { const [f0, x0, y0] = POP[k], [f1, x1, y1] = POP[k + 1]; if (frame <= f1) { const t = EASE.smooth((frame - f0) / (f1 - f0)); return [lerp(x0, x1, t), lerp(y0, y1, t)]; } }
+    return [1, 1];
+  }
+  function mixHex(x, y, k) {
+    if (k <= 0 || x === y) return x; if (k >= 1) return y;
+    const a = parseInt(x.slice(1), 16), b = parseInt(y.slice(1), 16);
+    const c = [16, 8, 0].map((sh) => Math.round(lerp((a >> sh) & 255, (b >> sh) & 255, k)));
+    return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+  function noise(t, seed) { return Math.sin(t * 13.1 + seed) * .5 + Math.sin(t * 29.7 + seed * 1.7) * .3 + Math.sin(t * 47.3 + seed * 2.3) * .2; }
+  const lerpRot = (a, b, t) => ({ x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t) });
+  // the story at time t (ms) -- the generator (stories/lab.py) builds the same thing in Rive
+  function storyFrame(t) {
+    const keys = state.story.keys; if (!keys.length) return workFrame();
+    let i = 0; while (i + 1 < keys.length && keys[i + 1].t <= t) i++;
+    const a = keys[i], b = keys[i + 1];
+    let p = 0; if (b && t > a.t) p = Math.min(1, (t - a.t) / Math.max(1, b.t - a.t));
+    const e = b ? (EASE[a.ease] || EASE.jelly)(p) : 0;
+    const eyes = {}, eyeRot = {};
+    for (const eye of ["L", "R"]) {
+      const va = outline(a.eyes[eye].pts), vb = b ? outline(b.eyes[eye].pts) : va;
+      // colour: held, then crossfaded over the last morphMs before the next key (as stories/lab.py)
+      const ca = COLORS[a.eyes[eye].color] || COLORS.cyan, cb = b ? COLORS[b.eyes[eye].color] || COLORS.cyan : ca;
+      const cf = b ? Math.min(1, Math.max(0, 1 - (b.t - t) / Math.min(state.motion.morphMs, b.t - a.t || 1))) : 0;
+      eyes[eye] = { verts: lerpVerts(va, vb, e), color: [mixHex(ca[0], cb[0], cf), mixHex(ca[1], cb[1], cf)] };
+      eyeRot[eye] = b ? lerpRot(a.eyeRot[eye], b.eyeRot[eye], e) : a.eyeRot[eye];
+    }
+    const pose = b ? { yaw: lerp(a.pose.yaw, b.pose.yaw, e), pitch: lerp(a.pose.pitch, b.pose.pitch, e), roll: lerp(a.pose.roll, b.pose.roll, e) } : a.pose;
+    let prop = a.prop;
+    if (a.prop && b && b.prop && b.prop.index === a.prop.index) prop = { index: a.prop.index, dx: lerp(a.prop.dx, b.prop.dx, e), dy: lerp(a.prop.dy, b.prop.dy, e), scale: lerp(a.prop.scale, b.prop.scale, e), rot: lerp(a.prop.rot, b.prop.rot, e), opacity: lerp(a.prop.opacity, b.prop.opacity, e) };
+    // effects of the segment: pop when the key lands, trembling / lid quiver through it
+    const since = (t - a.t) * 60 / 1000, m = state.motion, fx = { sx: [1, 1], sy: [1, 1], d: [[0, 0], [0, 0]] };
+    if (a.pop) {
+      [0, 1].forEach((j) => { const g = (j ? m.popGainR : 1) * m.pop, [px, py] = popAt(since - (j ? m.popLag : 0)); fx.sx[j] = 1 + (px - 1) * g; fx.sy[j] = 1 + (py - 1) * g; });
+    }
+    const secs = t / 1000;
+    if (a.tremble) [0, 1].forEach((j) => { fx.d[j] = [noise(secs, j ? 4.1 : 1.3) * a.tremble, noise(secs + 7, j ? 6.1 : 3.3) * a.tremble]; });
+    if (a.quiver) for (const [j, eye] of [[0, "L"], [1, "R"]]) eyes[eye].verts = eyes[eye].verts.map((v, n) => (n >= 3 && n <= 5) ? { ...v, y: v.y + noise(secs + n, (j ? 4.1 : 1.3) + n) * a.quiver } : v);
+    return { eyes, pose, eyeRot, prop, fx, verts: true };
+  }
+
+  // ================================================================ drawing
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) if (attrs[k] !== undefined) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const stage = document.getElementById("stage");
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
+  const defs = el("defs", {}, svg), filt = el("filter", { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
+  const blur = el("feGaussianBlur", { stdDeviation: "7" }, filt);
+  const layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
+  function drawEye(g, verts, color, ix, iy) {
+    const [front, back] = Array.isArray(color) ? color : COLORS[color] || COLORS.cyan, d = pathD(verts);
     el("path", { d, fill: back, transform: `translate(${RIG.backDx / RIG.eyeScale} ${RIG.backDy / RIG.eyeScale})` }, g);
     const fg = el("g", { transform: `translate(${ix} ${iy})` }, g);
     if (RIG.glowOpacity > 0 && (RIG.glowWidth > 0 || RIG.glowFeather > 0))
-      el("path", { d, fill: "none", stroke: front, "stroke-width": Math.max(0.5, RIG.glowWidth), filter: `url(#${glowId})`, opacity: RIG.glowOpacity }, fg);
+      el("path", { d, fill: "none", stroke: front, "stroke-width": Math.max(0.5, RIG.glowWidth), filter: "url(#glow)", opacity: RIG.glowOpacity }, fg);
     el("path", { d, fill: front }, fg);
   }
-
-  // ---------------------------------------------------------------- reference sheets
-  function cellRect(ref) {
-    const s = SHEETS[ref.sheet]; const i = ref.cell, c = i % s.cols, r = Math.floor(i / s.cols);
-    return { x: s.x0 + c * s.pw, y: s.y0 + r * s.ph, w: s.w, h: s.h, src: s.src };
+  const propMeta = (index) => state.props.find((p) => p.index === index);
+  function propXform(pr) {   // about the prop's own centre, in view coordinates
+    const m = propMeta(pr.index); if (!m) return null;
+    const [bx, by, bw, bh] = m.box, cx = bx + bw / 2, cy = by + bh / 2 - ART_DY;
+    return { m, cx, cy, attr: `translate(${cx + pr.dx} ${cy + pr.dy}) rotate(${pr.rot}) scale(${pr.scale}) translate(${-cx} ${-cy})` };
   }
-  function loadImages() {
-    for (const k of Object.keys(SHEETS)) {
-      const img = new Image(); img.src = SHEETS[k].src; img.onload = () => { images[k] = img; renderRefThumb(); }; images[k] = null;
-    }
+  function drawProp(pr, withHandle) {
+    layerProp.replaceChildren();
+    if (!pr) return;
+    const x = propXform(pr); if (!x) return;
+    const g = el("g", { transform: x.attr, opacity: pr.opacity, "data-prop": "1", style: withHandle ? "cursor:move" : "" }, layerProp);
+    const [bx, by, bw, bh] = x.m.box;
+    el("image", { href: `props/${pr.index}.png`, x: bx, y: by - ART_DY, width: bw, height: bh }, g);
+    if (withHandle) el("rect", { x: bx, y: by - ART_DY, width: bw, height: bh, fill: "none", stroke: "#f5b841", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }, g);
   }
-
-  // ---------------------------------------------------------------- editor stage
-  const stage = document.getElementById("stage");
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
-  defs(svg, "glowE");
-  const layerRef = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
-
-  function eyeCenter(eye) { return eye === "L" ? CX - RIG.eyeDx : CX + RIG.eyeDx; }
-  function toScreen(eye, x, y) {
-    const t = eyeXform(eye), r = t.rot * DEG;
-    const u = (x + t.ix) * t.sx, v = (y + t.iy) * t.sy;
-    return [t.tx + u * Math.cos(r) - v * Math.sin(r), t.ty + u * Math.sin(r) + v * Math.cos(r)];
-  }
-  function fromScreen(eye, X, Y) {
-    const t = eyeXform(eye), r = -t.rot * DEG, dx = X - t.tx, dy = Y - t.ty;
-    const u = dx * Math.cos(r) - dy * Math.sin(r), v = dx * Math.sin(r) + dy * Math.cos(r);
-    return [u / t.sx - t.ix, v / t.sy - t.iy];
-  }
-
-  function renderStage() {
+  function render(frame, editing) {
     for (const L of [layerRef, layerGhost, layerEyes, layerHandles]) L.replaceChildren();
+    blur.setAttribute("stdDeviation", Math.max(0.01, RIG.glowFeather * 0.45));
     const body = state.shapes[state.selected];
-    if (!body) return;
-    // reference cell behind the eyes, fitted by the shape's own refFit
-    if (state.showRef && body.ref) {
-      const rc = cellRect(body.ref), fit = { ...DEFAULT_FIT, ...(body.refFit || {}) };
+    if (editing && state.showRef && body && body.ref && !currentKey()) {
+      const rc = cellRect(body.ref), fit = { ...DEFAULT_FIT, ...(body.refFit || {}) }, sh = SHEETS[body.ref.sheet];
       const g = el("g", { transform: `translate(${CX + fit.dx} ${CY + fit.dy}) scale(${fit.scale}) translate(${-CX} ${-CY})`, opacity: fit.opacity }, layerRef);
-      const inner = el("svg", { x: 0, y: 0, width: W, height: H, viewBox: `${rc.x} ${rc.y} ${rc.w} ${rc.h}`, preserveAspectRatio: "xMidYMid meet" }, g);
-      const sh = SHEETS[body.ref.sheet];
+      const inner = el("svg", { x: 0, y: CY - 160, width: W, height: 320, viewBox: `${rc.x} ${rc.y} ${rc.w} ${rc.h}`, preserveAspectRatio: "xMidYMid meet" }, g);
       el("image", { href: rc.src, x: 0, y: 0, width: sh.iw, height: sh.ih }, inner);
     }
-    if (state.showGhost) {
-      for (const eye of ["L", "R"]) {
-        const pts = eye === "L" ? round() : mirror(round());
-        const t = eyeXform(eye);
-        const g = el("g", { transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
-        el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#ffffff", "stroke-opacity": .35, "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke" }, g);
-      }
-    }
-    for (const eye of ["L", "R"]) {
-      const t = eyeXform(eye);
-      const g = el("g", { transform: xformAttr(t) }, layerEyes);
-      drawEye(g, outline(eyePts(body, eye)), body.color, "glowE", t.ix, t.iy);
-    }
-    if (ellOpen()) {
-      for (const eye of ["L", "R"]) {
+    drawProp(frame.prop, editing);
+    for (const [j, eye] of [[0, "L"], [1, "R"]]) {
+      const t = eyeXform(eye, frame);
+      const verts = frame.verts ? frame.eyes[eye].verts : outline(frame.eyes[eye].pts);
+      const g = el("g", { transform: xformAttr(t, frame.fx.sx[j], frame.fx.sy[j], frame.fx.d[j][0], frame.fx.d[j][1]) }, layerEyes);
+      drawEye(g, verts, frame.eyes[eye].color, t.ix, t.iy);
+      if (editing && state.showGhost) el("path", { d: pathD(outline(eye === "L" ? round() : mirror(round()))), fill: "none", stroke: "#fff", "stroke-opacity": .35, "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke", transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
+      if (editing && ellOpen()) {
         const pts = eye === "L" ? ellipsePts(ELL) : mirror(ellipsePts(ELL));
-        const t = eyeXform(eye);
-        const g = el("g", { transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
-        el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#f5b841", "stroke-width": 2, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }, g);
+        el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#f5b841", "stroke-width": 2, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke", transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
       }
     }
-    // handles: always on the left eye; on the right too when it is drawn on its own
-    const editable = body.mirror === false ? ["L", "R"] : ["L"];
+    if (editing) drawHandles(frame);
+  }
+  function editEyes() { return workFrame().eyes; }
+  function mirrored() { const k = currentKey(); return k ? k.mirror !== false : (state.shapes[state.selected] || {}).mirror !== false; }
+  function toScreen(eye, frame, x, y) {
+    const t = eyeXform(eye, frame), r = t.rot * DEG, u = (x + t.ix) * t.sx, v = (y + t.iy) * t.sy;
+    return [t.tx + u * Math.cos(r) - v * Math.sin(r), t.ty + u * Math.sin(r) + v * Math.cos(r)];
+  }
+  function fromScreen(eye, frame, X, Y) {
+    const t = eyeXform(eye, frame), r = -t.rot * DEG, dx = X - t.tx, dy = Y - t.ty;
+    return [(dx * Math.cos(r) - dy * Math.sin(r)) / t.sx - t.ix, (dx * Math.sin(r) + dy * Math.cos(r)) / t.sy - t.iy];
+  }
+  function drawHandles(frame) {
+    const editable = mirrored() ? ["L"] : ["L", "R"];
     for (const eye of editable) {
-      const pts = eyePts(body, eye), verts = outline(pts);
+      const verts = outline(frame.eyes[eye].pts);
       verts.forEach((v, i) => {
-        const [sx, sy] = toScreen(eye, v.x, v.y);
-        const sel = state.point.eye === eye && state.point.i === i;
-        const hx = toScreen(eye, v.x + Math.cos(v.outRot) * v.outDist, v.y + Math.sin(v.outRot) * v.outDist);
-        const hi = toScreen(eye, v.x + Math.cos(v.inRot) * v.inDist, v.y + Math.sin(v.inRot) * v.inDist);
+        const [sx, sy] = toScreen(eye, frame, v.x, v.y), sel = state.point.eye === eye && state.point.i === i;
         if (sel) {
+          const hx = toScreen(eye, frame, v.x + Math.cos(v.outRot) * v.outDist, v.y + Math.sin(v.outRot) * v.outDist);
+          const hi = toScreen(eye, frame, v.x + Math.cos(v.inRot) * v.inDist, v.y + Math.sin(v.inRot) * v.inDist);
           el("line", { x1: hi[0], y1: hi[1], x2: hx[0], y2: hx[1], stroke: "#f5b841", "stroke-opacity": .7 }, layerHandles);
-          for (const h of [hx, hi]) el("circle", { cx: h[0], cy: h[1], r: 2.5, fill: "#f5b841" }, layerHandles);
         }
-        const c = el("circle", { cx: sx, cy: sy, r: sel ? 7 : 5.5, fill: sel ? "#f5b841" : "#0b0f14", stroke: "#f5b841", "stroke-width": 2,
-                                 "data-eye": eye, "data-i": i, tabindex: 0, style: "cursor:grab" }, layerHandles);
+        const c = el("circle", { cx: sx, cy: sy, r: sel ? 7 : 5.5, fill: sel ? "#f5b841" : "#0b0f14", stroke: "#f5b841", "stroke-width": 2, "data-eye": eye, "data-i": i, tabindex: 0, style: "cursor:grab" }, layerHandles);
         c.setAttribute("aria-label", `จุด ${i} ตา${eye === "L" ? "ซ้าย" : "ขวา"}`);
-        const t = el("text", { x: sx + 9, y: sy - 8, fill: "#8599a8", "font-size": 10, "font-family": "IBM Plex Mono, monospace" }, layerHandles);
-        t.textContent = i;
+        el("text", { x: sx + 9, y: sy - 8, fill: "#8599a8", "font-size": 10, "font-family": "IBM Plex Mono, monospace" }, layerHandles).textContent = i;
       });
     }
   }
+  function renderView() { if (!state.playing) render(workFrame(), true); renderEditing(); }
 
-  function svgPoint(evt) {
-    const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
-    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  // ================================================================ reference sheets
+  const images = {};
+  function cellRect(ref) { const s = SHEETS[ref.sheet], c = ref.cell % s.cols, r = Math.floor(ref.cell / s.cols); return { x: s.x0 + c * s.pw, y: s.y0 + r * s.ph, w: s.w, h: s.h, src: s.src }; }
+  function loadImages() { for (const k of Object.keys(SHEETS)) { const img = new Image(); img.src = SHEETS[k].src; img.onload = () => { images[k] = img; renderRefThumb(); }; } }
+  function renderRefThumb() {
+    const cv = document.getElementById("refCanvas"), ctx = cv.getContext("2d"); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
+    const b = state.shapes[state.selected]; if (!b || !b.ref || !images[b.ref.sheet]) return;
+    const r = cellRect(b.ref), k = Math.min(cv.width / r.w, cv.height / r.h);
+    ctx.drawImage(images[b.ref.sheet], r.x, r.y, r.w, r.h, (cv.width - r.w * k) / 2, (cv.height - r.h * k) / 2, r.w * k, r.h * k);
   }
-  svg.addEventListener("pointerdown", (e) => {
-    const t = e.target.closest("circle[data-i]");
-    if (!t) return;
-    const body = state.shapes[state.selected];
-    if (!body || !state.canWrite) { selectPoint(t.dataset.eye, +t.dataset.i); return; }
-    pushHistory();
-    state.dragging = { eye: t.dataset.eye, i: +t.dataset.i };
-    selectPoint(t.dataset.eye, +t.dataset.i);
-    svg.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  svg.addEventListener("pointermove", (e) => {
-    if (!state.dragging) return;
-    const body = state.shapes[state.selected], { eye, i } = state.dragging;
-    const p = svgPoint(e);
-    const [lx, ly] = fromScreen(eye, p.x, p.y);
-    const x = +lx.toFixed(1), y = +ly.toFixed(1);
-    const arr = eye === "L" ? body.left : body.right;
-    arr[i] = [Math.max(-90, Math.min(90, x)), Math.max(-110, Math.min(140, y)), arr[i][2]];
-    renderStage(); renderPointInfo(); renderThumb(state.selected);
-  });
-  const endDrag = () => { if (state.dragging) { state.dragging = null; scheduleSave(state.selected); } };
-  svg.addEventListener("pointerup", endDrag);
-  svg.addEventListener("pointercancel", endDrag);
-  svg.addEventListener("keydown", (e) => {
-    const t = e.target.closest("circle[data-i]"); if (!t || !state.canWrite) return;
-    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return;
-    e.preventDefault(); pushHistory();
-    const body = state.shapes[state.selected], eye = t.dataset.eye, i = +t.dataset.i, arr = eye === "L" ? body.left : body.right;
-    const step = e.shiftKey ? 5 : 1;
-    arr[i] = [arr[i][0] + d[0] * step, arr[i][1] + d[1] * step, arr[i][2]];
-    selectPoint(eye, i); scheduleSave(state.selected);
-  });
 
-  function selectPoint(eye, i) { state.point = { eye, i }; renderStage(); renderPointInfo(); }
-  function renderPointInfo() {
-    const body = state.shapes[state.selected]; const info = document.getElementById("pointInfo");
-    const smooth = document.getElementById("smooth");
-    if (!body) { info.innerHTML = "<dt>จุด</dt><dd>–</dd>"; return; }
-    const arr = eyePts(body, state.point.eye), p = arr[state.point.i];
-    info.innerHTML = "";
-    for (const [k, v] of [["จุด", `${state.point.i} (ตา${state.point.eye === "L" ? "ซ้าย" : "ขวา"})`], ["x", p[0].toFixed(1)], ["y", p[1].toFixed(1)], ["โค้ง", (+p[2]).toFixed(2)]]) {
-      const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.textContent = v; info.append(dt, dd);
-    }
-    smooth.value = p[2];
-    smooth.disabled = !state.canWrite || (state.point.eye === "R" && body.mirror !== false);
+  // ================================================================ editing (points, colour, mirror)
+  // every edit goes to the selected key when there is one, otherwise to the library shape
+  function editTarget() {
+    const k = currentKey();
+    if (k) return { kind: "key", get L() { return k.eyes.L.pts; }, get R() { return k.eyes.R.pts; },
+      set(eye, pts) { k.eyes[eye].pts = pts; if (eye === "L" && k.mirror !== false) k.eyes.R.pts = mirror(pts); }, save: saveStory };
+    const b = state.shapes[state.selected]; if (!b) return null;
+    return { kind: "shape", get L() { return b.left; }, get R() { return b.mirror === false && b.right ? b.right : mirror(b.left); },
+      set(eye, pts) { if (eye === "L") b.left = pts; else b.right = pts; }, save: () => scheduleSave(state.selected) };
   }
-  document.getElementById("smooth").addEventListener("input", (e) => {
-    const body = state.shapes[state.selected]; if (!body) return;
-    const arr = state.point.eye === "L" ? body.left : body.right; if (!arr) return;
-    if (!state.smoothPushed) { pushHistory(); state.smoothPushed = true; }
-    arr[state.point.i] = [arr[state.point.i][0], arr[state.point.i][1], +e.target.value];
-    renderStage(); renderPointInfo(); renderThumb(state.selected); scheduleSave(state.selected);
-  });
-  document.getElementById("smooth").addEventListener("change", () => { state.smoothPushed = false; });
-
-  // ---------------------------------------------------------------- history
-  const clone = (o) => JSON.parse(JSON.stringify(o));
   function pushHistory() {
-    if (!state.selected) return;
-    state.history.push({ key: state.selected, body: clone(state.shapes[state.selected]) });
-    if (state.history.length > 60) state.history.shift();
+    const k = currentKey();
+    state.history.push(k ? { key: state.key, story: state.story.name, body: clone(k) } : { shape: state.selected, body: clone(state.shapes[state.selected]) });
+    if (state.history.length > 80) state.history.shift();
   }
   function undo() {
     const h = state.history.pop(); if (!h) return;
-    state.shapes[h.key] = h.body; state.selected = h.key;
-    renderAll(); scheduleSave(h.key);
+    if (h.shape) { state.shapes[h.shape] = h.body; state.selected = h.shape; state.key = -1; scheduleSave(h.shape); }
+    else if (state.story && state.story.name === h.story && state.story.keys[h.key]) { state.story.keys[h.key] = h.body; state.key = h.key; saveStory(); }
+    renderAll();
   }
-  document.getElementById("btnUndo").addEventListener("click", undo);
-  document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); undo(); } });
-
-  // ---------------------------------------------------------------- shape list
-  const thumbCache = {};
-  function renderThumb(key) {
-    const svgT = thumbCache[key]; const body = state.shapes[key]; if (!svgT || !body) return;
-    svgT.replaceChildren();
-    for (const eye of ["L", "R"]) {
-      const g = el("g", { transform: `translate(${eye === "L" ? 30 : 70} 25) scale(.26)` }, svgT);
-      const [front] = COLORS[body.color] || COLORS.cyan;
-      el("path", { d: pathD(outline(eyePts(body, eye))), fill: front }, g);
+  function svgPoint(evt) { const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+  svg.addEventListener("pointerdown", (e) => {
+    if (state.playing) return;
+    const c = e.target.closest("circle[data-i]");
+    if (c) {
+      pushHistory(); state.dragging = { kind: "point", eye: c.dataset.eye, i: +c.dataset.i };
+      state.point = { eye: c.dataset.eye, i: +c.dataset.i }; svg.setPointerCapture(e.pointerId); e.preventDefault(); renderView(); renderPointInfo(); return;
     }
+    if (e.target.closest("[data-prop]")) {
+      const pr = workFrame().prop; if (!pr) return;
+      pushHistory(); const p = svgPoint(e);
+      state.dragging = { kind: "prop", sx: p.x, sy: p.y, dx0: pr.dx, dy0: pr.dy }; svg.setPointerCapture(e.pointerId); e.preventDefault();
+    }
+  });
+  svg.addEventListener("pointermove", (e) => {
+    const d = state.dragging; if (!d) return;
+    const p = svgPoint(e), fr = workFrame();
+    if (d.kind === "point") {
+      const tg = editTarget(), [lx, ly] = fromScreen(d.eye, fr, p.x, p.y);
+      const pts = (d.eye === "L" ? tg.L : tg.R).map((q) => q.slice());
+      pts[d.i] = [Math.max(-90, Math.min(90, +lx.toFixed(1))), Math.max(-110, Math.min(140, +ly.toFixed(1))), pts[d.i][2]];
+      tg.set(d.eye, pts); renderView(); renderPointInfo(); renderList(); renderTrack();
+    } else {
+      const pr = fr.prop; pr.dx = +(d.dx0 + p.x - d.sx).toFixed(1); pr.dy = +(d.dy0 + p.y - d.sy).toFixed(1); renderView(); renderPropSliders();
+    }
+  });
+  const endDrag = () => {
+    const d = state.dragging; if (!d) return; state.dragging = null;
+    if (d.kind === "point") editTarget().save(); else if (currentKey()) saveStory();
+  };
+  svg.addEventListener("pointerup", endDrag); svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("keydown", (e) => {
+    const c = e.target.closest("circle[data-i]"); const dd = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!c || !dd) return; e.preventDefault(); pushHistory();
+    const tg = editTarget(), eye = c.dataset.eye, i = +c.dataset.i, step = e.shiftKey ? 5 : 1;
+    const pts = (eye === "L" ? tg.L : tg.R).map((q) => q.slice()); pts[i] = [pts[i][0] + dd[0] * step, pts[i][1] + dd[1] * step, pts[i][2]];
+    tg.set(eye, pts); state.point = { eye, i }; tg.save(); renderAll();
+  });
+  function renderPointInfo() {
+    const tg = editTarget(), info = document.getElementById("pointInfo"); info.replaceChildren(); if (!tg) return;
+    const p = (state.point.eye === "L" ? tg.L : tg.R)[state.point.i];
+    for (const [k, v] of [["จุด", `${state.point.i} ตา${state.point.eye === "L" ? "ซ้าย" : "ขวา"}`], ["x", p[0].toFixed(1)], ["y", p[1].toFixed(1)]]) {
+      const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.textContent = v; info.append(dt, dd);
+    }
+    const sm = document.getElementById("smooth"); sm.value = p[2]; document.getElementById("vSmooth").textContent = (+p[2]).toFixed(2);
+    sm.disabled = state.point.eye === "R" && mirrored();
   }
-  function sortedKeys() { return Object.keys(state.shapes).sort((a, b) => (state.shapes[a].order ?? 99) - (state.shapes[b].order ?? 99) || a.localeCompare(b)); }
+  const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
+  let smoothPushed = false;
+  on("smooth", "input", (e) => {
+    const tg = editTarget(); if (!tg) return; if (!smoothPushed) { pushHistory(); smoothPushed = true; }
+    const pts = (state.point.eye === "L" ? tg.L : tg.R).map((q) => q.slice()); pts[state.point.i][2] = +e.target.value;
+    tg.set(state.point.eye, pts); document.getElementById("vSmooth").textContent = (+e.target.value).toFixed(2); renderView(); renderList(); renderTrack(); tg.save();
+  });
+  on("smooth", "change", () => { smoothPushed = false; });
+  on("color", "change", (e) => {
+    pushHistory(); const k = currentKey();
+    if (k) { k.eyes.L.color = k.eyes.R.color = e.target.value; saveStory(); } else { state.shapes[state.selected].color = e.target.value; scheduleSave(state.selected); }
+    renderAll();
+  });
+  on("optMirror", "change", (e) => {
+    pushHistory(); const k = currentKey();
+    if (k) { k.mirror = e.target.checked; if (k.mirror) k.eyes.R.pts = mirror(k.eyes.L.pts); saveStory(); }
+    else { const b = state.shapes[state.selected]; b.mirror = e.target.checked; if (!b.mirror) b.right = b.right && b.right.length === N ? b.right : mirror(b.left); scheduleSave(state.selected); }
+    renderAll();
+  });
+  on("btnCopyL", "click", () => { const tg = editTarget(); pushHistory(); tg.set("R", mirror(tg.L)); tg.save(); renderAll(); });
+  on("btnResetRound", "click", () => { const tg = editTarget(); pushHistory(); tg.set("L", round()); if (!mirrored()) tg.set("R", mirror(round())); tg.save(); renderAll(); });
+  on("btnUndo", "click", undo);
+  document.addEventListener("keydown", (e) => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
+    if (e.key === " " && document.activeElement === document.body) { e.preventDefault(); togglePlay(); }
+  });
+  on("optRef", "change", (e) => { state.showRef = e.target.checked; renderView(); });
+  on("optGhost", "change", (e) => { state.showGhost = e.target.checked; renderView(); });
+  on("note", "input", (e) => {
+    const k = currentKey();
+    if (k) { k.note = e.target.value; saveStory(); } else if (state.shapes[state.selected]) { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); }
+  });
+  function renderEditing() {
+    const box = document.getElementById("editing"), k = currentKey();
+    box.className = "editing" + (state.playing ? " play" : k ? " key" : "");
+    box.replaceChildren();
+    const s = document.createElement("span");
+    if (state.playing) s.innerHTML = `กำลังเล่น story <b></b>`;
+    else if (k) s.innerHTML = `กำลังแก้ <b></b> ของ story <b></b> (การแก้บันทึกลงคีย์นี้)`;
+    else s.innerHTML = `กำลังแก้รูปในคลัง <b></b> · ท่าหัวและพร็อพตอนนี้เป็นแค่การลอง จนกว่าจะเพิ่มเป็นคีย์`;
+    const bs = s.querySelectorAll("b");
+    if (state.playing) bs[0].textContent = state.story ? state.story.name : "";
+    else if (k) { bs[0].textContent = `คีย์ ${state.key + 1} (${(k.t / 1000).toFixed(2)} s)`; bs[1].textContent = state.story.name; }
+    else bs[0].textContent = state.selected || "–";
+    box.appendChild(s);
+    document.getElementById("optMirror").checked = mirrored();
+    document.getElementById("btnCopyL").hidden = mirrored();
+  }
+
+  // ================================================================ tool panels
+  function sliderRow(box, id, label, min, max, step, value, fmt, oninput, onstart) {
+    const lab = document.createElement("label"); lab.className = "slider";
+    const head_ = document.createElement("span"), t = document.createElement("span"), b = document.createElement("b");
+    t.textContent = label; b.textContent = fmt(value); head_.append(t, b);
+    const inp = document.createElement("input"); Object.assign(inp, { type: "range", id, min, max, step, value });
+    let started = false;
+    inp.addEventListener("input", () => { if (!started && onstart) { onstart(); started = true; } b.textContent = fmt(+inp.value); oninput(+inp.value); });
+    inp.addEventListener("change", () => { started = false; });
+    lab.append(head_, inp); box.appendChild(lab); return inp;
+  }
+  const busy = (id) => document.getElementById(id).contains(document.activeElement);
+
+  // ---- library
+  const thumbSvg = (eyes) => {
+    const t = el("svg", { viewBox: "0 0 100 50" });
+    for (const [eye, x] of [["L", 30], ["R", 70]]) {
+      const g = el("g", { transform: `translate(${x} 25) scale(.26)` }, t);
+      el("path", { d: pathD(outline(eyes[eye].pts)), fill: (COLORS[eyes[eye].color] || COLORS.cyan)[0] }, g);
+    }
+    return t;
+  };
+  const sortedKeys = () => Object.keys(state.shapes).sort((a, b) => (state.shapes[a].order ?? 99) - (state.shapes[b].order ?? 99) || a.localeCompare(b));
   function renderList() {
     const list = document.getElementById("shapeList"); list.replaceChildren();
+    document.getElementById("libCount").textContent = `${Object.keys(state.shapes).length} รูป`;
     for (const key of sortedKeys()) {
-      const body = state.shapes[key];
-      const b = document.createElement("button"); b.className = "shape-item"; b.setAttribute("aria-current", key === state.selected);
-      const t = el("svg", { viewBox: "0 0 100 50" }); thumbCache[key] = t; b.appendChild(t);
-      const txt = document.createElement("div");
+      const b = document.createElement("button"); b.className = "shape-item"; b.setAttribute("aria-current", key === state.selected && !currentKey());
+      b.appendChild(thumbSvg(libraryEyes(key)));
+      const txt = document.createElement("div"), nm = document.createElement("div"), sub = document.createElement("div"); sub.className = "sub";
+      nm.textContent = state.shapes[key].label || key;
       const faces = Object.entries(state.faces).filter(([, s]) => s === key).map(([f]) => f);
-      txt.innerHTML = `<div class="nm"></div><div class="sub"></div>`;
-      txt.querySelector(".nm").textContent = body.label || key;
-      txt.querySelector(".sub").textContent = faces.length ? faces.join(", ") : "ยังไม่มีหน้าใช้";
-      b.appendChild(txt);
-      b.addEventListener("click", () => { state.selected = key; state.point = { eye: "L", i: 0 }; renderAll(); });
-      list.appendChild(b); renderThumb(key);
+      sub.textContent = faces.length ? faces.join(", ") : "ยังไม่มีหน้าใช้";
+      txt.append(nm, sub); b.appendChild(txt);
+      b.title = currentKey() ? "ใส่รูปนี้ลงในคีย์ที่เลือก" : "แก้รูปนี้";
+      b.addEventListener("click", () => {
+        const k = currentKey();
+        if (k) { pushHistory(); const ey = libraryEyes(key); k.eyes = clone(ey); k.mirror = state.shapes[key].mirror !== false; k.from = key; saveStory(); }
+        else state.selected = key;
+        state.point = { eye: "L", i: 0 }; renderAll();
+      });
+      list.appendChild(b);
+    }
+  }
+  on("btnNew", "click", () => {
+    const inp = document.getElementById("newName"), key = inp.value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{2,24}$/.test(key)) return setStatus("ชื่อรูปใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error");
+    if (state.shapes[key]) return setStatus(`มีรูปชื่อ ${key} แล้ว`, "error");
+    const ey = editEyes(), base = state.shapes[state.selected] || {};
+    state.shapes[key] = { label: key, left: clone(ey.L.pts), right: clone(ey.R.pts), mirror: mirrored(), color: ey.L.color, ref: base.ref || null, refFit: base.refFit, note: "", order: Object.keys(state.shapes).length };
+    state.selected = key; state.key = -1; inp.value = ""; scheduleSave(key, 0); renderAll();
+  });
+  on("btnDelete", "click", () => { document.getElementById("deleteConfirm").hidden = false; });
+  on("btnDeleteNo", "click", () => { document.getElementById("deleteConfirm").hidden = true; });
+  on("btnDeleteYes", "click", async () => {
+    document.getElementById("deleteConfirm").hidden = true; const key = state.selected;
+    delete state.shapes[key]; for (const f of Object.keys(state.faces)) if (state.faces[f] === key) delete state.faces[f];
+    state.selected = sortedKeys()[0] || null; renderAll(); await api("DELETE", "/api/shapes/" + key).catch(handleWriteError);
+  });
+
+  // ---- base rig
+  const RIG_SLIDERS = [
+    ["eyeDx", "ระยะห่างตา", 60, 160, 1, (v) => `${v}`], ["eyeScale", "ขนาดตา", 0.8, 1.8, 0.01, (v) => `${Math.round(v / 1.32 * 100)}%`],
+    ["backDx", "วงหลังเหลื่อม ซ้าย/ขวา", -15, 15, 0.5, (v) => `${v}`], ["backDy", "วงหลังเหลื่อม ขึ้น/ลง", -10, 20, 0.5, (v) => `${v}`],
+    ["glowFeather", "ออร่า: ความฟุ้ง", 0, 40, 1, (v) => `${v}`], ["glowWidth", "ออร่า: ความหนา", 0, 20, 0.5, (v) => `${v}`],
+    ["glowOpacity", "ออร่า: ความสว่าง", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`]];
+  function renderRig() {
+    if (busy("rigSliders")) return; const box = document.getElementById("rigSliders"); box.replaceChildren();
+    for (const [k, label, min, max, step, fmt] of RIG_SLIDERS) sliderRow(box, "rig_" + k, label, min, max, step, RIG[k] ?? DEFAULT_RIG[k], fmt, (v) => { RIG[k] = v; renderView(); saveRig(); });
+  }
+  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG, head: RIG.head, eyeRot: RIG.eyeRot }; renderAll(); saveRig(); });
+
+  // ---- head: pose (key or live) + model
+  function currentPose() { const k = currentKey(); return k ? k.pose : state.live.pose; }
+  function poseChanged() { if (currentKey()) saveStory(); renderView(); }
+  const POSE_SLIDERS = [["yaw", "หันซ้าย ↔ ขวา"], ["pitch", "เงย ↕ ก้ม"], ["roll", "เอียงคอ"]];
+  function renderPose() {
+    if (busy("poseSliders")) return; const box = document.getElementById("poseSliders"); box.replaceChildren(); const pose = currentPose();
+    for (const [k, label] of POSE_SLIDERS) sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { currentPose()[k] = v; poseChanged(); }, () => currentKey() && pushHistory());
+  }
+  const HEAD_SLIDERS = [
+    ["radius", "ความโค้งหัว", 150, 900, 5, (v) => `${v}`], ["maxYaw", "หันได้สุด", 0, 35, 0.5, (v) => `${v}°`], ["maxPitch", "ก้ม/เงยได้สุด", 0, 30, 0.5, (v) => `${v}°`],
+    ["maxRoll", "เอียงคอได้สุด", 0, 30, 0.5, (v) => `${v}°`], ["yawRoll", "เอียงตามตอนหัน", 0, 12, 0.2, (v) => `${v}°`], ["pupil", "ลูกตาขยับนำหัว", 0, 30, 0.5, (v) => `${v}`],
+    ["travelX", "หน้าเลื่อนเพิ่ม ซ้าย/ขวา", -80, 80, 1, (v) => `${v}`], ["travelY", "หน้าเลื่อนเพิ่ม ขึ้น/ลง", -80, 80, 1, (v) => `${v}`], ["persp", "ระยะลึก", 0, 0.6, 0.01, (v) => `${Math.round(v * 100)}%`]];
+  function renderHead() {
+    if (busy("headSliders")) return; const box = document.getElementById("headSliders"); box.replaceChildren(); const Hd = head();
+    for (const [k, label, min, max, step, fmt] of HEAD_SLIDERS) sliderRow(box, "head_" + k, label, min, max, step, Hd[k], fmt, (v) => { RIG.head = { ...head(), [k]: v }; renderView(); saveRig(); });
+  }
+  let glide = null;
+  function lookAt(yaw, pitch) {
+    const pose = currentPose(), from = { ...pose }, t0 = performance.now(); cancelAnimationFrame(glide);
+    if (currentKey()) pushHistory();
+    const step = (ts) => {
+      const k = Math.min(1, (ts - t0) / 420), e = EASE.jelly(k);
+      pose.yaw = lerp(from.yaw, yaw, e); pose.pitch = lerp(from.pitch, pitch, e); renderView(); renderPose();
+      if (k < 1) glide = requestAnimationFrame(step); else { pose.yaw = yaw; pose.pitch = pitch; poseChanged(); renderPose(); }
+    };
+    glide = requestAnimationFrame(step);
+  }
+  document.querySelectorAll("[data-look]").forEach((b) => b.addEventListener("click", () => { document.getElementById("optWander").checked = false; const [x, y] = b.dataset.look.split(",").map(Number); lookAt(x, y); }));
+  let wanderTimer = null;
+  on("optWander", "change", (e) => {
+    clearTimeout(wanderTimer);
+    const next = () => { if (!document.getElementById("optWander").checked || currentKey()) return; lookAt(+(Math.random() * 2 - 1).toFixed(2), +(Math.random() * 1.6 - .8).toFixed(2)); wanderTimer = setTimeout(next, 900 + Math.random() * 1400); };
+    if (e.target.checked) next();
+  });
+
+  // ---- per-eye rotation (key or rig)
+  function currentRot() { const k = currentKey(); return k ? k.eyeRot : rigEyeRot(); }
+  function renderRot() {
+    if (busy("rotSliders")) return; const box = document.getElementById("rotSliders"); box.replaceChildren();
+    const k = currentKey(), link = k ? k.rotLink !== false : (RIG.eyeRot || {}).link !== false, rot = currentRot();
+    document.getElementById("optRotLink").checked = link;
+    for (const eye of ["L", "R"]) for (const [ax, label] of [["x", "X ก้ม/เงยตา"], ["y", "Y หันตา"], ["z", "Z เอียงตา"]]) {
+      const inp = sliderRow(box, `rot_${eye}_${ax}`, `ตา${eye === "L" ? "ซ้าย" : "ขวา"} ${label}`, -60, 60, 1, rot[eye][ax], (v) => `${v}°`, (v) => {
+        const kk = currentKey();
+        if (kk) { kk.eyeRot[eye][ax] = v; if (eye === "L" && kk.rotLink !== false) kk.eyeRot.R = { x: kk.eyeRot.L.x, y: -kk.eyeRot.L.y, z: -kk.eyeRot.L.z }; saveStory(); }
+        else { const r = { link: true, L: { x: 0, y: 0, z: 0 }, R: { x: 0, y: 0, z: 0 }, ...(RIG.eyeRot || {}) }; r[eye] = { ...rigEyeRot()[eye], [ax]: v }; RIG.eyeRot = r; saveRig(); }
+        renderView(); if (eye === "L") renderRotRight();
+      }, () => currentKey() && pushHistory());
+      if (eye === "R" && link) inp.disabled = true;
+    }
+  }
+  function renderRotRight() { const rot = currentRot(); for (const ax of ["x", "y", "z"]) { const i = document.getElementById(`rot_R_${ax}`); if (i) { i.value = rot.R[ax]; i.previousSibling.lastChild.textContent = `${Math.round(rot.R[ax])}°`; } } }
+  on("optRotLink", "change", (e) => {
+    const k = currentKey();
+    if (k) { k.rotLink = e.target.checked; if (k.rotLink) k.eyeRot.R = { x: k.eyeRot.L.x, y: -k.eyeRot.L.y, z: -k.eyeRot.L.z }; saveStory(); }
+    else { const r = { L: { x: 0, y: 0, z: 0 }, ...(RIG.eyeRot || {}) }; if (!e.target.checked) r.R = rigEyeRot().R; r.link = e.target.checked; RIG.eyeRot = r; saveRig(); }
+    renderRot(); renderView();
+  });
+
+  // ---- ellipse tool
+  const ELL = { rx: 48.6, ry: 57.2, cy: 0, square: 0, tilt: 0 };
+  function ellipsePts(e) {
+    const n = 2 + e.square * 6, a = e.tilt * DEG;
+    return Array.from({ length: N }, (_, i) => {
+      const t = i * Math.PI / 4, sn = Math.sin(t), cs = Math.cos(t);
+      const x = e.rx * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n), y = -e.ry * Math.sign(cs) * Math.pow(Math.abs(cs), 2 / n);
+      const sm = i % 2 ? 1 - 0.45 * e.square : 1 + 0.4 * e.square;
+      return [+(x * Math.cos(a) - y * Math.sin(a)).toFixed(2), +(e.cy + x * Math.sin(a) + y * Math.cos(a)).toFixed(2), +sm.toFixed(2)];
+    });
+  }
+  const ellOpen = () => document.getElementById("ellSliders").closest("details").open;
+  function renderEll() {
+    const box = document.getElementById("ellSliders"); box.replaceChildren();
+    for (const [k, label, min, max, step, fmt] of [["rx", "ความกว้าง", 10, 80, .5, (v) => `${v}`], ["ry", "ความสูง", 10, 100, .5, (v) => `${v}`], ["cy", "เลื่อน ขึ้น/ลง", -40, 40, .5, (v) => `${v}`], ["square", "ความเหลี่ยม", 0, 1, .02, (v) => `${Math.round(v * 100)}%`], ["tilt", "เอียง", -35, 35, 1, (v) => `${v}°`]])
+      sliderRow(box, "ell_" + k, label, min, max, step, ELL[k], fmt, (v) => { ELL[k] = v; renderView(); });
+  }
+  document.getElementById("ellSliders").closest("details").addEventListener("toggle", renderView);
+  on("btnEllApply", "click", () => { const tg = editTarget(); if (!tg) return; pushHistory(); tg.set("L", ellipsePts(ELL)); if (!mirrored()) tg.set("R", mirror(ellipsePts(ELL))); tg.save(); renderAll(); });
+
+  // ---- props (one library prop per frame)
+  function currentProp() { const k = currentKey(); return k ? k.prop : state.live.prop; }
+  function setProp(pr) { const k = currentKey(); if (k) { pushHistory(); k.prop = pr; saveStory(); } else state.live.prop = pr; renderAll(); }
+  function renderPropGrid() {
+    const grid = document.getElementById("propGrid"), q = document.getElementById("propFilter").value.trim().toLowerCase(), cur = currentProp();
+    grid.replaceChildren();
+    document.getElementById("propNow").textContent = cur ? (propMeta(cur.index) || {}).name || cur.index : "ไม่มี";
+    for (const m of state.props) {
+      if (q && !m.name.toLowerCase().includes(q)) continue;
+      const b = document.createElement("button"); b.className = "prop-cell"; b.setAttribute("aria-pressed", !!cur && cur.index === m.index); b.title = m.name;
+      const img = document.createElement("img"); img.src = `props/${m.index}.png`; img.alt = ""; img.loading = "lazy";
+      const s = document.createElement("span"); s.textContent = m.name; b.append(img, s);
+      b.addEventListener("click", () => setProp({ index: m.index, dx: 0, dy: 0, scale: 1, rot: 0, opacity: 1, ...(cur && cur.index === m.index ? cur : {}) }));
+      grid.appendChild(b);
+    }
+    if (!state.props.length) { const p = document.createElement("p"); p.className = "hint"; p.textContent = "ยังไม่มีภาพพร็อพ: รัน python rive_avatar/tools/eyelab/make_prop_thumbs.py"; grid.appendChild(p); }
+  }
+  on("propFilter", "input", renderPropGrid);
+  on("btnPropNone", "click", () => setProp(null));
+  function renderPropSliders() {
+    const box = document.getElementById("propSliders"), pr = currentProp();
+    if (busy("propSliders") && pr) { return; }
+    box.replaceChildren(); if (!pr) return;
+    for (const [k, label, min, max, step, fmt] of [["dx", "เลื่อน ซ้าย/ขวา", -300, 300, 1, (v) => `${v}`], ["dy", "เลื่อน ขึ้น/ลง", -300, 300, 1, (v) => `${v}`], ["scale", "ขนาด", 0.1, 3, 0.01, (v) => `${Math.round(v * 100)}%`], ["rot", "หมุน", -180, 180, 1, (v) => `${v}°`], ["opacity", "ความชัด", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`]])
+      sliderRow(box, "prop_" + k, label, min, max, step, pr[k], fmt, (v) => { currentProp()[k] = v; if (currentKey()) saveStory(); renderView(); }, () => currentKey() && pushHistory());
+  }
+
+  // ---- motion defaults for new keys
+  function renderMotion() {
+    if (busy("motionSliders")) return; const box = document.getElementById("motionSliders"); box.replaceChildren(); const m = state.motion;
+    for (const [k, label, min, max, step, fmt] of [["morphMs", "เวลาเปลี่ยนรูป", 100, 1500, 10, (v) => `${v} ms`], ["popLag", "ตาขวาช้ากว่า", 0, 12, 1, (v) => `${v} เฟรม`], ["popGainR", "แรงเด้งตาขวา", 0, 1.2, .05, (v) => `${Math.round(v * 100)}%`], ["pop", "ความแรงการเด้ง", 0, 2, .05, (v) => `${Math.round(v * 100)}%`], ["tremble", "สั่นทั้งดวงตา", 0, 6, .1, (v) => (+v).toFixed(1)], ["quiver", "ขอบตาล่างสั่น", 0, 8, .1, (v) => (+v).toFixed(1)]])
+      sliderRow(box, "mo_" + k, label, min, max, step, m[k], fmt, (v) => { m[k] = v; saveMotion(); });
+  }
+
+  // ---- faces
+  function renderFaces() {
+    const box = document.getElementById("faces"); box.replaceChildren();
+    for (const f of state.faceNames) {
+      if (f === "LabMorph") continue;
+      const lab = document.createElement("label"), cur = state.faces[f] || ""; if (cur) lab.className = "on";
+      const s = document.createElement("span"); s.textContent = f;
+      const sel = document.createElement("select"); sel.setAttribute("aria-label", `รูปตาของหน้า ${f}`);
+      const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "แบบเดิม"; sel.appendChild(o0);
+      for (const k of sortedKeys()) { const o = document.createElement("option"); o.value = k; o.textContent = state.shapes[k].label || k; sel.appendChild(o); }
+      sel.value = cur;
+      sel.addEventListener("change", () => { if (sel.value) state.faces[f] = sel.value; else delete state.faces[f]; saveFaces(); renderList(); lab.className = sel.value ? "on" : ""; });
+      lab.append(s, sel); box.appendChild(lab);
     }
   }
 
-  // ---------------------------------------------------------------- right panel
+  // ---- reference (library shape only)
   function fillRefSelect() {
     const sel = document.getElementById("refCell"); sel.replaceChildren();
     const none = document.createElement("option"); none.value = ""; none.textContent = "(ไม่มี)"; sel.appendChild(none);
@@ -624,78 +849,157 @@
       sel.appendChild(og);
     }
   }
-  function renderRefThumb() {
-    const cv = document.getElementById("refCanvas"), ctx = cv.getContext("2d"); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
-    const body = state.shapes[state.selected]; if (!body || !body.ref) return;
-    const img = images[body.ref.sheet]; if (!img) return;
-    const r = cellRect(body.ref); const k = Math.min(cv.width / r.w, cv.height / r.h);
-    ctx.drawImage(img, r.x, r.y, r.w, r.h, (cv.width - r.w * k) / 2, (cv.height - r.h * k) / 2, r.w * k, r.h * k);
-  }
-  function renderPanel() {
-    const body = state.shapes[state.selected]; if (!body) return;
-    document.getElementById("color").value = body.color || "cyan";
-    document.getElementById("refCell").value = body.ref ? `${body.ref.sheet}:${body.ref.cell}` : "";
-    const fit = { ...DEFAULT_FIT, ...(body.refFit || {}) };
-    for (const [id, k] of [["fitScale", "scale"], ["fitOpacity", "opacity"], ["fitDx", "dx"], ["fitDy", "dy"]]) document.getElementById(id).value = fit[k];
-    const note = document.getElementById("note"); if (document.activeElement !== note) note.value = body.note || "";
-    document.getElementById("optMirror").checked = body.mirror !== false;
-    document.getElementById("btnCopyL").hidden = body.mirror !== false;
-    for (const id of ["color", "refCell", "note", "btnDelete", "btnResetRound", "btnCopyL", "optMirror", "btnUndo", "btnNew", "newName"]) document.getElementById(id).disabled = !state.canWrite;
+  on("refCell", "change", (e) => { const b = state.shapes[state.selected]; if (!b) return; const v = e.target.value; b.ref = v ? { sheet: +v.split(":")[0], cell: +v.split(":")[1] } : null; scheduleSave(state.selected); renderAll(); });
+  function renderRefPanel() {
+    const b = state.shapes[state.selected], sel = document.getElementById("refCell");
+    sel.disabled = !!currentKey(); sel.value = b && b.ref ? `${b.ref.sheet}:${b.ref.cell}` : "";
     renderRefThumb();
+    if (busy("fitSliders")) return; const box = document.getElementById("fitSliders"); box.replaceChildren(); if (!b || currentKey()) return;
+    const fit = { ...DEFAULT_FIT, ...(b.refFit || {}) };
+    for (const [k, label, min, max, step, fmt] of [["scale", "ขนาดชีท", .5, 2, .01, (v) => `${Math.round(v * 100)}%`], ["opacity", "ความจางชีท", 0, 1, .05, (v) => `${Math.round(v * 100)}%`], ["dx", "เลื่อน ซ้าย/ขวา", -150, 150, 1, (v) => `${v}`], ["dy", "เลื่อน ขึ้น/ลง", -150, 150, 1, (v) => `${v}`]])
+      sliderRow(box, "fit_" + k, label, min, max, step, fit[k], fmt, (v) => { b.refFit = { ...DEFAULT_FIT, ...(b.refFit || {}), [k]: v }; renderView(); scheduleSave(state.selected); });
   }
-  function renderFaces() {
-    const box = document.getElementById("faces"); box.replaceChildren();
-    for (const f of FACES) {
-      const lab = document.createElement("label"); const cur = state.faces[f] || "";
-      if (cur) lab.className = "on";
-      const s = document.createElement("span"); s.textContent = f;
-      const sel = document.createElement("select"); sel.disabled = !state.canWrite; sel.setAttribute("aria-label", `รูปตาของหน้า ${f}`);
-      const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "แบบเดิม"; sel.appendChild(o0);
-      for (const k of sortedKeys()) { const o = document.createElement("option"); o.value = k; o.textContent = state.shapes[k].label || k; sel.appendChild(o); }
-      sel.value = cur;
-      sel.addEventListener("change", () => { if (sel.value) state.faces[f] = sel.value; else delete state.faces[f]; saveFaces(); renderFaces(); renderList(); });
-      lab.append(s, sel); box.appendChild(lab);
-    }
-  }
-  const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
-  on("color", "change", (e) => { const b = state.shapes[state.selected]; pushHistory(); b.color = e.target.value; renderAll(); scheduleSave(state.selected); });
-  on("refCell", "change", (e) => { const b = state.shapes[state.selected]; const v = e.target.value;
-    b.ref = v ? { sheet: +v.split(":")[0], cell: +v.split(":")[1] } : null; renderAll(); scheduleSave(state.selected); });
-  for (const [id, k] of [["fitScale", "scale"], ["fitOpacity", "opacity"], ["fitDx", "dx"], ["fitDy", "dy"]]) {
-    on(id, "input", (e) => { const b = state.shapes[state.selected]; b.refFit = { ...DEFAULT_FIT, ...(b.refFit || {}), [k]: +e.target.value }; renderStage(); scheduleSave(state.selected); });
-  }
-  on("note", "input", (e) => { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); });
-  on("optMirror", "change", (e) => { const b = state.shapes[state.selected]; pushHistory();
-    if (e.target.checked) { b.mirror = true; } else { b.mirror = false; b.right = b.right && b.right.length === N ? b.right : mirror(b.left); }
-    renderAll(); scheduleSave(state.selected); });
-  on("btnCopyL", "click", () => { const b = state.shapes[state.selected]; pushHistory(); b.right = mirror(b.left); renderAll(); scheduleSave(state.selected); });
-  on("optRef", "change", (e) => { state.showRef = e.target.checked; renderStage(); });
-  on("optGhost", "change", (e) => { state.showGhost = e.target.checked; renderStage(); });
-  on("btnResetRound", "click", () => { const b = state.shapes[state.selected]; pushHistory(); b.left = round(); b.right = b.mirror === false ? mirror(round()) : null; renderAll(); scheduleSave(state.selected); });
-  on("btnDelete", "click", () => { document.getElementById("deleteConfirm").hidden = false; });
-  on("btnDeleteNo", "click", () => { document.getElementById("deleteConfirm").hidden = true; });
-  on("btnDeleteYes", "click", async () => {
-    document.getElementById("deleteConfirm").hidden = true;
-    const key = state.selected; delete state.shapes[key];
-    for (const f of Object.keys(state.faces)) if (state.faces[f] === key) delete state.faces[f];
-    state.selected = sortedKeys()[0] || null; renderAll();
-    await deleteShape(key);
-  });
-  on("btnNew", "click", () => {
-    const inp = document.getElementById("newName"); const key = inp.value.trim().toLowerCase();
-    if (!/^[a-z0-9_]{2,24}$/.test(key)) { setStatus("ชื่อรูปใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error"); return; }
-    if (state.shapes[key]) { setStatus(`มีรูปชื่อ ${key} แล้ว`, "error"); return; }
-    const base = state.shapes[state.selected];
-    state.shapes[key] = { ...(base ? clone(base) : { left: round(), color: "cyan", mirror: true }), label: key, note: "", order: Object.keys(state.shapes).length };
-    state.selected = key; inp.value = ""; renderAll(); scheduleSave(key, 0);
-  });
 
-  // ---------------------------------------------------------------- saving (local server)
-  // Everything lives in rive_avatar/tools/avatar/data/eye_lab.json, served by server.py.
-  const timers = {}, writing = {}, again = {};
-  // a shape edited here in the last moments ignores polled data, so a slow reload
-  // never jumps the shape back under the pointer
-  const dirtyUntil = {};
+  // ================================================================ timeline
+  const storyDur = () => (state.story ? state.story.durationMs : 7000);
+  const track = document.getElementById("track");
+  const tToX = (t) => 16 + (track.clientWidth - 32) * (t / storyDur());
+  const xToT = (x) => Math.max(0, Math.min(storyDur(), (x - 16) / Math.max(1, track.clientWidth - 32) * storyDur()));
+  function renderTrack() {
+    track.querySelectorAll(".kf, .tick").forEach((n) => n.remove());
+    const ruler = document.getElementById("ruler"), dur = storyDur(), step = dur > 8000 ? 1000 : 500;
+    for (let t = 0; t <= dur; t += step) { const d = document.createElement("div"); d.className = "tick"; d.style.left = tToX(t) + "px"; d.textContent = (t / 1000).toFixed(t % 1000 ? 1 : 0) + "s"; ruler.appendChild(d); }
+    if (!state.story) return;
+    state.story.keys.forEach((k, i) => {
+      const d = document.createElement("div"); d.className = "kf"; d.style.left = tToX(k.t) + "px"; d.setAttribute("aria-current", i === state.key); d.tabIndex = 0;
+      d.setAttribute("aria-label", `คีย์ ${i + 1} ที่ ${(k.t / 1000).toFixed(2)} วินาที`);
+      d.appendChild(thumbSvg(k.eyes));
+      const s = document.createElement("span"); s.textContent = `${i + 1} · ${(k.t / 1000).toFixed(2)}`; d.appendChild(s);
+      if (k.prop) { const pd = document.createElement("div"); pd.className = "pdot"; pd.title = "มีพร็อพ"; d.appendChild(pd); }
+      d.addEventListener("pointerdown", (e) => {
+        e.stopPropagation(); stopPlay(); selectKey(i);
+        const x0 = e.clientX, t0 = k.t; let moved = false; d.setPointerCapture(e.pointerId);
+        const mv = (ev) => { const dt = (ev.clientX - x0) / Math.max(1, track.clientWidth - 32) * storyDur(); if (Math.abs(ev.clientX - x0) > 3) { if (!moved) pushHistory(); moved = true; } if (moved) { k.t = Math.round(Math.max(0, Math.min(storyDur(), t0 + dt)) / 10) * 10; d.style.left = tToX(k.t) + "px"; s.textContent = `${i + 1} · ${(k.t / 1000).toFixed(2)}`; } };
+        const up = () => { d.removeEventListener("pointermove", mv); d.removeEventListener("pointerup", up); if (moved) { sortKeys(k); saveStory(); renderAll(); } };
+        d.addEventListener("pointermove", mv); d.addEventListener("pointerup", up);
+      });
+      d.addEventListener("keydown", (e) => { if (e.key === "Enter") selectKey(i); if (e.key === "Delete") { selectKey(i); deleteKey(); } });
+      track.appendChild(d);
+    });
+    movePlayhead();
+  }
+  function sortKeys(keep) { state.story.keys.sort((a, b) => a.t - b.t); state.key = keep ? state.story.keys.indexOf(keep) : state.key; }
+  function movePlayhead() { document.getElementById("playhead").style.left = tToX(state.t) + "px"; document.getElementById("timeNow").textContent = `${(state.t / 1000).toFixed(2)} s / ${(storyDur() / 1000).toFixed(1)} s`; }
+  track.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".kf")) return;
+    stopPlay(); state.key = -1; track.setPointerCapture(e.pointerId);
+    const scrub = (ev) => { const r = track.getBoundingClientRect(); state.t = xToT(ev.clientX - r.left + track.parentElement.scrollLeft * 0); movePlayhead(); if (state.story) render(storyFrame(state.t), false); renderEditing(); };
+    scrub(e);
+    const up = () => { track.removeEventListener("pointermove", scrub); track.removeEventListener("pointerup", up); renderAll(); };
+    track.addEventListener("pointermove", scrub); track.addEventListener("pointerup", up);
+  });
+  function selectKey(i) { state.key = i; if (state.story && state.story.keys[i]) { state.t = state.story.keys[i].t; } state.point = { eye: "L", i: 0 }; renderAll(); }
+  on("btnDeselect", "click", () => { state.key = -1; renderAll(); });
+  function snapshotKey(t) {
+    const fr = workFrame(), m = state.motion, k = currentKey();
+    return { t, ease: k ? k.ease : m.ease, pop: true, tremble: k ? k.tremble : 0, quiver: k ? k.quiver : 0,
+             eyes: clone(fr.eyes), mirror: mirrored(), from: k ? k.from : state.selected,
+             pose: clone(fr.pose), eyeRot: clone(fr.eyeRot), rotLink: k ? k.rotLink !== false : (RIG.eyeRot || {}).link !== false,
+             prop: fr.prop ? clone(fr.prop) : null, note: "" };
+  }
+  on("btnAddKey", "click", () => {
+    if (!state.story) return setStatus("สร้างหรือเลือก story ก่อน", "error");
+    const keys = state.story.keys, gap = Math.max(200, state.motion.morphMs + 300);
+    let t = state.key >= 0 ? keys[state.key].t + gap : (keys.length ? keys[keys.length - 1].t + gap : 0);
+    t = Math.min(storyDur(), Math.round(t / 10) * 10);
+    pushHistory(); const k = snapshotKey(t); keys.push(k); sortKeys(k); state.t = t; saveStory(); renderAll();
+    setStatus(`เพิ่มคีย์ ${state.key + 1} ที่ ${(t / 1000).toFixed(2)} s`);
+  });
+  on("btnDupKey", "click", () => { const k = currentKey(); if (!k) return; const c = clone(k); c.t = Math.min(storyDur(), k.t + 300); state.story.keys.push(c); sortKeys(c); saveStory(); renderAll(); });
+  function deleteKey() { if (!currentKey()) return; pushHistory(); state.story.keys.splice(state.key, 1); state.key = -1; saveStory(); renderAll(); }
+  on("btnDelKey", "click", deleteKey);
+  function renderKeyProps() {
+    const box = document.getElementById("keyProps"), k = currentKey();
+    if (busy("keyProps") && k) return; box.replaceChildren();
+    if (!k) { const p = document.createElement("p"); p.className = "hint"; p.textContent = state.story ? "เลือกคีย์เพื่อตั้งเวลา เส้นโค้ง และเอฟเฟกต์" : "เลือกหรือสร้าง story เพื่อเริ่ม"; box.appendChild(p); return; }
+    const tl = document.createElement("label"); tl.className = "row"; tl.textContent = "เวลา ";
+    const ti = document.createElement("input"); ti.type = "number"; ti.min = 0; ti.max = storyDur(); ti.step = 10; ti.value = k.t; ti.id = "keyT";
+    ti.addEventListener("change", () => { pushHistory(); k.t = Math.max(0, Math.min(storyDur(), +ti.value || 0)); sortKeys(k); saveStory(); renderAll(); });
+    tl.append(ti, document.createTextNode(" ms")); box.appendChild(tl);
+    const el_ = document.createElement("label"); el_.className = "row"; el_.textContent = "ไปคีย์ถัดไปแบบ ";
+    const es = document.createElement("select"); es.id = "keyEase";
+    for (const [v, n] of Object.entries(EASE_NAMES)) { const o = document.createElement("option"); o.value = v; o.textContent = n; es.appendChild(o); }
+    es.value = k.ease || "jelly"; es.addEventListener("change", () => { k.ease = es.value; saveStory(); });
+    el_.appendChild(es); box.appendChild(el_);
+    const pl = document.createElement("label"); pl.className = "row";
+    const pc = document.createElement("input"); pc.type = "checkbox"; pc.checked = k.pop !== false; pc.id = "keyPop";
+    pc.addEventListener("change", () => { k.pop = pc.checked; saveStory(); });
+    pl.append(pc, document.createTextNode(" เด้งเมื่อถึงคีย์นี้")); box.appendChild(pl);
+    sliderRow(box, "keyTremble", "สั่นทั้งดวงตา (ช่วงนี้)", 0, 6, .1, k.tremble || 0, (v) => (+v).toFixed(1), (v) => { k.tremble = v; saveStory(); });
+    sliderRow(box, "keyQuiver", "ขอบตาล่างสั่น (ช่วงนี้)", 0, 8, .1, k.quiver || 0, (v) => (+v).toFixed(1), (v) => { k.quiver = v; saveStory(); });
+  }
+  // play / stop
+  let raf = 0, playT0 = 0, playFrom = 0;
+  function togglePlay() { state.playing ? stopPlay() : startPlay(); }
+  function startPlay() {
+    if (!state.story || !state.story.keys.length) return setStatus("ยังไม่มีคีย์ใน story นี้", "error");
+    state.playing = true; state.key = -1; playFrom = state.t >= storyDur() - 1 ? 0 : state.t; playT0 = performance.now();
+    document.getElementById("btnPlay").textContent = "⏸ หยุด"; renderAll();
+    const tick = (ts) => {
+      if (!state.playing) return;
+      let t = playFrom + (ts - playT0);
+      if (t > storyDur()) { if (document.getElementById("optLoop").checked) { playFrom = 0; playT0 = ts; t = 0; } else { state.t = storyDur(); stopPlay(); return; } }
+      state.t = t; render(storyFrame(t), false); movePlayhead(); raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  }
+  function stopPlay() { if (!state.playing) return; state.playing = false; cancelAnimationFrame(raf); document.getElementById("btnPlay").textContent = "▶ เล่น"; renderAll(); }
+  on("btnPlay", "click", togglePlay);
+  // stories: list, open, create, target, delete
+  function renderStoryBar() {
+    const sel = document.getElementById("storySel"); sel.replaceChildren();
+    if (!state.stories.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "(ยังไม่มี story)"; sel.appendChild(o); }
+    for (const s of state.stories) { const o = document.createElement("option"); o.value = s.name; o.textContent = `${s.name}${s.target ? " → " + s.target : ""} (${s.keys} คีย์)`; sel.appendChild(o); }
+    sel.value = state.story ? state.story.name : "";
+    const tg = document.getElementById("storyTarget"); tg.replaceChildren();
+    const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "(ยังไม่ใช้ในแอป)"; tg.appendChild(o0);
+    for (const m of state.moods) { const o = document.createElement("option"); o.value = m.name; o.textContent = m.name; tg.appendChild(o); }
+    tg.value = state.story ? state.story.target || "" : ""; tg.disabled = !state.story;
+    const du = document.getElementById("storyDur"); du.value = storyDur(); du.disabled = !state.story || !!(state.story && state.story.target);
+    du.title = state.story && state.story.target ? "ความยาวเท่ากับ story เดิมที่แทน" : "";
+  }
+  async function openStory(name) {
+    stopPlay();
+    if (!name) { state.story = null; state.key = -1; renderAll(); return; }
+    try { state.story = await api("GET", "/api/stories/" + name); state.story.name = name; state.key = -1; state.t = 0; renderAll(); } catch (err) { setStatus("เปิด story ไม่ได้: " + err.message, "error"); }
+  }
+  on("storySel", "change", (e) => openStory(e.target.value));
+  on("btnStoryNew", "click", async () => {
+    const inp = document.getElementById("storyNew"), name = inp.value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{2,24}$/.test(name)) return setStatus("ชื่อ story ใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error");
+    if (state.stories.some((s) => s.name === name)) return setStatus(`มี story ชื่อ ${name} แล้ว`, "error");
+    stopPlay(); state.key = -1;
+    state.story = { name, target: null, durationMs: 7000, keys: [] };
+    state.story.keys.push(snapshotKey(0)); state.key = 0;           // enter: the story starts from what is on screen now
+    inp.value = ""; await saveStoryNow(); await loadStories(); renderAll();
+  });
+  on("storyTarget", "change", (e) => {
+    if (!state.story) return; state.story.target = e.target.value || null;
+    const m = state.moods.find((x) => x.name === state.story.target); if (m) state.story.durationMs = m.durationMs;
+    for (const k of state.story.keys) k.t = Math.min(k.t, storyDur());
+    saveStory(); renderAll();
+  });
+  on("storyDur", "change", (e) => { if (!state.story) return; state.story.durationMs = Math.max(500, Math.min(20000, +e.target.value || 7000)); saveStory(); renderAll(); });
+  on("btnStoryDel", "click", () => { if (state.story) document.getElementById("storyDelConfirm").hidden = false; });
+  on("btnStoryDelNo", "click", () => { document.getElementById("storyDelConfirm").hidden = true; });
+  on("btnStoryDelYes", "click", async () => {
+    document.getElementById("storyDelConfirm").hidden = true; const name = state.story.name;
+    await api("DELETE", "/api/stories/" + name).catch(handleWriteError); state.story = null; state.key = -1; await loadStories(); renderAll();
+  });
+  window.addEventListener("resize", renderTrack);
+
+  // ================================================================ server I/O
+  const timers = {}, writing = {}, again = {}, dirtyUntil = {};
   const markDirty = (key, ms = 1500) => { dirtyUntil[key] = Date.now() + ms; };
   const isDirty = (key) => (dirtyUntil[key] || 0) > Date.now();
   let version = 0;
@@ -704,341 +1008,80 @@
     const r = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `server ${r.status}`);
-    if (j.version) version = j.version;
-    return j;
+    if (j.version) version = j.version; return j;
   }
   const savedNow = () => setStatus("บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
-  function scheduleSave(key, delay = 350) {
-    if (!state.canWrite || !key) return;
-    clearTimeout(timers[key]); setStatus("กำลังบันทึก…", "saving");
-    markDirty(key, delay + 1500);
-    timers[key] = setTimeout(() => writeShape(key), delay);
-  }
+  function handleWriteError(err) { setStatus("บันทึกไม่สำเร็จ: " + (err && err.message ? err.message : "เซิร์ฟเวอร์ไม่ตอบ") + " (server.py ยังรันอยู่ไหม)", "error"); }
+  function scheduleSave(key, delay = 350) { if (!key) return; clearTimeout(timers[key]); setStatus("กำลังบันทึก…", "saving"); markDirty(key, delay + 1500); timers[key] = setTimeout(() => writeShape(key), delay); }
   async function writeShape(key) {
     if (writing[key]) { again[key] = true; return; }
-    const body = state.shapes[key]; if (!body) return;
-    writing[key] = true; markDirty(key);
-    try { await api("PUT", "/api/shapes/" + key, { ...clone(body), right: body.mirror === false ? body.right : null }); savedNow(); }
-    catch (err) { handleWriteError(err); }
-    writing[key] = false;
-    if (again[key]) { again[key] = false; writeShape(key); }
+    const b = state.shapes[key]; if (!b) return; writing[key] = true; markDirty(key);
+    try { await api("PUT", "/api/shapes/" + key, { ...clone(b), right: b.mirror === false ? b.right : null }); savedNow(); } catch (err) { handleWriteError(err); }
+    writing[key] = false; if (again[key]) { again[key] = false; writeShape(key); }
   }
-  let facesWriting = false, facesAgain = false;
-  async function saveFaces() {
-    if (!state.canWrite) return;
-    if (facesWriting) { facesAgain = true; return; }
-    facesWriting = true; markDirty("_faces"); setStatus("กำลังบันทึก…", "saving");
-    try { await api("PUT", "/api/faces", { map: clone(state.faces) }); savedNow(); }
-    catch (err) { handleWriteError(err); }
-    facesWriting = false; if (facesAgain) { facesAgain = false; saveFaces(); }
-  }
+  let facesBusy = false;
+  async function saveFaces() { if (facesBusy) return setTimeout(saveFaces, 300); facesBusy = true; markDirty("_faces"); try { await api("PUT", "/api/faces", { map: clone(state.faces) }); savedNow(); } catch (err) { handleWriteError(err); } facesBusy = false; }
   let motionTimer = null;
-  function saveMotion() {
-    if (!state.canWrite) return;
-    clearTimeout(motionTimer); markDirty("_motion", 2500);
-    motionTimer = setTimeout(async () => {
-      markDirty("_motion");
-      try { await api("PUT", "/api/motion", clone(state.motion)); savedNow(); }
-      catch (err) { handleWriteError(err); }
-    }, 500);
-  }
-  async function deleteShape(key) {
-    try { await api("DELETE", "/api/shapes/" + key); setStatus("ลบแล้ว"); } catch (err) { handleWriteError(err); }
-  }
-  function handleWriteError(err) {
-    setStatus("บันทึกไม่สำเร็จ: " + (err && err.message ? err.message : "เซิร์ฟเวอร์ไม่ตอบ") + " (server.py ยังรันอยู่ไหม)", "error");
-  }
-
-  // ---------------------------------------------------------------- motion preview
-  const pv = document.getElementById("preview");
-  const psvg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "ตัวอย่างการเปลี่ยนรูปทรงของตา" }, pv);
-  defs(psvg, "glowP");
-  const pg = el("g", {}, psvg);
-  const POP = [[0, 1, 1], [4, 1.09, .88], [10, .93, 1.08], [15, 1.02, .98], [20, 1, 1]];
-  function popAt(frame) {
-    if (frame < 0 || frame > 20) return [1, 1];
-    for (let k = 0; k < POP.length - 1; k++) {
-      const [f0, x0, y0] = POP[k], [f1, x1, y1] = POP[k + 1];
-      if (frame <= f1) { const t = EASE.smooth((frame - f0) / (f1 - f0)); return [lerp(x0, x1, t), lerp(y0, y1, t)]; }
-    }
-    return [1, 1];
-  }
-  // irregular noise: a few incommensurate sines with per-eye phases (never a clean wave)
-  function noise(t, seed) { return (Math.sin(t * 13.1 + seed) * .5 + Math.sin(t * 29.7 + seed * 1.7) * .3 + Math.sin(t * 47.3 + seed * 2.3) * .2); }
-  let play = { on: false, t0: 0, raf: 0 };
-  function seqShapes() { return state.motion.sequence.filter((k) => state.shapes[k]); }
-  function eyeStateAt(eye, ms) {
-    const seq = seqShapes(); const m = state.motion;
-    if (!seq.length) return null;
-    const lagMs = eye === "R" ? m.popLag * 1000 / 60 : 0;
-    const step = m.holdMs + m.morphMs, total = seq.length * step;
-    let t = ms - lagMs; if (optLoop.checked) t = ((t % total) + total) % total; else t = Math.max(0, Math.min(t, total - 1));
-    const idx = Math.floor(t / step), local = t - idx * step;
-    const a = state.shapes[seq[idx]], b = state.shapes[seq[(idx + 1) % seq.length]];
-    const last = !optLoop.checked && idx === seq.length - 1;
-    let verts = outline(eyePts(a, eye)), color = a.color, sx = 1, sy = 1;
-    if (local > m.holdMs && !last) {
-      const p = (local - m.holdMs) / m.morphMs;
-      verts = lerpVerts(verts, outline(eyePts(b, eye)), EASE[m.ease] ? EASE[m.ease](p) : p);
-      if (p > .5) color = b.color;
-      const gain = (eye === "R" ? m.popGainR : 1) * m.pop;
-      const [px, py] = popAt((local - m.holdMs) * 60 / 1000);
-      sx = 1 + (px - 1) * gain; sy = 1 + (py - 1) * gain;
-    }
-    const round_ = seq[idx] === "round" && (local <= m.holdMs || last);
-    const tr = round_ ? 0 : m.tremble, qv = round_ ? 0 : m.quiver, seed = eye === "L" ? 1.3 : 4.1;
-    const secs = ms / 1000;
-    if (qv) verts = verts.map((v, i) => (i >= 3 && i <= 5) ? { ...v, y: v.y + noise(secs + i, seed + i) * qv } : v);
-    return { verts, color, sx, sy, dx: noise(secs, seed) * tr, dy: noise(secs + 7, seed + 2) * tr };
-  }
-  function renderPreview(ms) {
-    pg.replaceChildren();
-    for (const eye of ["L", "R"]) {
-      const s = eyeStateAt(eye, ms); if (!s) continue;
-      const t = eyeXform(eye);
-      const g = el("g", { transform: xformAttr(t, s.sx, s.sy, s.dx, s.dy) }, pg);
-      drawEye(g, s.verts, s.color, "glowP", t.ix, t.iy);
-    }
-    const seq = seqShapes(), step = state.motion.holdMs + state.motion.morphMs;
-    const now = seq.length ? Math.floor(((ms % (seq.length * step)) + seq.length * step) % (seq.length * step) / step) : -1;
-    document.querySelectorAll("#seq .chip").forEach((c, i) => c.classList.toggle("now", play.on && i === now));
-  }
-  const optLoop = document.getElementById("optLoop");
-  function tick(ts) { if (!play.on) return; renderPreview(ts - play.t0); play.raf = requestAnimationFrame(tick); }
-  on("btnPlay", "click", () => {
-    play.on = !play.on; document.getElementById("btnPlay").textContent = play.on ? "หยุด" : "เล่น";
-    if (play.on) { play.t0 = performance.now(); play.raf = requestAnimationFrame(tick); } else { cancelAnimationFrame(play.raf); renderPreview(0); }
-  });
-  function renderSeq() {
-    const box = document.getElementById("seq"); box.replaceChildren();
-    state.motion.sequence.forEach((k, i) => {
-      const c = document.createElement("span"); c.className = "chip";
-      const n = document.createElement("span"); n.textContent = state.shapes[k] ? (state.shapes[k].label || k) : `${k} (ไม่มีแล้ว)`;
-      const x = document.createElement("button"); x.textContent = "×"; x.setAttribute("aria-label", `เอา ${k} ออกจากลำดับ`);
-      x.addEventListener("click", () => { state.motion.sequence.splice(i, 1); renderSeq(); saveMotion(); renderPreview(0); });
-      c.append(n, x); box.appendChild(c);
-      if (i < state.motion.sequence.length - 1) { const a = document.createElement("span"); a.textContent = "→"; a.style.color = "var(--muted)"; box.appendChild(a); }
-    });
-    const sel = document.getElementById("seqAdd"); const keep = sel.value; sel.replaceChildren();
-    for (const k of sortedKeys()) { const o = document.createElement("option"); o.value = k; o.textContent = state.shapes[k].label || k; sel.appendChild(o); }
-    if (keep) sel.value = keep;
-  }
-  on("btnSeqAdd", "click", () => { const v = document.getElementById("seqAdd").value; if (v) { state.motion.sequence.push(v); renderSeq(); saveMotion(); } });
-  const PARAMS = [["pMorph", "morphMs", "vMorph", (v) => `${v} ms`], ["pHold", "holdMs", "vHold", (v) => `${v} ms`], ["pLag", "popLag", "vLag", (v) => `${v} เฟรม`],
-                  ["pGain", "popGainR", "vGain", (v) => `${Math.round(v * 100)}%`], ["pPop", "pop", "vPop", (v) => `${Math.round(v * 100)}%`],
-                  ["pTremble", "tremble", "vTremble", (v) => (+v).toFixed(1)], ["pQuiver", "quiver", "vQuiver", (v) => (+v).toFixed(1)]];
-  function renderParams() {
-    for (const [id, k, vid, fmt] of PARAMS) { document.getElementById(id).value = state.motion[k]; document.getElementById(vid).textContent = fmt(state.motion[k]); }
-    document.getElementById("pEase").value = state.motion.ease;
-  }
-  for (const [id, k, vid, fmt] of PARAMS) on(id, "input", (e) => { state.motion[k] = +e.target.value; document.getElementById(vid).textContent = fmt(state.motion[k]); saveMotion(); if (!play.on) renderPreview(0); });
-  on("pEase", "change", (e) => { state.motion.ease = e.target.value; saveMotion(); });
-
-
-  // ---------------------------------------------------------------- rig (ค่าหลัก)
-  const RIG_SLIDERS = [
-    ["eyeDx", "ระยะห่างตา", 60, 160, 1, (v) => `${v}`],
-    ["eyeScale", "ขนาดตา", 0.8, 1.8, 0.01, (v) => `${Math.round(v / 1.32 * 100)}%`],
-    ["backDx", "วงหลังเหลื่อม ซ้าย/ขวา", -15, 15, 0.5, (v) => `${v}`],
-    ["backDy", "วงหลังเหลื่อม ขึ้น/ลง", -10, 20, 0.5, (v) => `${v}`],
-    ["glowFeather", "ออร่า: ความฟุ้ง", 0, 40, 1, (v) => `${v}`],
-    ["glowWidth", "ออร่า: ความหนา", 0, 20, 0.5, (v) => `${v}`],
-    ["glowOpacity", "ออร่า: ความสว่าง", 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
-  ];
-  function sliderRow(box, id, label, min, max, step, value, fmt, oninput) {
-    const lab = document.createElement("label"); lab.className = "slider";
-    const head = document.createElement("span"); const t = document.createElement("span"); t.textContent = label;
-    const b = document.createElement("b"); b.textContent = fmt(value); head.append(t, b);
-    const inp = document.createElement("input"); Object.assign(inp, { type: "range", id, min, max, step, value });
-    inp.addEventListener("input", () => { b.textContent = fmt(+inp.value); oninput(+inp.value); });
-    lab.append(head, inp); box.appendChild(lab); return inp;
-  }
-  function applyGlowFilter() {
-    // Rive's Feather strength ~ blur radius; SVG blur is a standard deviation in the eye's own units
-    document.querySelectorAll('[data-glow]').forEach((f) => f.setAttribute("stdDeviation", Math.max(0.01, RIG.glowFeather * 0.45)));
-  }
+  function saveMotion() { clearTimeout(motionTimer); markDirty("_motion", 2500); motionTimer = setTimeout(async () => { markDirty("_motion"); try { await api("PUT", "/api/motion", clone(state.motion)); savedNow(); } catch (err) { handleWriteError(err); } }, 500); }
   let rigTimer = null;
-  function saveRig() {
-    if (!state.canWrite) return;
-    clearTimeout(rigTimer); markDirty("_rig", 2500); setStatus("กำลังบันทึก…", "saving");
-    rigTimer = setTimeout(async () => { markDirty("_rig"); try { await api("PUT", "/api/rig", { ...RIG }); savedNow(); } catch (err) { handleWriteError(err); } }, 400);
+  function saveRig() { clearTimeout(rigTimer); markDirty("_rig", 2500); setStatus("กำลังบันทึก…", "saving"); rigTimer = setTimeout(async () => { markDirty("_rig"); try { await api("PUT", "/api/rig", { ...RIG }); savedNow(); } catch (err) { handleWriteError(err); } }, 400); }
+  let storyTimer = null;
+  function saveStory() { if (!state.story) return; clearTimeout(storyTimer); setStatus("กำลังบันทึก…", "saving"); storyTimer = setTimeout(saveStoryNow, 400); }
+  async function saveStoryNow() {
+    if (!state.story) return; const { name, ...body } = state.story;
+    try { await api("PUT", "/api/stories/" + name, body); savedNow(); const s = state.stories.find((x) => x.name === name); if (s) { s.keys = body.keys.length; s.target = body.target; renderStoryBar(); } } catch (err) { handleWriteError(err); }
   }
-  function renderRig() {
-    const box = document.getElementById("rigSliders"); if (box.contains(document.activeElement)) return;
-    box.replaceChildren();
-    for (const [k, label, min, max, step, fmt] of RIG_SLIDERS) {
-      sliderRow(box, "rig_" + k, label, min, max, step, RIG[k], fmt, (v) => { RIG[k] = v; applyGlowFilter(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
-    }
-    applyGlowFilter();
-  }
-  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG, head: RIG.head, eyeRot: RIG.eyeRot }; renderRig(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
-
-
-  // ---------------------------------------------------------------- 3D head panel
-  const POSE_SLIDERS = [["yaw", "หันซ้าย ↔ ขวา"], ["pitch", "เงย ↕ ก้ม"], ["roll", "เอียงคอ"]];
-  const HEAD_SLIDERS = [
-    ["radius", "ความโค้งหัว (รัศมี)", 150, 900, 5, (v) => `${v}`],
-    ["maxYaw", "หันได้สุด (องศา)", 0, 35, 0.5, (v) => `${v}°`],
-    ["maxPitch", "ก้ม/เงยได้สุด (องศา)", 0, 30, 0.5, (v) => `${v}°`],
-    ["maxRoll", "เอียงคอได้สุด (องศา)", 0, 30, 0.5, (v) => `${v}°`],
-    ["yawRoll", "เอียงตามตอนหัน (องศา)", 0, 12, 0.2, (v) => `${v}°`],
-    ["pupil", "ลูกตาขยับนำหัว", 0, 30, 0.5, (v) => `${v}`],
-    ["travelX", "หน้าเลื่อนเพิ่ม ซ้าย/ขวา", -80, 80, 1, (v) => `${v}`],
-    ["travelY", "หน้าเลื่อนเพิ่ม ขึ้น/ลง", -80, 80, 1, (v) => `${v}`],
-    ["persp", "ระยะลึก (ข้างไกลเล็กลง)", 0, 0.6, 0.01, (v) => `${Math.round(v * 100)}%`],
-  ];
-  const ROT_SLIDERS = [["x", "หมุนแกน X (ก้ม/เงยตา)"], ["y", "หมุนแกน Y (หันตา)"], ["z", "หมุนแกน Z (เอียงตา)"]];
-  function redrawPose() { renderStage(); if (!play.on) renderPreview(0); }
-  function renderPose() {
-    const box = document.getElementById("poseSliders"); if (box.contains(document.activeElement)) return;
-    box.replaceChildren();
-    for (const [k, label] of POSE_SLIDERS)
-      sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { pose[k] = v; redrawPose(); });
-  }
-  function renderHead() {
-    const box = document.getElementById("headSliders"); if (box.contains(document.activeElement)) return;
-    box.replaceChildren(); const H = head();
-    for (const [k, label, min, max, step, fmt] of HEAD_SLIDERS)
-      sliderRow(box, "head_" + k, label, min, max, step, H[k], fmt, (v) => { RIG.head = { ...head(), [k]: v }; redrawPose(); saveRig(); });
-  }
-  function renderRot() {
-    const box = document.getElementById("rotSliders"); if (box.contains(document.activeElement)) return;
-    box.replaceChildren();
-    const r = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
-    document.getElementById("optRotLink").checked = r.link !== false;
-    for (const eye of ["L", "R"]) {
-      const cur = eyeRot(eye);
-      for (const [k, label] of ROT_SLIDERS) {
-        const inp = sliderRow(box, `rot_${eye}_${k}`, `ตา${eye === "L" ? "ซ้าย" : "ขวา"}: ${label}`, -60, 60, 1, cur[k], (v) => `${v}°`, (v) => {
-          const now = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
-          now[eye] = { ...eyeRot(eye), [k]: v };
-          RIG.eyeRot = now; redrawPose(); saveRig();
-        });
-        if (eye === "R" && r.link !== false) inp.disabled = true;
-      }
-    }
-  }
-  on("optRotLink", "change", (e) => {
-    const now = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
-    if (!e.target.checked) now.R = eyeRot("R");       // start the free right eye from its mirror
-    now.link = e.target.checked; RIG.eyeRot = now; renderRot(); redrawPose(); saveRig();
+  on("btnBuild", "click", async () => {
+    const btn = document.getElementById("btnBuild"), out = document.getElementById("buildOut");
+    await saveStoryNow();
+    btn.disabled = true; btn.textContent = "กำลังสร้าง…"; out.hidden = false; out.textContent = "รัน build.py และ rive . --once …";
+    try { const r = await api("POST", "/api/build"); out.textContent = `สร้างเสร็จใน ${r.seconds} วินาที · avatar.riv ${(r.bytes / 1024).toFixed(0)} KB คัดลอกเข้าแอปแล้ว (ติดตั้งแอปใหม่ถึงจะเห็นบนมือถือ)`; }
+    catch (err) { out.textContent = "สร้างไม่สำเร็จ: " + err.message; }
+    btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
   });
-  // look pad: glide the pose to a target (the same kind of spring the app's gaze uses)
-  let glide = null;
-  function lookAt(yaw, pitch) {
-    const from = { ...pose }, t0 = performance.now(), dur = 420;
-    cancelAnimationFrame(glide);
-    const step = (ts) => {
-      const k = Math.min(1, (ts - t0) / dur), e = EASE.jelly(k);
-      pose.yaw = lerp(from.yaw, yaw, e); pose.pitch = lerp(from.pitch, pitch, e);
-      redrawPose(); renderPose();
-      if (k < 1) glide = requestAnimationFrame(step);
-    };
-    glide = requestAnimationFrame(step);
-  }
-  document.querySelectorAll("[data-look]").forEach((b) => b.addEventListener("click", () => {
-    const [x, y] = b.dataset.look.split(",").map(Number);
-    document.getElementById("optWander").checked = false; lookAt(x, y);
-  }));
-  let wanderTimer = null;
-  on("optWander", "change", (e) => {
-    clearTimeout(wanderTimer);
-    const next = () => {
-      if (!document.getElementById("optWander").checked) return;
-      lookAt(+(Math.random() * 2 - 1).toFixed(2), +(Math.random() * 1.6 - 0.8).toFixed(2));
-      wanderTimer = setTimeout(next, 900 + Math.random() * 1400);
-    };
-    if (e.target.checked) next(); else lookAt(0, 0);
-  });
-
-  // ---------------------------------------------------------------- ellipse / circle tool
-  const ELL = { rx: 48.6, ry: 57.2, cy: 0, square: 0, tilt: 0 };
-  const ELL_SLIDERS = [
-    ["rx", "ความกว้าง", 10, 80, 0.5, (v) => `${v}`],
-    ["ry", "ความสูง", 10, 100, 0.5, (v) => `${v}`],
-    ["cy", "เลื่อน ขึ้น/ลง", -40, 40, 0.5, (v) => `${v}`],
-    ["square", "ความเหลี่ยม", 0, 1, 0.02, (v) => `${Math.round(v * 100)}%`],
-    ["tilt", "เอียง (องศา)", -35, 35, 1, (v) => `${v}°`],
-  ];
-  // superellipse through 8 points (top, then clockwise): square 0 = ellipse, 1 = rounded box
-  function ellipsePts(e) {
-    const n = 2 + e.square * 6, a = e.tilt * Math.PI / 180;
-    return Array.from({ length: N }, (_, i) => {
-      const t = i * Math.PI / 4, sn = Math.sin(t), cs = Math.cos(t);
-      const x = e.rx * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n);
-      const y = e.cy - e.ry * Math.sign(cs) * Math.pow(Math.abs(cs), 2 / n);
-      const diag = i % 2 === 1;
-      const sm = diag ? 1 - 0.45 * e.square : 1 + 0.4 * e.square;
-      const rx_ = x * Math.cos(a) - (y - e.cy) * Math.sin(a), ry_ = e.cy + x * Math.sin(a) + (y - e.cy) * Math.cos(a);
-      return [+rx_.toFixed(2), +ry_.toFixed(2), +sm.toFixed(2)];
-    });
-  }
-  const ellOpen = () => document.getElementById("ellTool").open;
-  function renderEll() {
-    const box = document.getElementById("ellSliders"); box.replaceChildren();
-    for (const [k, label, min, max, step, fmt] of ELL_SLIDERS)
-      sliderRow(box, "ell_" + k, label, min, max, step, ELL[k], fmt, (v) => { ELL[k] = v; renderStage(); });
-  }
-  document.getElementById("ellTool").addEventListener("toggle", () => renderStage());
-  on("btnEllApply", "click", () => {
-    const b = state.shapes[state.selected]; if (!b) return; pushHistory();
-    b.left = ellipsePts(ELL); if (b.mirror === false) b.right = mirror(b.left);
-    renderAll(); scheduleSave(state.selected);
-  });
-
-  // ---------------------------------------------------------------- render all
-  function renderAll() { renderRig(); renderHead(); renderRot(); renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
-
-  // ---------------------------------------------------------------- data (polled from the local server)
   function normalize(body) {
     const b = { ...body };
     if (!Array.isArray(b.left) || b.left.length !== N) b.left = round();
     b.left = b.left.map((p) => [+p[0] || 0, +p[1] || 0, p[2] == null ? 1 : +p[2]]);
-    if (Array.isArray(b.right) && b.right.length === N) b.right = b.right.map((p) => [+p[0] || 0, +p[1] || 0, p[2] == null ? 1 : +p[2]]);
-    else b.right = null;
+    b.right = Array.isArray(b.right) && b.right.length === N ? b.right.map((p) => [+p[0] || 0, +p[1] || 0, p[2] == null ? 1 : +p[2]]) : null;
     if (b.mirror === false && !b.right) b.right = mirror(b.left);
     return b;
   }
   function apply(data) {
-    version = data.version || 0;
-    const incoming = data.shapes || {};
+    version = data.version || 0; const incoming = data.shapes || {};
     for (const key of Object.keys(state.shapes)) if (!(key in incoming) && !isDirty(key)) delete state.shapes[key];
-    for (const [key, body] of Object.entries(incoming)) {
-      if (state.dragging && key === state.selected) continue;   // don't yank a point from under the pointer
-      if (isDirty(key)) continue;                               // our own edit is still being saved
-      state.shapes[key] = normalize(body);
-    }
-    if (!facesWriting && !isDirty("_faces")) state.faces = { ...(data.faces || {}) };
+    for (const [key, body] of Object.entries(incoming)) { if ((state.dragging && key === state.selected) || isDirty(key)) continue; state.shapes[key] = normalize(body); }
+    if (!isDirty("_faces")) state.faces = { ...(data.faces || {}) };
     if (!isDirty("_motion") && data.motion) state.motion = { ...DEFAULT_MOTION, ...data.motion };
     if (!isDirty("_rig") && data.rig) RIG = { ...DEFAULT_RIG, ...data.rig };
     if (!state.selected || !state.shapes[state.selected]) state.selected = sortedKeys()[0] || null;
-    renderAll();
+    if (!state.playing) renderAll();
   }
+  async function loadStories() { try { state.stories = await api("GET", "/api/stories"); } catch { state.stories = []; } renderStoryBar(); }
   let online = false;
   async function poll() {
     try {
       const v = await api("GET", "/api/version");
       if (!online || v.version !== version) apply(await api("GET", "/api/data"));
-      if (!online) { online = true; setStatus("เชื่อมแล้ว แก้ได้เลย"); }
-    } catch {
-      online = false; setStatus("ติดต่อ server.py ไม่ได้: รัน python rive_avatar/tools/eyelab/server.py แล้วโหลดหน้าใหม่", "error");
-    }
+      if (!online) {
+        online = true; setStatus("เชื่อมแล้ว แก้ได้เลย");
+        const meta = await api("GET", "/api/meta"); state.props = meta.props; state.moods = meta.moods; state.faceNames = meta.faces;
+        await loadStories(); if (state.stories.length && !state.story) await openStory(state.stories[0].name); renderAll();
+      }
+    } catch { online = false; setStatus("ติดต่อ server.py ไม่ได้: รัน python rive_avatar/tools/eyelab/server.py แล้วโหลดหน้าใหม่", "error"); }
     setTimeout(poll, 1500);
   }
-  // ---------------------------------------------------------------- build .riv
-  on("btnBuild", "click", async () => {
-    const btn = document.getElementById("btnBuild"), out = document.getElementById("buildOut");
-    btn.disabled = true; btn.textContent = "กำลังสร้าง…"; out.hidden = false; out.textContent = "รัน build.py และ rive . --once …";
-    try {
-      const r = await api("POST", "/api/build");
-      out.textContent = `สร้างเสร็จใน ${r.seconds} วินาที · avatar.riv ${(r.bytes / 1024).toFixed(0)} KB คัดลอกเข้าแอปแล้ว (ติดตั้งแอปใหม่ถึงจะเห็นบนมือถือ)`;
-    } catch (err) { out.textContent = "สร้างไม่สำเร็จ: " + err.message; }
-    btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
-  });
 
-  fillRefSelect(); loadImages(); renderEll(); renderPose();
-  renderAll();
-  poll();
+  // ================================================================ render all
+  function renderAll() {
+    renderList(); renderRig(); renderPose(); renderHead(); renderRot(); renderPropGrid(); renderPropSliders(); renderMotion(); renderFaces();
+    renderRefPanel(); renderPointInfo(); renderStoryBar(); renderTrack(); renderKeyProps();
+    const k = currentKey(), note = document.getElementById("note");
+    if (document.activeElement !== note) note.value = k ? k.note || "" : (state.shapes[state.selected] || {}).note || "";
+    document.getElementById("color").value = editEyes().L.color;
+    if (state.playing) renderEditing(); else renderView();
+  }
+  fillRefSelect(); loadImages(); renderEll(); renderAll(); poll();
 })();
 </script>
 </body>

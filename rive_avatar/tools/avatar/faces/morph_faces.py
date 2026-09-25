@@ -21,3 +21,9 @@ if EYE_LAB.get("faces"):
 for _i, (_fn, _el, _er, _br, _mo, _nb) in enumerate(FACES):
     if _fn in MORPH_FACE:
         FACES[_i] = (_fn, V_MORPH, V_MORPH, _br, _mo, _nb)
+
+# the Eye Lab timeline stories (stories/lab.py) key every vertex themselves: their
+# beats use this face, which shows the morph eye without a shape of its own
+_nrow = FACES[F_INDEX["Neutral"]]
+FACES.append(("LabMorph", V_MORPH, V_MORPH, _nrow[3], _nrow[4], False))
+F_INDEX["LabMorph"] = len(FACES) - 1
