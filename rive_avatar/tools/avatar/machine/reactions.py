@@ -135,29 +135,32 @@ RE_NAMES = [r[0] for r in REACTS]
 
 
 def check_eye_scale(table, label):
-    """A timeline that pins a face must not blow those eyes up past the point
-    where the pair touches. Only checkable where the face is known, so
-    motion-only entries (no beats) are the host's responsibility -- see the
-    ceiling noted in AVATAR_CONTRACT.md."""
-    bad = []
+    """A timeline that pins a face must not blow those eyes up past the point where
+    the pair touches. The eye size and spacing come from the Eye Lab (rig), so instead
+    of failing the build, any widening past that limit is capped to it (and reported).
+    Only checkable where the face is known, so motion-only entries (no beats) are the
+    host's responsibility -- see the ceiling noted in AVATAR_CONTRACT.md."""
+    capped = []
     for name, _dur, beats, extra in table:
         if not beats:
             continue
         # a face that is already tight at rest is the FACE's problem, not this
-        # beat's -- never fail a timeline for returning to scale 1
+        # beat's -- never cap a timeline below scale 1
         lim = max(1.0, min(max_eye_scale(FACES[F_INDEX[b[1]]][1], FACES[F_INDEX[b[1]]][2])
                            for b in beats))
-        peak = 0.0
-        for ex in extra:
+        for j, ex in enumerate(extra):
             if ex[0] in ("blink", "blinkL", "blinkR") and ex[1] == 16:
-                peak = max(peak, max(v for _f, v in ex[2]))
-        if peak > lim + 1e-6:
-            bad.append("%s (peak %.2f > %.2f)" % (name, peak, lim))
-    if bad:
-        raise SystemExit("%s: eyes would overlap when widened: %s"
-                         % (label, ", ".join(bad)))
+                peak = max(k[1] for k in ex[2])
+                if peak > lim + 1e-6:
+                    capped.append("%s (%.2f -> %.2f)" % (name, peak, lim))
+                    kfs = [(k[0], min(k[1], lim)) + tuple(k[2:]) for k in ex[2]]
+                    extra[j] = (ex[0], ex[1], kfs) + tuple(ex[3:])
+    if capped:
+        sys.stderr.write("%s: eye widening capped so the eyes never touch (Eye Lab size/spacing): %s\n"
+                         % (label, ", ".join(capped)))
 
 
+import sys
 check_eye_scale(STATES, "states")
 check_eye_scale(REACTS, "reactions")
 check_eye_scale(SEQS, "sequences")

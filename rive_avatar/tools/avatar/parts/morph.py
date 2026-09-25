@@ -255,3 +255,18 @@ def pop_tracks(frame, gain_r=None):
             kfs += [(frame + lag + row[0], 1 + (row[col] - 1) * gain, "cubic") for row in POP_KEYS]
             tracks[(node, key)] = kfs
     return tracks
+
+
+def eye_rotation(tag):
+    """Fixed per-eye 3D turn from the Eye Lab (degrees): {"x", "y", "z"}; the right eye
+    mirrors the left (y and z flipped) unless the lab unlinked them."""
+    r = EYE_RIG.get("eyeRot", {})
+    left = {"x": 0.0, "y": 0.0, "z": 0.0}
+    left.update(r.get("L", {}))
+    if tag == "L":
+        return left
+    if r.get("link", True):
+        return {"x": left["x"], "y": -left["y"], "z": -left["z"]}
+    right = {"x": 0.0, "y": 0.0, "z": 0.0}
+    right.update(r.get("R", {}))
+    return right

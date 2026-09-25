@@ -40,6 +40,9 @@ A local page (no internet data, Python standard library only) that edits
   `mirror: false`), colour, the LOOI sheet cell to compare with, and a `note` for Claude
 - `faces`: app face -> shape (faces not listed keep their old discrete eyes)
 - `motion`: morph time, right-eye lag, pop strength, tremble / quiver amounts
+- `rig`: eye spacing / size, back-layer offset, aura; `rig.head` = the 3D head model (sphere radius,
+  max yaw / pitch, tilt while turning, pupil lead, perspective) from which `machine/poses.py` builds the
+  Rive look poses; `rig.eyeRot` = a fixed X/Y/Z turn per eye (the `EyeTilt` node)
 
 The page polls the file every 1.5 s, so an edit Claude makes to the JSON shows up live.
 "สร้างไฟล์ Rive" runs `build.py` + `rive . --once` and copies the `.riv` into the app

@@ -188,7 +188,9 @@ def seq_targets(nkey):
 
 
 JELLY_NODES = ("blink", "blinkL", "blinkR", "sblink", "sblinkL", "sblinkR", "face", "mouth")
-IRIS_X, IRIS_Y, IRIS_GAIN = 13.0, 13.0, 0.45
+# how far the front (pupil) layer leads the look -- Eye Lab "ลูกตาขยับนำหัว"
+IRIS_X = IRIS_Y = float(EYE_HEAD["pupil"])
+IRIS_GAIN = 0.45
 IRIS_FROM = {"blink": (irisL_look, irisR_look), "blinkL": (irisL_look,), "blinkR": (irisR_look,),
              "sblink": (irisL_look, irisR_look), "sblinkL": (irisL_look,), "sblinkR": (irisR_look,)}
 explicit_iris = set()

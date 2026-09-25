@@ -90,6 +90,13 @@
   .slider > span { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
   .slider > span b { font-family: var(--mono); font-weight: 500; color: var(--text); }
   .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+  .head3d { margin-top: 12px; display: grid; gap: 12px; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 1100px) { .head3d { grid-template-columns: auto minmax(0, 1fr); } }
+  @media (max-width: 620px) { .head3d { grid-template-columns: minmax(0, 1fr); } }
+  .pad { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; }
+  .pad button { height: 44px; padding: 0; font-size: 18px; }
+  .pad button.home { font-size: 12px; }
+  .subh { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
   .hint { font-size: 12px; color: var(--muted); margin: 0; }
 
   /* right panel */
@@ -217,6 +224,31 @@
   </aside>
 </div>
 
+<section class="box head3d" aria-labelledby="h3d">
+  <div style="display:grid;gap:8px">
+    <h2 id="h3d">หัว 3D</h2>
+    <div class="pad" role="group" aria-label="มองไปทิศต่างๆ">
+      <button data-look="-1,-1" aria-label="มองซ้ายบน">↖</button><button data-look="0,-1" aria-label="เงยหน้า">↑</button><button data-look="1,-1" aria-label="มองขวาบน">↗</button>
+      <button data-look="-1,0" aria-label="หันซ้าย">←</button><button class="home" data-look="0,0" aria-label="มองตรง">ตรง</button><button data-look="1,0" aria-label="หันขวา">→</button>
+      <button data-look="-1,1" aria-label="มองซ้ายล่าง">↙</button><button data-look="0,1" aria-label="ก้มหน้า">↓</button><button data-look="1,1" aria-label="มองขวาล่าง">↘</button>
+    </div>
+    <label><input type="checkbox" id="optWander"> มองรอบๆ เอง</label>
+  </div>
+  <div>
+    <p class="subh">ลองท่า (ไม่บันทึก)</p>
+    <div class="sliders" id="poseSliders" style="grid-template-columns:1fr"></div>
+  </div>
+  <div>
+    <p class="subh">โมเดลหัว (บันทึก ใช้ในแอป)</p>
+    <div class="sliders" id="headSliders"></div>
+  </div>
+  <div>
+    <p class="subh">หมุนดวงตาแต่ละข้าง (องศา)</p>
+    <label><input type="checkbox" id="optRotLink"> ตาขวาสะท้อนจากตาซ้าย</label>
+    <div class="sliders" id="rotSliders"></div>
+  </div>
+</section>
+
 <section class="box motion">
   <div class="preview-stage" id="preview"></div>
   <div style="display:grid;gap:10px">
@@ -328,6 +360,53 @@
   }
   const EASE = { jelly: bezier(0.30, 0, 0.32, 1.28), smooth: bezier(0.42, 0, 0.58, 1) };
 
+  // ---------------------------------------------------------------- 3D head
+  // The face is drawn on a sphere: each feature sits on it at its offset from the face
+  // centre, the head turns (yaw) / nods (pitch) and the result is projected back onto the
+  // screen. Features on the far side shrink (cos) and, with perspective, get smaller.
+  // tools/avatar/machine/poses.py builds the Rive look poses from the same maths.
+  const DEG = Math.PI / 180;
+  const EYE_ROW_Y = -20;          // the eye row sits 20 px above the face centre (core/layout.py EYE_Y)
+  const DEFAULT_HEAD = { radius: 300, maxYaw: 12, maxPitch: 9, maxRoll: 10, yawRoll: 3.4, travelX: 0, travelY: 0, pupil: 13, persp: 0.15 };
+  const DEFAULT_EYEROT = { link: true, L: { x: 0, y: 0, z: 0 }, R: { x: 0, y: 0, z: 0 } };
+  const pose = { yaw: 0, pitch: 0, roll: 0 };   // what the lab is looking at right now (-1..1), not saved
+  const head = () => ({ ...DEFAULT_HEAD, ...(RIG.head || {}) });
+  function eyeRot(eye) {
+    const r = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
+    const L = { x: 0, y: 0, z: 0, ...(r.L || {}) };
+    if (eye === "L") return L;
+    return r.link ? { x: L.x, y: -L.y, z: -L.z } : { x: 0, y: 0, z: 0, ...(r.R || {}) };
+  }
+  function headProject(x0, y0, yaw, pitch, H) {
+    const R = Math.max(H.radius, Math.abs(x0) + 1, Math.abs(y0) + 1);
+    const a = Math.asin(x0 / R), b = Math.asin(y0 / R);
+    const at = (yw, pt) => {
+      const px = R * Math.sin(a) * Math.cos(b), py = R * Math.sin(b), pz = R * Math.cos(a) * Math.cos(b);
+      const x1 = px * Math.cos(yw) + pz * Math.sin(yw), z1 = -px * Math.sin(yw) + pz * Math.cos(yw);
+      const y2 = py * Math.cos(pt) + z1 * Math.sin(pt), z2 = -py * Math.sin(pt) + z1 * Math.cos(pt);
+      const k = 1 + H.persp * (z2 - R) / R;
+      const nx = x1 / R, ny = y2 / R;
+      return { x: x1 * k, y: y2 * k, fx: Math.sqrt(Math.max(0.05, 1 - nx * nx)) * k, fy: Math.sqrt(Math.max(0.05, 1 - ny * ny)) * k };
+    };
+    const b0 = at(0, 0), q = at(yaw, pitch);
+    return { dx: q.x - b0.x, dy: q.y - b0.y, sx: q.fx / b0.fx, sy: q.fy / b0.fy };
+  }
+  // where and how one eye is drawn at the current head pose
+  function eyeXform(eye) {
+    const H = head();
+    const bx = eye === "L" ? -RIG.eyeDx : RIG.eyeDx;
+    const pj = headProject(bx, EYE_ROW_Y, pose.yaw * H.maxYaw * DEG, pose.pitch * H.maxPitch * DEG, H);
+    const rollDeg = pose.roll * H.maxRoll - pose.yaw * H.yawRoll;
+    const x = bx + pj.dx + H.travelX * pose.yaw, y = pj.dy + H.travelY * pose.pitch;
+    const r = rollDeg * DEG, er = eyeRot(eye);
+    return {
+      tx: CX + x * Math.cos(r) - y * Math.sin(r), ty: CY + x * Math.sin(r) + y * Math.cos(r), rot: rollDeg + er.z,
+      sx: RIG.eyeScale * pj.sx * Math.cos(er.y * DEG), sy: RIG.eyeScale * pj.sy * Math.cos(er.x * DEG),
+      ix: H.pupil * pose.yaw / RIG.eyeScale, iy: H.pupil * pose.pitch / RIG.eyeScale,
+    };
+  }
+  const xformAttr = (t, kx = 1, ky = 1, dx = 0, dy = 0) => `translate(${t.tx + dx} ${t.ty + dy}) rotate(${t.rot}) scale(${t.sx * kx} ${t.sy * ky})`;
+
   // ---------------------------------------------------------------- svg helpers
   const NS = "http://www.w3.org/2000/svg";
   const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
@@ -337,13 +416,14 @@
     el("feGaussianBlur", { stdDeviation: "7", "data-glow": "1" }, f);
   }
   // one eye: back layer, glow, front layer -- the same layering as the Rive rig
-  function drawEye(g, verts, color, glowId) {
+  function drawEye(g, verts, color, glowId, ix = 0, iy = 0) {
     const [front, back] = COLORS[color] || COLORS.cyan;
     const d = pathD(verts);
     el("path", { d, fill: back, transform: `translate(${RIG.backDx / RIG.eyeScale} ${RIG.backDy / RIG.eyeScale})` }, g);
+    const fg = el("g", { transform: `translate(${ix} ${iy})` }, g);
     if (RIG.glowOpacity > 0 && (RIG.glowWidth > 0 || RIG.glowFeather > 0))
-      el("path", { d, fill: "none", stroke: front, "stroke-width": Math.max(0.5, RIG.glowWidth), filter: `url(#${glowId})`, opacity: RIG.glowOpacity }, g);
-    el("path", { d, fill: front }, g);
+      el("path", { d, fill: "none", stroke: front, "stroke-width": Math.max(0.5, RIG.glowWidth), filter: `url(#${glowId})`, opacity: RIG.glowOpacity }, fg);
+    el("path", { d, fill: front }, fg);
   }
 
   // ---------------------------------------------------------------- reference sheets
@@ -364,7 +444,16 @@
   const layerRef = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
 
   function eyeCenter(eye) { return eye === "L" ? CX - RIG.eyeDx : CX + RIG.eyeDx; }
-  function toScreen(eye, x, y) { return [eyeCenter(eye) + x * RIG.eyeScale, CY + y * RIG.eyeScale]; }
+  function toScreen(eye, x, y) {
+    const t = eyeXform(eye), r = t.rot * DEG;
+    const u = (x + t.ix) * t.sx, v = (y + t.iy) * t.sy;
+    return [t.tx + u * Math.cos(r) - v * Math.sin(r), t.ty + u * Math.sin(r) + v * Math.cos(r)];
+  }
+  function fromScreen(eye, X, Y) {
+    const t = eyeXform(eye), r = -t.rot * DEG, dx = X - t.tx, dy = Y - t.ty;
+    const u = dx * Math.cos(r) - dy * Math.sin(r), v = dx * Math.sin(r) + dy * Math.cos(r);
+    return [u / t.sx - t.ix, v / t.sy - t.iy];
+  }
 
   function renderStage() {
     for (const L of [layerRef, layerGhost, layerEyes, layerHandles]) L.replaceChildren();
@@ -381,18 +470,21 @@
     if (state.showGhost) {
       for (const eye of ["L", "R"]) {
         const pts = eye === "L" ? round() : mirror(round());
-        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerGhost);
+        const t = eyeXform(eye);
+        const g = el("g", { transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
         el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#ffffff", "stroke-opacity": .35, "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke" }, g);
       }
     }
     for (const eye of ["L", "R"]) {
-      const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerEyes);
-      drawEye(g, outline(eyePts(body, eye)), body.color, "glowE");
+      const t = eyeXform(eye);
+      const g = el("g", { transform: xformAttr(t) }, layerEyes);
+      drawEye(g, outline(eyePts(body, eye)), body.color, "glowE", t.ix, t.iy);
     }
     if (ellOpen()) {
       for (const eye of ["L", "R"]) {
         const pts = eye === "L" ? ellipsePts(ELL) : mirror(ellipsePts(ELL));
-        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${RIG.eyeScale})` }, layerGhost);
+        const t = eyeXform(eye);
+        const g = el("g", { transform: xformAttr(t) + ` translate(${t.ix} ${t.iy})` }, layerGhost);
         el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#f5b841", "stroke-width": 2, "stroke-dasharray": "5 4", "vector-effect": "non-scaling-stroke" }, g);
       }
     }
@@ -437,7 +529,8 @@
     if (!state.dragging) return;
     const body = state.shapes[state.selected], { eye, i } = state.dragging;
     const p = svgPoint(e);
-    const x = +((p.x - eyeCenter(eye)) / RIG.eyeScale).toFixed(1), y = +((p.y - CY) / RIG.eyeScale).toFixed(1);
+    const [lx, ly] = fromScreen(eye, p.x, p.y);
+    const x = +lx.toFixed(1), y = +ly.toFixed(1);
     const arr = eye === "L" ? body.left : body.right;
     arr[i] = [Math.max(-90, Math.min(90, x)), Math.max(-110, Math.min(140, y)), arr[i][2]];
     renderStage(); renderPointInfo(); renderThumb(state.selected);
@@ -702,8 +795,9 @@
     pg.replaceChildren();
     for (const eye of ["L", "R"]) {
       const s = eyeStateAt(eye, ms); if (!s) continue;
-      const g = el("g", { transform: `translate(${eyeCenter(eye) + s.dx} ${CY + s.dy}) scale(${RIG.eyeScale * s.sx} ${RIG.eyeScale * s.sy})` }, pg);
-      drawEye(g, s.verts, s.color, "glowP");
+      const t = eyeXform(eye);
+      const g = el("g", { transform: xformAttr(t, s.sx, s.sy, s.dx, s.dy) }, pg);
+      drawEye(g, s.verts, s.color, "glowP", t.ix, t.iy);
     }
     const seq = seqShapes(), step = state.motion.holdMs + state.motion.morphMs;
     const now = seq.length ? Math.floor(((ms % (seq.length * step)) + seq.length * step) % (seq.length * step) / step) : -1;
@@ -777,7 +871,85 @@
     }
     applyGlowFilter();
   }
-  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG }; renderRig(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
+  on("btnRigReset", "click", () => { RIG = { ...DEFAULT_RIG, head: RIG.head, eyeRot: RIG.eyeRot }; renderRig(); renderStage(); renderList(); if (!play.on) renderPreview(0); saveRig(); });
+
+
+  // ---------------------------------------------------------------- 3D head panel
+  const POSE_SLIDERS = [["yaw", "หันซ้าย ↔ ขวา"], ["pitch", "เงย ↕ ก้ม"], ["roll", "เอียงคอ"]];
+  const HEAD_SLIDERS = [
+    ["radius", "ความโค้งหัว (รัศมี)", 150, 900, 5, (v) => `${v}`],
+    ["maxYaw", "หันได้สุด (องศา)", 0, 35, 0.5, (v) => `${v}°`],
+    ["maxPitch", "ก้ม/เงยได้สุด (องศา)", 0, 30, 0.5, (v) => `${v}°`],
+    ["maxRoll", "เอียงคอได้สุด (องศา)", 0, 30, 0.5, (v) => `${v}°`],
+    ["yawRoll", "เอียงตามตอนหัน (องศา)", 0, 12, 0.2, (v) => `${v}°`],
+    ["pupil", "ลูกตาขยับนำหัว", 0, 30, 0.5, (v) => `${v}`],
+    ["travelX", "หน้าเลื่อนเพิ่ม ซ้าย/ขวา", -80, 80, 1, (v) => `${v}`],
+    ["travelY", "หน้าเลื่อนเพิ่ม ขึ้น/ลง", -80, 80, 1, (v) => `${v}`],
+    ["persp", "ระยะลึก (ข้างไกลเล็กลง)", 0, 0.6, 0.01, (v) => `${Math.round(v * 100)}%`],
+  ];
+  const ROT_SLIDERS = [["x", "หมุนแกน X (ก้ม/เงยตา)"], ["y", "หมุนแกน Y (หันตา)"], ["z", "หมุนแกน Z (เอียงตา)"]];
+  function redrawPose() { renderStage(); if (!play.on) renderPreview(0); }
+  function renderPose() {
+    const box = document.getElementById("poseSliders"); if (box.contains(document.activeElement)) return;
+    box.replaceChildren();
+    for (const [k, label] of POSE_SLIDERS)
+      sliderRow(box, "pose_" + k, label, -1, 1, 0.01, pose[k], (v) => `${Math.round(v * 100)}%`, (v) => { pose[k] = v; redrawPose(); });
+  }
+  function renderHead() {
+    const box = document.getElementById("headSliders"); if (box.contains(document.activeElement)) return;
+    box.replaceChildren(); const H = head();
+    for (const [k, label, min, max, step, fmt] of HEAD_SLIDERS)
+      sliderRow(box, "head_" + k, label, min, max, step, H[k], fmt, (v) => { RIG.head = { ...head(), [k]: v }; redrawPose(); saveRig(); });
+  }
+  function renderRot() {
+    const box = document.getElementById("rotSliders"); if (box.contains(document.activeElement)) return;
+    box.replaceChildren();
+    const r = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
+    document.getElementById("optRotLink").checked = r.link !== false;
+    for (const eye of ["L", "R"]) {
+      const cur = eyeRot(eye);
+      for (const [k, label] of ROT_SLIDERS) {
+        const inp = sliderRow(box, `rot_${eye}_${k}`, `ตา${eye === "L" ? "ซ้าย" : "ขวา"}: ${label}`, -60, 60, 1, cur[k], (v) => `${v}°`, (v) => {
+          const now = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
+          now[eye] = { ...eyeRot(eye), [k]: v };
+          RIG.eyeRot = now; redrawPose(); saveRig();
+        });
+        if (eye === "R" && r.link !== false) inp.disabled = true;
+      }
+    }
+  }
+  on("optRotLink", "change", (e) => {
+    const now = { ...DEFAULT_EYEROT, ...(RIG.eyeRot || {}) };
+    if (!e.target.checked) now.R = eyeRot("R");       // start the free right eye from its mirror
+    now.link = e.target.checked; RIG.eyeRot = now; renderRot(); redrawPose(); saveRig();
+  });
+  // look pad: glide the pose to a target (the same kind of spring the app's gaze uses)
+  let glide = null;
+  function lookAt(yaw, pitch) {
+    const from = { ...pose }, t0 = performance.now(), dur = 420;
+    cancelAnimationFrame(glide);
+    const step = (ts) => {
+      const k = Math.min(1, (ts - t0) / dur), e = EASE.jelly(k);
+      pose.yaw = lerp(from.yaw, yaw, e); pose.pitch = lerp(from.pitch, pitch, e);
+      redrawPose(); renderPose();
+      if (k < 1) glide = requestAnimationFrame(step);
+    };
+    glide = requestAnimationFrame(step);
+  }
+  document.querySelectorAll("[data-look]").forEach((b) => b.addEventListener("click", () => {
+    const [x, y] = b.dataset.look.split(",").map(Number);
+    document.getElementById("optWander").checked = false; lookAt(x, y);
+  }));
+  let wanderTimer = null;
+  on("optWander", "change", (e) => {
+    clearTimeout(wanderTimer);
+    const next = () => {
+      if (!document.getElementById("optWander").checked) return;
+      lookAt(+(Math.random() * 2 - 1).toFixed(2), +(Math.random() * 1.6 - 0.8).toFixed(2));
+      wanderTimer = setTimeout(next, 900 + Math.random() * 1400);
+    };
+    if (e.target.checked) next(); else lookAt(0, 0);
+  });
 
   // ---------------------------------------------------------------- ellipse / circle tool
   const ELL = { rx: 48.6, ry: 57.2, cy: 0, square: 0, tilt: 0 };
@@ -815,7 +987,7 @@
   });
 
   // ---------------------------------------------------------------- render all
-  function renderAll() { renderRig(); renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
+  function renderAll() { renderRig(); renderHead(); renderRot(); renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
 
   // ---------------------------------------------------------------- data (polled from the local server)
   function normalize(body) {
@@ -864,7 +1036,7 @@
     btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
   });
 
-  fillRefSelect(); loadImages(); renderEll();
+  fillRefSelect(); loadImages(); renderEll(); renderPose();
   renderAll();
   poll();
 })();

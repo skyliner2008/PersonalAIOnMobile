@@ -39,6 +39,9 @@ eyeL_yaw, eyeL_pitch, eyeL_blink, eyeL_sblink, eyeL_solo = nid(), nid(), nid(), 
 # EyePop: only face changes / story reshape beats key it -- the squash & overshoot
 # as an eye becomes a new shape (parts/morph.py)
 eyeL_pop, eyeR_pop = nid(), nid()
+# EyeTilt: a fixed 3D turn of each eye (Eye Lab 'หมุนดวงตาแต่ละข้าง'): X foreshortens the
+# height, Y the width, Z rotates -- never animated
+eyeL_tilt, eyeR_tilt = nid(), nid()
 eyeR_yaw, eyeR_pitch, eyeR_blink, eyeR_sblink, eyeR_solo = nid(), nid(), nid(), nid(), nid()
 # iris: the front shape's own offset. Gaze poses write IrisGaze, stories /
 # states / reactions write IrisLook (derived from where they move the eye).
@@ -90,11 +93,15 @@ eye_ids = {}
 for tag, dx, s, yaw, pitch, blink, sblink, solo, back_solo, igaze, ilook, pop in (
         ("L", -EYE_DX, 1, eyeL_yaw, eyeL_pitch, eyeL_blink, eyeL_sblink, eyeL_solo, eyeL_back, irisL_gaze, irisL_look, eyeL_pop),
         ("R", EYE_DX, -1, eyeR_yaw, eyeR_pitch, eyeR_blink, eyeR_sblink, eyeR_solo, eyeR_back, irisR_gaze, irisR_look, eyeR_pop)):
+    _rot = eye_rotation(tag)
     w(7, '<Node x="%g" y="%g" name="%sEyeYaw" id="%s">' % (dx, EYE_Y, tag, yaw))
     w(8, '<Node name="%sEyePitch" id="%s">' % (tag, pitch))
     w(9, '<Node name="%sBlink" id="%s">' % (tag, blink))
     w(10, '<Node name="%sStateBlink" id="%s">' % (tag, sblink))
     w(10, '<Node name="%sEyePop" id="%s">' % (tag, pop))
+    w(10, '<Node scaleX="%g" scaleY="%g" rotation="%g" name="%sEyeTilt" id="%s">'
+      % (math.cos(math.radians(_rot["y"])), math.cos(math.radians(_rot["x"])), math.radians(_rot["z"]),
+         tag, eyeL_tilt if tag == "L" else eyeR_tilt))
     # earlier in the file = drawn on top: front first, back after it
     w(11, '<Node name="%sIrisGaze" id="%s">' % (tag, igaze))
     w(12, '<Node name="%sIrisLook" id="%s">' % (tag, ilook))
@@ -108,6 +115,7 @@ for tag, dx, s, yaw, pitch, blink, sblink, solo, back_solo, igaze, ilook, pop in
     w(11, '</Solo>')
     EYE_BACK.update(zip(eye_ids[tag], backs))
     BACK_SOLO[solo] = back_solo
+    w(10, '</Node>')
     w(10, '</Node>')
     w(10, '</Node>')
     w(9, '</Node>')
