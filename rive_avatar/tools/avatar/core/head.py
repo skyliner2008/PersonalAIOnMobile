@@ -2,7 +2,7 @@
 # into one shared namespace (see tools/avatar/README.md). Not importable on its own.
 
 # ================================================================= 3D HEAD MODEL
-# The Eye Lab's head (data/eye_lab.json rig.head): every feature sits on a sphere at its
+# The Eye Lab's head (data/eye_app.json rig.head): every feature sits on a sphere at its
 # offset from the face centre; turning / nodding moves and foreshortens it. Used by the
 # gaze poses (machine/poses.py) and the lab's timeline stories (stories/lab.py).
 EYE_HEAD = {"radius": 300, "maxYaw": 12, "maxPitch": 9, "yawRoll": 3.4, "travelX": 0, "travelY": 0,

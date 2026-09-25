@@ -88,7 +88,7 @@ MORPH_SHAPES = {
 MORPH_COLOR = {"angry": (RED, RED_DEEP)}   # (front, back); everything else cyan on blue
 
 
-# ---- shapes edited in the Eye Lab (tools/eyelab/, data/eye_lab.json) win ----
+# ---- shapes edited in the Eye Lab and shipped to the app (data/eye_app.json) win ----
 # The JSON is the shared source of truth: the local page writes it, Claude edits it,
 # this generator reads it. The table above is only the fallback without the file.
 # EYE_LAB / EYE_RIG are loaded by build.py before any part runs

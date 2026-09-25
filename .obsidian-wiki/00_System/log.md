@@ -1,3 +1,12 @@
+## 2026-09-25 — Eye Lab = โต๊ะออกแบบ แยกจากแอป (branch `feat/rive-eye-morph`)
+- **User Request**: "Eye Lab ไม่จำเป็นต้องผูกกับไฟล์ riv โดยตรง… เป็นสื่อกลาง ฉันร่างไกด์ คุณเอาไปปรับด้วยโค้ดให้เป็น story สมบูรณ์ ฉันเอามาดูได้ เสร็จแล้วค่อยใส่ใน app"
+- แยกข้อมูล: workspace `tools/eyelab/data/eye_lab.json` + `data/stories/` ↔ app `tools/avatar/data/eye_app.json` + `data/stories/` (generator อ่านเฉพาะฝั่ง app)
+- `tools/eyelab/ship.py` (status / eye / story / unship / build) — Claude นำเข้าแอปเมื่อผู้ใช้พอใจเท่านั้น; เอาปุ่ม "สร้างไฟล์ Rive" ออกจากหน้าเว็บ
+- `tools/eyelab/labstory.py`: ตัวช่วยให้ Claude เกลา story ด้วยโค้ด (`fork` เป็นฉบับ Claude + `basedOn`, `add_key`, `set_eyes`, `shape`, `save`)
+- หน้าเว็บ: รีโหลด story เองเมื่อ Claude แก้ไฟล์, "เทียบต้นแบบ" (เส้นประของ story ร่างซ้อนบนฉบับ Claude), โน้ต story ถึง Claude + ช่อง "Claude ตอบ" (`claudeNote` ทั้งระดับ story/คีย์/รูป),
+  แถบสถานะ "ต่างจากในแอป" (`/api/app`), "ใช้แทน" → "ตั้งใจใช้แทน" (`intent`)
+- app copy ตั้งเป็นเวอร์ชันที่ build ล่าสุด (v184) — รูปตาที่ผู้ใช้แก้หลังจากนั้น (round, small, …) อยู่ใน workspace รอนำเข้า
+
 ## 2026-09-25 — Eye Lab 3 ส่วน + ไทม์ไลน์ story + พร็อพ (branch `feat/rive-eye-morph`)
 - **User Request**: จัด Eye Lab ใหม่เป็น 3 ส่วน (ซ้าย=เครื่องมือแยกหมวด, ขวา=view/8 จุด/ชีท/สีตา, ล่าง=timeline เล่น/หยุด) + พร็อพ; จัดท่า 2.5D แล้ว add เป็นคีย์เรื่อยๆ ให้ Claude แปลงไปใช้ในแอป
   - เลือก: story แทนเรื่องอารมณ์เดิมได้, พร็อพเลือกจากคลังเดิม

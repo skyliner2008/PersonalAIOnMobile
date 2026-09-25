@@ -18,7 +18,7 @@ PITCH = {                     # node            up         centre      down
     "mouth": {"y": (10, 0, -8), "sy": (0.86, 1.0, 0.92)},
 }
 
-# ---- Eye Lab 3D head: when data/eye_lab.json has rig.head, the poses above are
+# ---- Eye Lab 3D head: when data/eye_app.json has rig.head, the poses above are
 # rebuilt from a sphere model (the same maths as tools/eyelab/index.html headProject):
 # every feature sits on a sphere at its offset from the face centre, the head turns /
 # nods, and the projected offset + foreshortening become the pose's x / y / scale.

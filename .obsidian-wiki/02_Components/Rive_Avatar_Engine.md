@@ -41,7 +41,7 @@ Weather, Alarm, Calendar, StandbyClock (ตัวเลขจาก VM), Drawing
 | ไฟล์ | บทบาท |
 |---|---|
 | `tools/avatar/` | **แหล่งความจริง** (2026-09-25 แยกจาก `build_scene.py` เดิม) — 1 ไฟล์ต่อ 1 ฉาก / 1 อารมณ์ + ตา morph (`parts/morph.py`) + motion helpers; รัน `python tools/avatar/build.py` → `scene.rml` + `presets.json` (มี self-check); คู่มือ `tools/avatar/README.md` · `tools/build_scene.py` เหลือเป็น shim |
-| `tools/eyelab/` | **LOOI Eye Lab** หน้าเว็บ local (`python rive_avatar/tools/eyelab/server.py` → http://localhost:8765): ซ้าย=เครื่องมือ, ขวา=view 8 จุด/ชีทอ้างอิง/สีตา/พร็อพ, ล่าง=ไทม์ไลน์ story · ข้อมูล `tools/avatar/data/eye_lab.json` + `data/stories/*.json` (story ที่ตั้ง "ใช้แทน" แปลงโดย `stories/lab.py` ไปแทน mood story นั้น) |
+| `tools/eyelab/` | **LOOI Eye Lab** หน้าเว็บ local (`python rive_avatar/tools/eyelab/server.py` → http://localhost:8765): ซ้าย=เครื่องมือ, ขวา=view 8 จุด/ชีทอ้างอิง/สีตา/พร็อพ, ล่าง=ไทม์ไลน์ story · เป็น **โต๊ะออกแบบ แยกจากแอป**: workspace `tools/eyelab/data/` (ผู้ใช้ร่าง, Claude เกลาด้วย `labstory.py`) → Claude นำเข้าแอปด้วย `ship.py` ไป `tools/avatar/data/eye_app.json` + `data/stories/` (story ที่มี target แปลงโดย `stories/lab.py` ไปแทน mood story นั้น) |
 | `scene.rml` | ผลลัพธ์ที่เจน ~36k บรรทัด **ห้ามแก้มือ** |
 | `presets.json` | ชื่อ/ดัชนีของทุกช่อง + `durationMs` ของ seq/state/react + `selfPlay` |
 | `AVATAR_CONTRACT.md` | สัญญาข้อมูลฉบับเต็ม (ภาษาอังกฤษ) |

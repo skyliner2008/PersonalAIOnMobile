@@ -2,8 +2,9 @@
 # into one shared namespace (see tools/avatar/README.md). Not importable on its own.
 
 # ================================================================= EYE LAB STORIES
-# Timelines made in the Eye Lab (tools/eyelab/, "ไทม์ไลน์") live in data/stories/<name>.json.
-# A story with a "target" replaces that mood story (e.g. MoodSad). Each key is a whole
+# Timelines designed in the Eye Lab (tools/eyelab/, "ไทม์ไลน์") are a workspace; when one is
+# finished Claude ships it here (tools/eyelab/ship.py story <name> <Mood>): data/stories/<name>.json
+# with a "target" replaces that mood story (e.g. MoodSad). Each key is a whole
 # frame of the lab: both eyes' 8 points + colour, the head pose, the per-eye rotation and
 # one library prop, plus how it moves on to the next key (ease) and its effects
 # (pop on arrival, trembling / lower-lid quiver through the segment).

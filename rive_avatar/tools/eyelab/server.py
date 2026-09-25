@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LOOI Eye Lab -- a local web page for editing the morph eye shapes together.
+LOOI Eye Lab -- a local design table for the eyes and their stories.
 
     python rive_avatar/tools/eyelab/server.py            # then open http://localhost:8765
 
-The page (index.html next to this file) edits ONE file:
-    rive_avatar/tools/avatar/data/eye_lab.json
-which the avatar generator reads (parts/morph.py, faces/morph_faces.py). Claude edits the
-same file directly; the page polls it and shows the change within a couple of seconds.
+The page (index.html next to this file) and Claude share a WORKSPACE:
+    tools/eyelab/data/eye_lab.json        shapes, app face table, motion, rig
+    tools/eyelab/data/stories/<name>.json timeline stories
+The user sketches on the page, Claude refines by editing / generating these files; the page
+polls them and shows Claude's changes within a couple of seconds. Nothing here reaches the
+Android app until Claude ships it (ship.py -> tools/avatar/data/, then builds the .riv).
 
 API (JSON):
     GET    /api/data              -> {"version", "shapes", "faces", "motion"}
@@ -19,28 +21,27 @@ API (JSON):
     PUT    /api/motion            body = motion          -> {"version"}
     PUT    /api/rig               body = rig (eye size, spacing, layer offset, glow) -> {"version"}
     GET    /api/meta              -> {"props", "moods", "faces"}  (library props, mood stories a story may replace)
-    GET    /api/stories           -> [{"name", "target", "keys", "durationMs"}]
-    GET    /api/stories/<name>    -> story            PUT = save, DELETE = remove
-    POST   /api/build             run the generator + `rive . --once`, copy the .riv into the app
+    GET    /api/stories           -> [{"name", "by", "basedOn", "intent", "keys", "durationMs", "mtime"}]
+    GET    /api/stories/<name>    -> story (+ "mtime")  PUT = save (-> {"mtime"}), DELETE = remove
+    GET    /api/app               -> what differs between the workspace and the app (ship.py status)
 Only listens on 127.0.0.1.
 """
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import threading
-import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ship  # noqa: E402  (status of workspace vs app)
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RIVE_DIR = os.path.abspath(os.path.join(HERE, "..", ".."))
-DATA = os.path.join(RIVE_DIR, "tools", "avatar", "data", "eye_lab.json")
-STORIES = os.path.join(RIVE_DIR, "tools", "avatar", "data", "stories")   # one timeline story per file
+DATA = os.path.join(HERE, "data", "eye_lab.json")
+STORIES = os.path.join(HERE, "data", "stories")   # one timeline story per file
 PRESETS = os.path.join(RIVE_DIR, "presets.json")
 PROPS_META = os.path.join(HERE, "props", "props.json")
-APP_RIV = os.path.abspath(os.path.join(RIVE_DIR, "..", "composeApp", "src", "androidMain", "res", "raw", "avatar.riv"))
 PORT = int(os.environ.get("EYELAB_PORT", "8765"))
 KEY_RE = re.compile(r"^[a-z0-9_]{2,24}$")
 LOCK = threading.Lock()
@@ -107,16 +108,22 @@ class Handler(SimpleHTTPRequestHandler):
             out = []
             for f in sorted(os.listdir(STORIES)):
                 if f.endswith(".json"):
-                    st = json.load(open(os.path.join(STORIES, f), encoding="utf-8"))
-                    out.append({"name": f[:-5], "target": st.get("target"), "keys": len(st.get("keys", [])),
-                                "durationMs": st.get("durationMs")})
+                    fp = os.path.join(STORIES, f)
+                    st = json.load(open(fp, encoding="utf-8"))
+                    out.append({"name": f[:-5], "by": st.get("by", "user"), "basedOn": st.get("basedOn"),
+                                "intent": st.get("intent"), "keys": len(st.get("keys", [])),
+                                "durationMs": st.get("durationMs"), "mtime": os.path.getmtime(fp)})
             return self._json(200, out)
         m = re.match(r"^/api/stories/([^/]+)$", self.path)
         if m:
             sp = self._story_path(m.group(1))
             if not sp or not os.path.exists(sp):
                 return self._json(404, {"error": "ไม่มี story " + m.group(1)})
-            return self._json(200, json.load(open(sp, encoding="utf-8")))
+            st = json.load(open(sp, encoding="utf-8"))
+            st["mtime"] = os.path.getmtime(sp)
+            return self._json(200, st)
+        if self.path == "/api/app":
+            return self._json(200, ship.status())
         if self.path == "/api/data":
             with LOCK:
                 return self._json(200, load())
@@ -138,13 +145,14 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(body, dict) or not isinstance(body.get("keys"), list):
                 return self._json(400, {"error": "story ต้องมี keys"})
             os.makedirs(STORIES, exist_ok=True)
+            body.pop("mtime", None)
             with LOCK:
                 tmp = sp + ".tmp"
                 with open(tmp, "w", encoding="utf-8", newline="\n") as f:
                     json.dump(body, f, ensure_ascii=False, indent=1)
                     f.write("\n")
                 os.replace(tmp, sp)
-            return self._json(200, {"ok": True})
+            return self._json(200, {"ok": True, "mtime": os.path.getmtime(sp)})
         m = re.match(r"^/api/shapes/([^/]+)$", self.path)
         with LOCK:
             data = load()
@@ -182,24 +190,6 @@ class Handler(SimpleHTTPRequestHandler):
             data.get("shapes", {}).pop(key, None)
             data["faces"] = {f: s for f, s in data.get("faces", {}).items() if s != key}
             return self._json(200, {"version": save(data)})
-
-    def do_POST(self):
-        if self.path != "/api/build":
-            return self._json(404, {"error": "ไม่รู้จัก " + self.path})
-        t0 = time.time()
-        steps = []
-        for cmd in ([sys.executable, os.path.join("tools", "avatar", "build.py"), "scene.rml"],
-                    ["rive", ".", "--once"]):
-            p = subprocess.run(cmd, cwd=RIVE_DIR, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", shell=(os.name == "nt" and cmd[0] == "rive"))
-            steps.append({"cmd": " ".join(cmd[-3:]), "ok": p.returncode == 0,
-                          "out": (p.stdout + p.stderr).strip().splitlines()[-4:]})
-            if p.returncode != 0:
-                return self._json(500, {"ok": False, "steps": steps})
-        riv = os.path.join(RIVE_DIR, "build", "rive_avatar.riv")
-        shutil.copyfile(riv, APP_RIV)
-        return self._json(200, {"ok": True, "steps": steps, "bytes": os.path.getsize(riv),
-                                "seconds": round(time.time() - t0, 1)})
 
 
 if __name__ == "__main__":

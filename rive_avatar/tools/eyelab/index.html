@@ -39,7 +39,11 @@
   header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
   header.top p { margin: 0; color: var(--muted); max-width: 72ch; font-size: 13px; }
   .status { margin-left: auto; font-size: 12px; color: var(--muted); }
-  .status.saving { color: var(--accent); } .status.error { color: var(--warn); }
+  .status.saving { color: var(--accent); } .status.error { color: var(--warn); } .status.claude { color: var(--ok); }
+  .app-state { margin: -4px 0 12px; font-size: 12px; color: var(--muted); }
+  .app-state b { color: var(--accent); font-weight: 500; }
+  .claude-note { margin: 0; padding: 6px 10px; border-left: 3px solid var(--ok); background: #0b1a14; font-size: 13px; white-space: pre-wrap; }
+  .story-notes { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 
   /* ---- layout: tools | view, timeline below ---- */
   .workbench { display: grid; gap: 12px; grid-template-columns: 330px minmax(0, 1fr); align-items: start; }
@@ -116,11 +120,10 @@
 <body>
 <header class="top">
   <h1>LOOI Eye Lab</h1>
-  <p>ปรับรูปตาและท่าทางทางขวา ใช้เครื่องมือทางซ้าย แล้วกด "เพิ่มท่านี้เป็นคีย์" เพื่อเรียง story ในไทม์ไลน์ด้านล่าง ทุกอย่างบันทึกลงไฟล์ใน tools/avatar/data/ ที่ Claude ใช้สร้างไฟล์ Rive</p>
+  <p>โต๊ะออกแบบร่วมกัน: คุณร่างบนหน้านี้ Claude เกลาต่อด้วยโค้ดในไฟล์เดียวกัน แล้วทั้งคู่ดูผลที่นี่ ยังไม่เข้าแอปจนกว่าจะบอก Claude ให้นำเข้า</p>
   <span class="status" id="status">กำลังเชื่อม server.py…</span>
-  <button class="primary" id="btnBuild" title="รัน generator + rive . --once แล้วคัดลอก avatar.riv เข้าแอป">สร้างไฟล์ Rive</button>
 </header>
-<p class="hint" id="buildOut" hidden></p>
+<p class="app-state" id="appState"></p>
 
 <div class="workbench">
   <!-- ================= 1. tools ================= -->
@@ -236,6 +239,7 @@
       <div class="card">
         <h3>โน้ตถึง Claude</h3>
         <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้"></textarea>
+        <p class="claude-note" id="claudeNote" hidden></p>
         <p class="hint">โน้ตผูกกับรูปในคลัง หรือกับคีย์ที่เลือกอยู่</p>
       </div>
     </div>
@@ -250,7 +254,7 @@
     <input type="text" id="storyNew" placeholder="ชื่อ story ใหม่" aria-label="ชื่อ story ใหม่" style="width:150px">
     <button id="btnStoryNew">สร้าง story</button>
     <span class="sep"></span>
-    <label>ใช้แทน <select id="storyTarget" aria-label="story นี้แทนเรื่องไหนในแอป"></select></label>
+    <label title="บอก Claude ว่าตั้งใจให้ story นี้แทนเรื่องไหนในแอป (Claude เป็นคนนำเข้า)">ตั้งใจใช้แทน <select id="storyTarget" aria-label="ตั้งใจให้ story นี้แทนเรื่องไหนในแอป"></select></label>
     <label>ยาว <input type="number" id="storyDur" min="500" max="20000" step="100" aria-label="ความยาว story (มิลลิวินาที)"> ms</label>
     <button class="warn" id="btnStoryDel">ลบ story</button>
     <span id="storyDelConfirm" hidden><button class="warn" id="btnStoryDelYes">ยืนยันลบ</button> <button id="btnStoryDelNo">ยกเลิก</button></span>
@@ -258,6 +262,7 @@
   <div class="row">
     <button class="primary" id="btnPlay">▶ เล่น</button>
     <label><input type="checkbox" id="optLoop" checked> วนซ้ำ</label>
+    <label title="วาดเส้นประของ story ต้นแบบซ้อน เพื่อเทียบกับฉบับที่ Claude เกลา"><input type="checkbox" id="optCompare"> เทียบต้นแบบ <span id="baseName" class="mono"></span></label>
     <span class="mono" id="timeNow">0.00 s</span>
     <span class="sep"></span>
     <button class="primary" id="btnAddKey">＋ เพิ่มท่านี้เป็นคีย์</button>
@@ -267,6 +272,10 @@
   </div>
   <div class="track-wrap"><div class="track" id="track"><div class="ruler" id="ruler"></div><div class="playhead" id="playhead"></div></div></div>
   <div class="key-props" id="keyProps"></div>
+  <div class="story-notes">
+    <label class="slider"><span>โน้ต story ถึง Claude</span><textarea id="storyNote" placeholder="เช่น อยากให้สะอื้นแรงขึ้นตอนท้าย แล้วค่อยๆ สงบ"></textarea></label>
+    <div class="slider"><span>Claude ตอบ</span><p class="claude-note" id="storyClaudeNote">–</p></div>
+  </div>
   <p class="hint">คลิกคีย์เพื่อแก้ (รูปตา ท่าหัว หมุนตา พร็อพ จะแก้คีย์นั้น) ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา ลากบนไม้บรรทัดเพื่อดูทีละช่วง</p>
 </section>
 
@@ -396,8 +405,8 @@
   function noise(t, seed) { return Math.sin(t * 13.1 + seed) * .5 + Math.sin(t * 29.7 + seed * 1.7) * .3 + Math.sin(t * 47.3 + seed * 2.3) * .2; }
   const lerpRot = (a, b, t) => ({ x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t) });
   // the story at time t (ms) -- the generator (stories/lab.py) builds the same thing in Rive
-  function storyFrame(t) {
-    const keys = state.story.keys; if (!keys.length) return workFrame();
+  function storyFrame(t, story = state.story) {
+    const keys = story.keys; if (!keys.length) return workFrame();
     let i = 0; while (i + 1 < keys.length && keys[i + 1].t <= t) i++;
     const a = keys[i], b = keys[i + 1];
     let p = 0; if (b && t > a.t) p = Math.min(1, (t - a.t) / Math.max(1, b.t - a.t));
@@ -432,7 +441,7 @@
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
   const defs = el("defs", {}, svg), filt = el("filter", { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
   const blur = el("feGaussianBlur", { stdDeviation: "7" }, filt);
-  const layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
+  const layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerCompare = el("g", {}, svg), layerHandles = el("g", {}, svg);
   function drawEye(g, verts, color, ix, iy) {
     const [front, back] = Array.isArray(color) ? color : COLORS[color] || COLORS.cyan, d = pathD(verts);
     el("path", { d, fill: back, transform: `translate(${RIG.backDx / RIG.eyeScale} ${RIG.backDy / RIG.eyeScale})` }, g);
@@ -457,7 +466,16 @@
     if (withHandle) el("rect", { x: bx, y: by - ART_DY, width: bw, height: bh, fill: "none", stroke: "#f5b841", "stroke-dasharray": "4 3", "vector-effect": "non-scaling-stroke" }, g);
   }
   function render(frame, editing) {
-    for (const L of [layerRef, layerGhost, layerEyes, layerHandles]) L.replaceChildren();
+    for (const L of [layerRef, layerGhost, layerEyes, layerCompare, layerHandles]) L.replaceChildren();
+    if (state.compare && state.base && state.base.keys.length) {
+      // the story it was based on, at the same moment: dashed outlines over the eyes
+      const k = currentKey(), bf = storyFrame(k ? k.t : state.t, state.base);
+      for (const [j, eye] of [[0, "L"], [1, "R"]]) {
+        const t = eyeXform(eye, bf);
+        el("path", { d: pathD(bf.eyes[eye].verts), fill: "none", stroke: "#f5b841", "stroke-width": 2, "stroke-dasharray": "6 4", "vector-effect": "non-scaling-stroke",
+                     transform: xformAttr(t, bf.fx.sx[j], bf.fx.sy[j], bf.fx.d[j][0], bf.fx.d[j][1]) + ` translate(${t.ix} ${t.iy})` }, layerCompare);
+      }
+    }
     blur.setAttribute("stdDeviation", Math.max(0.01, RIG.glowFeather * 0.45));
     const body = state.shapes[state.selected];
     if (editing && state.showRef && body && body.ref && !currentKey()) {
@@ -959,19 +977,25 @@
   function renderStoryBar() {
     const sel = document.getElementById("storySel"); sel.replaceChildren();
     if (!state.stories.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "(ยังไม่มี story)"; sel.appendChild(o); }
-    for (const s of state.stories) { const o = document.createElement("option"); o.value = s.name; o.textContent = `${s.name}${s.target ? " → " + s.target : ""} (${s.keys} คีย์)`; sel.appendChild(o); }
+    for (const s of state.stories) { const o = document.createElement("option"); o.value = s.name; o.textContent = `${s.name}${s.by === "claude" ? " · Claude" : ""}${s.basedOn ? " (จาก " + s.basedOn + ")" : ""}${s.intent ? " → " + s.intent : ""} (${s.keys} คีย์)`; sel.appendChild(o); }
     sel.value = state.story ? state.story.name : "";
     const tg = document.getElementById("storyTarget"); tg.replaceChildren();
     const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "(ยังไม่ใช้ในแอป)"; tg.appendChild(o0);
     for (const m of state.moods) { const o = document.createElement("option"); o.value = m.name; o.textContent = m.name; tg.appendChild(o); }
-    tg.value = state.story ? state.story.target || "" : ""; tg.disabled = !state.story;
-    const du = document.getElementById("storyDur"); du.value = storyDur(); du.disabled = !state.story || !!(state.story && state.story.target);
-    du.title = state.story && state.story.target ? "ความยาวเท่ากับ story เดิมที่แทน" : "";
+    tg.value = state.story ? state.story.intent || "" : ""; tg.disabled = !state.story;
+    const du = document.getElementById("storyDur"); du.value = storyDur(); du.disabled = !state.story || !!(state.story && state.story.intent);
+    du.title = state.story && state.story.intent ? "ความยาวเท่ากับ story เดิมที่จะแทน" : "";
+    const cmp = document.getElementById("optCompare"), base = state.story && state.story.basedOn;
+    cmp.disabled = !base; cmp.checked = !!(base && state.compare); document.getElementById("baseName").textContent = base || "";
+    const sn = document.getElementById("storyNote");
+    if (document.activeElement !== sn) sn.value = state.story ? state.story.note || "" : "";
+    sn.disabled = !state.story;
+    document.getElementById("storyClaudeNote").textContent = (state.story && state.story.claudeNote) || "–";
   }
   async function openStory(name) {
     stopPlay();
     if (!name) { state.story = null; state.key = -1; renderAll(); return; }
-    try { state.story = await api("GET", "/api/stories/" + name); state.story.name = name; state.key = -1; state.t = 0; renderAll(); } catch (err) { setStatus("เปิด story ไม่ได้: " + err.message, "error"); }
+    try { state.story = await api("GET", "/api/stories/" + name); state.story.name = name; state.key = -1; state.t = 0; await loadBase(); renderAll(); } catch (err) { setStatus("เปิด story ไม่ได้: " + err.message, "error"); }
   }
   on("storySel", "change", (e) => openStory(e.target.value));
   on("btnStoryNew", "click", async () => {
@@ -979,16 +1003,22 @@
     if (!/^[a-z0-9_]{2,24}$/.test(name)) return setStatus("ชื่อ story ใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error");
     if (state.stories.some((s) => s.name === name)) return setStatus(`มี story ชื่อ ${name} แล้ว`, "error");
     stopPlay(); state.key = -1;
-    state.story = { name, target: null, durationMs: 7000, keys: [] };
+    state.story = { name, by: "user", intent: null, durationMs: 7000, keys: [] };
     state.story.keys.push(snapshotKey(0)); state.key = 0;           // enter: the story starts from what is on screen now
     inp.value = ""; await saveStoryNow(); await loadStories(); renderAll();
   });
   on("storyTarget", "change", (e) => {
-    if (!state.story) return; state.story.target = e.target.value || null;
-    const m = state.moods.find((x) => x.name === state.story.target); if (m) state.story.durationMs = m.durationMs;
+    if (!state.story) return; state.story.intent = e.target.value || null;
+    const m = state.moods.find((x) => x.name === state.story.intent); if (m) state.story.durationMs = m.durationMs;
     for (const k of state.story.keys) k.t = Math.min(k.t, storyDur());
     saveStory(); renderAll();
   });
+  on("optCompare", "change", (e) => { state.compare = e.target.checked; renderView(); });
+  on("storyNote", "input", (e) => { if (state.story) { state.story.note = e.target.value; saveStory(); } });
+  async function loadBase() {
+    state.base = null; const b = state.story && state.story.basedOn;
+    if (b) try { state.base = await api("GET", "/api/stories/" + b); } catch { state.base = null; }
+  }
   on("storyDur", "change", (e) => { if (!state.story) return; state.story.durationMs = Math.max(500, Math.min(20000, +e.target.value || 7000)); saveStory(); renderAll(); });
   on("btnStoryDel", "click", () => { if (state.story) document.getElementById("storyDelConfirm").hidden = false; });
   on("btnStoryDelNo", "click", () => { document.getElementById("storyDelConfirm").hidden = true; });
@@ -1026,19 +1056,56 @@
   let rigTimer = null;
   function saveRig() { clearTimeout(rigTimer); markDirty("_rig", 2500); setStatus("กำลังบันทึก…", "saving"); rigTimer = setTimeout(async () => { markDirty("_rig"); try { await api("PUT", "/api/rig", { ...RIG }); savedNow(); } catch (err) { handleWriteError(err); } }, 400); }
   let storyTimer = null;
-  function saveStory() { if (!state.story) return; clearTimeout(storyTimer); setStatus("กำลังบันทึก…", "saving"); storyTimer = setTimeout(saveStoryNow, 400); }
+  let storyPending = false;
+  function saveStory() { if (!state.story) return; clearTimeout(storyTimer); storyPending = true; setStatus("กำลังบันทึก…", "saving"); storyTimer = setTimeout(saveStoryNow, 400); }
   async function saveStoryNow() {
-    if (!state.story) return; const { name, ...body } = state.story;
-    try { await api("PUT", "/api/stories/" + name, body); savedNow(); const s = state.stories.find((x) => x.name === name); if (s) { s.keys = body.keys.length; s.target = body.target; renderStoryBar(); } } catch (err) { handleWriteError(err); }
+    clearTimeout(storyTimer);
+    if (!state.story) { storyPending = false; return; }
+    const { name, mtime, ...body } = state.story;
+    try {
+      const r = await api("PUT", "/api/stories/" + name, body); state.story.mtime = r.mtime; savedNow();
+      const s = state.stories.find((x) => x.name === name); if (s) { s.keys = body.keys.length; s.intent = body.intent; s.mtime = r.mtime; renderStoryBar(); }
+    } catch (err) { handleWriteError(err); }
+    storyPending = false;
   }
-  on("btnBuild", "click", async () => {
-    const btn = document.getElementById("btnBuild"), out = document.getElementById("buildOut");
-    await saveStoryNow();
-    btn.disabled = true; btn.textContent = "กำลังสร้าง…"; out.hidden = false; out.textContent = "รัน build.py และ rive . --once …";
-    try { const r = await api("POST", "/api/build"); out.textContent = `สร้างเสร็จใน ${r.seconds} วินาที · avatar.riv ${(r.bytes / 1024).toFixed(0)} KB คัดลอกเข้าแอปแล้ว (ติดตั้งแอปใหม่ถึงจะเห็นบนมือถือ)`; }
-    catch (err) { out.textContent = "สร้างไม่สำเร็จ: " + err.message; }
-    btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
-  });
+  // Claude edits the story files in code: pick up a newer file on disk and show it
+  async function syncStories() {
+    let list; try { list = await api("GET", "/api/stories"); } catch { return; }
+    const names = (l) => l.map((s) => s.name + ":" + s.keys + ":" + (s.intent || "")).join("|");
+    const changedList = names(list) !== names(state.stories);
+    state.stories = list;
+    const cur = state.story && list.find((s) => s.name === state.story.name);
+    if (cur && state.story.mtime && cur.mtime > state.story.mtime + 1e-3 && !storyPending && !state.dragging) {
+      const keep = { key: state.key, t: state.t, name: state.story.name };
+      try {
+        state.story = await api("GET", "/api/stories/" + keep.name); state.story.name = keep.name;
+        state.key = keep.key < state.story.keys.length ? keep.key : -1; state.t = Math.min(keep.t, storyDur());
+        await loadBase(); setStatus("Claude อัปเดต story " + keep.name + " แล้ว", "claude");
+        if (!state.playing) renderAll();
+      } catch { /* try again next round */ }
+    } else if (changedList) renderStoryBar();
+    if (state.base && state.story && state.story.basedOn) {
+      const b = list.find((s) => s.name === state.story.basedOn);
+      if (b && state.base.mtime && b.mtime > state.base.mtime + 1e-3) { await loadBase(); renderView(); }
+    }
+  }
+  // what the Android app still does not have (Claude ships it with ship.py)
+  let appTick = 0;
+  async function syncAppState() {
+    let st; try { st = await api("GET", "/api/app"); } catch { return; }
+    const box = document.getElementById("appState"), parts = [];
+    if (st.eye.length) parts.push("รูปตา/ค่า: " + st.eye.join(", "));
+    const drafts = st.stories.filter((x) => !x.shipped).map((x) => x.name), changed = st.stories.filter((x) => x.changed).map((x) => x.name);
+    const shipped = st.stories.filter((x) => x.shipped && !x.changed).map((x) => x.name + " → " + x.shipped);
+    box.replaceChildren();
+    if (!parts.length && !changed.length) box.append("ในแอปตรงกับงานในนี้ทุกอย่าง" + (drafts.length ? " (story ร่างยังไม่นำเข้า: " + drafts.join(", ") + ")" : ""));
+    else {
+      box.append("ต่างจากในแอป (บอก Claude ให้นำเข้าเมื่อพอใจ): ");
+      const b = document.createElement("b"); b.textContent = [...parts, ...changed.map((n) => "story " + n + " แก้หลังนำเข้า")].join(" · "); box.append(b);
+      if (drafts.length) box.append(" · story ร่าง: " + drafts.join(", "));
+    }
+    if (shipped.length) box.append(" · ในแอปแล้ว: " + shipped.join(", "));
+  }
   function normalize(body) {
     const b = { ...body };
     if (!Array.isArray(b.left) || b.left.length !== N) b.left = round();
@@ -1068,6 +1135,8 @@
         const meta = await api("GET", "/api/meta"); state.props = meta.props; state.moods = meta.moods; state.faceNames = meta.faces;
         await loadStories(); if (state.stories.length && !state.story) await openStory(state.stories[0].name); renderAll();
       }
+      await syncStories();
+      if (appTick++ % 4 === 0) syncAppState();
     } catch { online = false; setStatus("ติดต่อ server.py ไม่ได้: รัน python rive_avatar/tools/eyelab/server.py แล้วโหลดหน้าใหม่", "error"); }
     setTimeout(poll, 1500);
   }
@@ -1078,6 +1147,8 @@
     renderRefPanel(); renderPointInfo(); renderStoryBar(); renderTrack(); renderKeyProps();
     const k = currentKey(), note = document.getElementById("note");
     if (document.activeElement !== note) note.value = k ? k.note || "" : (state.shapes[state.selected] || {}).note || "";
+    const cn = document.getElementById("claudeNote"), ctext = k ? k.claudeNote : (state.shapes[state.selected] || {}).claudeNote;
+    cn.hidden = !ctext; cn.textContent = ctext ? "Claude: " + ctext : "";
     document.getElementById("color").value = editEyes().L.color;
     if (state.playing) renderEditing(); else renderView();
   }
