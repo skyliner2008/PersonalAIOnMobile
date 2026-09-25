@@ -90,6 +90,10 @@
   .editing.play b { color: var(--ok); }
   .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
   .stage svg { display: block; width: 100%; height: auto; max-height: 60vh; margin-inline: auto; }
+  .stage.framed { background: var(--panel-2); }
+  .stage.framed.portrait svg { max-height: 78vh; }
+  .screen-info { font-size: 12px; color: var(--muted); margin: 0; }
+  .screen-info b { color: var(--text); font-weight: 500; font-family: var(--mono); }
   .under { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
   .card h3 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .05em; }
@@ -218,11 +222,16 @@
       <label><input type="checkbox" id="optRef" checked> ซ้อนชีทต้นฉบับ</label>
       <label><input type="checkbox" id="optGhost"> เงาตาปกติ</label>
       <span class="sep"></span>
+      <label>จอมือถือ <select id="screenMode" aria-label="แสดงกรอบจอมือถือ">
+        <option value="none">ไม่แสดง</option><option value="portrait">แนวตั้ง 9:16</option><option value="landscape">แนวนอน 16:9</option>
+      </select></label>
+      <span class="sep"></span>
       <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)">ย้อนกลับ</button>
       <button id="btnResetRound">ตั้งเป็นวงกลม</button>
       <button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button>
     </div>
     <div class="stage" id="stage"></div>
+    <p class="screen-info" id="screenInfo" hidden></p>
     <div class="under">
       <div class="card">
         <h3>จุดที่เลือก</h3>
@@ -285,6 +294,22 @@
   // ================================================================ constants
   const N = 8, DEG = Math.PI / 180;
   const W = 500, H = 420, CX = 250, CY = 190;       // view: the eye row sits at CY
+  // How the app places the 500x500 artboard (composeApp/.../PetModeScreen.kt, RIVE_* constants):
+  //   portrait : the pet area is the top 1.08 / (1.08 + 0.92) = 54% of the screen, full width;
+  //              artboard side = 1.10 x area width, artboard eye row (y 230) at 40% of the area
+  //   landscape: the pet area is the whole screen; side = min(1.15 x height, width), eye row at 42%
+  // -> the screen rectangle in artboard units (view y = artboard y - 40).
+  const APP_SCREEN = { ratio: 16 / 9, eyeRow: 230,
+    portrait: { scale: 1.10, eyeLine: 0.40, area: 1.08 / 2.0 }, landscape: { scale: 1.15, eyeLine: 0.42 } };
+  function screenRect(mode) {
+    const r = APP_SCREEN.ratio;
+    if (mode === "portrait") {
+      const c = APP_SCREEN.portrait, w = 500 / c.scale, h = w * r, areaH = h * c.area, top = APP_SCREEN.eyeRow - c.eyeLine * areaH;
+      return { x: 250 - w / 2, y: top - 40, w, h, areaH };
+    }
+    const c = APP_SCREEN.landscape, h = 500 / c.scale, w = h * r, top = APP_SCREEN.eyeRow - c.eyeLine * h;
+    return { x: 250 - w / 2, y: top - 40, w, h, areaH: h };
+  }
   const EYE_ROW_Y = -20;                             // eye row above the face centre (core/layout.py EYE_Y)
   const ART_DY = 40;                                 // artboard y = view y + 40 (artboard eye row is at 230)
   const FACE_CY = CY - EYE_ROW_Y;                    // the face centre / tilt pivot in the view
@@ -441,7 +466,45 @@
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
   const defs = el("defs", {}, svg), filt = el("filter", { id: "glow", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
   const blur = el("feGaussianBlur", { stdDeviation: "7" }, filt);
-  const layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerCompare = el("g", {}, svg), layerHandles = el("g", {}, svg);
+  const layerScreen = el("g", {}, svg), layerRef = el("g", {}, svg), layerProp = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerCompare = el("g", {}, svg), layerPanel = el("g", {}, svg), layerHandles = el("g", {}, svg);
+  let screenMode = "none";
+  try { screenMode = localStorage.getItem("eyelab.screen") || "none"; } catch { /* private window */ }
+  function applyScreen() {
+    layerScreen.replaceChildren(); layerPanel.replaceChildren();
+    stage.className = "stage" + (screenMode === "none" ? "" : " framed " + screenMode);
+    const info = document.getElementById("screenInfo");
+    if (screenMode === "none") { svg.setAttribute("viewBox", `0 0 ${W} ${H}`); info.hidden = true; return; }
+    const sr = screenRect(screenMode), pad = 6;
+    svg.setAttribute("viewBox", `${sr.x - pad} ${sr.y - pad} ${sr.w + pad * 2} ${sr.h + pad * 2}`);
+    el("rect", { x: sr.x, y: sr.y, width: sr.w, height: sr.h, rx: 14, fill: "#000" }, layerScreen);
+    // where the artboard ends (Rive draws nothing outside it)
+    el("rect", { x: 0, y: -40, width: 500, height: 500, fill: "none", stroke: "#33485c", "stroke-dasharray": "4 6", "vector-effect": "non-scaling-stroke" }, layerScreen);
+    if (screenMode === "portrait") {
+      // the status panel under the pet area
+      el("rect", { x: sr.x, y: sr.y + sr.areaH, width: sr.w, height: sr.h - sr.areaH, fill: "#0d1117", stroke: "#1f2a36", "vector-effect": "non-scaling-stroke" }, layerPanel);
+      const tx = el("text", { x: sr.x + sr.w / 2, y: sr.y + sr.areaH + (sr.h - sr.areaH) / 2, fill: "#8599a8", "font-size": 18, "text-anchor": "middle", "font-family": "IBM Plex Sans Thai, sans-serif" }, layerPanel);
+      tx.textContent = "แผงสถานะ (46% ล่างของจอ)";
+    }
+    el("rect", { x: sr.x, y: sr.y, width: sr.w, height: sr.h, rx: 14, fill: "none", stroke: "#8599a8", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke" }, layerPanel);
+    info.hidden = false;
+  }
+  function renderScreenInfo(frame) {
+    if (screenMode === "none") return;
+    const sr = screenRect(screenMode), xs = frame.eyes.L.pts.map((q) => q[0]), ys = frame.eyes.L.pts.map((q) => q[1]);
+    const ew = (Math.max(...xs) - Math.min(...xs)) * RIG.eyeScale, eh = (Math.max(...ys) - Math.min(...ys)) * RIG.eyeScale;
+    const pct = (v) => (v / sr.w * 100).toFixed(0) + "%";
+    const info = document.getElementById("screenInfo"); info.replaceChildren();
+    const parts = screenMode === "portrait"
+      ? [["พื้นที่หน้า", `9 : ${(9 * sr.areaH / sr.w).toFixed(2)}`], ["ตาซ้ายกว้าง", pct(ew) + " ของความกว้างจอ"], ["สูง", (eh / sr.areaH * 100).toFixed(0) + "% ของพื้นที่หน้า"],["ระยะกลางตาถึงกลางตา", pct(RIG.eyeDx * 2)]]
+      : [["พื้นที่หน้า", "16 : 9 เต็มจอ"], ["ตาซ้ายกว้าง", pct(ew) + " ของความกว้างจอ"], ["สูง", (eh / sr.h * 100).toFixed(0) + "% ของความสูงจอ"], ["ระยะกลางตาถึงกลางตา", pct(RIG.eyeDx * 2)]];
+    parts.forEach(([k, v], i) => { if (i) info.append(" · "); info.append(k + " "); const b = document.createElement("b"); b.textContent = v; info.append(b); });
+  }
+  document.getElementById("screenMode").value = screenMode;
+  document.getElementById("screenMode").addEventListener("change", (e) => {
+    screenMode = e.target.value; try { localStorage.setItem("eyelab.screen", screenMode); } catch { /* ignore */ }
+    applyScreen(); renderView();
+  });
+  applyScreen();
   function drawEye(g, verts, color, ix, iy) {
     const [front, back] = Array.isArray(color) ? color : COLORS[color] || COLORS.cyan, d = pathD(verts);
     el("path", { d, fill: back, transform: `translate(${RIG.backDx / RIG.eyeScale} ${RIG.backDy / RIG.eyeScale})` }, g);
@@ -525,7 +588,7 @@
       });
     }
   }
-  function renderView() { if (!state.playing) render(workFrame(), true); renderEditing(); }
+  function renderView() { const fr = workFrame(); if (!state.playing) render(fr, true); renderEditing(); renderScreenInfo(fr); }
 
   // ================================================================ reference sheets
   const images = {};

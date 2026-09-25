@@ -70,6 +70,10 @@ python rive_avatar/tools/eyelab/ship.py build                   # build.py + riv
 The page has three areas: tools by category on the left (library shapes, base rig, 3D head,
 eye rotation, ellipse, props, motion defaults, app faces), the view on the right (drag the 8
 points, reference sheet, eye colour, drag the prop) and the **timeline** at the bottom.
+"จอมือถือ" frames the view as the phone shows it (9:16 portrait / 16:9 landscape), using
+the Rive placement constants of `PetModeScreen.kt` (`RIVE_*`): portrait = the pet area is the
+top 54% of the screen (9 : 8.64), artboard side 1.10 x width, eye row at 40% of the area;
+landscape = full screen, side 1.15 x height, eye row at 42%. Change both together.
 
 ### Timeline stories (`stories/lab.py`)
 
