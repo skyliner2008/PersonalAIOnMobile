@@ -105,11 +105,9 @@
   .card h3 { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: .05em; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12px; margin: 0; }
   .kv dt { color: var(--muted); } .kv dd { margin: 0; }
-  .ref-thumb { background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .ref-thumb canvas { display: block; width: 100%; height: auto; }
 
   /* ---- timeline ---- */
-  .timeline { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 10px; }
+  .timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 10px; }
   .timeline h2 { font-size: 15px; }
   .track-wrap { overflow-x: auto; }
   .track { position: relative; height: 104px; min-width: 560px; background: #0a0e13; border: 1px solid var(--line); border-radius: 8px; user-select: none; touch-action: none; }
@@ -148,6 +146,25 @@
         </div>
         <p class="hint">รูปใหม่เริ่มจากรูปที่กำลังแก้อยู่ ชื่อใช้ a–z, 0–9, _</p>
         <div class="row"><button class="warn" id="btnDelete">ลบรูปนี้</button><span id="deleteConfirm" hidden><button class="warn" id="btnDeleteYes">ยืนยันลบ</button> <button id="btnDeleteNo">ยกเลิก</button></span></div>
+      </div>
+    </details>
+
+    <details class="cat" open>
+      <summary>จุดที่เลือก · สีตา</summary>
+      <div class="cat-body">
+        <dl class="kv mono" id="pointInfo"></dl>
+        <label class="slider"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)<b id="vSmooth"></b></span><input type="range" id="smooth" min="0" max="1.6" step="0.05"></label>
+        <label class="row">สีตา <select id="color"><option value="cyan">ฟ้า</option><option value="red">แดง</option><option value="pink">ชมพู</option><option value="gold">ทอง</option></select></label>
+      </div>
+    </details>
+
+    <details class="cat">
+      <summary>ชีทอ้างอิง <small>รูปในคลัง</small></summary>
+      <div class="cat-body">
+        <label class="row"><input type="checkbox" id="optRef" checked> ซ้อนชีทต้นฉบับในพื้นที่แก้รูป</label>
+        <select id="refCell" aria-label="ช่องในชีทอ้างอิง"></select>
+        <p class="hint">จัดตำแหน่งชีท</p>
+        <div class="sliders" id="fitSliders"></div>
       </div>
     </details>
 
@@ -233,7 +250,6 @@
     <div class="editing" id="editing"></div>
     <div class="row">
       <label><input type="checkbox" id="optMirror" checked> ตาขวาสะท้อนจากตาซ้าย</label>
-      <label><input type="checkbox" id="optRef" checked> ซ้อนชีทต้นฉบับ</label>
       <label><input type="checkbox" id="optGhost"> เงาตาปกติ</label>
       <span class="sep"></span>
       <label>จอมือถือ <select id="screenMode" aria-label="แสดงกรอบจอมือถือ">
@@ -246,31 +262,10 @@
     </div>
     <div class="stage" id="stage"></div>
     <p class="fit-warn" id="fitWarn" hidden></p>
-    <div class="under">
-      <div class="card">
-        <h3>จุดที่เลือก</h3>
-        <dl class="kv mono" id="pointInfo"></dl>
-        <label class="slider"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)<b id="vSmooth"></b></span><input type="range" id="smooth" min="0" max="1.6" step="0.05"></label>
-        <label class="row">สีตา <select id="color"><option value="cyan">ฟ้า</option><option value="red">แดง</option><option value="pink">ชมพู</option><option value="gold">ทอง</option></select></label>
-      </div>
-      <div class="card">
-        <h3>ชีทอ้างอิง</h3>
-        <select id="refCell" aria-label="ช่องในชีทอ้างอิง"></select>
-        <div class="ref-thumb"><canvas id="refCanvas" width="268" height="158"></canvas></div>
-        <div class="sliders" id="fitSliders"></div>
-      </div>
-      <div class="card">
-        <h3>โน้ตถึง Claude</h3>
-        <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้"></textarea>
-        <p class="claude-note" id="claudeNote" hidden></p>
-        <p class="hint">โน้ตผูกกับสิ่งที่กำลังแก้: รูปในคลัง, ท่าที่จัด (ติดไปกับคีย์ที่เพิ่ม) หรือคีย์ที่เลือก</p>
-      </div>
-    </div>
-  </main>
-</div>
+    <p class="claude-note" id="claudeNote" hidden></p>
 
-<!-- ================= 3. timeline ================= -->
-<section class="timeline" aria-labelledby="tlh">
+  <!-- ================= 3. timeline (under the view) ================= -->
+  <section class="timeline" aria-labelledby="tlh">
   <div class="row">
     <h2 id="tlh">ไทม์ไลน์</h2>
     <select id="storySel" aria-label="เลือก story"></select>
@@ -301,7 +296,9 @@
     <div class="slider"><span>Claude ตอบ</span><p class="claude-note" id="storyClaudeNote">–</p></div>
   </div>
   <p class="hint">จัดท่าแล้วกด "＋ เพิ่มท่านี้เป็นคีย์" ปรับต่ออีกนิดแล้วกดเพิ่มอีก (ท่าที่จัดไม่เปลี่ยนเมื่อเพิ่มคีย์) · คลิกคีย์เพื่อแก้คีย์นั้น · ลากคีย์ซ้าย-ขวาเพื่อเปลี่ยนเวลา · กดหรือลากบนไม้บรรทัดเพื่อดู story ที่เวลานั้น · เสียงของคีย์เล่นในแอปเท่านั้น (Lab เล่นเสียงไม่ได้)</p>
-</section>
+  </section>
+  </main>
+</div>
 
 <script>
 (() => {
@@ -655,14 +652,6 @@
   // ================================================================ reference sheets
   const images = {};
   function cellRect(ref) { const s = SHEETS[ref.sheet], c = ref.cell % s.cols, r = Math.floor(ref.cell / s.cols); return { x: s.x0 + c * s.pw, y: s.y0 + r * s.ph, w: s.w, h: s.h, src: s.src }; }
-  function loadImages() { for (const k of Object.keys(SHEETS)) { const img = new Image(); img.src = SHEETS[k].src; img.onload = () => { images[k] = img; renderRefThumb(); }; } }
-  function renderRefThumb() {
-    const cv = document.getElementById("refCanvas"), ctx = cv.getContext("2d"); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
-    const b = state.shapes[state.selected]; if (!b || !b.ref || !images[b.ref.sheet]) return;
-    const r = cellRect(b.ref), k = Math.min(cv.width / r.w, cv.height / r.h);
-    ctx.drawImage(images[b.ref.sheet], r.x, r.y, r.w, r.h, (cv.width - r.w * k) / 2, (cv.height - r.h * k) / 2, r.w * k, r.h * k);
-  }
-
   // ================================================================ editing (points, colour, mirror)
   // every edit goes to the selected key when there is one, otherwise to the library shape
   function editTarget() {
@@ -768,10 +757,6 @@
   });
   on("optRef", "change", (e) => { state.showRef = e.target.checked; renderView(); });
   on("optGhost", "change", (e) => { state.showGhost = e.target.checked; renderView(); });
-  on("note", "input", (e) => {
-    const h = holder();
-    if (h) { h.note = e.target.value; saveHolder(); } else if (state.shapes[state.selected]) { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); }
-  });
   function renderEditing() {
     const box = document.getElementById("editing"), k = currentKey(), viewing = viewingTime();
     box.className = "editing" + (state.playing ? " play" : viewing ? " view" : k ? " key" : "");
@@ -1050,7 +1035,6 @@
   function renderRefPanel() {
     const b = state.shapes[state.selected], sel = document.getElementById("refCell");
     sel.disabled = !!holder(); sel.value = b && b.ref ? `${b.ref.sheet}:${b.ref.cell}` : "";
-    renderRefThumb();
     if (busy("fitSliders")) return; const box = document.getElementById("fitSliders"); box.replaceChildren(); if (!b || holder()) return;
     const fit = { ...DEFAULT_FIT, ...(b.refFit || {}) };
     for (const [k, label, min, max, step, fmt] of [["scale", "ขนาดชีท", .5, 2, .01, (v) => `${Math.round(v * 100)}%`], ["opacity", "ความจางชีท", 0, 1, .05, (v) => `${Math.round(v * 100)}%`], ["dx", "เลื่อน ซ้าย/ขวา", -150, 150, 1, (v) => `${v}`], ["dy", "เลื่อน ขึ้น/ลง", -150, 150, 1, (v) => `${v}`]])
@@ -1438,14 +1422,13 @@
   function renderAll() {
     renderList(); renderRig(); renderPose(); renderHead(); renderRot(); renderPropGrid(); renderPropSliders(); renderMotion(); renderFaces();
     renderRefPanel(); renderPointInfo(); renderStoryBar(); renderTrack(); renderKeyProps();
-    const h = holder(), note = document.getElementById("note");
-    if (document.activeElement !== note) note.value = h ? h.note || "" : (state.shapes[state.selected] || {}).note || "";
-    const cn = document.getElementById("claudeNote"), ctext = h ? h.claudeNote : (state.shapes[state.selected] || {}).claudeNote;
+    // Claude's reply on the shape / key being edited (notes to Claude go in the story note)
+    const h = holder(), cn =document.getElementById("claudeNote"), ctext = h ? h.claudeNote : (state.shapes[state.selected] || {}).claudeNote;
     cn.hidden = !ctext; cn.textContent = ctext ? "Claude: " + ctext : "";
     document.getElementById("color").value = editEyes().L.color;
     if (state.playing) renderEditing(); else renderView();
   }
-  fillRefSelect(); loadImages(); renderEll(); renderAll(); poll();
+  fillRefSelect(); renderEll(); renderAll(); poll();
   // for Claude's checks against the Rive render (ship.py check --shots): read-only helpers
   window.eyelabDebug = { state, storyFrame, workFrame, frameBoxes, render: (fr) => render(fr, false), svg };
 })();
