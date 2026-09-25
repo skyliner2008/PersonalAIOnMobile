@@ -33,6 +33,10 @@ single 5,100-line script, so everything a later file uses is already defined).
 python rive_avatar/tools/eyelab/server.py      # from the repo root, then open http://localhost:8765
 ```
 
+Or double-click `EyeLab.bat` in the repo root: it starts the server in a minimised window
+(close that window to stop it) and opens the page; if the server already runs, it only
+opens the page.
+
 A local page (Python standard library only) where the user and Claude design the eyes and
 their stories together. It is a **workspace**, separate from the app:
 
