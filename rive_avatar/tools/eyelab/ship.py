@@ -93,7 +93,7 @@ def _cues_block(src, name):
 
 def app_moods():
     """The app's mood stories: name, seq, Thai name, the emotions that play it, its cues."""
-    src = _read(MOODS_KT)
+    src = _read(MOODS_KT).replace("\r\n", "\n")        # parsing only; set_cues() keeps the file's CRLF
     by_val, out = {}, []
     for m in re.finditer(r'val (\w+) = RiveMoodStory\("(\w+)",\s*(\d+),\s*cues\((.*?)\),\s*\n\s*nameTh = "([^"]*)"', src, re.S):
         cues = [{"ms": int(ms), "sound": s} for ms, s in re.findall(r"(\d+)L to (\w+)", m.group(4))]
