@@ -27,6 +27,25 @@ single 5,100-line script, so everything a later file uses is already defined).
 | `moods/` | one file per mood story (`05_sad.py` ...) |
 | `machine/` | states, reactions, the document (rig), animations, state machine |
 
+## Eye Lab: editing the shapes together (`tools/eyelab/`)
+
+```
+python rive_avatar/tools/eyelab/server.py      # from the repo root, then open http://localhost:8765
+```
+
+A local page (no internet data, Python standard library only) that edits
+`tools/avatar/data/eye_lab.json` -- the **source of truth** for the morph eye:
+
+- `shapes`: 8 points `[x, y, smoothness]` for the left eye (right eye mirrored unless
+  `mirror: false`), colour, the LOOI sheet cell to compare with, and a `note` for Claude
+- `faces`: app face -> shape (faces not listed keep their old discrete eyes)
+- `motion`: morph time, right-eye lag, pop strength, tremble / quiver amounts
+
+The page polls the file every 1.5 s, so an edit Claude makes to the JSON shows up live.
+"สร้างไฟล์ Rive" runs `build.py` + `rive . --once` and copies the `.riv` into the app
+(reinstall the app to see it on the phone). `parts/morph.py` and `faces/morph_faces.py`
+read the JSON; the tables in them are only the fallback without the file.
+
 ## The morph eye (`parts/morph.py`)
 
 Each eye's front and back layer is one closed path of 8 cubic vertices. Every shape in

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "eyelab",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["rive_avatar/tools/eyelab/server.py"],
+      "port": 8765
+    }
+  ]
+}

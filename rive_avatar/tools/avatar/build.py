@@ -24,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def main():
     order = [ln.strip() for ln in open(os.path.join(HERE, "ORDER.txt"), encoding="utf-8")
              if ln.strip() and not ln.startswith("#")]
-    ns = {"__name__": "avatar_build", "__builtins__": __builtins__}
+    ns = {"__name__": "avatar_build", "__builtins__": __builtins__, "AVATAR_DIR": HERE}
     for rel in order:
         path = os.path.join(HERE, rel)
         code = compile(open(path, encoding="utf-8").read(), path, "exec")

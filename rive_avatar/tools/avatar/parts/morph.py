@@ -88,6 +88,32 @@ MORPH_SHAPES = {
 MORPH_COLOR = {"angry": (RED, RED_DEEP)}   # (front, back); everything else cyan on blue
 
 
+# ---- shapes edited in the Eye Lab (tools/eyelab/, data/eye_lab.json) win ----
+# The JSON is the shared source of truth: the local page writes it, Claude edits it,
+# this generator reads it. The table above is only the fallback without the file.
+import json as _json
+import os as _os
+
+EYE_LAB_PATH = _os.path.join(AVATAR_DIR, "data", "eye_lab.json")
+EYE_LAB = {}
+MORPH_SHAPES_R = {}            # shapes whose right eye is drawn on its own (not mirrored)
+_LAB_COLORS = {"cyan": (CYAN, BLUE), "red": (RED, RED_DEEP), "pink": (HEART, PINK_DEEP), "gold": (GOLD, GOLD_DEEP)}
+if _os.path.exists(EYE_LAB_PATH):
+    with open(EYE_LAB_PATH, encoding="utf-8") as _f:
+        EYE_LAB = _json.load(_f)
+    for _key, _sh in EYE_LAB.get("shapes", {}).items():
+        MORPH_SHAPES[_key] = ([(p[0], p[1]) for p in _sh["left"]], [p[2] for p in _sh["left"]])
+        if _sh.get("mirror") is False and _sh.get("right"):
+            MORPH_SHAPES_R[_key] = ([(p[0], p[1]) for p in _sh["right"]], [p[2] for p in _sh["right"]])
+        MORPH_COLOR[_key] = _LAB_COLORS.get(_sh.get("color", "cyan"), (CYAN, BLUE))
+MOTION = {"morphMs": 267, "popLag": 3, "popGainR": 0.8, "pop": 1.0, "tremble": 1.6, "quiver": 2.4}
+MOTION.update(EYE_LAB.get("motion", {}))
+MORPH_F = max(4, int(round(MOTION["morphMs"] * 60 / 1000.0)))
+FACE_MIX_MS = int(MOTION["morphMs"])
+TREMBLE_GAIN = MOTION["tremble"] / 1.6     # stories author their shaking at the default 1.6
+QUIVER_GAIN = MOTION["quiver"] / 2.4
+
+
 def _mirror(pts, smooth):
     """Right eye: mirror x and re-number so the order is still clockwise from the top."""
     n = len(pts)
@@ -96,6 +122,9 @@ def _mirror(pts, smooth):
 
 
 def morph_shape(name, tag):
+    if tag == "R" and name in MORPH_SHAPES_R:
+        pts, smooth = MORPH_SHAPES_R[name]      # already in right-eye order
+        return outline(pts, smooth)
     pts, smooth = MORPH_SHAPES[name]
     if tag == "R":
         pts, smooth = _mirror(pts, smooth)
@@ -207,13 +236,15 @@ def emit_color_frames(d, frames, interp="linear"):
 # ---- the pop: an eye taking a new shape squashes, overshoots, settles ----------
 # The right eye follows POP_LAG frames later and a little softer, so the two eyes
 # never move as one stamped picture.
-POP_LAG = 3
-POP_KEYS = [(0, 1.0, 1.0), (4, 1.09, 0.88), (10, 0.93, 1.08), (15, 1.02, 0.98), (20, 1.0, 1.0)]
+POP_LAG = int(MOTION["popLag"])
+_POP_BASE = [(0, 1.0, 1.0), (4, 1.09, 0.88), (10, 0.93, 1.08), (15, 1.02, 0.98), (20, 1.0, 1.0)]
+POP_KEYS = [(f, 1 + (sx - 1) * MOTION["pop"], 1 + (sy - 1) * MOTION["pop"]) for f, sx, sy in _POP_BASE]
 
 
-def pop_tracks(frame, gain_r=0.8):
+def pop_tracks(frame, gain_r=None):
     """{(pop node, key): kfs} for a reshape starting at frame (scaleX 16 / scaleY 17)."""
     tracks = {}
+    gain_r = MOTION["popGainR"] if gain_r is None else gain_r
     for node, lag, gain in ((eyeL_pop, 0, 1.0), (eyeR_pop, POP_LAG, gain_r)):
         for key, col in ((16, 1), (17, 2)):
             kfs = [(frame, 1.0, "hold")] if lag else []

@@ -1,3 +1,13 @@
+## 2026-09-25 — LOOI Eye Lab: หน้าเว็บ local สำหรับแก้รูปตาร่วมกัน (branch `feat/rive-eye-morph`)
+- **User Request**: "มี tool หรือวิธีอื่นมั้ย ที่สร้างระบบตาที่ฉันกับคุณแก้ไขรูปร่วมกันได้ง่าย" → เลือกหน้าเว็บ → "เปลี่ยนเป็นหน้าเว็บส่วนตัวบน Local แทน"
+- `rive_avatar/tools/eyelab/server.py` (Python stdlib, 127.0.0.1:8765) + `index.html`: ลากจุด 8 จุดของตา ปรับความโค้ง, ซ้อนชีท LOOI ต้นฉบับ (`ref/sheet1.jpg`, `sheet2.jpg`) ปรับขนาด/เลื่อน/ความจาง,
+  ตาขวาสะท้อนหรือแยกวาด, ตารางหน้าอารมณ์ในแอป → รูปตา, ตัวเล่นการเปลี่ยนรูป (ลำดับรูป, เวลา, ตาขวาช้ากว่า, แรงเด้ง, สั่น, ขอบตาสั่น), โน้ตถึง Claude, ปุ่ม "สร้างไฟล์ Rive"
+- ข้อมูลอยู่ไฟล์เดียว `rive_avatar/tools/avatar/data/eye_lab.json` (แหล่งความจริง อยู่ใน git) — หน้าเว็บ poll ทุก 1.5 วิ Claude แก้ไฟล์ตรงได้
+- generator อ่าน JSON: `parts/morph.py` (รูปทรง, สี, ตาขวาแยก, MORPH_F/FACE_MIX_MS/POP_* จาก motion), `faces/morph_faces.py` (ตาราง faces), `moods/05_sad.py` (ขนาดสั่นตาม motion)
+- เปิดด้วย `.claude/launch.json` ชื่อ `eyelab` หรือ `python rive_avatar/tools/eyelab/server.py`
+- **Verify**: หน้าเว็บเชื่อมได้ ("เชื่อมแล้ว แก้ได้เลย"), PUT shape → version เพิ่ม, `/api/build` สร้าง .riv 1.27 MB ใน 11 วิ 0 error และคัดลอกเข้าแอป
+- หน้า Artifact บน claude.ai ที่ publish ก่อนเปลี่ยนใจยังอยู่ (ไม่ได้ใช้แล้ว)
+
 ## 2026-09-25 — Rive: แยก generator รายไฟล์ + ตา morph + story เศร้า→ร้องไห้ใหม่ (branch `feat/rive-eye-morph`)
 - **User feedback**: ตายังไม่เหมือนต้นฉบับ แข็ง ไม่เป็นธรรมชาติ, story เศร้า/ร้องไห้ไม่มีความสั่นเครือ, เปลี่ยนรูปทรงไม่พริ้ว, ตา 2 ข้างขยับเหมือนกันทางเดียวกัน
 - **ต้นเหตุ**: ตาแต่ละอารมณ์เป็นรูปแยก 21 แบบใน `Solo` → เปลี่ยนอารมณ์ = สลับรูปทันที; `_eyes(key, kl, kr=None)` ใส่ key ชุดเดียวกันให้ 2 ตา;

@@ -14,6 +14,10 @@ MORPH_FACE = {
     "Angry": "angry",
 }
 
+# the Eye Lab's face -> shape table replaces the list above when the file exists
+if EYE_LAB.get("faces"):
+    MORPH_FACE = {f: s for f, s in EYE_LAB["faces"].items() if s in MORPH_SHAPES}
+
 for _i, (_fn, _el, _er, _br, _mo, _nb) in enumerate(FACES):
     if _fn in MORPH_FACE:
         FACES[_i] = (_fn, V_MORPH, V_MORPH, _br, _mo, _nb)

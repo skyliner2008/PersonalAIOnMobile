@@ -12,8 +12,9 @@
 #           hitches), tear streams run down, drops fall
 #   360     back to sad, sniffing, the trembling fades out
 _SAD_SHAPES = [(0, "round"), (30, "droop"), (220, "melt"), (360, "droop"), (MD, "droop")]
-_SAD_WINDOWS = [(48, 218, 1.8), (238, 358, 3.4), (378, 414, 1.0)]
-_sad_amp = envelope((40, 0), (80, 1.3), (218, 1.6), (240, 2.8), (356, 2.8), (385, 1.0), (412, 0))
+_SAD_WINDOWS = [(a, b, amp * QUIVER_GAIN) for a, b, amp in ((48, 218, 1.8), (238, 358, 3.4), (378, 414, 1.0))]
+_sad_env = envelope((40, 0), (80, 1.3), (218, 1.6), (240, 2.8), (356, 2.8), (385, 1.0), (412, 0))
+_sad_amp = lambda f: _sad_env(f) * TREMBLE_GAIN          # Eye Lab "สั่นทั้งดวงตา"
 _sad_y = [(0, 0), (30, 6), (220, 10), (360, 12), (MD, 10)]
 _sad_y_l = piecewise(_sad_y)
 _sad_y_r = piecewise(lagged(_sad_y, 4))

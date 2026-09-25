@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOOI Eye Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap">
+<style>
+  /* Deliberately single-theme: the pet's face lives on a black OLED screen. */
+  :root {
+    color-scheme: dark;
+    --bg: #07090d;
+    --panel: #0e131a;
+    --panel-2: #131a23;
+    --line: #1f2a36;
+    --text: #dce6ec;
+    --muted: #8599a8;
+    --eye: #3fe7f5;
+    --eye-back: #1b34d8;
+    --accent: #f5b841;
+    --warn: #ff7a6b;
+    --ok: #57d9a3;
+    --sans: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: var(--sans); font-size: 14px; line-height: 1.5; padding-inline: 16px; padding-block: 12px 24px; }
+  h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
+  h1 { font-size: 18px; letter-spacing: .01em; }
+  h2 { font-size: 13px; color: var(--muted); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+  button, select, input, textarea { font: inherit; color: var(--text); }
+  button {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 10px; cursor: pointer;
+  }
+  button:hover { border-color: #33485c; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: #123a40; border-color: #1f6b73; color: #bff7fb; }
+  button.danger { color: var(--warn); }
+  button[disabled] { opacity: .45; cursor: default; }
+  select, input[type=text], textarea {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  textarea { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; }
+  input[type=range] { width: 100%; accent-color: var(--eye); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
+  header.top p { margin: 0; color: var(--muted); max-width: 70ch; }
+  .status { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .status.saving { color: var(--accent); }
+  .status.error { color: var(--warn); }
+
+  .app { display: grid; gap: 12px; grid-template-columns: 200px minmax(0, 1fr) 280px; align-items: start; }
+  @media (max-width: 1100px) { .app { grid-template-columns: 170px minmax(0, 1fr); } .side-right { grid-column: 1 / -1; } }
+  @media (max-width: 720px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+  section.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+
+  /* shape list */
+  .shape-list { display: grid; gap: 6px; }
+  @media (max-width: 720px) { .shape-list { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
+  .shape-item {
+    display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: center; text-align: left;
+    padding: 6px; background: transparent; border: 1px solid transparent;
+  }
+  .shape-item:hover { border-color: var(--line); }
+  .shape-item[aria-current="true"] { border-color: #1f6b73; background: #0c1b20; }
+  .shape-item svg { width: 56px; height: 28px; display: block; }
+  .shape-item .nm { font-weight: 500; }
+  .shape-item .sub { font-size: 11px; color: var(--muted); }
+  .new-row { display: flex; gap: 6px; }
+  .new-row input { flex: 1; min-width: 0; }
+
+  /* stage */
+  .stage-wrap { display: grid; gap: 8px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--line); }
+  .toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+  .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; touch-action: none; }
+  .stage svg { display: block; width: 100%; height: auto; }
+  .hint { font-size: 12px; color: var(--muted); margin: 0; }
+
+  /* right panel */
+  .field { display: grid; gap: 4px; }
+  .field > span { font-size: 12px; color: var(--muted); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .ref-thumb { background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .ref-thumb canvas { display: block; width: 100%; height: auto; }
+  .faces { display: grid; gap: 4px; max-height: 260px; overflow: auto; padding-right: 4px; }
+  .faces label { display: grid; grid-template-columns: 1fr 110px; gap: 6px; align-items: center; font-size: 12px; }
+  .faces label.on span { color: var(--eye); }
+
+  /* motion preview */
+  .motion { margin-top: 12px; display: grid; gap: 10px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 900px) { .motion { grid-template-columns: minmax(0, 1fr); } }
+  .seq { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); font-size: 12px; }
+  .chip.now { border-color: var(--eye); color: var(--eye); }
+  .chip button { padding: 0 4px; border: 0; background: transparent; color: var(--muted); }
+  .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .params .field b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+  .preview-stage { background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .preview-stage svg { display: block; width: 100%; height: auto; }
+  .readonly-note { color: var(--accent); font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>LOOI Eye Lab</h1>
+  <p>ลากจุดสีเหลืองเพื่อแก้รูปตา กดจุดเพื่อปรับความโค้ง ทุกการแก้บันทึกลงไฟล์ tools/avatar/data/eye_lab.json ซึ่ง Claude แก้ไฟล์เดียวกันได้ และใช้สร้างไฟล์ Rive ให้แอป</p>
+  <span class="status" id="status">กำลังเชื่อม server.py…</span>
+  <button class="primary" id="btnBuild" title="รัน generator + rive . --once แล้วคัดลอก avatar.riv เข้าแอป">สร้างไฟล์ Rive</button>
+</header>
+
+<p class="hint" id="buildOut" hidden></p>
+<div class="app">
+  <aside class="side-left">
+    <section class="box">
+      <h2>รูปตา</h2>
+      <div class="shape-list" id="shapeList"></div>
+      <div class="new-row">
+        <input type="text" id="newName" placeholder="ชื่อรูปใหม่ เช่น sleepy" aria-label="ชื่อรูปตาใหม่">
+        <button id="btnNew" title="สร้างรูปใหม่โดยเริ่มจากรูปที่เลือกอยู่">สร้าง</button>
+      </div>
+      <p class="hint">ชื่อใช้ a–z, 0–9, _ เท่านั้น รูปใหม่จะเริ่มจากรูปที่เลือกอยู่</p>
+    </section>
+  </aside>
+
+  <main class="stage-wrap">
+    <div class="toolbar">
+      <label><input type="checkbox" id="optMirror" checked> ตาขวาสะท้อนจากตาซ้าย</label>
+      <span class="sep"></span>
+      <label><input type="checkbox" id="optRef" checked> ซ้อนชีทต้นฉบับ</label>
+      <label><input type="checkbox" id="optGhost"> เงาตาปกติ</label>
+      <span class="sep"></span>
+      <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)">ย้อนกลับ</button>
+      <button id="btnResetRound">ตั้งเป็นวงกลม</button>
+      <button id="btnCopyL" hidden>คัดลอกตาซ้าย → ขวา</button>
+    </div>
+    <div class="stage" id="stage"></div>
+    <p class="hint">ตัวเลข 0–7 คือลำดับจุด (0 = บนสุด แล้ววนตามเข็มนาฬิกา) ทุกรูปใช้ลำดับเดียวกัน ตาจึงเปลี่ยนรูปหากันได้ ถ้าจุดสลับลำดับ ตาจะบิดระหว่างเปลี่ยนรูป</p>
+  </main>
+
+  <aside class="side-right">
+    <section class="box">
+      <h2>จุดที่เลือก</h2>
+      <dl class="kv mono" id="pointInfo"><dt>จุด</dt><dd>–</dd></dl>
+      <label class="field"><span>ความโค้ง (0 = มุมแหลม, 1 = กลม)</span>
+        <input type="range" id="smooth" min="0" max="1.6" step="0.05" value="1"></label>
+    </section>
+
+    <section class="box">
+      <h2>รูปนี้</h2>
+      <div class="row2">
+        <label class="field"><span>สีตา</span>
+          <select id="color">
+            <option value="cyan">ฟ้า (ปกติ)</option>
+            <option value="red">แดง (โกรธ)</option>
+            <option value="pink">ชมพู (รัก)</option>
+            <option value="gold">ทอง</option>
+          </select></label>
+        <label class="field"><span>ชีทอ้างอิง</span>
+          <select id="refCell"></select></label>
+      </div>
+      <div class="ref-thumb"><canvas id="refCanvas" width="268" height="158"></canvas></div>
+      <div class="row2">
+        <label class="field"><span>ขนาดชีทที่ซ้อน</span><input type="range" id="fitScale" min="0.5" max="2" step="0.01"></label>
+        <label class="field"><span>ความจางชีท</span><input type="range" id="fitOpacity" min="0" max="1" step="0.05"></label>
+        <label class="field"><span>เลื่อนชีท ซ้าย/ขวา</span><input type="range" id="fitDx" min="-150" max="150" step="1"></label>
+        <label class="field"><span>เลื่อนชีท ขึ้น/ลง</span><input type="range" id="fitDy" min="-150" max="150" step="1"></label>
+      </div>
+      <label class="field"><span>โน้ตถึง Claude (ต้องการให้ปรับอะไร)</span>
+        <textarea id="note" placeholder="เช่น ปลายตาควรมนกว่านี้ ตาซ้ายควรเล็กกว่าขวา"></textarea></label>
+      <button class="danger" id="btnDelete">ลบรูปนี้</button>
+      <div id="deleteConfirm" hidden>
+        <span class="readonly-note">ลบรูปนี้ถาวร?</span>
+        <button class="danger" id="btnDeleteYes">ลบ</button>
+        <button id="btnDeleteNo">ยกเลิก</button>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>หน้าอารมณ์ในแอป → รูปตา</h2>
+      <p class="hint">หน้าที่เลือกรูปไว้จะใช้ตาแบบเปลี่ยนรูปได้ (morph) หน้าที่ตั้งเป็น "แบบเดิม" ยังใช้รูปวาดแยกแบบเก่า</p>
+      <div class="faces" id="faces"></div>
+    </section>
+  </aside>
+</div>
+
+<section class="box motion">
+  <div class="preview-stage" id="preview"></div>
+  <div style="display:grid;gap:10px">
+    <h2>ดูการเปลี่ยนรูปทรง</h2>
+    <div class="seq" id="seq"></div>
+    <div class="toolbar">
+      <select id="seqAdd" aria-label="เพิ่มรูปในลำดับ"></select>
+      <button id="btnSeqAdd">เพิ่มในลำดับ</button>
+      <button class="primary" id="btnPlay">เล่น</button>
+      <label><input type="checkbox" id="optLoop" checked> วนซ้ำ</label>
+    </div>
+    <div class="params">
+      <label class="field"><span>เวลาเปลี่ยนรูป <b id="vMorph"></b></span><input type="range" id="pMorph" min="100" max="900" step="10"></label>
+      <label class="field"><span>ค้างแต่ละรูป <b id="vHold"></b></span><input type="range" id="pHold" min="200" max="2500" step="50"></label>
+      <label class="field"><span>ตาขวาช้ากว่า <b id="vLag"></b></span><input type="range" id="pLag" min="0" max="12" step="1"></label>
+      <label class="field"><span>แรงเด้งตาขวา <b id="vGain"></b></span><input type="range" id="pGain" min="0" max="1.2" step="0.05"></label>
+      <label class="field"><span>ความแรงการเด้ง <b id="vPop"></b></span><input type="range" id="pPop" min="0" max="2" step="0.05"></label>
+      <label class="field"><span>สั่นทั้งดวงตา <b id="vTremble"></b></span><input type="range" id="pTremble" min="0" max="6" step="0.1"></label>
+      <label class="field"><span>ขอบตาล่างสั่น <b id="vQuiver"></b></span><input type="range" id="pQuiver" min="0" max="8" step="0.1"></label>
+      <label class="field"><span>เส้นโค้งการเปลี่ยน</span>
+        <select id="pEase"><option value="jelly">เด้งเลยเป้า (jelly)</option><option value="smooth">นุ่ม (ease-in-out)</option></select></label>
+    </div>
+    <p class="hint">ค่าการเคลื่อนไหวชุดนี้บันทึกไว้ให้ Claude ใช้กับ story ในแอปด้วย</p>
+  </div>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  // ---------------------------------------------------------------- constants
+  const N = 8;
+  const EYE_SCALE = 1.32, EYE_DX = 100, BACK_DY = 5;
+  const W = 500, H = 320, CX = 250, CY = 160;
+  const K8 = 4 / 3 * Math.tan(Math.PI / 16) / (2 * Math.sin(Math.PI / 8));
+  const COLORS = {
+    cyan: ["#3fe7f5", "#1b34d8"], red: ["#ff4d5e", "#8e0f26"],
+    pink: ["#ff5c8a", "#b0184a"], gold: ["#ffc53d", "#9a6a05"],
+  };
+  const FACES = ["Neutral", "Happy", "Angry", "Sleepy", "Curious", "Wink", "Dead", "Laughing", "Evil", "Focused",
+    "Excited", "Shy", "Shock", "Disgusted", "Love", "Crying", "Sad", "Thinking", "Listening", "Confused", "Pout",
+    "Dizzy", "Bored", "Scared", "Tired", "Blank", "Money", "Grin", "Smug", "Determined", "Calm", "Rage", "OneEye",
+    "Recognized", "Starry", "Weepy", "Quizzical", "Fume", "Beam", "Glad", "Bashful", "Fluster", "Haughty"];
+  // reference sheets: a regular grid of labelled cells
+  const SHEETS = {
+    1: { src: "ref/sheet1.jpg", iw: 1224, ih: 864, x0: 28, y0: 58, pw: 303.5, ph: 163, w: 268, h: 158, cols: 4,
+         names: ["Normal", "Happy", "Angry", "Sleepy", "Curious", "Eating", "Drinking", "Wink", "Dead", "Laughing",
+                 "Music", "VR Mode", "Diving", "Evil", "Focused", "Excited", "Shy", "Shock", "Disgusted", "Camera Mode"] },
+    2: { src: "ref/sheet2.jpg", iw: 1200, ih: 896, x0: 34, y0: 62, pw: 193.5, ph: 167, w: 178, h: 160, cols: 6,
+         names: ["Confused", "Sick", "Rich", "In Love", "Crying", "Thinking", "Reading", "Gaming", "Traveling", "Working",
+                 "Cold", "Hot", "Detective", "Cooking", "Art Mode", "Space", "Party", "Dreaming", "Exhausted", "Electric",
+                 "Sneaky", "Romantic", "Hero", "Glitched", "Magic", "Sporty", "Scientist", "Scared", "Warrior", "Low Battery"] },
+  };
+  const DEFAULT_MOTION = { morphMs: 267, holdMs: 900, popLag: 3, popGainR: 0.8, pop: 1, tremble: 1.6, quiver: 2.4, ease: "jelly",
+                           sequence: ["round", "droop", "melt", "droop", "round"] };
+  const DEFAULT_FIT = { scale: 1, dx: 0, dy: 36, opacity: 0.45 };
+
+  // ---------------------------------------------------------------- state
+  const state = {
+    shapes: {},            // key -> body
+    selected: null,        // shape key
+    point: { eye: "L", i: 0 },
+    faces: {},             // face -> shape key
+    motion: { ...DEFAULT_MOTION },
+    showRef: true, showGhost: false,
+    canWrite: true,
+    history: [],           // [{key, body}]
+    dragging: null,
+  };
+  const images = {};
+
+  // ---------------------------------------------------------------- geometry
+  const wrapNear = (a, ref) => { while (a - ref > Math.PI) a -= 2 * Math.PI; while (a - ref < -Math.PI) a += 2 * Math.PI; return a; };
+  function outline(pts) {
+    return pts.map((p, i) => {
+      const [px, py] = pts[(i + N - 1) % N], [nx, ny] = pts[(i + 1) % N];
+      const [x, y, s] = p;
+      const ref = i * 2 * Math.PI / N;
+      const ang = wrapNear(Math.atan2(ny - py, nx - px), ref);
+      return { x, y, outRot: ang, outDist: s * K8 * Math.hypot(nx - x, ny - y),
+               inRot: wrapNear(ang + Math.PI, ref + Math.PI), inDist: s * K8 * Math.hypot(x - px, y - py) };
+    });
+  }
+  const mirror = (pts) => Array.from({ length: N }, (_, i) => { const p = pts[(N - i) % N]; return [-p[0], p[1], p[2]]; });
+  const round = () => Array.from({ length: N }, (_, i) => [+(54 * .9 * Math.sin(i * Math.PI / 4)).toFixed(2), +(-54 * 1.06 * Math.cos(i * Math.PI / 4)).toFixed(2), 1]);
+  function pathD(v) {
+    let d = `M${v[0].x.toFixed(2)},${v[0].y.toFixed(2)}`;
+    for (let i = 0; i < N; i++) {
+      const a = v[i], b = v[(i + 1) % N];
+      d += `C${(a.x + Math.cos(a.outRot) * a.outDist).toFixed(2)},${(a.y + Math.sin(a.outRot) * a.outDist).toFixed(2)} ` +
+           `${(b.x + Math.cos(b.inRot) * b.inDist).toFixed(2)},${(b.y + Math.sin(b.inRot) * b.inDist).toFixed(2)} ${b.x.toFixed(2)},${b.y.toFixed(2)}`;
+    }
+    return d + "Z";
+  }
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const lerpVerts = (A, B, t) => A.map((a, i) => { const b = B[i]; return {
+    x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), outRot: lerp(a.outRot, b.outRot, t), outDist: lerp(a.outDist, b.outDist, t),
+    inRot: lerp(a.inRot, b.inRot, t), inDist: lerp(a.inDist, b.inDist, t) }; });
+  function eyePts(body, eye) {
+    if (eye === "L" || body.mirror !== false || !body.right) return eye === "L" ? body.left : mirror(body.left);
+    return body.right;
+  }
+  // cubic-bezier easing (same curves as the generator's EASES)
+  function bezier(x1, y1, x2, y2) {
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    const sx = (t) => ((ax * t + bx) * t + cx) * t, sy = (t) => ((ay * t + by) * t + cy) * t;
+    return (x) => { let t = x; for (let k = 0; k < 8; k++) { const d = (3 * ax * t + 2 * bx) * t + cx; if (Math.abs(d) < 1e-6) break; t -= (sx(t) - x) / d; } return sy(Math.min(1, Math.max(0, t))); };
+  }
+  const EASE = { jelly: bezier(0.30, 0, 0.32, 1.28), smooth: bezier(0.42, 0, 0.58, 1) };
+
+  // ---------------------------------------------------------------- svg helpers
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  function defs(svg, id) {
+    const d = el("defs", {}, svg);
+    const f = el("filter", { id, x: "-50%", y: "-50%", width: "200%", height: "200%" }, d);
+    el("feGaussianBlur", { stdDeviation: "7" }, f);
+  }
+  // one eye: back layer, glow, front layer -- the same layering as the Rive rig
+  function drawEye(g, verts, color, glowId) {
+    const [front, back] = COLORS[color] || COLORS.cyan;
+    const d = pathD(verts);
+    el("path", { d, fill: back, transform: `translate(0 ${BACK_DY / EYE_SCALE})` }, g);
+    el("path", { d, fill: "none", stroke: front, "stroke-width": 6, filter: `url(#${glowId})`, opacity: .9 }, g);
+    el("path", { d, fill: front }, g);
+  }
+
+  // ---------------------------------------------------------------- reference sheets
+  function cellRect(ref) {
+    const s = SHEETS[ref.sheet]; const i = ref.cell, c = i % s.cols, r = Math.floor(i / s.cols);
+    return { x: s.x0 + c * s.pw, y: s.y0 + r * s.ph, w: s.w, h: s.h, src: s.src };
+  }
+  function loadImages() {
+    for (const k of Object.keys(SHEETS)) {
+      const img = new Image(); img.src = SHEETS[k].src; img.onload = () => { images[k] = img; renderRefThumb(); }; images[k] = null;
+    }
+  }
+
+  // ---------------------------------------------------------------- editor stage
+  const stage = document.getElementById("stage");
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "พื้นที่แก้รูปตา" }, stage);
+  defs(svg, "glowE");
+  const layerRef = el("g", {}, svg), layerGhost = el("g", {}, svg), layerEyes = el("g", {}, svg), layerHandles = el("g", {}, svg);
+
+  function eyeCenter(eye) { return eye === "L" ? CX - EYE_DX : CX + EYE_DX; }
+  function toScreen(eye, x, y) { return [eyeCenter(eye) + x * EYE_SCALE, CY + y * EYE_SCALE]; }
+
+  function renderStage() {
+    for (const L of [layerRef, layerGhost, layerEyes, layerHandles]) L.replaceChildren();
+    const body = state.shapes[state.selected];
+    if (!body) return;
+    // reference cell behind the eyes, fitted by the shape's own refFit
+    if (state.showRef && body.ref) {
+      const rc = cellRect(body.ref), fit = { ...DEFAULT_FIT, ...(body.refFit || {}) };
+      const g = el("g", { transform: `translate(${CX + fit.dx} ${CY + fit.dy}) scale(${fit.scale}) translate(${-CX} ${-CY})`, opacity: fit.opacity }, layerRef);
+      const inner = el("svg", { x: 0, y: 0, width: W, height: H, viewBox: `${rc.x} ${rc.y} ${rc.w} ${rc.h}`, preserveAspectRatio: "xMidYMid meet" }, g);
+      const sh = SHEETS[body.ref.sheet];
+      el("image", { href: rc.src, x: 0, y: 0, width: sh.iw, height: sh.ih }, inner);
+    }
+    if (state.showGhost) {
+      for (const eye of ["L", "R"]) {
+        const pts = eye === "L" ? round() : mirror(round());
+        const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${EYE_SCALE})` }, layerGhost);
+        el("path", { d: pathD(outline(pts)), fill: "none", stroke: "#ffffff", "stroke-opacity": .35, "stroke-dasharray": "3 3", "vector-effect": "non-scaling-stroke" }, g);
+      }
+    }
+    for (const eye of ["L", "R"]) {
+      const g = el("g", { transform: `translate(${eyeCenter(eye)} ${CY}) scale(${EYE_SCALE})` }, layerEyes);
+      drawEye(g, outline(eyePts(body, eye)), body.color, "glowE");
+    }
+    // handles: always on the left eye; on the right too when it is drawn on its own
+    const editable = body.mirror === false ? ["L", "R"] : ["L"];
+    for (const eye of editable) {
+      const pts = eyePts(body, eye), verts = outline(pts);
+      verts.forEach((v, i) => {
+        const [sx, sy] = toScreen(eye, v.x, v.y);
+        const sel = state.point.eye === eye && state.point.i === i;
+        const hx = toScreen(eye, v.x + Math.cos(v.outRot) * v.outDist, v.y + Math.sin(v.outRot) * v.outDist);
+        const hi = toScreen(eye, v.x + Math.cos(v.inRot) * v.inDist, v.y + Math.sin(v.inRot) * v.inDist);
+        if (sel) {
+          el("line", { x1: hi[0], y1: hi[1], x2: hx[0], y2: hx[1], stroke: "#f5b841", "stroke-opacity": .7 }, layerHandles);
+          for (const h of [hx, hi]) el("circle", { cx: h[0], cy: h[1], r: 2.5, fill: "#f5b841" }, layerHandles);
+        }
+        const c = el("circle", { cx: sx, cy: sy, r: sel ? 7 : 5.5, fill: sel ? "#f5b841" : "#0b0f14", stroke: "#f5b841", "stroke-width": 2,
+                                 "data-eye": eye, "data-i": i, tabindex: 0, style: "cursor:grab" }, layerHandles);
+        c.setAttribute("aria-label", `จุด ${i} ตา${eye === "L" ? "ซ้าย" : "ขวา"}`);
+        const t = el("text", { x: sx + 9, y: sy - 8, fill: "#8599a8", "font-size": 10, "font-family": "IBM Plex Mono, monospace" }, layerHandles);
+        t.textContent = i;
+      });
+    }
+  }
+
+  function svgPoint(evt) {
+    const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  svg.addEventListener("pointerdown", (e) => {
+    const t = e.target.closest("circle[data-i]");
+    if (!t) return;
+    const body = state.shapes[state.selected];
+    if (!body || !state.canWrite) { selectPoint(t.dataset.eye, +t.dataset.i); return; }
+    pushHistory();
+    state.dragging = { eye: t.dataset.eye, i: +t.dataset.i };
+    selectPoint(t.dataset.eye, +t.dataset.i);
+    svg.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (!state.dragging) return;
+    const body = state.shapes[state.selected], { eye, i } = state.dragging;
+    const p = svgPoint(e);
+    const x = +((p.x - eyeCenter(eye)) / EYE_SCALE).toFixed(1), y = +((p.y - CY) / EYE_SCALE).toFixed(1);
+    const arr = eye === "L" ? body.left : body.right;
+    arr[i] = [Math.max(-90, Math.min(90, x)), Math.max(-110, Math.min(140, y)), arr[i][2]];
+    renderStage(); renderPointInfo(); renderThumb(state.selected);
+  });
+  const endDrag = () => { if (state.dragging) { state.dragging = null; scheduleSave(state.selected); } };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("keydown", (e) => {
+    const t = e.target.closest("circle[data-i]"); if (!t || !state.canWrite) return;
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return;
+    e.preventDefault(); pushHistory();
+    const body = state.shapes[state.selected], eye = t.dataset.eye, i = +t.dataset.i, arr = eye === "L" ? body.left : body.right;
+    const step = e.shiftKey ? 5 : 1;
+    arr[i] = [arr[i][0] + d[0] * step, arr[i][1] + d[1] * step, arr[i][2]];
+    selectPoint(eye, i); scheduleSave(state.selected);
+  });
+
+  function selectPoint(eye, i) { state.point = { eye, i }; renderStage(); renderPointInfo(); }
+  function renderPointInfo() {
+    const body = state.shapes[state.selected]; const info = document.getElementById("pointInfo");
+    const smooth = document.getElementById("smooth");
+    if (!body) { info.innerHTML = "<dt>จุด</dt><dd>–</dd>"; return; }
+    const arr = eyePts(body, state.point.eye), p = arr[state.point.i];
+    info.innerHTML = "";
+    for (const [k, v] of [["จุด", `${state.point.i} (ตา${state.point.eye === "L" ? "ซ้าย" : "ขวา"})`], ["x", p[0].toFixed(1)], ["y", p[1].toFixed(1)], ["โค้ง", (+p[2]).toFixed(2)]]) {
+      const dt = document.createElement("dt"); dt.textContent = k; const dd = document.createElement("dd"); dd.textContent = v; info.append(dt, dd);
+    }
+    smooth.value = p[2];
+    smooth.disabled = !state.canWrite || (state.point.eye === "R" && body.mirror !== false);
+  }
+  document.getElementById("smooth").addEventListener("input", (e) => {
+    const body = state.shapes[state.selected]; if (!body) return;
+    const arr = state.point.eye === "L" ? body.left : body.right; if (!arr) return;
+    if (!state.smoothPushed) { pushHistory(); state.smoothPushed = true; }
+    arr[state.point.i] = [arr[state.point.i][0], arr[state.point.i][1], +e.target.value];
+    renderStage(); renderPointInfo(); renderThumb(state.selected); scheduleSave(state.selected);
+  });
+  document.getElementById("smooth").addEventListener("change", () => { state.smoothPushed = false; });
+
+  // ---------------------------------------------------------------- history
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  function pushHistory() {
+    if (!state.selected) return;
+    state.history.push({ key: state.selected, body: clone(state.shapes[state.selected]) });
+    if (state.history.length > 60) state.history.shift();
+  }
+  function undo() {
+    const h = state.history.pop(); if (!h) return;
+    state.shapes[h.key] = h.body; state.selected = h.key;
+    renderAll(); scheduleSave(h.key);
+  }
+  document.getElementById("btnUndo").addEventListener("click", undo);
+  document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); undo(); } });
+
+  // ---------------------------------------------------------------- shape list
+  const thumbCache = {};
+  function renderThumb(key) {
+    const svgT = thumbCache[key]; const body = state.shapes[key]; if (!svgT || !body) return;
+    svgT.replaceChildren();
+    for (const eye of ["L", "R"]) {
+      const g = el("g", { transform: `translate(${eye === "L" ? 30 : 70} 25) scale(.26)` }, svgT);
+      const [front] = COLORS[body.color] || COLORS.cyan;
+      el("path", { d: pathD(outline(eyePts(body, eye))), fill: front }, g);
+    }
+  }
+  function sortedKeys() { return Object.keys(state.shapes).sort((a, b) => (state.shapes[a].order ?? 99) - (state.shapes[b].order ?? 99) || a.localeCompare(b)); }
+  function renderList() {
+    const list = document.getElementById("shapeList"); list.replaceChildren();
+    for (const key of sortedKeys()) {
+      const body = state.shapes[key];
+      const b = document.createElement("button"); b.className = "shape-item"; b.setAttribute("aria-current", key === state.selected);
+      const t = el("svg", { viewBox: "0 0 100 50" }); thumbCache[key] = t; b.appendChild(t);
+      const txt = document.createElement("div");
+      const faces = Object.entries(state.faces).filter(([, s]) => s === key).map(([f]) => f);
+      txt.innerHTML = `<div class="nm"></div><div class="sub"></div>`;
+      txt.querySelector(".nm").textContent = body.label || key;
+      txt.querySelector(".sub").textContent = faces.length ? faces.join(", ") : "ยังไม่มีหน้าใช้";
+      b.appendChild(txt);
+      b.addEventListener("click", () => { state.selected = key; state.point = { eye: "L", i: 0 }; renderAll(); });
+      list.appendChild(b); renderThumb(key);
+    }
+  }
+
+  // ---------------------------------------------------------------- right panel
+  function fillRefSelect() {
+    const sel = document.getElementById("refCell"); sel.replaceChildren();
+    const none = document.createElement("option"); none.value = ""; none.textContent = "(ไม่มี)"; sel.appendChild(none);
+    for (const k of Object.keys(SHEETS)) {
+      const og = document.createElement("optgroup"); og.label = k === "1" ? "ชีท 1 (20 อารมณ์)" : "ชีท 2 (30 อารมณ์)";
+      SHEETS[k].names.forEach((n, i) => { const o = document.createElement("option"); o.value = `${k}:${i}`; o.textContent = n; og.appendChild(o); });
+      sel.appendChild(og);
+    }
+  }
+  function renderRefThumb() {
+    const cv = document.getElementById("refCanvas"), ctx = cv.getContext("2d"); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
+    const body = state.shapes[state.selected]; if (!body || !body.ref) return;
+    const img = images[body.ref.sheet]; if (!img) return;
+    const r = cellRect(body.ref); const k = Math.min(cv.width / r.w, cv.height / r.h);
+    ctx.drawImage(img, r.x, r.y, r.w, r.h, (cv.width - r.w * k) / 2, (cv.height - r.h * k) / 2, r.w * k, r.h * k);
+  }
+  function renderPanel() {
+    const body = state.shapes[state.selected]; if (!body) return;
+    document.getElementById("color").value = body.color || "cyan";
+    document.getElementById("refCell").value = body.ref ? `${body.ref.sheet}:${body.ref.cell}` : "";
+    const fit = { ...DEFAULT_FIT, ...(body.refFit || {}) };
+    for (const [id, k] of [["fitScale", "scale"], ["fitOpacity", "opacity"], ["fitDx", "dx"], ["fitDy", "dy"]]) document.getElementById(id).value = fit[k];
+    const note = document.getElementById("note"); if (document.activeElement !== note) note.value = body.note || "";
+    document.getElementById("optMirror").checked = body.mirror !== false;
+    document.getElementById("btnCopyL").hidden = body.mirror !== false;
+    for (const id of ["color", "refCell", "note", "btnDelete", "btnResetRound", "btnCopyL", "optMirror", "btnUndo", "btnNew", "newName"]) document.getElementById(id).disabled = !state.canWrite;
+    renderRefThumb();
+  }
+  function renderFaces() {
+    const box = document.getElementById("faces"); box.replaceChildren();
+    for (const f of FACES) {
+      const lab = document.createElement("label"); const cur = state.faces[f] || "";
+      if (cur) lab.className = "on";
+      const s = document.createElement("span"); s.textContent = f;
+      const sel = document.createElement("select"); sel.disabled = !state.canWrite; sel.setAttribute("aria-label", `รูปตาของหน้า ${f}`);
+      const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "แบบเดิม"; sel.appendChild(o0);
+      for (const k of sortedKeys()) { const o = document.createElement("option"); o.value = k; o.textContent = state.shapes[k].label || k; sel.appendChild(o); }
+      sel.value = cur;
+      sel.addEventListener("change", () => { if (sel.value) state.faces[f] = sel.value; else delete state.faces[f]; saveFaces(); renderFaces(); renderList(); });
+      lab.append(s, sel); box.appendChild(lab);
+    }
+  }
+  const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
+  on("color", "change", (e) => { const b = state.shapes[state.selected]; pushHistory(); b.color = e.target.value; renderAll(); scheduleSave(state.selected); });
+  on("refCell", "change", (e) => { const b = state.shapes[state.selected]; const v = e.target.value;
+    b.ref = v ? { sheet: +v.split(":")[0], cell: +v.split(":")[1] } : null; renderAll(); scheduleSave(state.selected); });
+  for (const [id, k] of [["fitScale", "scale"], ["fitOpacity", "opacity"], ["fitDx", "dx"], ["fitDy", "dy"]]) {
+    on(id, "input", (e) => { const b = state.shapes[state.selected]; b.refFit = { ...DEFAULT_FIT, ...(b.refFit || {}), [k]: +e.target.value }; renderStage(); scheduleSave(state.selected); });
+  }
+  on("note", "input", (e) => { state.shapes[state.selected].note = e.target.value; scheduleSave(state.selected, 1200); });
+  on("optMirror", "change", (e) => { const b = state.shapes[state.selected]; pushHistory();
+    if (e.target.checked) { b.mirror = true; } else { b.mirror = false; b.right = b.right && b.right.length === N ? b.right : mirror(b.left); }
+    renderAll(); scheduleSave(state.selected); });
+  on("btnCopyL", "click", () => { const b = state.shapes[state.selected]; pushHistory(); b.right = mirror(b.left); renderAll(); scheduleSave(state.selected); });
+  on("optRef", "change", (e) => { state.showRef = e.target.checked; renderStage(); });
+  on("optGhost", "change", (e) => { state.showGhost = e.target.checked; renderStage(); });
+  on("btnResetRound", "click", () => { const b = state.shapes[state.selected]; pushHistory(); b.left = round(); b.right = b.mirror === false ? mirror(round()) : null; renderAll(); scheduleSave(state.selected); });
+  on("btnDelete", "click", () => { document.getElementById("deleteConfirm").hidden = false; });
+  on("btnDeleteNo", "click", () => { document.getElementById("deleteConfirm").hidden = true; });
+  on("btnDeleteYes", "click", async () => {
+    document.getElementById("deleteConfirm").hidden = true;
+    const key = state.selected; delete state.shapes[key];
+    for (const f of Object.keys(state.faces)) if (state.faces[f] === key) delete state.faces[f];
+    state.selected = sortedKeys()[0] || null; renderAll();
+    await deleteShape(key);
+  });
+  on("btnNew", "click", () => {
+    const inp = document.getElementById("newName"); const key = inp.value.trim().toLowerCase();
+    if (!/^[a-z0-9_]{2,24}$/.test(key)) { setStatus("ชื่อรูปใช้ a–z, 0–9, _ ยาว 2–24 ตัว", "error"); return; }
+    if (state.shapes[key]) { setStatus(`มีรูปชื่อ ${key} แล้ว`, "error"); return; }
+    const base = state.shapes[state.selected];
+    state.shapes[key] = { ...(base ? clone(base) : { left: round(), color: "cyan", mirror: true }), label: key, note: "", order: Object.keys(state.shapes).length };
+    state.selected = key; inp.value = ""; renderAll(); scheduleSave(key, 0);
+  });
+
+  // ---------------------------------------------------------------- saving (local server)
+  // Everything lives in rive_avatar/tools/avatar/data/eye_lab.json, served by server.py.
+  const timers = {}, writing = {}, again = {};
+  // a shape edited here in the last moments ignores polled data, so a slow reload
+  // never jumps the shape back under the pointer
+  const dirtyUntil = {};
+  const markDirty = (key, ms = 1500) => { dirtyUntil[key] = Date.now() + ms; };
+  const isDirty = (key) => (dirtyUntil[key] || 0) > Date.now();
+  let version = 0;
+  function setStatus(text, kind = "") { const s = document.getElementById("status"); s.textContent = text; s.className = "status " + kind; }
+  async function api(method, path, body) {
+    const r = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `server ${r.status}`);
+    if (j.version) version = j.version;
+    return j;
+  }
+  const savedNow = () => setStatus("บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  function scheduleSave(key, delay = 350) {
+    if (!state.canWrite || !key) return;
+    clearTimeout(timers[key]); setStatus("กำลังบันทึก…", "saving");
+    markDirty(key, delay + 1500);
+    timers[key] = setTimeout(() => writeShape(key), delay);
+  }
+  async function writeShape(key) {
+    if (writing[key]) { again[key] = true; return; }
+    const body = state.shapes[key]; if (!body) return;
+    writing[key] = true; markDirty(key);
+    try { await api("PUT", "/api/shapes/" + key, { ...clone(body), right: body.mirror === false ? body.right : null }); savedNow(); }
+    catch (err) { handleWriteError(err); }
+    writing[key] = false;
+    if (again[key]) { again[key] = false; writeShape(key); }
+  }
+  let facesWriting = false, facesAgain = false;
+  async function saveFaces() {
+    if (!state.canWrite) return;
+    if (facesWriting) { facesAgain = true; return; }
+    facesWriting = true; markDirty("_faces"); setStatus("กำลังบันทึก…", "saving");
+    try { await api("PUT", "/api/faces", { map: clone(state.faces) }); savedNow(); }
+    catch (err) { handleWriteError(err); }
+    facesWriting = false; if (facesAgain) { facesAgain = false; saveFaces(); }
+  }
+  let motionTimer = null;
+  function saveMotion() {
+    if (!state.canWrite) return;
+    clearTimeout(motionTimer); markDirty("_motion", 2500);
+    motionTimer = setTimeout(async () => {
+      markDirty("_motion");
+      try { await api("PUT", "/api/motion", clone(state.motion)); savedNow(); }
+      catch (err) { handleWriteError(err); }
+    }, 500);
+  }
+  async function deleteShape(key) {
+    try { await api("DELETE", "/api/shapes/" + key); setStatus("ลบแล้ว"); } catch (err) { handleWriteError(err); }
+  }
+  function handleWriteError(err) {
+    setStatus("บันทึกไม่สำเร็จ: " + (err && err.message ? err.message : "เซิร์ฟเวอร์ไม่ตอบ") + " (server.py ยังรันอยู่ไหม)", "error");
+  }
+
+  // ---------------------------------------------------------------- motion preview
+  const pv = document.getElementById("preview");
+  const psvg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "ตัวอย่างการเปลี่ยนรูปทรงของตา" }, pv);
+  defs(psvg, "glowP");
+  const pg = el("g", {}, psvg);
+  const POP = [[0, 1, 1], [4, 1.09, .88], [10, .93, 1.08], [15, 1.02, .98], [20, 1, 1]];
+  function popAt(frame) {
+    if (frame < 0 || frame > 20) return [1, 1];
+    for (let k = 0; k < POP.length - 1; k++) {
+      const [f0, x0, y0] = POP[k], [f1, x1, y1] = POP[k + 1];
+      if (frame <= f1) { const t = EASE.smooth((frame - f0) / (f1 - f0)); return [lerp(x0, x1, t), lerp(y0, y1, t)]; }
+    }
+    return [1, 1];
+  }
+  // irregular noise: a few incommensurate sines with per-eye phases (never a clean wave)
+  function noise(t, seed) { return (Math.sin(t * 13.1 + seed) * .5 + Math.sin(t * 29.7 + seed * 1.7) * .3 + Math.sin(t * 47.3 + seed * 2.3) * .2); }
+  let play = { on: false, t0: 0, raf: 0 };
+  function seqShapes() { return state.motion.sequence.filter((k) => state.shapes[k]); }
+  function eyeStateAt(eye, ms) {
+    const seq = seqShapes(); const m = state.motion;
+    if (!seq.length) return null;
+    const lagMs = eye === "R" ? m.popLag * 1000 / 60 : 0;
+    const step = m.holdMs + m.morphMs, total = seq.length * step;
+    let t = ms - lagMs; if (optLoop.checked) t = ((t % total) + total) % total; else t = Math.max(0, Math.min(t, total - 1));
+    const idx = Math.floor(t / step), local = t - idx * step;
+    const a = state.shapes[seq[idx]], b = state.shapes[seq[(idx + 1) % seq.length]];
+    const last = !optLoop.checked && idx === seq.length - 1;
+    let verts = outline(eyePts(a, eye)), color = a.color, sx = 1, sy = 1;
+    if (local > m.holdMs && !last) {
+      const p = (local - m.holdMs) / m.morphMs;
+      verts = lerpVerts(verts, outline(eyePts(b, eye)), EASE[m.ease] ? EASE[m.ease](p) : p);
+      if (p > .5) color = b.color;
+      const gain = (eye === "R" ? m.popGainR : 1) * m.pop;
+      const [px, py] = popAt((local - m.holdMs) * 60 / 1000);
+      sx = 1 + (px - 1) * gain; sy = 1 + (py - 1) * gain;
+    }
+    const round_ = seq[idx] === "round" && (local <= m.holdMs || last);
+    const tr = round_ ? 0 : m.tremble, qv = round_ ? 0 : m.quiver, seed = eye === "L" ? 1.3 : 4.1;
+    const secs = ms / 1000;
+    if (qv) verts = verts.map((v, i) => (i >= 3 && i <= 5) ? { ...v, y: v.y + noise(secs + i, seed + i) * qv } : v);
+    return { verts, color, sx, sy, dx: noise(secs, seed) * tr, dy: noise(secs + 7, seed + 2) * tr };
+  }
+  function renderPreview(ms) {
+    pg.replaceChildren();
+    for (const eye of ["L", "R"]) {
+      const s = eyeStateAt(eye, ms); if (!s) continue;
+      const g = el("g", { transform: `translate(${eyeCenter(eye) + s.dx} ${CY + s.dy}) scale(${EYE_SCALE * s.sx} ${EYE_SCALE * s.sy})` }, pg);
+      drawEye(g, s.verts, s.color, "glowP");
+    }
+    const seq = seqShapes(), step = state.motion.holdMs + state.motion.morphMs;
+    const now = seq.length ? Math.floor(((ms % (seq.length * step)) + seq.length * step) % (seq.length * step) / step) : -1;
+    document.querySelectorAll("#seq .chip").forEach((c, i) => c.classList.toggle("now", play.on && i === now));
+  }
+  const optLoop = document.getElementById("optLoop");
+  function tick(ts) { if (!play.on) return; renderPreview(ts - play.t0); play.raf = requestAnimationFrame(tick); }
+  on("btnPlay", "click", () => {
+    play.on = !play.on; document.getElementById("btnPlay").textContent = play.on ? "หยุด" : "เล่น";
+    if (play.on) { play.t0 = performance.now(); play.raf = requestAnimationFrame(tick); } else { cancelAnimationFrame(play.raf); renderPreview(0); }
+  });
+  function renderSeq() {
+    const box = document.getElementById("seq"); box.replaceChildren();
+    state.motion.sequence.forEach((k, i) => {
+      const c = document.createElement("span"); c.className = "chip";
+      const n = document.createElement("span"); n.textContent = state.shapes[k] ? (state.shapes[k].label || k) : `${k} (ไม่มีแล้ว)`;
+      const x = document.createElement("button"); x.textContent = "×"; x.setAttribute("aria-label", `เอา ${k} ออกจากลำดับ`);
+      x.addEventListener("click", () => { state.motion.sequence.splice(i, 1); renderSeq(); saveMotion(); renderPreview(0); });
+      c.append(n, x); box.appendChild(c);
+      if (i < state.motion.sequence.length - 1) { const a = document.createElement("span"); a.textContent = "→"; a.style.color = "var(--muted)"; box.appendChild(a); }
+    });
+    const sel = document.getElementById("seqAdd"); const keep = sel.value; sel.replaceChildren();
+    for (const k of sortedKeys()) { const o = document.createElement("option"); o.value = k; o.textContent = state.shapes[k].label || k; sel.appendChild(o); }
+    if (keep) sel.value = keep;
+  }
+  on("btnSeqAdd", "click", () => { const v = document.getElementById("seqAdd").value; if (v) { state.motion.sequence.push(v); renderSeq(); saveMotion(); } });
+  const PARAMS = [["pMorph", "morphMs", "vMorph", (v) => `${v} ms`], ["pHold", "holdMs", "vHold", (v) => `${v} ms`], ["pLag", "popLag", "vLag", (v) => `${v} เฟรม`],
+                  ["pGain", "popGainR", "vGain", (v) => `${Math.round(v * 100)}%`], ["pPop", "pop", "vPop", (v) => `${Math.round(v * 100)}%`],
+                  ["pTremble", "tremble", "vTremble", (v) => (+v).toFixed(1)], ["pQuiver", "quiver", "vQuiver", (v) => (+v).toFixed(1)]];
+  function renderParams() {
+    for (const [id, k, vid, fmt] of PARAMS) { document.getElementById(id).value = state.motion[k]; document.getElementById(vid).textContent = fmt(state.motion[k]); }
+    document.getElementById("pEase").value = state.motion.ease;
+  }
+  for (const [id, k, vid, fmt] of PARAMS) on(id, "input", (e) => { state.motion[k] = +e.target.value; document.getElementById(vid).textContent = fmt(state.motion[k]); saveMotion(); if (!play.on) renderPreview(0); });
+  on("pEase", "change", (e) => { state.motion.ease = e.target.value; saveMotion(); });
+
+  // ---------------------------------------------------------------- render all
+  function renderAll() { renderList(); renderStage(); renderPointInfo(); renderPanel(); renderFaces(); renderSeq(); renderParams(); if (!play.on) renderPreview(0); }
+
+  // ---------------------------------------------------------------- data (polled from the local server)
+  function normalize(body) {
+    const b = { ...body };
+    if (!Array.isArray(b.left) || b.left.length !== N) b.left = round();
+    b.left = b.left.map((p) => [+p[0] || 0, +p[1] || 0, p[2] == null ? 1 : +p[2]]);
+    if (Array.isArray(b.right) && b.right.length === N) b.right = b.right.map((p) => [+p[0] || 0, +p[1] || 0, p[2] == null ? 1 : +p[2]]);
+    else b.right = null;
+    if (b.mirror === false && !b.right) b.right = mirror(b.left);
+    return b;
+  }
+  function apply(data) {
+    version = data.version || 0;
+    const incoming = data.shapes || {};
+    for (const key of Object.keys(state.shapes)) if (!(key in incoming) && !isDirty(key)) delete state.shapes[key];
+    for (const [key, body] of Object.entries(incoming)) {
+      if (state.dragging && key === state.selected) continue;   // don't yank a point from under the pointer
+      if (isDirty(key)) continue;                               // our own edit is still being saved
+      state.shapes[key] = normalize(body);
+    }
+    if (!facesWriting && !isDirty("_faces")) state.faces = { ...(data.faces || {}) };
+    if (!isDirty("_motion") && data.motion) state.motion = { ...DEFAULT_MOTION, ...data.motion };
+    if (!state.selected || !state.shapes[state.selected]) state.selected = sortedKeys()[0] || null;
+    renderAll();
+  }
+  let online = false;
+  async function poll() {
+    try {
+      const v = await api("GET", "/api/version");
+      if (!online || v.version !== version) apply(await api("GET", "/api/data"));
+      if (!online) { online = true; setStatus("เชื่อมแล้ว แก้ได้เลย"); }
+    } catch {
+      online = false; setStatus("ติดต่อ server.py ไม่ได้: รัน python rive_avatar/tools/eyelab/server.py แล้วโหลดหน้าใหม่", "error");
+    }
+    setTimeout(poll, 1500);
+  }
+  // ---------------------------------------------------------------- build .riv
+  on("btnBuild", "click", async () => {
+    const btn = document.getElementById("btnBuild"), out = document.getElementById("buildOut");
+    btn.disabled = true; btn.textContent = "กำลังสร้าง…"; out.hidden = false; out.textContent = "รัน build.py และ rive . --once …";
+    try {
+      const r = await api("POST", "/api/build");
+      out.textContent = `สร้างเสร็จใน ${r.seconds} วินาที · avatar.riv ${(r.bytes / 1024).toFixed(0)} KB คัดลอกเข้าแอปแล้ว (ติดตั้งแอปใหม่ถึงจะเห็นบนมือถือ)`;
+    } catch (err) { out.textContent = "สร้างไม่สำเร็จ: " + err.message; }
+    btn.disabled = false; btn.textContent = "สร้างไฟล์ Rive";
+  });
+
+  fillRefSelect(); loadImages();
+  renderAll();
+  poll();
+})();
+</script>
+</body>
+</html>
