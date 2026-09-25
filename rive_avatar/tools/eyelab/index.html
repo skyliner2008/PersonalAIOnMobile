@@ -179,11 +179,11 @@
     </details>
 
     <details class="cat">
-      <summary>สร้างรูปจากวงกลม / วงรี</summary>
+      <summary>สร้างรูปจากวงรี</summary>
       <div class="cat-body">
         <div class="sliders" id="ellSliders"></div>
-        <p class="hint">เริ่มจากวงกลม เลื่อน "ยืด" ออกจากกลางเพื่อเป็นวงรี (ใกล้กลางจะดูดกลับเป็นวงกลม) เส้นประในพื้นที่แก้รูปคือรูปที่จะได้</p>
-        <div class="row"><button id="btnEllCircle">กลับเป็นวงกลม</button><button class="primary" id="btnEllApply">ใช้รูปนี้กับตา</button></div>
+        <p class="hint">เส้นประในพื้นที่แก้รูปคือวงรีที่จะได้</p>
+        <button class="primary" id="btnEllApply">ใช้วงรีนี้กับตา</button>
       </div>
     </details>
 
@@ -836,12 +836,9 @@
   });
 
   // ---- ellipse tool
-  // a circle first: "size" is its radius; "stretch" > 0 makes it taller, < 0 wider
-  const ELL = { size: 50, stretch: 0, cy: 0, square: 0, tilt: 0 };
-  const ellRadii = (e) => e.stretch >= 0 ? [e.size, e.size * (1 + e.stretch / 100)] : [e.size * (1 - e.stretch / 100), e.size];
+  const ELL = { rx: 49, ry: 57, cy: 0, square: 0, tilt: 0 };   // whole numbers: the sliders step by 1
   function ellipsePts(e) {
-    const n = 2 + e.square * 6, a = e.tilt * DEG, [rx, ry] = ellRadii(e);
-    e = { ...e, rx, ry };
+    const n = 2 + e.square * 6, a = e.tilt * DEG;
     return Array.from({ length: N }, (_, i) => {
       const t = i * Math.PI / 4, sn = Math.sin(t), cs = Math.cos(t);
       const x = e.rx * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n), y = -e.ry * Math.sign(cs) * Math.pow(Math.abs(cs), 2 / n);
@@ -852,15 +849,9 @@
   const ellOpen = () => document.getElementById("ellSliders").closest("details").open;
   function renderEll() {
     const box = document.getElementById("ellSliders"); box.replaceChildren();
-    const stretchFmt = (v) => v === 0 ? "วงกลม" : v > 0 ? `สูงขึ้น ${v}%` : `กว้างขึ้น ${-v}%`;
-    for (const [k, label, min, max, step, fmt] of [["size", "ขนาด (รัศมี)", 10, 90, 1, (v) => `${v}`], ["stretch", "ยืด ↔ กว้าง / สูง ↕", -60, 60, 1, stretchFmt], ["cy", "เลื่อน ขึ้น/ลง", -40, 40, 1, (v) => `${v}`], ["square", "ความเหลี่ยม", 0, 1, .02, (v) => `${Math.round(v * 100)}%`], ["tilt", "เอียง", -35, 35, 1, (v) => `${v}°`]]) {
-      const inp = sliderRow(box, "ell_" + k, label, min, max, step, ELL[k], fmt, (v) => {
-        if (k === "stretch" && Math.abs(v) <= 3 && v !== 0) { v = 0; inp.value = 0; inp.previousSibling.lastChild.textContent = fmt(0); }   // snap back to a circle
-        ELL[k] = v; renderView();
-      });
-    }
+    for (const [k, label, min, max, step, fmt] of [["rx", "ความกว้าง", 10, 80, 1, (v) => `${v}`], ["ry", "ความสูง", 10, 100, 1, (v) => `${v}`], ["cy", "เลื่อน ขึ้น/ลง", -40, 40, 1, (v) => `${v}`], ["square", "ความเหลี่ยม", 0, 1, .02, (v) => `${Math.round(v * 100)}%`], ["tilt", "เอียง", -35, 35, 1, (v) => `${v}°`]])
+      sliderRow(box, "ell_" + k, label, min, max, step, ELL[k], fmt, (v) => { ELL[k] = v; renderView(); });
   }
-  on("btnEllCircle", "click", () => { Object.assign(ELL, { stretch: 0, square: 0, tilt: 0 }); renderEll(); renderView(); });
   document.getElementById("ellSliders").closest("details").addEventListener("toggle", renderView);
   on("btnEllApply", "click", () => { const tg = editTarget(); if (!tg) return; pushHistory(); tg.set("L", ellipsePts(ELL)); if (!mirrored()) tg.set("R", mirror(ellipsePts(ELL))); tg.save(); renderAll(); });
 
