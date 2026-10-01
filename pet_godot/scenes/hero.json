@@ -1,0 +1,28 @@
+{
+  "id": "hero",
+  "title": "ฮีโร่",
+  "mood": "proud",
+  "tags": ["hero", "fly", "jetpack", "cape", "mission", "achievement"],
+  "description": "ใส่ผ้าคลุมกับเจ็ตแพ็ก บินวนรอบเมือง 360 องศา (อ้อมไปด้านหลังแล้วกลับมา) พุ่งเฉียดกล้อง บินขึ้นไกล แล้วดิ่งลงมาแลนดิ้งแบบฮีโร่ จอสั่น ภารกิจสำเร็จ! กางโล่",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ภารกิจ: ปกป้องโลก (อีกแล้ว)", "dur": 3.0},
+    {"t": 0.0, "do": "background", "name": "city"},
+    {"t": 0.0, "do": "wear", "item": "cape"},
+    {"t": 0.1, "do": "wear", "item": "jetpack"},
+    {"t": 0.3, "do": "eyes", "name": "angry", "dur": 2.6},
+    {"t": 0.6, "do": "fly", "on": true},
+    {"t": 1.2, "do": "orbit", "center": [0.0, -1.3], "radius": 1.6, "from": 0, "to": 360, "dur": 3.0, "y": -0.25, "ease": "sine", "face": "travel"},
+    {"t": 4.3, "do": "move", "to": [0.0, -0.55, 3.0], "dur": 0.6, "ease": "quad"},
+    {"t": 4.9, "do": "move", "to": [0.0, 1.0, -2.5], "dur": 0.8, "ease": "sine"},
+    {"t": 5.8, "do": "fly", "on": false},
+    {"t": 5.8, "do": "move", "to": [0.0, 0.0, 0.0], "dur": 0.55, "ease": "quad_in"},
+    {"t": 6.35, "do": "shake", "amount": 0.14, "dur": 0.35},
+    {"t": 6.35, "do": "squash", "amount": -0.35},
+    {"t": 6.7, "do": "emotion", "name": "happy"},
+    {"t": 6.8, "do": "say", "text": "ภารกิจสำเร็จ!", "dur": 1.6},
+    {"t": 7.2, "do": "wear", "item": "shield_L"},
+    {"t": 7.8, "do": "tool", "side": "L"},
+    {"t": 8.2, "do": "emote", "kind": "star", "count": 3}
+  ]
+}

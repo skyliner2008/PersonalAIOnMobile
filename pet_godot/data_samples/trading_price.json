@@ -1,0 +1,15 @@
+{
+  "canonical_symbol": "BTCUSDT",
+  "change": "236.7669",
+  "change_pct": "0.28%",
+  "currency": "USD",
+  "direction": "UP",
+  "fetched_at": "2026-09-30 19:25:58",
+  "high_52w": "126199.63",
+  "low_52w": "57800.19",
+  "market_state": "LIVE | TV:BINANCE",
+  "prev_close": "83663.2231",
+  "price": "83899.9900",
+  "source": "TV:BINANCE",
+  "symbol": "BTCUSDT"
+}

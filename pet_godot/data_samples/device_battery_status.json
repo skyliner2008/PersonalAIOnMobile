@@ -1,0 +1,5 @@
+{
+  "level": 76,
+  "charging": true,
+  "note": "sample - the app fills this from BatteryManager"
+}

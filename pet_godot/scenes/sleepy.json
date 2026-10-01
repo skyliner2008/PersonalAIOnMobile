@@ -1,0 +1,28 @@
+{
+  "id": "sleepy",
+  "title": "ง่วงนอน",
+  "mood": "sleepy",
+  "tags": ["sleepy", "tired", "night", "afternoon"],
+  "description": "ประชุมบ่ายโมง ตาปรือ Zzz ลอยต่ำลง สัปหงก ฟองน้ำมูกพองยุบแล้วแตก สะดุ้งตื่น ไม่ได้หลับนะ! แล้วค่อยๆ เอียงหลับไปอีก นอนตะแคงกลางอากาศ",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ประชุมบ่ายโมง", "dur": 3.0},
+    {"t": 0.0, "do": "emotion", "name": "sleepy"},
+    {"t": 0.2, "do": "emote", "kind": "zzz", "count": 3, "dur": 2.0},
+    {"t": 0.4, "do": "move", "to": [0.0, -0.3, 0.0], "dur": 2.4, "ease": "sine"},
+    {"t": 1.2, "do": "effect", "name": "snot_bubble", "dur": 3.0},
+    {"t": 2.6, "do": "emote", "kind": "zzz", "count": 3, "dur": 1.8},
+    {"t": 2.8, "do": "pitch", "deg": 14, "dur": 1.4, "ease": "sine"},
+    {"t": 4.4, "do": "pitch", "deg": 0, "dur": 0.2, "ease": "back"},
+    {"t": 4.4, "do": "emotion", "name": "surprised"},
+    {"t": 4.4, "do": "hop", "height": 0.35, "dur": 0.6},
+    {"t": 4.4, "do": "emote", "kind": "exclaim", "count": 1},
+    {"t": 4.5, "do": "move", "to": [0.0, 0.1, 0.0], "dur": 0.4, "ease": "back"},
+    {"t": 4.6, "do": "say", "text": "ไม่ได้หลับนะ!", "dur": 1.5},
+    {"t": 6.2, "do": "emotion", "name": "sleepy"},
+    {"t": 6.4, "do": "lean", "deg": 22, "dur": 2.0},
+    {"t": 6.6, "do": "emote", "kind": "zzz", "count": 3, "dur": 2.0},
+    {"t": 7.8, "do": "roll", "deg": 80, "dur": 1.2, "ease": "sine"},
+    {"t": 8.8, "do": "say", "text": "ครอก…ฟี้…", "dur": 1.0}
+  ]
+}

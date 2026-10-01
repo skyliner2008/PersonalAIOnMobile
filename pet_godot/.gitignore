@@ -1,0 +1,6 @@
+# Godot 4 editor cache (the *.import files next to assets are kept)
+.godot/
+# written for a moment by tools/record_scenes.ps1 (video size); must never stay in the project
+override.cfg
+# exported APKs (tools: export_presets.cfg)
+build/

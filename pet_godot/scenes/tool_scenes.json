@@ -1,0 +1,21 @@
+{
+  "about": "Which scene shows which app tool's result (director.play_tool). The data is what the tool returns: a map, a list of rows or plain text. '*' is any other tool: its text goes on a markdown card.",
+  "tools": {
+    "device_weather": {"scene": "weather_report"},
+    "trading_fundamental_analysis": {"scene": "stock_balance"},
+    "trading_price": {"scene": "price_report"},
+    "trading_technical_analysis": {"scene": "technical_report"},
+    "trading_top_gainers": {"scene": "market_movers", "extra": {"direction": "up", "list_title": "ขึ้นแรงสุด"}},
+    "trading_top_losers": {"scene": "market_movers", "extra": {"direction": "down", "list_title": "ลงแรงสุด"}},
+    "trading_fear_greed": {"scene": "fear_greed_report"},
+    "trading_crypto_overview": {"scene": "crypto_overview"},
+    "device_battery_status": {"scene": "battery_report"},
+    "trading_news": {"scene": "answer_card", "title": "ข่าวล่าสุด"},
+    "search_web": {"scene": "answer_card", "title": "ผลการค้นหา"},
+    "summarize_text": {"scene": "answer_card", "title": "สรุป"},
+    "translate_text": {"scene": "answer_card", "title": "คำแปล"},
+    "calculate": {"scene": "answer_card", "title": "ผลคำนวณ"},
+    "convert_units": {"scene": "answer_card", "title": "แปลงหน่วย"},
+    "*": {"scene": "answer_card"}
+  }
+}

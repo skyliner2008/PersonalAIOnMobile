@@ -1,0 +1,54 @@
+{
+  "id": "weather_report",
+  "title": "รายงานอากาศ",
+  "mood": "helpful",
+  "needs": "weather",
+  "tags": ["weather", "info", "forecast", "today", "rain", "temperature"],
+  "description": "ตอบคำถามสภาพอากาศด้วยข้อมูลจริง: การ์ดโฮโลแกรมบอกอุณหภูมิ สภาพฟ้า สูง/ต่ำ ความชื้น ลม โอกาสฝน พร้อมไอคอน 3D ตามสภาพฟ้า ฉากหลังตามกลางวัน/กลางคืน และหุ่นทำท่าตามสถานการณ์ (ร้อน ฝน ฝนน่าจะตก หนาว หมอก อากาศดี)",
+  "duration": 11.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "สภาพอากาศวันนี้", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "{backdrop}"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "wx", "type": "weather", "at": "top", "beam": "R"},
+    {"t": 0.9, "do": "effect", "name": "rain", "dur": 10.0, "if": "rainy"},
+    {"t": 0.9, "do": "effect", "name": "snow", "dur": 10.0, "if": "kind == snow"},
+    {"t": 2.0, "do": "say", "text": "ตอนนี้ {temp:0}°C {desc}", "dur": 2.4},
+
+    {"t": 4.6, "do": "emote", "kind": "bolt", "count": 3, "if": "situation == thunder"},
+    {"t": 4.6, "do": "shake", "amount": 0.08, "dur": 0.3, "if": "situation == thunder"},
+    {"t": 4.6, "do": "eyes", "name": "surprised", "dur": 1.2, "if": "situation == thunder"},
+    {"t": 4.6, "do": "say", "text": "ฟ้าร้องด้วย! อยู่ในบ้านดีกว่า", "dur": 2.2, "if": "situation == thunder"},
+
+    {"t": 4.6, "do": "effect", "name": "rain_cloud", "dur": 3.4, "if": "situation == rain"},
+    {"t": 4.6, "do": "eyes", "name": "sad", "dur": 2.4, "if": "situation == rain"},
+    {"t": 4.6, "do": "say", "text": "ฝนตกอยู่ พกร่มด้วยนะ!", "dur": 2.2, "if": "situation == rain"},
+
+    {"t": 4.6, "do": "vibrate", "amount": 0.03, "dur": 1.4, "if": "situation in [snow, cold]"},
+    {"t": 4.6, "do": "say", "text": "หนาวจัง! ใส่เสื้อกันหนาวด้วยนะ", "dur": 2.2, "if": "situation in [snow, cold]"},
+
+    {"t": 4.5, "do": "wear", "item": "sunglasses", "if": "situation == hot"},
+    {"t": 4.7, "do": "emote", "kind": "sweat", "count": 2, "if": "situation == hot"},
+    {"t": 4.7, "do": "say", "text": "ร้อนมาก! ดื่มน้ำเยอะๆ นะ", "dur": 2.2, "if": "situation == hot"},
+
+    {"t": 4.6, "do": "effect", "name": "rain_cloud", "dur": 2.6, "if": "situation == rain_likely"},
+    {"t": 4.6, "do": "tilt_head", "deg": 12, "dur": 0.3, "if": "situation == rain_likely"},
+    {"t": 4.6, "do": "say", "text": "โอกาสฝน {rain_prob}% พกร่มไว้ก่อนนะ", "dur": 2.4, "if": "situation == rain_likely"},
+    {"t": 7.0, "do": "tilt_head", "deg": 0, "dur": 0.3, "if": "situation == rain_likely"},
+
+    {"t": 4.6, "do": "say", "text": "หมอกลง ขับรถระวังนะ", "dur": 2.2, "if": "situation == fog"},
+    {"t": 4.6, "do": "emotion", "name": "happy", "if": "situation == nice"},
+    {"t": 4.7, "do": "say", "text": "อากาศดี ออกไปเดินเล่นได้เลย!", "dur": 2.2, "if": "situation == nice"},
+    {"t": 4.7, "do": "say", "text": "ฟ้าครึ้มๆ แต่ยังไม่มีฝน", "dur": 2.2, "if": "situation == cloudy"},
+
+    {"t": 7.2, "do": "panel", "id": "tip", "type": "text", "at": "bottom_right", "size": [1.3, 0.5], "text": "{advice}", "if": "advice"},
+    {"t": 7.2, "do": "panel", "id": "tip", "type": "text", "at": "bottom_right", "size": [1.3, 0.5],
+      "text": "**{desc}**\n- รู้สึกเหมือน **{feels_like:0}°C**\n- โอกาสฝน **{rain_prob}%**\n> {source} · {fetched_at}", "if": "!advice"},
+    {"t": 7.4, "do": "emotion", "name": "talk", "if": "situation != nice"},
+    {"t": 9.0, "do": "fidget", "name": "cheeky"},
+    {"t": 9.8, "do": "hold"},
+    {"t": 10.2, "do": "present", "side": "R", "on": false}
+  ]
+}

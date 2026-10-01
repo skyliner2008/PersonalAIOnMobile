@@ -1,0 +1,30 @@
+{
+  "id": "idle_play",
+  "title": "ว่างงาน เล่นคนเดียว",
+  "mood": "lonely_playful",
+  "tags": ["idle", "alone", "play", "playful", "no_user"],
+  "description": "ไม่มีใครเล่นด้วย มองซ้ายขวาหาคน ถอนใจ แล้วใส่หมวกใบพัดวิ่งวนรอบฉาก 360 องศา (ไปด้านหลังแล้ววนกลับ) หมุนตัว แล้วโผล่มาขยิบตาหน้ากล้อง",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "เมื่อไม่มีใครเล่นด้วย…", "dur": 3.0},
+    {"t": 0.2, "do": "look", "x": -1.0, "y": 0.1},
+    {"t": 0.2, "do": "tilt_head", "deg": -10, "dur": 0.3},
+    {"t": 0.8, "do": "look", "x": 1.0, "y": 0.1},
+    {"t": 0.8, "do": "tilt_head", "deg": 10, "dur": 0.3},
+    {"t": 1.4, "do": "look", "x": 0.0, "y": 0.0},
+    {"t": 1.4, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 1.4, "do": "eyes", "name": "sad", "dur": 1.1},
+    {"t": 1.5, "do": "say", "text": "…ไม่มีใครเลยเหรอ", "dur": 1.2},
+    {"t": 2.6, "do": "emotion", "name": "happy"},
+    {"t": 2.6, "do": "say", "text": "งั้นเล่นคนเดียวก็ได้!", "dur": 1.2},
+    {"t": 2.7, "do": "wear", "item": "propeller_cap"},
+    {"t": 3.0, "do": "orbit", "center": [0.0, -1.0], "radius": 1.0, "from": 0, "to": 360, "dur": 3.0, "y": 0.15, "ease": "sine", "face": "travel"},
+    {"t": 3.0, "do": "emote", "kind": "note", "count": 4, "dur": 2.4},
+    {"t": 6.1, "do": "fidget", "name": "spin"},
+    {"t": 6.9, "do": "move", "to": [0.1, -0.1, 2.7], "dur": 0.8, "ease": "back"},
+    {"t": 7.0, "do": "emotion", "name": "wink"},
+    {"t": 7.7, "do": "say", "text": "ยังดูอยู่ใช่มั้ย?", "dur": 1.3},
+    {"t": 7.8, "do": "emote", "kind": "sparkle", "count": 3},
+    {"t": 9.1, "do": "move", "to": [0.0, 0.0, 0.0], "dur": 0.8, "ease": "back"}
+  ]
+}

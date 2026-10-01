@@ -1,0 +1,15 @@
+{
+  "feels_like": 34.2,
+  "fetched_at": "2026-09-30 19:25:57",
+  "humidity": 85.0,
+  "is_day": 0.0,
+  "location": "กรุงเทพมหานคร",
+  "max": 32.8,
+  "min": 26.0,
+  "precipitation": 0.0,
+  "rain_prob": 73.0,
+  "source": "Open-Meteo",
+  "temp": 28.1,
+  "weather_code": 3.0,
+  "wind": 5.5
+}

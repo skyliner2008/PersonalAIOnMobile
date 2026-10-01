@@ -1,0 +1,22 @@
+{
+  "ADX": "41.3871",
+  "ATR": "2145.6827",
+  "BB.basis": "81340.986",
+  "BB.width": "N/A",
+  "MACD.macd": "2097.4856",
+  "MACD.signal": "2201.603",
+  "RSI": "62.0356",
+  "Recommend.All": "0.4455",
+  "buy_signals": "N/A",
+  "change": "0.283",
+  "close": "83899.99",
+  "fetched_at": "2026-09-30 19:25:59",
+  "interval": "1D",
+  "neutral_signals": "N/A",
+  "recommend_score": "0.446",
+  "sell_signals": "N/A",
+  "signal": "BUY",
+  "source": "TradingView",
+  "symbol": "BTCUSDT",
+  "volume": "6038.4876"
+}

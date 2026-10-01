@@ -1,0 +1,28 @@
+{
+  "id": "market_movers",
+  "title": "ขึ้น/ลงแรงสุด",
+  "mood": "excited",
+  "needs": "movers",
+  "tags": ["top_gainers", "top_losers", "movers", "ranking", "crypto", "info", "trading_top_gainers", "trading_top_losers"],
+  "description": "ผลของ trading_top_gainers / trading_top_losers: กราฟแท่ง 3D 6 อันดับแรกตาม % เปลี่ยนแปลง (เขียวขึ้น แดงลง) หุ่นตื่นเต้นเมื่อเป็นขาขึ้น หรือทำหน้าเศร้าเมื่อเป็นขาลง",
+  "duration": 9.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "{list_title} ตอนนี้", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "cyber"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "rank", "type": "bars", "at": "top", "beam": "R", "money": false,
+      "title": "{list_title}", "subtitle": "% เปลี่ยนแปลงวันนี้", "bars": "{movers}"},
+    {"t": 2.4, "do": "say", "text": "อันดับ 1: {best_symbol} {best_change}", "dur": 2.2},
+    {"t": 4.7, "do": "emotion", "name": "happy", "if": "up"},
+    {"t": 4.7, "do": "hop", "height": 0.3, "dur": 0.6, "if": "up"},
+    {"t": 4.8, "do": "effect", "name": "confetti", "if": "up"},
+    {"t": 4.8, "do": "say", "text": "ตลาดคึกคัก!", "dur": 1.8, "if": "up"},
+    {"t": 4.7, "do": "eyes", "name": "sad", "dur": 2.0, "if": "!up"},
+    {"t": 4.8, "do": "emote", "kind": "sweat", "count": 2, "if": "!up"},
+    {"t": 4.8, "do": "say", "text": "แดงกันทั้งกระดาน…", "dur": 1.8, "if": "!up"},
+    {"t": 7.0, "do": "hold"},
+    {"t": 8.3, "do": "present", "side": "R", "on": false}
+  ]
+}

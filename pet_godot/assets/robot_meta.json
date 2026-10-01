@@ -1,0 +1,235 @@
+{
+  "clips": {
+    "Idle_loop": 2.4,
+    "Happy_loop": 1.6,
+    "Wave_loop": 1.6,
+    "Sad_loop": 3.2,
+    "Surprised_loop": 2.0,
+    "Love_loop": 2.0,
+    "Sleep_loop": 4.0,
+    "Talk_loop": 1.6,
+    "Fly_loop": 1.6
+  },
+  "accessories": {
+    "crown": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "CROWN"
+    },
+    "party_hat": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "PARTY_HAT"
+    },
+    "wizard_hat": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "WIZARD_HAT"
+    },
+    "chef_hat": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "CHEF_HAT"
+    },
+    "sunglasses": {
+      "follows": "PR_HeadPivot",
+      "slot": "face",
+      "prop": "SUNGLASSES"
+    },
+    "headphones": {
+      "follows": "PR_HeadPivot",
+      "slot": "ears",
+      "prop": "HEADPHONES"
+    },
+    "backpack": {
+      "follows": "PR_BodyPivot",
+      "slot": "back",
+      "prop": "BACKPACK"
+    },
+    "cannon_L": {
+      "follows": "PR_ArmL",
+      "slot": "hand_l",
+      "prop": null,
+      "kind": "tool",
+      "tool": "cannon",
+      "side": "L",
+      "muzzle": "ACC_cannon_L_muzzle"
+    },
+    "cannon_R": {
+      "follows": "PR_ArmR",
+      "slot": "hand_r",
+      "prop": null,
+      "kind": "tool",
+      "tool": "cannon",
+      "side": "R",
+      "muzzle": "ACC_cannon_R_muzzle"
+    },
+    "laser_L": {
+      "follows": "PR_ArmL",
+      "slot": "hand_l",
+      "prop": null,
+      "kind": "tool",
+      "tool": "laser",
+      "side": "L",
+      "muzzle": "ACC_laser_L_muzzle"
+    },
+    "laser_R": {
+      "follows": "PR_ArmR",
+      "slot": "hand_r",
+      "prop": null,
+      "kind": "tool",
+      "tool": "laser",
+      "side": "R",
+      "muzzle": "ACC_laser_R_muzzle"
+    },
+    "flashlight_L": {
+      "follows": "PR_ArmL",
+      "slot": "hand_l",
+      "prop": null,
+      "kind": "tool",
+      "tool": "flashlight",
+      "side": "L",
+      "muzzle": "ACC_flashlight_L_muzzle"
+    },
+    "flashlight_R": {
+      "follows": "PR_ArmR",
+      "slot": "hand_r",
+      "prop": null,
+      "kind": "tool",
+      "tool": "flashlight",
+      "side": "R",
+      "muzzle": "ACC_flashlight_R_muzzle"
+    },
+    "shield_L": {
+      "follows": "PR_ArmL",
+      "slot": "hand_l",
+      "prop": null,
+      "kind": "tool",
+      "tool": "shield",
+      "side": "L",
+      "muzzle": "ACC_shield_L_muzzle"
+    },
+    "shield_R": {
+      "follows": "PR_ArmR",
+      "slot": "hand_r",
+      "prop": null,
+      "kind": "tool",
+      "tool": "shield",
+      "side": "R",
+      "muzzle": "ACC_shield_R_muzzle"
+    },
+    "jetpack": {
+      "follows": "PR_BodyPivot",
+      "slot": "back",
+      "prop": null,
+      "kind": "gear",
+      "nozzles": [
+        "ACC_jetpack_nozzle_L",
+        "ACC_jetpack_nozzle_R"
+      ]
+    },
+    "cape": {
+      "follows": "PR_BodyPivot",
+      "slot": "cape",
+      "prop": "SUPERHERO_CAPE",
+      "kind": "gear",
+      "wave": "ACC_cape_cloth"
+    },
+    "propeller_cap": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": null,
+      "spin": "ACC_propeller_cap_spin"
+    },
+    "cat_ears": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": null
+    },
+    "halo": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": null,
+      "bob": "ACC_halo_ring"
+    },
+    "devil_horns": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "DEVIL_HORNS"
+    },
+    "viking_helmet": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "VIKING_HELMET"
+    },
+    "astronaut_helmet": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "ASTRONAUT_HELMET"
+    },
+    "fedora": {
+      "follows": "PR_HeadPivot",
+      "slot": "hat",
+      "prop": "FEDORA_HAT"
+    },
+    "vr_headset": {
+      "follows": "PR_HeadPivot",
+      "slot": "face",
+      "prop": "VR_HEADSET"
+    }
+  },
+  "pivots_rest": {
+    "PR_Float": [
+      0.0,
+      0.0,
+      -0.0
+    ],
+    "PR_HeadPivot": [
+      0.0,
+      1.03,
+      -0.0
+    ],
+    "PR_BodyPivot": [
+      0.0,
+      0.78,
+      -0.0
+    ],
+    "PR_ArmL": [
+      -0.6,
+      0.83,
+      -0.0
+    ],
+    "PR_ArmR": [
+      0.6,
+      0.83,
+      -0.0
+    ],
+    "PR_AntennaPivotL": [
+      -0.60787,
+      1.67562,
+      -0.0
+    ],
+    "PR_AntennaPivotR": [
+      0.60787,
+      1.67562,
+      -0.0
+    ],
+    "PR_HeadRoot": [
+      0.0,
+      1.53,
+      -0.0
+    ]
+  },
+  "screen": {
+    "node": "PR_Screen",
+    "half_size": [
+      0.42396923899650574,
+      0.27760058641433716
+    ],
+    "center": [
+      0.0,
+      1.53,
+      0.448
+    ]
+  }
+}

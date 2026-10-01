@@ -1,0 +1,45 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Pet Robot Lab"
+config/description="Design table for the 3D pet robot: animation, outfits, backgrounds."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+config/icon="res://icon.png"
+run/max_fps.mobile=60
+config/quit_on_go_back=false
+boot_splash/bg_color=Color(0, 0, 0, 1)
+boot_splash/image="res://assets/boot_splash.png"
+boot_splash/stretch_mode=0
+
+[input_devices]
+
+sensors/enable_gravity=true
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/size/window_width_override=450
+window/size/window_height_override=800
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+window/frame_pacing/android/enable_frame_pacing=false
+
+[rendering]
+
+renderer/rendering_method="mobile"
+anti_aliasing/quality/msaa_3d=2
+textures/vram_compression/import_etc2_astc=true
+scaling_3d/scale.mobile=0.75
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile=1

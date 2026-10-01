@@ -1,0 +1,47 @@
+{
+  "id": "stock_balance",
+  "title": "งบดุลหุ้น",
+  "mood": "analytical",
+  "needs": "stock",
+  "tags": ["stock", "finance", "balance_sheet", "fundamentals", "info", "chart"],
+  "description": "ตอบคำถามงบการเงินของหุ้นด้วยข้อมูลจริง: กราฟ 3D งบดุล (สินทรัพย์ = หนี้สิน + ส่วนผู้ถือหุ้น), Pie Chart โครงสร้างเงินทุน, กราฟแท่งรายได้/กำไรสุทธิ/กระแสเงินสดอิสระ 12 เดือน และกล่องสรุป markdown โดยหุ่นใส่หมวกเฟโดร่าชี้อธิบาย",
+  "duration": 16.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "งบดุล {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "hangar"},
+    {"t": 0.0, "do": "wear", "item": "fedora"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "balance", "at": "top", "beam": "R"},
+    {"t": 2.0, "do": "say", "text": "สินทรัพย์รวม {totalAssets:money}", "dur": 1.9},
+    {"t": 4.0, "do": "say", "text": "หนี้สิน {totalLiabilities:money} + ทุน {totalEquity:money}", "dur": 1.9},
+
+    {"t": 5.9, "do": "panel", "id": "main", "type": "pie", "at": "top", "beam": "R",
+      "title": "โครงสร้างเงินทุน · {symbol}", "subtitle": "เทียบสินทรัพย์รวม", "center": "{totalAssets:money}",
+      "slices": [
+        {"label": "หนี้สินที่มีดอกเบี้ย", "value": "{totalDebt}", "color": "#FF5A6E"},
+        {"label": "หนี้สินอื่น", "value": "{otherLiabilities}", "color": "#FF9A4C"},
+        {"label": "ส่วนของผู้ถือหุ้น", "value": "{totalEquity}", "color": "#A77BFF"}
+      ]},
+    {"t": 6.8, "do": "say", "text": "หนี้สินต่อทุน {debtToEquity:2} เท่า", "dur": 1.9},
+    {"t": 7.0, "do": "emote", "kind": "sparkle", "count": 3, "if": "debtToEquity < 0.5"},
+    {"t": 7.0, "do": "emote", "kind": "sweat", "count": 2, "if": "debtToEquity >= 2"},
+    {"t": 8.8, "do": "say", "text": "เงินสด {cashAndEquivalents:money}", "dur": 1.6},
+
+    {"t": 10.4, "do": "panel", "id": "main", "type": "bars", "at": "top", "beam": "R",
+      "title": "ผลประกอบการ 12 เดือน · {symbol}", "subtitle": "TTM",
+      "bars": [
+        {"label": "รายได้", "value": "{totalRevenueTtm}", "color": "#4FA3FF"},
+        {"label": "กำไรสุทธิ", "value": "{netIncomeTtm}", "color": "#3DDC97"},
+        {"label": "กระแสเงินสดอิสระ", "value": "{freeCashFlowTtm}", "color": "#FFC247"}
+      ]},
+    {"t": 11.3, "do": "say", "text": "อัตรากำไรสุทธิ {netMarginTtm:1}%", "dur": 1.8},
+    {"t": 12.3, "do": "panel", "id": "sum", "type": "text", "at": "bottom_right", "size": [1.35, 0.5], "text": "{summary}", "if": "summary"},
+    {"t": 12.3, "do": "panel", "id": "sum", "type": "text", "at": "bottom_right", "size": [1.35, 0.5],
+      "text": "### {symbol} สรุปงบ\n- สินทรัพย์ **{totalAssets:money}**\n- หนี้สิน **{liabilitiesPct:0}%** · ทุน **{equityPct:0}%**\n- ROE **{returnOnEquity:1}%**\n> {source} · {fetched_at}", "if": "!summary"},
+    {"t": 13.6, "do": "emotion", "name": "happy"},
+    {"t": 14.4, "do": "hold"},
+    {"t": 15.2, "do": "present", "side": "R", "on": false}
+  ]
+}

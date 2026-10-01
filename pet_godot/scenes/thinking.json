@@ -1,0 +1,30 @@
+{
+  "id": "thinking",
+  "title": "กำลังคิด",
+  "mood": "thinking",
+  "tags": ["thinking", "deciding", "processing", "food"],
+  "description": "คิดไม่ออกว่าจะกินอะไร เดินไปมาหันตามทางเดิน (มุมข้าง/หลัง) เอียงหัว มีเครื่องหมายคำถาม แล้วหลอดไฟสว่าง: กินทุกอย่างเลย! หมุนตัวดีใจ",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "กำลังคิดว่าจะกินอะไรดี", "dur": 3.0},
+    {"t": 0.0, "do": "look", "x": 0.4, "y": 0.9},
+    {"t": 0.2, "do": "tilt_head", "deg": 14, "dur": 0.4},
+    {"t": 0.3, "do": "emote", "kind": "dots", "count": 1, "size": 1.5, "dur": 2.0},
+    {"t": 0.8, "do": "move", "to": [-0.9, 0.0, -0.6], "dur": 1.4, "ease": "sine", "face": "travel", "then": "keep"},
+    {"t": 2.0, "do": "say", "text": "อืมมมม…", "dur": 1.3},
+    {"t": 2.3, "do": "move", "to": [0.9, 0.0, -0.6], "dur": 1.8, "ease": "sine", "face": "travel", "then": "keep"},
+    {"t": 3.2, "do": "tilt_head", "deg": -14, "dur": 0.4},
+    {"t": 4.2, "do": "move", "to": [0.0, 0.0, 0.2], "dur": 1.0, "ease": "sine", "face": "travel"},
+    {"t": 4.4, "do": "say", "text": "ข้าวมันไก่? ก๋วยเตี๋ยว? พิซซ่า?", "dur": 1.8},
+    {"t": 4.4, "do": "emote", "kind": "question", "count": 3},
+    {"t": 5.2, "do": "look", "x": 0.0, "y": 0.2},
+    {"t": 6.3, "do": "effect", "name": "bulb", "dur": 1.6},
+    {"t": 6.3, "do": "emotion", "name": "happy"},
+    {"t": 6.3, "do": "tilt_head", "deg": 0, "dur": 0.2},
+    {"t": 6.35, "do": "hop", "height": 0.3, "dur": 0.6},
+    {"t": 6.5, "do": "say", "text": "อ๋อ! กินทุกอย่างเลย!", "dur": 1.6},
+    {"t": 7.3, "do": "fidget", "name": "spin"},
+    {"t": 8.2, "do": "emote", "kind": "sparkle", "count": 4},
+    {"t": 9.0, "do": "move", "to": [0.0, 0.0, 0.0], "dur": 0.8, "ease": "back"}
+  ]
+}

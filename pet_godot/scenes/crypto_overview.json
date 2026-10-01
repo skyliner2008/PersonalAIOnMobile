@@ -1,0 +1,31 @@
+{
+  "id": "crypto_overview",
+  "title": "ภาพรวมตลาดคริปโต",
+  "mood": "analytical",
+  "needs": "crypto",
+  "tags": ["crypto", "market_cap", "dominance", "overview", "info", "trading_crypto_overview"],
+  "description": "ผลของ trading_crypto_overview (CoinGecko): ช่องตัวเลขมูลค่าตลาดรวม ปริมาณซื้อขาย 24 ชม. การเปลี่ยนแปลง 24 ชม. จำนวนเหรียญ แล้วต่อด้วย Pie Chart 3D ส่วนแบ่งตลาด BTC / ETH / อื่นๆ",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ตลาดคริปโตวันนี้", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "space"},
+    {"t": 0.0, "do": "wear", "item": "astronaut_helmet"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 2,
+      "title": "ภาพรวมตลาดคริปโต", "items": [
+        {"label": "มูลค่าตลาดรวม", "value": "{total_market_cap_usd:money}"},
+        {"label": "เปลี่ยนแปลง 24 ชม.", "value": "{market_cap_change_24h:pct+}", "good": "{up}"},
+        {"label": "ปริมาณซื้อขาย 24 ชม.", "value": "{total_volume_24h_usd:money}"},
+        {"label": "เหรียญที่ซื้อขายอยู่", "value": "{active_cryptocurrencies:int}"}
+      ]},
+    {"t": 2.4, "do": "say", "text": "มูลค่ารวม {total_market_cap_usd:money}", "dur": 2.0},
+    {"t": 5.0, "do": "panel", "id": "main", "type": "pie", "at": "top", "beam": "R", "money": false,
+      "title": "ส่วนแบ่งตลาด (Dominance)", "subtitle": "CoinGecko", "center": "BTC {btc_dominance:1}%", "slices": "{dominance}"},
+    {"t": 6.2, "do": "say", "text": "BTC ครอง {btc_dominance:1}%", "dur": 2.0},
+    {"t": 6.4, "do": "emote", "kind": "star", "count": 3, "if": "up"},
+    {"t": 8.6, "do": "hold"},
+    {"t": 9.3, "do": "present", "side": "R", "on": false}
+  ]
+}

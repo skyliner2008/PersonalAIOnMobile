@@ -1,0 +1,36 @@
+{
+  "id": "battery_report",
+  "title": "แบตเตอรี่มือถือ",
+  "mood": "helpful",
+  "needs": "battery",
+  "tags": ["battery", "device", "charging", "info", "device_battery_status"],
+  "description": "ผลของ device_battery_status: หน้าปัด 3D ระดับแบตจริง (แดง/เหลือง/เขียว) กับสถานะชาร์จ และแบตเตอรี่ลอยเหนือหัวเติมถึงระดับเดียวกัน หุ่นง่วงเมื่อแบตต่ำ มีสายฟ้าเมื่อกำลังชาร์จ ดีใจเมื่อแบตเต็ม",
+  "duration": 8.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "แบตมือถือ", "dur": 1.1},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "dial", "type": "gauge", "at": "top", "beam": "R",
+      "title": "แบตเตอรี่", "subtitle": "{charging_th}", "value": "{level}", "min": 0, "max": 100,
+      "text": "{level:int}%", "label": "{charging_th}",
+      "zones": [
+        {"to": 20, "color": "#FF4D5E", "label": "ต่ำ"},
+        {"to": 50, "color": "#FFC247", "label": ""},
+        {"to": 100, "color": "#3DDC97", "label": "ดี"}
+      ]},
+    {"t": 1.2, "do": "effect", "name": "battery", "from": 0.0, "to": "{level01}", "dur": 1.2, "hold": 5.0},
+    {"t": 2.2, "do": "say", "text": "แบตเหลือ {level:int}%", "dur": 1.8},
+    {"t": 4.2, "do": "emote", "kind": "bolt", "count": 3, "if": "charging"},
+    {"t": 4.2, "do": "emotion", "name": "happy", "if": "charging or full"},
+    {"t": 4.3, "do": "say", "text": "กำลังชาร์จอยู่ ⚡", "dur": 1.8, "if": "charging and !full"},
+    {"t": 4.3, "do": "say", "text": "แบตเต็มแล้ว!", "dur": 1.8, "if": "full"},
+    {"t": 4.2, "do": "eyes", "name": "sleepy", "if": "low and !charging"},
+    {"t": 4.2, "do": "lean", "deg": 12, "dur": 1.0, "if": "low and !charging"},
+    {"t": 4.3, "do": "say", "text": "แบตน้อยแล้ว ชาร์จหน่อยนะ…", "dur": 2.0, "if": "low and !charging"},
+    {"t": 4.3, "do": "say", "text": "ยังเหลือเยอะ สบายๆ", "dur": 1.8, "if": "!low and !charging and !full"},
+    {"t": 6.4, "do": "lean", "deg": 0, "dur": 0.4},
+    {"t": 6.6, "do": "hold"},
+    {"t": 7.3, "do": "present", "side": "R", "on": false}
+  ]
+}

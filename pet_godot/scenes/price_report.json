@@ -1,0 +1,32 @@
+{
+  "id": "price_report",
+  "title": "ราคาล่าสุด",
+  "mood": "helpful",
+  "needs": "price",
+  "tags": ["price", "quote", "stock", "crypto", "gold", "info", "trading_price"],
+  "description": "ผลของ trading_price: การ์ดราคาตัวใหญ่ การเปลี่ยนแปลงสีเขียว/แดง ราคาปิดก่อนหน้า และช่วง 52 สัปดาห์ (ถ้ามี) หุ่นดีใจเมื่อราคาขึ้นแรง เหงื่อตกเมื่อร่วงแรง",
+  "duration": 9.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ราคา {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "cyber"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "quote", "type": "price", "at": "top", "beam": "R"},
+    {"t": 2.2, "do": "say", "text": "{symbol} ตอนนี้ {price:price}", "dur": 2.0},
+
+    {"t": 4.4, "do": "emotion", "name": "happy", "if": "move >= 3"},
+    {"t": 4.4, "do": "hop", "height": 0.3, "dur": 0.6, "if": "move >= 3"},
+    {"t": 4.5, "do": "emote", "kind": "sparkle", "count": 4, "if": "move >= 3"},
+    {"t": 4.5, "do": "say", "text": "พุ่งแรง {change_pct:pct+}!", "dur": 2.0, "if": "move >= 3"},
+    {"t": 4.5, "do": "say", "text": "ขึ้น {change_pct:pct+} วันนี้", "dur": 2.0, "if": "move >= 0 and move < 3"},
+    {"t": 4.5, "do": "say", "text": "ลง {change_pct:pct+} วันนี้", "dur": 2.0, "if": "move < 0 and move > -3"},
+    {"t": 4.4, "do": "eyes", "name": "sad", "dur": 2.0, "if": "move <= -3"},
+    {"t": 4.5, "do": "emote", "kind": "sweat", "count": 2, "if": "move <= -3"},
+    {"t": 4.5, "do": "say", "text": "ร่วงแรง {change_pct:pct+}…", "dur": 2.0, "if": "move <= -3"},
+
+    {"t": 6.8, "do": "fidget", "name": "cheeky", "if": "up"},
+    {"t": 7.6, "do": "hold"},
+    {"t": 8.3, "do": "present", "side": "R", "on": false}
+  ]
+}

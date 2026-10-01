@@ -1,0 +1,21 @@
+{
+  "id": "answer_card",
+  "title": "การ์ดข้อความ",
+  "mood": "helpful",
+  "needs": "answer",
+  "tags": ["answer", "info", "text", "markdown", "summary", "explain"],
+  "description": "ตอบคำถามทั่วไปด้วยการ์ดโฮโลแกรมข้อความ markdown สั้นๆ (หัวข้อ ตัวหนา รายการ) ที่หุ่นยกขึ้นมาโชว์ พร้อมพูดประโยคสั้นในบับเบิล",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.1, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.5, "do": "present", "side": "R"},
+    {"t": 0.7, "do": "panel", "id": "answer", "type": "text", "at": "upper", "size": [2.0, 0.8], "beam": "R",
+      "title": "{title}", "text": "{markdown}"},
+    {"t": 1.6, "do": "say", "text": "{say}", "dur": 3.0, "if": "say"},
+    {"t": 6.0, "do": "emote", "kind": "sparkle", "count": 2},
+    {"t": 7.5, "do": "fidget", "name": "cheeky"},
+    {"t": 8.5, "do": "hold"},
+    {"t": 9.2, "do": "present", "side": "R", "on": false}
+  ]
+}
