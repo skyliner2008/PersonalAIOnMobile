@@ -1,47 +1,47 @@
 {
-  "version": 208,
+  "version": 403,
   "shapes": {
     "round": {
       "label": "round",
       "left": [
         [
-          0,
-          -57.24,
-          1
-        ],
-        [
-          40.3,
-          -38.3,
-          1
-        ],
-        [
-          52.8,
-          -1.3,
-          1
-        ],
-        [
-          35.9,
-          39.6,
+          6.1,
+          -62.73,
           1.3
         ],
         [
-          0.5,
-          55.6,
+          53.62,
+          -38,
           1
         ],
         [
-          -41.2,
-          44.9,
+          69.73,
+          13.1,
           1
         ],
         [
-          -57,
-          4.9,
+          45,
+          60.62,
           1
         ],
         [
-          -42.9,
-          -38.7,
+          -6.1,
+          76.73,
+          1
+        ],
+        [
+          -53.62,
+          52,
+          1
+        ],
+        [
+          -69.73,
+          0.9,
+          1
+        ],
+        [
+          -45,
+          -46.62,
           1
         ]
       ],
@@ -50,13 +50,13 @@
       "color": "cyan",
       "ref": {
         "sheet": 1,
-        "cell": 8
+        "cell": 10
       },
       "refFit": {
-        "scale": 1.47,
-        "dx": 59,
+        "scale": 1.43,
+        "dx": 9,
         "dy": 36,
-        "opacity": 0
+        "opacity": 0.45
       },
       "note": "",
       "description": "ตาปกติของ LOOI วงรีแนวตั้งนุ่มๆ",
@@ -150,10 +150,7 @@
       ],
       "mirror": false,
       "color": "cyan",
-      "ref": {
-        "sheet": 1,
-        "cell": 1
-      },
+      "ref": null,
       "refFit": {
         "scale": 1.45,
         "dx": -1,
@@ -418,14 +415,14 @@
     "Angry": "angry"
   },
   "motion": {
-    "morphMs": 267,
-    "holdMs": 900,
-    "popLag": 3,
-    "popGainR": 0.8,
+    "morphMs": 100,
+    "popLag": 0,
+    "popGainR": 0,
     "pop": 1,
-    "tremble": 1.6,
+    "tremble": 0,
     "quiver": 2.4,
     "ease": "smooth",
+    "holdMs": 900,
     "sequence": [
       "round",
       "droop",
@@ -435,23 +432,23 @@
     ]
   },
   "rig": {
-    "eyeDx": 124,
-    "eyeScale": 1.8,
+    "eyeDx": 100,
+    "eyeScale": 1.06,
     "backDx": 0,
-    "backDy": 9,
+    "backDy": -6.5,
     "glowFeather": 0,
-    "glowWidth": 0.5,
+    "glowWidth": 0,
     "glowOpacity": 1,
     "head": {
-      "radius": 385,
-      "maxYaw": 12,
-      "maxPitch": 8,
-      "maxRoll": 10,
-      "yawRoll": 3.4,
-      "travelX": 0,
+      "radius": 270,
+      "maxYaw": 9,
+      "maxPitch": 8.5,
+      "maxRoll": 30,
+      "yawRoll": 0,
+      "travelX": 20,
       "travelY": 0,
-      "pupil": 13,
-      "persp": 0.15
+      "pupil": 10,
+      "persp": 0.6
     },
     "eyeRot": {
       "link": true,
