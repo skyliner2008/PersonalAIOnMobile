@@ -67,8 +67,9 @@ kotlin {
             implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.firebase.vertexai.get().toString())
 
-            // Rive Runtime for Android (State Machine & Vector Animation)
-            implementation(libs.rive.android)
+            // Avatar mode: the Godot engine (see the `dependencies` block below for the engine itself)
+            implementation(libs.androidx.fragment)
+            implementation(libs.androidx.documentfile)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -120,6 +121,23 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // the Godot engine is ~75 MB per ABI: phones only (Avatar mode checks for arm64 before starting it)
+            excludes += listOf(
+                "lib/armeabi-v7a/libgodot_android.so",
+                "lib/x86/libgodot_android.so",
+                "lib/x86_64/libgodot_android.so"
+            )
+        }
+    }
+    sourceSets {
+        // the robot exported from pet_godot/ (pet_godot/tools/export_to_app.ps1), at the assets root where
+        // the engine looks for its project
+        getByName("main").assets.srcDir("src/androidMain/godot-assets")
+    }
+    androidResources {
+        // the export keeps its imported resources in a ".godot" folder, which aapt's default pattern drops
+        ignoreAssetsPattern = "!.svn:!.git:!.gitignore:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
     // ติดตั้งเฉพาะผู้ใช้หลัก — `adb install` ปกติติดตั้งให้ทุก user profile
     // เครื่องที่เปิด Dual Messenger ของซัมซุง (user 95 = DUAL_APP) จึงได้ไอคอนแอปโคลนเพิ่มมาทุกครั้งที่ installDebug
@@ -145,6 +163,18 @@ android {
             val outputImpl = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
             outputImpl?.outputFileName = "PersonalAIBot-${variantName}.apk"
         }
+    }
+}
+
+// Avatar mode's engine: Godot's Android library, the same version the robot is exported with (4.7.2).
+// The local copy comes from the Godot export templates already on this PC (pet_godot/tools/export_to_app.ps1
+// puts it here; it is too big for git); without it Gradle takes the same library from Maven Central.
+val godotAar = file("libs/godot-lib.template_release.aar")
+dependencies {
+    if (godotAar.exists()) {
+        implementation(files(godotAar))
+    } else {
+        implementation("org.godotengine:godot:4.7.2.stable")
     }
 }
 

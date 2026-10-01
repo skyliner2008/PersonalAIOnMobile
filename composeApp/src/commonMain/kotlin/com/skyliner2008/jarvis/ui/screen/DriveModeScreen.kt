@@ -29,7 +29,7 @@ import com.skyliner2008.jarvis.data.ConnectionState
 import com.skyliner2008.jarvis.drive.DriveBridge
 import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
-import com.skyliner2008.jarvis.ui.component.avatar.JarvisAvatar
+import com.skyliner2008.jarvis.ui.component.avatar.RobotSprite
 import com.skyliner2008.jarvis.ui.theme.JarvisTheme
 import kotlinx.datetime.Clock
 
@@ -150,8 +150,8 @@ internal fun DriveModeContent(
                     modifier = Modifier.size(visualizerSize)
                 )
 
-                // 3D Robot Avatar
-                JarvisAvatar(
+                // the Godot robot (pre-rendered faces)
+                RobotSprite(
                     state = activeAvatarState,
                     modifier = Modifier.size(if (isLowGlareMode) avatarSize * 0.92f else avatarSize)
                 )
@@ -301,7 +301,7 @@ internal fun DriveModeContent(
                     modifier = Modifier.size(visualizerSize)
                 )
 
-                JarvisAvatar(
+                RobotSprite(
                     state = activeAvatarState,
                     modifier = Modifier.size(if (isLowGlareMode) avatarSize * 0.92f else avatarSize)
                 )

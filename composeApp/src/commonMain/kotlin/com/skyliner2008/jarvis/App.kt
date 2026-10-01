@@ -125,7 +125,6 @@ fun App(
     val isAiVisionRequested by viewModel.isAiVisionRequested.collectAsStateWithLifecycle()
     val voiceError by viewModel.voiceError.collectAsStateWithLifecycle()
     val activeToolName by viewModel.activeToolName.collectAsStateWithLifecycle()
-    val lastToolResult by viewModel.lastToolResult.collectAsStateWithLifecycle()
     val audioLevel by viewModel.audioLevel.collectAsStateWithLifecycle()
     val isAiSpeaking by viewModel.isAiSpeaking.collectAsStateWithLifecycle()
     val isWidgetEnabled by viewModel.floatingWidgetEnabled.collectAsStateWithLifecycle()
@@ -829,10 +828,7 @@ fun App(
                     viewModel.playSceneShowcase()
                 }
             },
-            onSetImmersiveMode = onSetImmersiveMode,
-            activeToolName = activeToolName,
-            lastToolResult = lastToolResult,
-            onDismissToolCard = { viewModel.dismissToolCard() }
+            onSetImmersiveMode = onSetImmersiveMode
         )
     }
 }

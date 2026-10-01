@@ -20,6 +20,25 @@
 - Trading AI Profile: TF เริ่มต้น M15/H1/H4 แต่ **อนุญาต D1/W1 เมื่อผู้ใช้ระบุเอง**; counter ต่อ turn อยู่ใต้ mutex
 - `device_notification_reply` ข้อความเดิมภายใน 20 วินาทีถูกบล็อก (กันส่งซ้ำ)
 
+- **เทิร์นทักทายเปิดเซสชัน**: tool call ก่อนผู้ใช้พูดอะไรใน session (`liveService.inGreetingTurn`) ไม่รัน ตอบ
+  `LiveProtocol.GREETING_TURN_TOOL_NOTE` — เดิมโมเดลดึงอากาศ/BTC จากประวัติเองแล้วเปิดหน้าเต็มจอ Drive (logcat 2026-10-01 16:51)
+
+- **ผลทีละ call ให้โหมดอวตาร**: หลังรัน tool (ที่ไม่ใช่ UI) ส่ง `AvatarLiveFeed.result(tool, AvatarToolData.of(call, tool), text)` —
+  ข้อมูลฉากอยู่ใน `LiveToolCallContext` ของ call นั้น · ส่งต่อ `liveService.speechMarks` → `AvatarLiveFeed.speech` (แทน `lastToolResult` เดิม)
+  · `later = true` เมื่อ call ถูกส่งให้ลูกน้อง (`delegatedCallIds`) หรือถูก server ยกเลิก — ผลนั้น AI เล่าทีหลังจากคิว · ส่งต่อ
+  `liveService.reportsSent` → `AvatarLiveFeed.report` (ฉากขึ้นตอน AI เริ่มเล่า ไม่ใช่ตอนพูดรับงาน)
+
+## 🗣️ ข้อความกำกับเสียง (`[VOICE RULE - …]` ต่อท้ายผล tool)
+- **ห้ามมีแค่ "ตอบรับสั้นๆ น่ารัก"** ในผลของ tool ที่โมเดลเรียกประกอบ — โมเดลจะหยิบประโยคทักทายเปิดเซสชันมาพูดแทนผลจริง
+- `device_avatar_emotion` (ตั้งสีหน้า) ใช้ `avatarEmotionVoiceRule` ที่เดียว และต้อง **เป็นกลาง ไม่สั่งให้พูดอะไร** — โมเดลเรียกได้ทั้งก่อนพูด
+  (คู่กับ tool ข้อมูล) และหลังพูดจบ: "ตอบรับสั้นๆ น่ารัก" → พูดคำทักทายแทนผลราคา (16:24) · "ถ้ามีผล tool อื่นให้ตอบเรื่องนั้น" → เปลี่ยนหน้า
+  หลังรายงานอากาศแล้วตอบอากาศซ้ำ (18:19) · ตอนนี้: ท่าทางประกอบ ไม่ต้องพูดถึง, ผู้ใช้ขอเองค่อยตอบรับ 1 ประโยค, ห้ามพูดซ้ำ/เรียกซ้ำ/ถามต่อ/ทักทาย
+- **เรียก tool เดิมซ้ำในเทิร์นเดียว** (`DuplicateCallGuard`): ยังไม่พูดหลังได้ผล → `repeatNote` (ส่งผลเดิม "ให้พูดตอบจากผลนี้ทันที");
+  พูดไปแล้ว (`liveService.lastModelSpeechAtMs > resultAtMs`) → `alreadyReportedNote` ("รายงานไปแล้ว ห้ามพูดซ้ำ จบเทิร์นได้เลย")
+- `[VOICE RULE - PET WEATHER]` / `PET LOCATION` ขึ้นต้นด้วย "เริ่มที่เนื้อหาเลย (ห้ามทักทาย)"
+- รายชื่อ tool ที่ผลคือการเปลี่ยน UI/โหมด (`uiOnlyTools`) ใช้ `LiveProtocol.UI_ONLY_TOOLS` ร่วมกับคิวรายงานของ [[LiveGeminiService]]
+- ต้นทางของ call (`CallOrigin`) ใช้ `liveService.currentQuestion` — งานที่ทำให้คำถามค้างที่แอปถามซ้ำ ติดป้ายคำถามนั้น ไม่ใช่ประโยคล่าสุด
+
 ## 👁️ การจัดการสายตา (Vision Logic)
 มีการป้องกันความผิดพลาด (Anti-Hallucination) โดยการบังคับฉีด Prompt ให้ AI รอสังเกตการณ์ 1-2 วินาทีหลังเปิดกล้อง
 

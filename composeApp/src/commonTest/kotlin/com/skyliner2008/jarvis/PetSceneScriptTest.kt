@@ -1,24 +1,19 @@
 package com.skyliner2008.jarvis
 
+import com.skyliner2008.jarvis.avatar.AvatarSkits
 import com.skyliner2008.jarvis.pet.PetSceneArchetype
 import com.skyliner2008.jarvis.pet.PetSceneEngine
-import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
-import com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme
-import com.skyliner2008.jarvis.ui.component.avatar.PropType
-import com.skyliner2008.jarvis.ui.component.avatar.RiveAvatarMapper
-import com.skyliner2008.jarvis.ui.component.avatar.RiveSeq
-import com.skyliner2008.jarvis.ui.component.avatar.withFace
+import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PetSceneScriptTest {
 
     @Test
-    fun `every archetype has a Rive story and a scripted sound timeline`() {
+    fun `every archetype has a scripted sound timeline`() {
         for (archetype in PetSceneArchetype.entries) {
-            assertNotNull(RiveSeq.forScene(archetype.name.lowercase()), "no story for $archetype")
             val spec = PetSceneEngine.ARCHETYPE_SPECS.getValue(archetype)
             assertTrue(spec.cues.isNotEmpty(), "no cues for $archetype")
             assertTrue(spec.cues.all { it.atMs < spec.durationMs }, "cue past the end in $archetype")
@@ -26,13 +21,15 @@ class PetSceneScriptTest {
     }
 
     @Test
-    fun `scene state drives seq and item and hides compose overlays`() {
-        val (face, _) = PetSceneEngine.resolveScene(PetSceneArchetype.DRINKING, PropType.BOBA_TEA)
-        val plan = RiveAvatarMapper.plan(AvatarState().withFace(face))
-        assertEquals(RiveSeq.SCENE_DRINKING, plan.inputs.seq)
-        assertEquals(1, plan.inputs.item)
-        assertTrue(plan.composeProps.isEmpty())
-        assertEquals(BackgroundTheme.DEFAULT, plan.composeBackground)
+    fun `story archetypes play the robot's closest skit, the rest show emotion and props`() {
+        fun skitFor(archetype: PetSceneArchetype) =
+            AvatarSkits.forSceneName(PetSceneEngine.resolveScene(archetype).first.sceneName)
+        assertEquals(AvatarSkits.ANGRY, skitFor(PetSceneArchetype.ANGRY_MISSILE))
+        assertEquals(AvatarSkits.LOVE, skitFor(PetSceneArchetype.SUPER_LOVE))
+        assertEquals(AvatarSkits.SAD, skitFor(PetSceneArchetype.DRAMATIC_CRY))
+        assertEquals(AvatarSkits.PARTY, skitFor(PetSceneArchetype.CELEBRATION))
+        assertNull(skitFor(PetSceneArchetype.DRINKING))
+        assertNull(skitFor(PetSceneArchetype.EATING))
     }
 
     @Test
@@ -44,26 +41,24 @@ class PetSceneScriptTest {
     }
 }
 
-class RiveMoodStoriesTest {
+class AvatarSkitsTest {
 
     @Test
-    fun `mood stories cover seq 82 to 100 with sounds inside the story`() {
-        val all = com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories.ALL
-        assertEquals((82..100).toList(), all.map { it.seq })
-        for (story in all) {
-            assertTrue(story.cues.isNotEmpty(), "no sound for ${story.name}")
-            assertTrue(story.cues.zipWithNext().all { (a, b) -> a.atMs <= b.atMs }, "cues out of order in ${story.name}")
-            assertTrue(story.cues.all { it.atMs < story.durationMs }, "cue past the end in ${story.name}")
+    fun `every skit has its sounds inside the skit, in order`() {
+        assertEquals(12, AvatarSkits.ALL.size)
+        assertEquals(AvatarSkits.ALL.size, AvatarSkits.ALL.map { it.id }.toSet().size)
+        for (skit in AvatarSkits.ALL) {
+            assertTrue(skit.cues.isNotEmpty(), "no sound for ${skit.id}")
+            assertTrue(skit.cues.zipWithNext().all { (a, b) -> a.atMs <= b.atMs }, "cues out of order in ${skit.id}")
+            assertTrue(skit.cues.all { it.atMs < skit.durationMs }, "cue past the end in ${skit.id}")
         }
     }
 
     @Test
-    fun `emotions pick their mood story and never repeat the last variant`() {
-        val m = com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories
-        assertEquals(listOf(m.SHOCKED), m.variantsFor(com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SURPRISED))
-        assertEquals(listOf(m.CURIOUS), m.variantsFor(com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.CONFUSED))
-        assertTrue(m.variantsFor(com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.LISTENING).isEmpty())
-        assertTrue(m.variantsFor(com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.SPEAKING).isEmpty())
-        repeat(20) { assertTrue(m.pick(m.variantsFor(com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion.ANGRY), m.FUMING) == m.GLITCH) }
+    fun `skits play under the pet brain's scene name`() {
+        assertEquals("godot:party", AvatarSkits.PARTY.sceneName)
+        assertEquals(AvatarSkits.PARTY, AvatarSkits.forSceneName("godot:party"))
+        assertNull(AvatarSkits.forSceneName("godot:nope"))
+        assertEquals(AvatarEmotion.ENRAGED, AvatarSkits.ANGRY.emotion)
     }
 }

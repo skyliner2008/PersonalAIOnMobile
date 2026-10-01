@@ -100,9 +100,6 @@ class JarvisOrchestrator(
     /** Live session READY และ socket ยังเปิดอยู่ */
     val isLiveReady: Boolean get() = liveService.isReady
     val activeToolName: StateFlow<String?> = toolBridge.activeToolName
-    val lastToolResult: StateFlow<Pair<String, String>?> = toolBridge.lastToolResult
-
-    fun clearLastToolResult() = toolBridge.clearLastToolResult()
 
     fun getGeminiService() = geminiService
 

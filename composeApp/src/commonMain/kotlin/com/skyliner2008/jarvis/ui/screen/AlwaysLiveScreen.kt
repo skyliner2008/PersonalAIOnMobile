@@ -31,7 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.skyliner2008.jarvis.camera.DetectedObject
+import com.skyliner2008.jarvis.avatar.AvatarStage
 import com.skyliner2008.jarvis.data.ConnectionState
 import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
 import com.skyliner2008.jarvis.pet.PetModeController
@@ -44,7 +44,6 @@ import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotionColors
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
 import com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState
 import com.skyliner2008.jarvis.ui.theme.JarvisTheme
-import kotlinx.datetime.Clock
 import kotlin.math.PI
 import kotlin.math.absoluteValue
 import kotlin.math.cos
@@ -63,7 +62,7 @@ private val VOICE_SESSION_EMOTIONS = setOf(
  * - Dark gradient background ที่เปลี่ยนตาม emotion
  * - Status badge (LIVE / CONNECTING / ERROR)
  * - Controls: Mic, Camera, Minimize, End
- * - Profile Routing: Virtual Desk Pet (PET) vs Smart Drive & Control (CONTROL / DRIVE)
+ * - Profile Routing: Avatar mode (PET: the Godot robot fullscreen) vs Smart Drive & Control (CONTROL / DRIVE)
  */
 @Composable
 fun AlwaysLiveScreen(
@@ -82,10 +81,7 @@ fun AlwaysLiveScreen(
     onLiveVideoFrame: ((String) -> Unit)? = null,
     isDemoRunning: Boolean = false,
     onToggleDemo: (() -> Unit)? = null,
-    onSetImmersiveMode: ((Boolean) -> Unit)? = null,
-    activeToolName: String? = null,
-    lastToolResult: Pair<String, String>? = null,
-    onDismissToolCard: (() -> Unit)? = null
+    onSetImmersiveMode: ((Boolean) -> Unit)? = null
 ) {
     BackHandler(enabled = true) {
         onEndLive()
@@ -95,16 +91,10 @@ fun AlwaysLiveScreen(
     var lastObservedExternalEmotion by remember { mutableStateOf(avatarState.emotion) }
     var lastObservedExternalFaceState by remember { mutableStateOf(avatarState.faceState) }
 
-    // Live Detection HUD & Vision PIP state
-    var detectedObjects by remember { mutableStateOf<List<DetectedObject>>(emptyList()) }
+    // AI vision (the live session sees through the camera) state
     var isCameraPipOpen by remember { mutableStateOf(false) }
-    var isFrontCam by remember { mutableStateOf(true) }
+    val isFrontCam = true
     var lastLiveFrameSendTime by remember { mutableStateOf(0L) }
-
-    var lastShakeTime by remember { mutableStateOf(0L) }
-    var lastFaceCoords by remember { mutableStateOf<Pair<Float, Float>?>(null) }
-    var lastFaceTime by remember { mutableStateOf(0L) }
-    var currentTick by remember { mutableStateOf(0L) }
     var isMissileBarrageActive by remember { mutableStateOf(false) }
 
     // True while the pet itself (touch, sensors, needs, scenes) owns the emotion.
@@ -154,11 +144,7 @@ fun AlwaysLiveScreen(
     val petVisionProcessor = remember(currentProfile) {
         if (currentProfile == AlwaysLiveProfile.PET) {
             PetVisionBridge.createProcessor(
-                onGazeDetected = { x, y ->
-                    lastFaceCoords = Pair(x, y)
-                    lastFaceTime = Clock.System.now().toEpochMilliseconds()
-                    petController.onGazeTouch(x, y)
-                },
+                onGazeDetected = { x, y -> petController.onGazeTouch(x, y) },
                 onIntruderDetected = { petController.triggerIntruderAlert() },
                 onCopycatSuccess = { petController.onUserMimicSuccess() },
                 getCopycatTarget = { petController.copycatTarget.value },
@@ -188,27 +174,28 @@ fun AlwaysLiveScreen(
         if (isPet) {
             onSetImmersiveMode?.invoke(true)
             petController.start()
+            // every sensor reaction: the robot's body moves at once (AvatarStage.react), the pet brain
+            // picks the emotion that follows
             PetMotionBridge.onShake = {
-                lastShakeTime = Clock.System.now().toEpochMilliseconds()
+                AvatarStage.react("shake")
                 petController.onDizzy()
             }
             PetMotionBridge.onHeavyShake = {
-                lastShakeTime = Clock.System.now().toEpochMilliseconds()
+                AvatarStage.react("heavy_shake")
                 petController.onHeavyShake()
             }
             PetMotionBridge.onBoatRocking = {
+                AvatarStage.react("boat")
                 petController.onBoatRocking()
             }
             PetMotionBridge.onTableThump = {
+                AvatarStage.react("thump")
                 petController.onTableThump()
             }
             PetMotionBridge.onFaceDown = { petController.onFaceDown() }
-            PetMotionBridge.onFaceUp = { petController.onFaceUp() }
-            PetVisionBridge.onObjectsDetected = { objects ->
-                detectedObjects = objects
-                if (objects.isNotEmpty()) {
-                    lastFaceTime = Clock.System.now().toEpochMilliseconds()
-                }
+            PetMotionBridge.onFaceUp = {
+                AvatarStage.react("face_up")
+                petController.onFaceUp()
             }
             PetVisionBridge.onEyeOpenRequest = { open ->
                 isCameraPipOpen = open
@@ -225,7 +212,6 @@ fun AlwaysLiveScreen(
                 PetMotionBridge.onTableThump = null
                 PetMotionBridge.onFaceDown = null
                 PetMotionBridge.onFaceUp = null
-                PetVisionBridge.onObjectsDetected = null
                 PetVisionBridge.onEyeOpenRequest = null
             }
         }
@@ -263,16 +249,8 @@ fun AlwaysLiveScreen(
         val isSpike = level > 0.78f && previousMicLevel < 0.35f
         previousMicLevel = level
         if (currentProfile == AlwaysLiveProfile.PET && isSpike && !activeAvatarState.isSpeaking) {
+            AvatarStage.react("loud")
             petController.onLoudNoise(level)
-        }
-    }
-
-    LaunchedEffect(currentProfile) {
-        if (currentProfile == AlwaysLiveProfile.PET) {
-            while (true) {
-                kotlinx.coroutines.delay(500)
-                currentTick = Clock.System.now().toEpochMilliseconds()
-            }
         }
     }
 
@@ -682,40 +660,16 @@ fun AlwaysLiveScreen(
         val visualizerSize = avatarSize * 1.48f
 
         if (currentProfile == AlwaysLiveProfile.PET) {
-            PetModeContent(
+            AvatarModeContent(
                 activeAvatarState = activeAvatarState,
-                onUpdateActiveAvatarState = { activeAvatarState = it },
                 petController = petController,
                 petVisionProcessor = petVisionProcessor,
-                auraColor = auraColor,
-                isLandscape = isLandscape,
-                screenMaxWidth = screenMaxWidth,
-                screenMaxHeight = screenMaxHeight,
-                activeToolName = activeToolName,
-                lastToolResult = lastToolResult,
-                onDismissToolCard = onDismissToolCard,
-                isDemoRunning = isDemoRunning,
-                onToggleDemo = onToggleDemo,
-                isMuted = isMuted,
-                detectedObjects = detectedObjects,
-                isCameraPipOpen = isCameraPipOpen,
-                onCloseCameraPip = {
-                    isCameraPipOpen = false
-                    lastLiveFrameSendTime = 0L
-                    PetVisionBridge.requestEyeOpen(false)
-                },
-                onToggleCameraPip = { isCameraPipOpen = !isCameraPipOpen },
+                isAiVisionOn = isCameraPipOpen,
                 isFrontCam = isFrontCam,
-                onSwitchCamera = { isFrontCam = !isFrontCam },
                 lastLiveFrameSendTime = lastLiveFrameSendTime,
                 onUpdateLastLiveFrameSendTime = { lastLiveFrameSendTime = it },
                 onLiveVideoFrame = onLiveVideoFrame,
-                onSelectProfile = onSelectProfile,
                 onEndLive = onEndLive,
-                currentTick = currentTick,
-                lastFaceCoords = lastFaceCoords,
-                lastFaceTime = lastFaceTime,
-                lastShakeTime = lastShakeTime,
                 isMissileBarrageActive = isMissileBarrageActive,
                 onMissileBarrageFinished = { isMissileBarrageActive = false }
             )
@@ -1110,7 +1064,7 @@ internal fun ProfileSelectorRow(
                     onClick = { onSelectProfile?.invoke(AlwaysLiveProfile.CONTROL) }
                 )
                 ProfileSelectorItem(
-                    label = "🐾 สัตว์เลี้ยง",
+                    label = "🤖 อวตาร",
                     isSelected = currentProfile == AlwaysLiveProfile.PET,
                     activeColor = Color(0xFFFF4081),
                     onClick = { onSelectProfile?.invoke(AlwaysLiveProfile.PET) }

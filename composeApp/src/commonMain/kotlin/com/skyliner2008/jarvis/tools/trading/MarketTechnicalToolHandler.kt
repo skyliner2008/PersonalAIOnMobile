@@ -1,6 +1,7 @@
 package com.skyliner2008.jarvis.tools.trading
 
 import com.skyliner2008.jarvis.automation.IndicatorAlertProvider
+import com.skyliner2008.jarvis.avatar.AvatarToolData
 import com.skyliner2008.jarvis.data.GeminiService
 import com.skyliner2008.jarvis.logDebug
 import io.ktor.client.*
@@ -46,6 +47,7 @@ internal class MarketTechnicalToolHandler(
         val data = api.getBestEffortPrice(symbol)
 
         if (data.containsKey("error")) return "Price fetch failed: ${data["error"]}"
+        AvatarToolData.publish("trading_price", mapOf("symbol" to symbol.uppercase()) + data)
 
         return buildString {
             appendLine("**${symbol.uppercase()}** - Real-time Price")
@@ -103,6 +105,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getTopGainers(exchange, limit.coerceAtMost(50))
+        AvatarToolData.publishRows("trading_top_gainers", results)
         return formatScanResults("🚀 Top Gainers — $exchange", results)
     }
 
@@ -110,6 +113,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getTopLosers(exchange, limit.coerceAtMost(50))
+        AvatarToolData.publishRows("trading_top_losers", results)
         return formatScanResults("📉 Top Losers — $exchange", results)
     }
 
@@ -147,6 +151,7 @@ internal class MarketTechnicalToolHandler(
         val data = fillTaFromLocal(symbol, interval, api.getTechnicalAnalysis(symbol, resolvedExchange, interval))
 
         if (data.containsKey("error")) return "TA error: ${data["error"]}"
+        AvatarToolData.publish("trading_technical_analysis", mapOf("symbol" to symbol.uppercase(), "interval" to interval) + data)
 
         val signal = data["signal"] ?: "N/A"
         val score  = data["recommend_score"] ?: "N/A"
@@ -367,6 +372,7 @@ internal class MarketTechnicalToolHandler(
 
         val fng = api.getFearGreedIndex(7)
         fng["error"]?.let { return "⚠️ ดึง Fear & Greed Index ไม่สำเร็จ ($it)" }
+        AvatarToolData.publish("trading_fear_greed", fng)
 
         val value = fng["value"]?.toIntOrNull() ?: 0
         val classification = fng["classification"] ?: "Unknown"

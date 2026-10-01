@@ -35,7 +35,10 @@
 | [[JarvisViewModel]] | State orchestration ฝั่ง UI |
 | [[LocalEmbeddingSystem]] | Embedding ฝั่ง local สำหรับ vector memory |
 | [[Always_AI_Live_Mode]] | ระบบ Always AI Live (Full-screen, Mini Robot Overlay, Wake-on-voice) |
-| [[Pet_Avatar_Canvas]] | หน้าสัตว์เลี้ยงแบบ Compose Canvas: การวาดดวงตา, kinematics, การเคลื่อนไหว, กฎ performance |
+| [[Avatar_Mode]] | **Avatar mode** (เดิมโหมดสัตว์เลี้ยง): หุ่น Godot เต็มจอเป็น Engine เดียวของแอป — process `:avatar`, bridge JSON, แตะ/กล้อง/ไจโร/เขย่า, ฉากข้อมูลจาก tool, หน้าหุ่นสำหรับ Drive/Overlay |
+| [[Pet_Avatar_Canvas]] | (ถอดออกแล้ว 2026-10-01) หน้าสัตว์เลี้ยงแบบ Compose Canvas — เก็บเป็นประวัติ |
+| [[Pet_Robot_3D]] | (ถอดออกแล้ว 2026-10-01) Engine หุ่น 3D แบบเฟรม Blender + ตา Canvas — เก็บเป็นประวัติ |
+| [[Pet_Godot_Lab]] | ตัวละครเกมใน Godot (โต๊ะออกแบบบนคอม + Engine ของ Avatar mode ในแอป): rig + 9 ท่า + อุปกรณ์ 25 ชิ้น (ชุดเกราะ/เจ็ตแพ็ก/ผ้าคลุม) + ตา shader 11 แบบ + ฉาก 12 แบบ + บทละคร 12 ฉาก JSON สำหรับสมอง AI + ฉากข้อมูล (อากาศ/งบดุล/markdown) บนการ์ดโฮโลแกรม 3D (`pet_godot/`) |
 
 ### 03 Tools — เครื่องมือ
 | ไฟล์ | หน้าที่ |

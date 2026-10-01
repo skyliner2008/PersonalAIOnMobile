@@ -9,8 +9,8 @@ import com.skyliner2008.jarvis.ui.component.avatar.BackgroundTheme
 import com.skyliner2008.jarvis.ui.component.avatar.PropType
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp
 import com.skyliner2008.jarvis.ui.component.avatar.withFace
-import com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories
-import com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStory
+import com.skyliner2008.jarvis.avatar.AvatarSkit
+import com.skyliner2008.jarvis.avatar.AvatarSkits
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -429,44 +429,59 @@ class PetModeController(
         label: String? = null
     ): Long {
         val (faceState, spec) = PetSceneEngine.resolveScene(archetype, specificProp)
+        return startArchetypeScene(faceState.copy(speechText = label), spec, durationMs)
+    }
+
+    /**
+     * An archetype scene: when the robot has a skit for it (angry missile, super love, dramatic cry,
+     * celebration …) the skit plays with its own sound timeline and length (its rockets replace the
+     * missile barrage); otherwise the robot shows the scene's emotion and props with the scene's sounds.
+     */
+    private fun startArchetypeScene(faceState: RobotFaceState, spec: PetSceneSpec, durationMs: Long? = null): Long {
+        val skit = AvatarSkits.forSceneName(faceState.sceneName)
+        if (skit != null) {
+            val duration = skit.durationMs + SCENE_TAIL_MS
+            startScene(faceState, spec.nameTh, skit.cues, duration, triggerMissileBarrage = false)
+            return duration
+        }
         val duration = durationMs ?: spec.durationMs
-        startScene(faceState.copy(speechText = label), spec.nameTh, spec.cues.ifEmpty { listOf(SceneCue(0L, spec.sound)) },
+        startScene(faceState, spec.nameTh, spec.cues.ifEmpty { listOf(SceneCue(0L, spec.sound)) },
             duration, spec.triggerMissileBarrage)
         return duration
     }
 
     /**
-     * เล่นเรื่องสั้นตามอารมณ์ (ตาเยลลี่, seq 82–100) จนจบ — ใช้จากปุ่มเดโม่และคำสั่งเสียง
-     * @return ความยาวของเรื่อง (ms)
+     * เล่นละครสั้นของหุ่น (pet_godot/scenes, ~10 วินาที) จนจบ พร้อมเสียงตามไทม์ไลน์ของฉาก
+     * — ใช้จากปุ่มเดโม่และคำสั่งเสียง
+     * @return ความยาวของฉาก (ms)
      */
-    fun playMoodStory(story: RiveMoodStory, label: String? = null): Long {
+    fun playSkit(skit: AvatarSkit, label: String? = null): Long {
         val face = RobotFaceState(
-            emotionName = story.emotion.name.lowercase(),
-            sceneName = story.name,
+            emotionName = skit.emotion.name.lowercase(),
+            sceneName = skit.sceneName,
             speechText = label
         )
-        val duration = story.durationMs + SCENE_TAIL_MS
-        startScene(face, story.nameTh, story.cues, duration, triggerMissileBarrage = false)
+        val duration = skit.durationMs + SCENE_TAIL_MS
+        startScene(face, skit.nameTh, skit.cues, duration, triggerMissileBarrage = false)
         return duration
     }
 
     /**
-     * สั่งเล่นฉากจากชื่อหรือคีย์เวิร์ด (ไทยหรืออังกฤษ): เรื่องอารมณ์ (ชื่อ/คำเฉพาะ) ก่อน แล้วค่อย Pet Scene
+     * สั่งเล่นฉากจากชื่อหรือคีย์เวิร์ด (ไทยหรืออังกฤษ): ละครของหุ่น (ชื่อ/คำเฉพาะ) ก่อน แล้วค่อย Pet Scene
      * @return ชื่อฉากภาษาไทยที่เล่น หรือ null ถ้าไม่รู้จัก
      */
     fun playSceneByNameOrKeyword(keyword: String, specificProp: PropType? = null): String? {
-        val mood = RiveMoodStories.resolveKeyword(keyword)
-        if (mood != null) {
-            logDebug(TAG, "🎬 playSceneByNameOrKeyword: '$keyword' -> mood ${mood.name}")
-            playMoodStory(mood)
-            return mood.nameTh
+        val skit = AvatarSkits.resolveKeyword(keyword)
+        if (skit != null) {
+            logDebug(TAG, "🎬 playSceneByNameOrKeyword: '$keyword' -> skit ${skit.id}")
+            playSkit(skit)
+            return skit.nameTh
         }
         val resolved = PetSceneEngine.resolveFromKeyword(keyword, specificProp)
         if (resolved != null) {
             val (faceState, spec) = resolved
             logDebug(TAG, "🎬 playSceneByNameOrKeyword: '$keyword' -> ${spec.archetype.name}")
-            startScene(faceState, spec.nameTh, spec.cues.ifEmpty { listOf(SceneCue(0L, spec.sound)) },
-                spec.durationMs, spec.triggerMissileBarrage)
+            startArchetypeScene(faceState, spec)
             return spec.nameTh
         }
         logDebug(TAG, "⚠️ playSceneByNameOrKeyword: No match for '$keyword'")

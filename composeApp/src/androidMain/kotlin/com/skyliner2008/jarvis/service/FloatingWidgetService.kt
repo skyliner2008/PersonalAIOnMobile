@@ -41,7 +41,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.skyliner2008.jarvis.MainActivity
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
-import com.skyliner2008.jarvis.ui.component.avatar.JarvisAvatar
+import com.skyliner2008.jarvis.ui.component.avatar.RobotSprite
 import com.skyliner2008.jarvis.ui.theme.JarvisTheme
 
 /**
@@ -50,7 +50,7 @@ import com.skyliner2008.jarvis.ui.theme.JarvisTheme
  * Evolution จาก text bubble เดิม → animated robot avatar ตัวเล็ก
  *
  * Features:
- *  - ComposeView ที่ render JarvisAvatar ขนาด ~80dp
+ *  - ComposeView ที่แสดงหน้าหุ่น Godot (RobotSprite, ภาพเรนเดอร์ล่วงหน้า) ขนาด ~80dp
  *  - แสดงอารมณ์ตาม AvatarState จาก AlwaysLiveManager
  *  - ลากเพื่อย้ายตำแหน่งได้ + snap to edges
  *  - แตะเพื่อเปิด app หลัก
@@ -217,7 +217,7 @@ class FloatingWidgetService : Service() {
     }
 
     /**
-     * Create ComposeView-based floating widget with animated JarvisAvatar
+     * Create ComposeView-based floating widget with the Godot robot's face (RobotSprite)
      */
     private fun createComposeFloatingView(sizePixels: Int): View {
         val composeView = ComposeView(this).apply {
@@ -242,7 +242,7 @@ class FloatingWidgetService : Service() {
                         .background(JarvisTheme.Dark.copy(alpha = 0.85f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    JarvisAvatar(
+                    RobotSprite(
                         state = currentState,
                         modifier = Modifier.size(72.dp)
                     )

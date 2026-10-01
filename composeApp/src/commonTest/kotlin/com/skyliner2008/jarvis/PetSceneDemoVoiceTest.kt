@@ -1,13 +1,11 @@
 package com.skyliner2008.jarvis
 
+import com.skyliner2008.jarvis.avatar.AvatarSkits
 import com.skyliner2008.jarvis.pet.PetModeController
 import com.skyliner2008.jarvis.pet.PetSceneArchetype
 import com.skyliner2008.jarvis.pet.PetSceneEngine
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
-import com.skyliner2008.jarvis.ui.component.avatar.RiveAvatarMapper
-import com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories
-import com.skyliner2008.jarvis.ui.component.avatar.RiveSeq
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -68,28 +66,27 @@ class PetSceneDemoVoiceTest {
     }
 
     @Test
-    fun `mood stories are reachable by name and by voice`() {
-        for (story in RiveMoodStories.ALL) {
-            assertEquals(story, RiveMoodStories.resolveKeyword(story.name), story.name)
-            assertEquals(story.seq, RiveSeq.forScene(story.name))
-            for (kw in story.keywords) {
-                assertEquals(story, RiveMoodStories.resolveKeyword("เล่น $kw หน่อย"), "keyword '$kw'")
+    fun `skits are reachable by id and by voice`() {
+        for (skit in AvatarSkits.ALL) {
+            assertEquals(skit, AvatarSkits.resolveKeyword(skit.id), skit.id)
+            for (kw in skit.keywords) {
+                assertEquals(skit, AvatarSkits.resolveKeyword("เล่น $kw หน่อย"), "keyword '$kw'")
             }
         }
-        assertEquals(RiveMoodStories.YOYO, RiveMoodStories.resolveKeyword("เล่นโยโย่ให้ดูหน่อย"))
-        assertEquals(RiveMoodStories.CURIOUS, RiveMoodStories.resolveKeyword("ใส่แว่นขยาย"))
+        assertEquals(AvatarSkits.PARTY, AvatarSkits.resolveKeyword("ฉลองปาร์ตี้กันเลย"))
+        assertEquals(AvatarSkits.DIZZY, AvatarSkits.resolveKeyword("มึนหัวไปหมดแล้ว"))
     }
 
     @Test
-    fun `voice keyword plays a scene or mood story with its Rive story`() = runBlocking {
+    fun `voice keyword plays a skit or a scene`() = runBlocking {
         val (c, state, scope) = controller()
-        assertEquals("ว่างงาน: โยโย่", c.playSceneByNameOrKeyword("โยโย่"))
-        assertEquals(RiveSeq.forScene("MoodYoYo"), RiveAvatarMapper.plan(state()).inputs.seq)
+        assertEquals("ปาร์ตี้", c.playSceneByNameOrKeyword("ปาร์ตี้"))
+        assertEquals(AvatarSkits.PARTY, AvatarSkits.forSceneName(state().faceState.sceneName))
         val firstId = state().faceState.sceneId
 
         assertNotNull(c.playSceneByNameOrKeyword("vr_mode"))
-        assertEquals(RiveSeq.SCENE_VR, RiveAvatarMapper.plan(state()).inputs.seq)
-        assertNotEquals(firstId, state().faceState.sceneId, "a new scene restarts its story")
+        assertEquals("vr_mode", state().faceState.sceneName)
+        assertNotEquals(firstId, state().faceState.sceneId, "a new scene starts over")
         assertEquals(null, c.playSceneByNameOrKeyword("xyz-not-a-scene"))
         scope.cancel()
     }
@@ -97,9 +94,9 @@ class PetSceneDemoVoiceTest {
     @Test
     fun `a scene keeps playing through touches and ends by itself`() = runBlocking {
         val (c, state, scope) = controller()
-        c.playScene(PetSceneArchetype.MEME_RICH, durationMs = 600L, label = "🎬 1/37 · test")
+        c.playScene(PetSceneArchetype.MEME_RICH, durationMs = 600L, label = "🎬 1/23 · test")
         assertEquals("meme_rich", state().faceState.sceneName)
-        assertEquals("🎬 1/37 · test", state().faceState.speechText)
+        assertEquals("🎬 1/23 · test", state().faceState.speechText)
 
         delay(200L)
         c.onPoke(com.skyliner2008.jarvis.pet.TouchZone.FACE_CENTER)
@@ -112,21 +109,21 @@ class PetSceneDemoVoiceTest {
     }
 
     @Test
-    fun `stopping the demo stops the scene at once`() = runBlocking {
+    fun `stopping the demo stops the skit at once`() = runBlocking {
         val (c, state, scope) = controller()
-        c.playMoodStory(RiveMoodStories.GLITCH, label = "🎬 test")
+        c.playSkit(AvatarSkits.DIZZY, label = "🎬 test")
         assertTrue(c.isScenePlaying)
         c.stopScene()
         assertTrue(state().faceState.sceneName.isBlank())
-        assertEquals(RiveSeq.NONE, RiveAvatarMapper.plan(state()).inputs.seq)
         scope.cancel()
     }
 
     @Test
-    fun `showcase covers every scene exactly once`() {
-        val names = PetSceneArchetype.entries.map { it.name.lowercase() } + RiveMoodStories.ALL.map { it.name }
-        assertEquals(37, names.size)
+    fun `showcase covers every skit and every archetype without one, once`() {
+        val archetypes = PetSceneArchetype.entries.map { it.name.lowercase() }
+            .filter { AvatarSkits.forSceneName(it) == null }
+        val names = AvatarSkits.ALL.map { it.sceneName } + archetypes
+        assertEquals(23, names.size)
         assertEquals(names.size, names.toSet().size)
-        assertTrue(names.all { RiveSeq.forScene(it) != null }, "every showcase entry has a Rive story")
     }
 }

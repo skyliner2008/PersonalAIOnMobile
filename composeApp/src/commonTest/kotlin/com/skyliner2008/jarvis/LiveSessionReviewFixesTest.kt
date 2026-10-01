@@ -142,6 +142,11 @@ class LiveSessionReviewFixesTest {
     fun `open pet mode is not parsed as close`() {
         val cmd = LiveLocalCommandParser.parse("เปิดโหมดสัตว์เลี้ยง")
         assertEquals(LiveLocalCommandParser.AlwaysLiveCommand(turnOn = true, mode = "pet"), cmd.alwaysLive)
+        // Avatar mode is the new name of the same mode (the "pet" profile)
+        assertEquals(LiveLocalCommandParser.AlwaysLiveCommand(turnOn = true, mode = "pet"),
+            LiveLocalCommandParser.parse("เปิดโหมดอวตาร").alwaysLive)
+        assertEquals(LiveLocalCommandParser.AlwaysLiveCommand(turnOn = false, mode = "pet"),
+            LiveLocalCommandParser.parse("ปิดโหมดอวตาร").alwaysLive)
         val off = LiveLocalCommandParser.parse("ปิดโหมดขับขี่")
         assertEquals(LiveLocalCommandParser.AlwaysLiveCommand(turnOn = false, mode = "drive"), off.alwaysLive)
     }

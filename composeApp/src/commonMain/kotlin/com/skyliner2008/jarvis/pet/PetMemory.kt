@@ -196,25 +196,6 @@ object PetMemoryStore {
         _memoryFlow.value = _memoryFlow.value.copy(savedNeedsState = needs)
     }
 
-    private const val ENGINE_KEY = "pet.avatar_engine"
-
-    /** Engine ที่ผู้ใช้เลือกไว้ล่าสุด (ชื่อ enum AvatarEngineType) หรือ null ถ้ายังไม่เคยเลือก */
-    fun loadAvatarEngine(): String? = try {
-        JarvisDatabaseHolder.database?.jarvisDatabaseQueries?.getSetting(ENGINE_KEY)?.executeAsOneOrNull()
-    } catch (e: Exception) {
-        logDebug(TAG, "⚠️ Failed to load avatar engine: ${e.message}")
-        null
-    }
-
-    /** จำ Engine ที่เลือกข้ามการเปิดแอป */
-    fun saveAvatarEngine(name: String) {
-        try {
-            JarvisDatabaseHolder.database?.jarvisDatabaseQueries?.insertSetting(ENGINE_KEY, name)
-        } catch (e: Exception) {
-            logDebug(TAG, "⚠️ Failed to save avatar engine: ${e.message}")
-        }
-    }
-
     /**
      * รีเซ็ต PetMemory ทั้งหมด (สำหรับ New Game)
      */

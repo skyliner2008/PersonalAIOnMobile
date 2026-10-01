@@ -88,7 +88,7 @@ object DeviceToolDefinitions {
                     ),
                     "mode" to ParameterProperty(
                         type = "STRING",
-                        description = "รูปแบบโหมดเสริม (optional): 'control' (โหมดควบคุมทั่วไป), 'drive' (โหมดขับขี่), 'car' (โหมดรถยนต์), 'pet' (โหมดสัตว์เลี้ยงตั้งโต๊ะ)",
+                        description = "รูปแบบโหมดเสริม (optional): 'control' (โหมดควบคุมทั่วไป), 'drive' (โหมดขับขี่), 'car' (โหมดรถยนต์), 'avatar' (โหมดอวตาร: หุ่น 3D เต็มจอ — เดิมชื่อโหมดสัตว์เลี้ยง, 'pet' ใช้ได้เหมือนกัน)",
                         enum = listOf("control", "drive", "car", "pet")
                     )
                 ),

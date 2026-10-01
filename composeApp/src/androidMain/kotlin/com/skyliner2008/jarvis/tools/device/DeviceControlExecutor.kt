@@ -442,6 +442,14 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                 val minTemp = daily?.get("temperature_2m_min")?.jsonArray?.firstOrNull()?.jsonPrimitive?.doubleOrNull ?: temp
                 val rainProb = daily?.get("precipitation_probability_max")?.jsonArray?.firstOrNull()?.jsonPrimitive?.intOrNull ?: 0
 
+                // the robot's weather card in Avatar mode (fields as in pet_godot/data_samples/device_weather.json)
+                com.skyliner2008.jarvis.avatar.AvatarToolData.publish("device_weather", mapOf(
+                    "location" to (locationName ?: ""), "temp" to temp, "feels_like" to apparentTemp,
+                    "humidity" to humidity, "precipitation" to precipitation, "weather_code" to weatherCode,
+                    "wind" to windSpeed, "max" to maxTemp, "min" to minTemp, "rain_prob" to rainProb,
+                    "is_day" to (current["is_day"]?.jsonPrimitive?.intOrNull ?: 1), "source" to "Open-Meteo"
+                ))
+
                 // WMO Weather Interpretation Codes
                 val weatherDesc: String
                 val emoji: String
@@ -461,15 +469,18 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                     else -> { weatherDesc = "สภาพอากาศปกติ"; emoji = "🌤️"; isRain = false; isThunder = false; isSunny = false }
                 }
 
-                // Trigger contextual props and background on Pet/Avatar
+                // Avatar mode: the robot's stage and gear follow the weather. Only there — the face command opens the
+                // full-screen Live UI, and in the normal profile that is the Drive screen, whose robot face shows no stage
+                // or gear (logcat 2026-10-01 16:51: a sunny day threw the user into Drive mode unasked)
+                val decorate = com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode
                 val mainActivity = MainActivity.instance
                 if (isRain || isThunder) {
                     val cmd = "SPEAKING|background=rainy|props=umbrella,cloud,rain_drops"
-                    mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    if (decorate) { mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd) }
                     com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.SURPRISE)
                 } else if (isSunny || temp >= 33.0) {
                     val cmd = "SPEAKING|background=sunny|props=sun,sunglasses"
-                    mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd)
+                    if (decorate) { mainActivity?.triggerTestEmotion(cmd) ?: broadcastEmotionIntent(cmd) }
                     com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.CHIRP_HAPPY)
                 } else {
                     com.skyliner2008.jarvis.sound.RobotSoundEngine.play(com.skyliner2008.jarvis.sound.RobotSoundEngine.SoundType.SPARKLE)
@@ -510,7 +521,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         val rawAction = args["action"]?.lowercase()?.trim() ?: "on"
         val mode = args["mode"]?.lowercase()?.trim()
         val isDriveMode = mode in setOf("drive", "car", "ขับขี่", "รถยนต์") || rawAction in setOf("drive", "car")
-        val isPetMode = mode in setOf("pet", "animal", "สัตว์เลี้ยง", "แก้เบื่อ", "desk_pet", "toy") || rawAction in setOf("pet", "สัตว์เลี้ยง")
+        // Avatar mode (the Godot robot; the profile is still PET, and the old "pet" words keep working)
+        val isPetMode = mode in setOf("avatar", "อวตาร", "อวาตาร์", "pet", "animal", "สัตว์เลี้ยง", "แก้เบื่อ", "desk_pet", "toy") ||
+            rawAction in setOf("avatar", "อวตาร", "pet", "สัตว์เลี้ยง")
 
         val isExplicitOff = rawAction in setOf("off", "ปิด", "stop", "disable", "exit", "ออก", "close")
 
@@ -520,7 +533,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             MainActivity.instance?.closeAlwaysLive()
                 ?: com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstanceOrNull()?.disable()
             return if (isPetMode) {
-                "🐾 ปิดโหมดสัตว์เลี้ยงเรียบร้อยแล้วค่ะ ไว้มาเล่นกับน้องใหม่น้าา บ๊ายบายค่ะ"
+                "🤖 ปิดโหมดอวตารเรียบร้อยแล้วค่ะ ไว้มาเล่นกับน้องใหม่น้าา บ๊ายบายค่ะ"
             } else if (isDriveMode) {
                 "🚗 ปิดโหมดขับขี่เรียบร้อยแล้วค่ะ"
             } else {
@@ -557,7 +570,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
         MainActivity.instance?.expandAlwaysLive(profile)
 
         return if (isPetMode) {
-            "🐾 เปิดโหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) เรียบร้อยแล้วค่ะ! พร้อมเล่น ลูบหัว และอยู่เป็นเพื่อนแล้วน้า งุ้ยย ✨"
+            "🤖 เปิดโหมดอวตาร (หุ่น 3D เต็มจอ) เรียบร้อยแล้วค่ะ! จิ้ม ลูบหัว เขย่า หรือเอียงมือถือเล่นกับน้องได้เลยน้า ✨"
         } else if (isDriveMode) {
             "🚗 เปิดโหมดขับขี่ / โหมดรถยนต์ (โหมดควบคุม) เรียบร้อยแล้วค่ะ พร้อมดูแลและรับคำสั่งด้วยเสียงตลอดการเดินทางนะคะ"
         } else {
@@ -799,7 +812,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             waited += 100
             pet = com.skyliner2008.jarvis.pet.PetModeController.activeInstance
         }
-        pet ?: return "❌ ยังไม่ได้อยู่ในโหมดสัตว์เลี้ยง — เปิดด้วย device_always_live(action='on', mode='pet') ก่อนค่ะ"
+        pet ?: return "❌ ยังไม่ได้อยู่ในโหมดอวตาร — เปิดด้วย device_always_live(action='on', mode='avatar') ก่อนค่ะ"
         val food = args["food"]?.let { com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState.resolvePropType(it) }
         when (action) {
             "feed" -> pet.feedPet(food)
@@ -1507,7 +1520,7 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
     // ███ 4. SYSTEM INFO ███
     // ═══════════════════════════════════════════════════════════════════════
 
-    private fun executeBatteryStatus(): String {
+    private suspend fun executeBatteryStatus(): String {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val isCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -1516,6 +1529,9 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             false
         }
         val chargingStr = if (isCharging) "กำลังชาร์จ ⚡" else "ไม่ได้ชาร์จ"
+        com.skyliner2008.jarvis.avatar.AvatarToolData.publish(
+            "device_battery_status", mapOf("level" to level, "charging" to isCharging)
+        )
         return "🔋 แบตเตอรี่: ${level}% ($chargingStr)"
     }
 

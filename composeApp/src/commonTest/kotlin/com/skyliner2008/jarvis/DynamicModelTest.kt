@@ -121,9 +121,12 @@ class DynamicModelTest {
     }
 
     @Test
-    fun testLiveSystemPrompt_ContainsConsistentThaiGreeting() {
+    fun testLiveSystemPrompt_GreetsOnceInItsOwnWords() {
         val livePrompt = com.skyliner2008.jarvis.ai.JarvisPersona.LIVE_SYSTEM_PROMPT
-        assertTrue(livePrompt.contains("จาวิสพร้อมคุยแล้ว"), "Live prompt must instruct fixed Thai greeting")
+        // no word-for-word greeting: the model said it instead of the answer after tool results
+        // (logcat 2026-10-01 23:29:08 gold price, 23:29:59 the job handed to the assistant)
+        kotlin.test.assertFalse(livePrompt.contains("จาวิสพร้อมคุยแล้ว"), "Live prompt must not give a greeting to repeat")
+        assertTrue(livePrompt.contains("ทักทายได้ครั้งเดียวต่อเซสชัน"), "Live prompt must allow one greeting per session")
         assertTrue(livePrompt.contains("การออกเสียงและสำเนียงภาษาไทย"), "Live prompt must enforce natural standard Thai articulation")
     }
 

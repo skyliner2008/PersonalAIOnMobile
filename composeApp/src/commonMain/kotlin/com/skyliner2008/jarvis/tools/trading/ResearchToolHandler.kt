@@ -518,6 +518,11 @@ internal class ResearchToolHandler(
 
             // ซิงค์สัญลักษณ์หุ้นเข้าสู่ระบบกราฟและแดชบอร์ด
             ChartStateManager.updateSymbol(fundamental.ticker)
+            // งบดุลแบบตัวเลขดิบให้ฉากงบดุลของหุ่น (Avatar mode)
+            com.skyliner2008.jarvis.avatar.AvatarToolData.publishJson(
+                "trading_fundamental_analysis",
+                kotlinx.serialization.json.Json.encodeToJsonElement(StockFundamentalData.serializer(), fundamental)
+            )
 
             // จัดเตรียมข้อเท็จจริงและตัวเลขทางการเงิน
             val cur = fundamental.currency.ifBlank { "THB" }
@@ -679,6 +684,7 @@ internal class ResearchToolHandler(
     internal suspend fun executeCryptoOverview(@Suppress("UNUSED_PARAMETER") args: Map<String, String>): String {
         val global = api.getCryptoGlobal()
         global["error"]?.let { return "⚠️ ดึงข้อมูลตลาดคริปโตไม่สำเร็จ ($it)" }
+        com.skyliner2008.jarvis.avatar.AvatarToolData.publish("trading_crypto_overview", global)
 
         fun fmtUsd(raw: String): String {
             val v = raw.toDoubleOrNull() ?: return raw

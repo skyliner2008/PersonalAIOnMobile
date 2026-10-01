@@ -7,8 +7,11 @@ sources:
   - composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/RiveMoodStories.kt
   - composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/RiveAvatarView.kt
 created: 2026-09-15
-updated: 2026-09-15
+updated: 2026-10-01
 ---
+
+> **ถอดออกจากแอปแล้ว (2026-10-01)** — เรื่องสั้นของ Rive (`RiveMoodStories`) ถูกลบพร้อม Engine Rive
+> แทนด้วยละคร 12 ฉากของหุ่น Godot (`avatar/AvatarSkits.kt` + `pet_godot/scenes/*.json`) ดู [[Avatar_Mode]]
 
 # Pet Mood Scripts (บทอารมณ์)
 

@@ -38,15 +38,20 @@ class PendingAnswerQueue(
     /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — รันจนเสร็จแล้ว เก็บผลไว้ตอบทีหลัง */
     fun addToolResult(question: String, toolName: String, result: String, nowMs: Long) {
         val q = question.trim()
-        // ผลเก่าของ tool เดียวกันถูกแทนด้วยผลใหม่; ข้อ "ยังไม่ได้ตอบ" ของประโยคเดียวกันถูกแทนด้วยผลจริง
-        // (ไม่ลบผลของ tool อื่นที่บังเอิญติดประโยคเดียวกัน — ถามรัว ประโยคล่าสุดอาจไม่ใช่ของ call นี้)
-        items.removeAll { it.toolName == toolName || (it.toolName == null && same(it.question, q)) }
+        // ผลเก่าของเรื่องเดียวกัน (tool + หัวผลเดียวกัน) ถูกแทนด้วยผลใหม่; ข้อ "ยังไม่ได้ตอบ" ของประโยคเดียวกันถูกแทนด้วยผลจริง
+        // (ไม่ลบผลของ tool อื่นที่บังเอิญติดประโยคเดียวกัน — ถามรัว ประโยคล่าสุดอาจไม่ใช่ของ call นี้; ไม่ลบผลของ
+        // tool เดียวกันคนละเรื่อง — ราคาทองกับราคา Bitcoin)
+        items.removeAll { sameResult(it, toolName, result) || (it.toolName == null && same(it.question, q)) }
         push(Item(q.ifBlank { "(คำถามก่อนหน้า)" }, toolName, result, nowMs))
     }
 
-    /** tool นี้ได้คำตอบด้วยเสียงแล้วในเทิร์นที่จบปกติ — ผลค้างของ tool เดียวกันไม่ต้องตอบซ้ำ */
-    fun onToolAnswered(toolName: String) {
-        items.removeAll { it.toolName == toolName }
+    /**
+     * ผล [result] ของ [toolName] ได้คำตอบด้วยเสียงแล้ว — ผลค้างของเรื่องเดียวกันไม่ต้องตอบซ้ำ
+     * (เดิมดูแค่ชื่อ tool: ถามราคาทองแล้วถูกเสียงแทรก ผลเข้าคิว → ถาม Bitcoin ต่อ (trading_price เหมือนกัน)
+     * → ผลทองถูกลบทิ้งไม่ได้รายงานเลย, logcat 2026-10-01 21:32–21:33)
+     */
+    fun onToolAnswered(toolName: String, result: String) {
+        items.removeAll { sameResult(it, toolName, result) }
     }
 
     /**
@@ -81,8 +86,8 @@ class PendingAnswerQueue(
     fun requeueFront(item: Item): Boolean {
         val next = item.copy(attempts = item.attempts + 1)
         if (next.attempts >= MAX_ATTEMPTS) return false
-        // มีผลใหม่กว่าของ tool เดียวกันรออยู่แล้ว — ใช้ของใหม่
-        if (item.toolName != null && items.any { it.toolName == item.toolName }) return false
+        // มีผลใหม่กว่าของเรื่องเดียวกันรออยู่แล้ว — ใช้ของใหม่
+        if (item.toolName != null && items.any { sameResult(it, item.toolName, item.result) }) return false
         items.addFirst(next)
         while (items.size > maxItems) items.removeLast()
         return true
@@ -108,6 +113,17 @@ class PendingAnswerQueue(
         return sentResults.size
     }
 
+    /**
+     * เทิร์นที่มีผล tool แต่ AI พูดแค่ประโยคทักทายเปิดเซสชัน ([LiveProtocol.isSessionGreetingOnly]) — ผู้ใช้ยังไม่ได้ยินผล
+     * เหมือนเทิร์นที่ถูกตัด: ผลเข้าคิวรายงานตอนเงียบ (logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ราคา BTC และอากาศหายเงียบ)
+     * ผลของ tool เปลี่ยนหน้าตา/โหมด ([LiveProtocol.UI_ONLY_TOOLS]) ไม่ใช่เรื่องที่ต้องรายงาน คืนจำนวนที่เข้าคิว
+     */
+    fun onGreetingOnlyAnswer(sentResults: List<Triple<String, String, String>>, nowMs: Long): Int {
+        val reports = sentResults.filter { it.second !in LiveProtocol.UI_ONLY_TOOLS }
+        reports.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }
+        return reports.size
+    }
+
     private fun push(item: Item) {
         items.addLast(item)
         while (items.size > maxItems) items.removeFirst()
@@ -119,6 +135,16 @@ class PendingAnswerQueue(
         private val FILLERS = setOf("ครับ", "ค่ะ", "คะ", "โอเค", "ok", "อืม", "เอ่อ", "หยุด", "พอ", "เดี๋ยว", "เดี๋ยวก่อน", "ไม่เป็นไร")
 
         private fun normalize(s: String) = s.lowercase().filterNot { it.isWhitespace() }
+
+        /**
+         * หัวของผล (บรรทัดแรก: "**XAUUSD=X** - Real-time Price", "⛅ สภาพอากาศ: ตำบล บานา…") — บอกว่าผลนี้เป็นเรื่องอะไร
+         * แม่นกว่าประโยคที่ติดมากับ call (ถามรัว ประโยคล่าสุดอาจเป็นของคำถามอื่น)
+         */
+        fun subject(result: String?): String? =
+            result?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() }?.take(80)
+
+        private fun sameResult(item: Item, toolName: String?, result: String?): Boolean =
+            item.toolName != null && item.toolName == toolName && subject(item.result) == subject(result)
 
         /** ถามซ้ำ: เหมือนกันหรือข้อหนึ่งครอบอีกข้อ (transcript อาจมีคำลงท้ายต่างกัน) */
         fun same(a: String, b: String): Boolean {

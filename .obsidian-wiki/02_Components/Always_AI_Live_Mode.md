@@ -19,6 +19,12 @@ updated: 2026-09-13
 
 # Always AI Live Mode (2026-09-06)
 
+> **อัปเดต 2026-10-01 — โหมดสัตว์เลี้ยง (PET) กลายเป็น Avatar mode**: หุ่น Godot เต็มจอเป็น Engine เดียว ไม่มีปุ่ม
+> (ปุ่มย้อนกลับปิดโหมด) ดู [[Avatar_Mode]] · ส่วนที่เกี่ยวกับการวาด (`JarvisAvatar`, `PetRobotHeadAvatar`, Rive, `PetModeScreen`,
+> การ์ดข้อความ, `PetSettingsDialog`, แถบสถานะ, missile overlay, มือโฮโลแกรม) ด้านล่าง **เป็นประวัติ — ถูกลบแล้ว** ·
+> สมอง (`PetModeController`, `PetStateMachine`, needs, `PetMotionDetector`, `PetVisionDetector`) ยังใช้อยู่เหมือนเดิม ·
+> Drive mode และ floating overlay แสดงหน้าหุ่น Godot แบบภาพ (`RobotSprite`) แทน `JarvisAvatar`
+
 Always AI Live Mode elevates PersonalAIBot to a continuous, companion-level AI that operates seamlessly across full-screen interactions, floating overlays over other apps, and background wake-on-call even when the device is locked or screen is off.
 
 ---

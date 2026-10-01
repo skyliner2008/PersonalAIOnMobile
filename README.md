@@ -6,6 +6,134 @@
 [![Release APK](https://img.shields.io/github/v/release/skyliner2008/PersonalAIOnMobile?color=brightgreen&label=Download%20Release%20APK&logo=android)](https://github.com/skyliner2008/PersonalAIOnMobile/releases)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Avatar mode: the Godot robot is the app's only avatar engine (2026-10-01):** Pet mode is now **Avatar mode**. It shows the 3D robot from `pet_godot/` fullscreen, with no buttons (Android back closes it). It still reacts to the camera (it looks at your face), tilt, shakes and touches.
+> - **Removed:** the Compose Canvas pet, the Rive engine (`rive-android`, `avatar.riv`), the pre-rendered 3D frames, `JarvisAvatar` and the Pet screen's buttons, cards and dialogs.
+> - **How it runs:**
+>   - Godot 4.7's remote engine runs in its own `:avatar` process and draws into the app through `RemoteGodotFragment`.
+>   - Closing the mode ends that process.
+>   - If the app stays in the background for 30 s, the engine is released.
+>   - An engine that dies is restarted. After 3 deaths within 60 s the app stops trying and shows the robot's face as a picture.
+> - **Talking to the engine:** a Godot plugin carries JSON over a Messenger link:
+>   - state, gaze and voice;
+>   - reactions and skits;
+>   - tool results, which play on the info scenes (weather, price, technical, movers, fear & greed, crypto, balance sheet, battery).
+> - **Drive mode and the floating bubble** show the same robot as pictures: 27 faces rendered by Godot.
+> - **Voice commands:** "โหมดอวตาร" now works; the old "โหมดสัตว์เลี้ยง" still does.
+> - **Tested on the SM-S908E:** the robot appears about 3.5 s after opening, at 60 fps. A tap on the forehead turned it to LOVE. The party skit played. Back ends the engine. A killed engine restarts by itself.
+> - **Review fixes:**
+>   - The tilt lean went the wrong way; Godot's gravity is Android's reading negated.
+>   - Ending a skit no longer cuts off a tool's info scene that took over from it.
+>   - Opening the mode no longer replays an old tool result.
+>   - Commands queued when the mode closes are dropped.
+>   - The crash-loop guard above was added. On the phone, killing the engine 3 times gave 2 restarts, then the face picture.
+> - **From the first hands-on test log:**
+>   - The camera, hand signs, the boat rock, the table thump and the shake all reached the pet brain and the robot.
+>   - **Fixed: the robot stared at the floor while the phone was hand-held.** "Looking straight" was fixed for a desk stand. It now follows where the user's face usually sits (`GazeNeutral`).
+>   - **Fixed: the robot stopped looking at a still face** and wandered after 2.5 s. The app now repeats the gaze every second while it sees a face.
+>   - **Fixed: the AI's `gesture=nod` showed a wink.** The robot now nods.
+>   - Every command sent to the robot is now logged as `AvatarStage: → {...}`.
+>   - The periodic alarm sound is the pet being hungry (satiety 10 %), not a bug. Say "ให้อาหารน้อง" to feed it.
+> - **Fixed: in Avatar mode the AI answered "ราคา Bitcoin" and the weather with only its greeting.**
+>   - A face change asked for "a short cute reply", and the Avatar persona's only short, cute, word-for-word sentence was its greeting.
+>   - The greeting is now in the AI's own words, once per session, and a face change no longer asks for a reply when another answer is due.
+>   - If a reply is still only the greeting, the results are queued and reported once the conversation goes quiet.
+> - In Android Studio's Logcat, `PROCESS STARTED/ENDED` when Avatar mode opens or closes is the robot's own `:avatar` process, not the app restarting.
+> - **Fixed: pressing Live jumped to the Drive screen, and the AI read out an old BTC price and the weather twice, unasked.**
+>   - A new session's history no longer includes questions that never got an answer.
+>   - Tool calls in the greeting turn, before the user has said anything, are not run.
+>   - The last thing the user said no longer carries over from the previous session.
+>   - The weather decorates the robot only in Avatar mode, so it no longer opens the full-screen Live UI.
+> - **Fixed: one weather question was answered twice.**
+>   - After the answer the AI changed the robot's face. That result carried the tag "answer the user's question now", so the AI fetched the weather again.
+>   - Face and mode changes are no longer tagged as answers, and their reply no longer asks the AI to say anything.
+>   - A repeated call after the AI has already spoken the result is told "already reported, end the turn".
+> - **Tool scenes follow the AI's voice** (`ToolSceneSync`):
+>   - A scene stays up until the AI stops speaking (the robot holds it on its last picture), then plays its ending.
+>   - When the AI moves on to another result ("ส่วนราคาทองคำ…", "Microsoft…") its scene comes up the moment those words are heard. The transcript arrives seconds before the voice, so timing is taken from the audio.
+>   - Each tool call keeps its own data, so "Tesla and Microsoft" gives two cards.
+>   - A result the AI hasn't got to yet comes up when it is told later.
+> - **Fixed for questions in a row:**
+>   - A queued gold price is no longer dropped when Bitcoin (the same tool) is answered; results are matched by subject, not tool name.
+>   - Speech after a face change made once the AI has answered is not played. Gemini 3.1 Flash Live has no asynchronous function calls, so every tool reply makes the AI keep talking, and it greeted.
+> - **Fixed the boss/assistant flow in every Live mode** (three questions in a row: BTC 5 dimensions, the economic calendar, the gold price):
+>   - The normal persona no longer has a word-for-word greeting either. The AI had said it instead of the gold price and instead of "got it, my assistant is on it".
+>   - A queued question the AI handed to the assistant is no longer asked again. Asking it again had led to a duplicate call and a made-up gold price.
+>   - An answer read out by TTS counts as spoken, so it isn't reported twice.
+>   - A job done for a re-asked question is tagged with that question.
+>   - The acknowledgement of a handed-off job is no longer tagged "answer the question in full now", which contradicted "say one line and stop".
+>   - Checked on the phone in normal Live mode: the jobs went to the assistant, gold was answered at once, then "ส่วนเรื่องวิเคราะห์ Bitcoin…" and "ส่วนเรื่องปฏิทิน…" one by one, with no greetings and no repeats.
+> - **Fixed in Avatar mode: the scene of a handed-off job comes with its report.**
+>   - It used to go up while the AI only said "got it, my assistant is on it", then go down before the AI reported the result.
+>   - Now it waits until the app hands the result to the AI, and goes up with the AI's first words.
+>   - This applies to every handed-off job with a scene: technical, balance sheet, Fear & Greed, crypto, top movers, calendar, news and sentiment.
+>   - The 5-dimension analysis has no scene yet; the robot only speaks it.
+> - **Still to check by eye:** the robot following your face, the real tilt direction and the voice mouth.
+> - **Build the robot into the app:** run `powershell -ExecutionPolicy Bypass -File pet_godot\tools\export_to_app.ps1`, then build.
+>
+> Details: `.obsidian-wiki/02_Components/Avatar_Mode.md`, `pet_godot/README.md` ("In the app"), `pet_godot/scenes/SCHEMA.md` ("App bridge").
+
+> **Pet Robot Lab, round 7: tested on a real phone (2026-09-30):** the Godot lab was built as a standalone debug APK (43.6 MB, arm64) and run on the SM-S908E. The app itself was not changed.
+> - All 21 scenes hold 55–60 fps after three phone-only settings: a 60 fps cap, 3D rendered at 75 %, and an effect warm-up at start.
+> - Thai text and emoji render correctly.
+> - The 19.5:9 screen fits.
+> - The live data buttons work over mobile data.
+>
+> Details: `pet_godot/README.md` ("On a phone").
+
+> **Pet Robot Lab, round 6: each tool's result gets its own scene (2026-09-30):**
+> - **`director.play_tool(tool, result)`:** the app hands over exactly what its tool returned. `pet_godot/scenes/tool_scenes.json` then picks that tool's scene, so a tool always looks the same.
+> - **Scenes per tool:**
+>   - `trading_price`: price card with the 52-week range;
+>   - `trading_technical_analysis`: 3D rating and RSI dials, plus indicator tiles;
+>   - `trading_top_gainers` / `_losers`: 3D bars;
+>   - `trading_fear_greed`: a dial plus the last 7 days;
+>   - `trading_crypto_overview`: tiles plus a dominance donut;
+>   - `device_battery_status`: a battery dial;
+>   - weather and balance sheet as before;
+>   - any other text result: a markdown card.
+> - **Samples:** `data_samples/<tool>.json` holds a live result for each tool, fetched from the same sources as the app's tools. `tools/save_samples.gd` refreshes them.
+>
+> Details: `pet_godot/README.md`, `pet_godot/scenes/SCHEMA.md`.
+
+> **Pet Robot Lab, round 5: info scenes on 3D hologram panels (2026-09-30):**
+> - **Answers with real data:** ask "what's the weather today?" or "how is MSFT's balance sheet?" and the pet presents the answer on 3D hologram cards:
+>   - weather: a card with an animated 3D sky icon, a matching backdrop and rain or snow over the stage;
+>   - balance sheet: 3D columns (assets = liabilities + equity), a 3D donut of the capital structure and 3D bars for revenue, net income and free cash flow;
+>   - short markdown answers on a text card.
+> - **Data source:** the app's own tools supply the numbers (Open-Meteo, TradingView scanner); the AI only adds an optional short note.
+> - **Scene format:** scenes fill text from the data (`{totalAssets:money}`) and branch on it (`"if": "situation == rain_likely"`). See `pet_godot/scenes/SCHEMA.md`.
+> - **Lab:** a new **ข้อมูล** tab fetches the data live.
+>
+> Details: `pet_godot/README.md`, `.obsidian-wiki/02_Components/Pet_Godot_Lab.md`.
+
+> **Pet Robot Lab, round 4: skits for a future AI brain (2026-09-30):**
+> - **12 meme-style skits (8-10 s each):** idle, bored, angry, love, thinking, curious, sleepy, sad, low battery, party, hero and dizzy. Each opens with a caption and ends on a punchline in a speech bubble.
+> - **Free 3D movement:** the pet turns and flips through 360°, runs round the back of the stage, comes up to the lens and backs away.
+> - **Scenes are data:** each skit is a JSON file in `pet_godot/scenes/`, and `scenes/SCHEMA.md` lists every beat. An AI brain can pick a skit by mood or tags, or write a new one and play it with `play_json()`.
+> - **Comic layer:** emote symbols (💢 ⚡ z Z Z …), a rain cloud, a battery gauge, dizzy stars, a snot bubble and a rocket fired at the screen.
+> - **New eyes:** dizzy @ @, crying T T and squint > <.
+> - **Tools:** `tools/scene_frames.ps1` makes a contact sheet per skit, and `tools/record_scenes.ps1` records MP4 clips.
+>
+> Details: `pet_godot/README.md`, `.obsidian-wiki/02_Components/Pet_Godot_Lab.md`.
+
+> **Pet Robot Lab, round 3: armour gear, bouncy motion and suit colours (2026-09-30):**
+> - **Look:** the robot now has a satin (less shiny) finish.
+> - **Arms:** a collision check over every clip (`rive_avatar/blender/check_arms.py`) keeps the arms out of the head.
+> - **Suit colour:** the blue parts change colour with the emotion.
+> - **Bouncy motion:** clips play under a procedural layer of squash-and-stretch, springy head and antennas, and cheeky idle moves (hop, spin, tilt, wiggle, peek, wink).
+> - **New gear:** `rive_avatar/blender/robot_gear.py` adds 18 items:
+>   - hand tools for either hand: a rocket cannon, laser, flashlight and energy shield, each with its own effect;
+>   - a jetpack you can fly with, and a hero cape that waves in the wind;
+>   - 8 more headgear pieces.
+> - **Backgrounds:** now 12 in total.
+> - **Lab UI:** tabbed.
+>
+> Details: `pet_godot/README.md`, `.obsidian-wiki/02_Components/Pet_Godot_Lab.md`.
+
+> **Pet Robot Lab in Godot (2026-09-30):** the pet is being redesigned as a game character, built on the PC first (`pet_godot/`, Godot 4.7, Mobile renderer). The Blender model was rebuilt to match the user's model sheet, using measured proportions and all-quad subdivision cages. The screen is a separate object with a 0..1 UV. The pivots float independently and drive 8 animation clips (idle, happy, wave, sad, surprised, love, sleep, talk). Seven accessories (crown, party hat, wizard hat, chef hat, sunglasses, headphones, backpack) map to the app's `PropType`s. `rive_avatar/blender/export_game.py` runs in background Blender and exports glTF. In Godot, shader eyes (9 expressions, blink, gaze) are drawn on the screen, with 6 backdrops and a Thai button panel. Not in the app yet. Docs: `.obsidian-wiki/02_Components/Pet_Godot_Lab.md`.
+
+> **3D Robot Pet from Blender (2026-09-29):** a third pet engine, "🤖 หุ่น 3D", draws the robot from the user's model sheet. The body is modelled in code (`rive_avatar/blender/robot_build.py`) and rendered in Blender through the Blender MCP. The app gets 49 transparent frames (7 turns × 7 arm poses, ~900 KB) plus a generated `PetRobot3dFrames.kt`. The existing Canvas eyes are drawn live into the robot's screen, so every emotion, blink and gaze still works. Turning follows the gaze (cross-faded frames), the arm pose follows the emotion (happy, sad, hug, surprised, wave), and the robot floats over a soft shadow. Docs: `.obsidian-wiki/02_Components/Pet_Robot_3D.md`.
+
 > **Rive on the new `app.rive` API (2026-09-25):** the pet's Rive engine now uses the Compose-native `Rive` composable from `app.rive` (rive-android 11.12.0) instead of the deprecated `RiveAnimationView`. Every loading step falls back to the Canvas pet on error. Gaze and tilt springs are written to the view model without recomposing; on the phone the Rive surface went from ~30 recompositions per second to 3 in 5 seconds. Touch reactions were confirmed on the phone.
 
 > **Pet Eye Drawing & Motion Audit (2026-09-24):** a full review of the Compose Canvas pet face, with every finding fixed.

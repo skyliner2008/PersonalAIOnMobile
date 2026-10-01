@@ -465,12 +465,14 @@ class PetModeTest {
     }
 
     @Test
-    fun `GestureType headTiltOverride returns correct tilt values`() {
-        assertEquals(-12f, GestureType.TILT_LEFT.headTiltOverride())
-        assertEquals(12f, GestureType.TILT_RIGHT.headTiltOverride())
-        assertEquals(null, GestureType.IDLE.headTiltOverride())
-        assertEquals(null, GestureType.BOUNCE.headTiltOverride())
-        assertEquals(null, GestureType.SHAKE.headTiltOverride())
+    fun `face gestures become the Godot robot's moves`() {
+        val m = com.skyliner2008.jarvis.avatar.AvatarLookMapper
+        assertEquals("tilt", m.gestureFidget(GestureType.TILT_LEFT))
+        assertEquals("tilt", m.gestureFidget(GestureType.TILT_RIGHT))
+        assertEquals("hop", m.gestureFidget(GestureType.BOUNCE))
+        assertEquals("wiggle", m.gestureFidget(GestureType.SHAKE))
+        assertEquals("nod", m.gestureFidget(GestureType.NOD))           // the AI agreeing: a real nod, not a wink
+        assertEquals(null, m.gestureFidget(GestureType.IDLE))
     }
 
     @Test
@@ -1170,26 +1172,24 @@ class PetModeTest {
 
     @Test
     fun `Pet vision desk face calibration maps normal desk sitting position to dead center gaze`() {
-        val deskSittingRawNormYValues = listOf(-0.45f, -0.42f, -0.48f)
-        val deskNeutralBiasY = -0.45f
-
-        for (rawNormY in deskSittingRawNormYValues) {
-            val calibratedY = (rawNormY - deskNeutralBiasY) * 1.35f
-            val finalNormY = if (kotlin.math.abs(calibratedY) < 0.15f) 0f else calibratedY.coerceIn(-1f, 1f)
-            assertEquals(0f, finalNormY, "Desk sitting elevation must map to dead center gaze (0f)")
+        // straight ahead is where the face usually is (GazeNeutral, as PetVisionDetector uses it): sitting at a
+        // desk stand the face is high in the frame; hand-held cases are in GazeNeutralTest
+        val neutral = com.skyliner2008.jarvis.ui.component.avatar.GazeNeutral()
+        fun finalNormY(rawNormY: Float, atMs: Long): Float {
+            val calibratedY = neutral.offsetY(rawNormY, atMs) * 1.35f
+            return if (kotlin.math.abs(calibratedY) < 0.15f) 0f else calibratedY.coerceIn(-1f, 1f)
+        }
+        var t = 0L
+        for (rawNormY in listOf(-0.45f, -0.42f, -0.48f)) {
+            assertEquals(0f, finalNormY(rawNormY, t), "Desk sitting elevation must map to dead center gaze (0f)")
+            t += 80L
         }
 
         // Deliberate looking high up (rawNormY = -0.85f)
-        val highRawNormY = -0.85f
-        val highCalibratedY = (highRawNormY - deskNeutralBiasY) * 1.35f
-        val highFinalNormY = if (kotlin.math.abs(highCalibratedY) < 0.15f) 0f else highCalibratedY.coerceIn(-1f, 1f)
-        assertTrue(highFinalNormY < -0.4f, "Deliberate look-up should still track upward")
+        assertTrue(finalNormY(-0.85f, t + 80L) < -0.4f, "Deliberate look-up should still track upward")
 
         // Deliberate looking down (rawNormY = 0.20f)
-        val lowRawNormY = 0.20f
-        val lowCalibratedY = (lowRawNormY - deskNeutralBiasY) * 1.35f
-        val lowFinalNormY = if (kotlin.math.abs(lowCalibratedY) < 0.15f) 0f else lowCalibratedY.coerceIn(-1f, 1f)
-        assertTrue(lowFinalNormY > 0.4f, "Deliberate look-down should track downward")
+        assertTrue(finalNormY(0.20f, t + 160L) > 0.4f, "Deliberate look-down should track downward")
     }
 
     @Test
@@ -1571,9 +1571,13 @@ class PetModeTest {
         )
         controller.onTriggerMissileBarrage = { missileBarrageTriggered = true }
 
-        // Test missile barrage scene via keyword
+        // Missile scene via keyword: the robot's angry skit plays it (its rockets are the barrage,
+        // so no second barrage is triggered on top)
         controller.playSceneByNameOrKeyword("ยิงจรวด")
-        assertTrue(missileBarrageTriggered, "Missile barrage must be triggered on missile scene")
+        assertEquals("angry_missile", currentState.faceState.sceneName)
+        assertEquals(com.skyliner2008.jarvis.avatar.AvatarSkits.ANGRY,
+            com.skyliner2008.jarvis.avatar.AvatarSkits.forSceneName(currentState.faceState.sceneName))
+        assertTrue(!missileBarrageTriggered, "the skit fires the rockets; no second barrage")
         assertEquals(AvatarEmotion.ANGRY, currentState.faceState.emotion)
 
         // Test eating scene via keyword

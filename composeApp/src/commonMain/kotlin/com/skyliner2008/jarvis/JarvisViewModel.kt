@@ -327,25 +327,28 @@ class JarvisViewModel(
                 _isDemoRunning.value = false
                 return@launch
             }
-            val scenes = com.skyliner2008.jarvis.pet.PetSceneArchetype.entries
-            val moods = com.skyliner2008.jarvis.ui.component.avatar.RiveMoodStories.ALL
-            val total = scenes.size + moods.size
+            // the robot's skits, then the archetype scenes it has no skit for (those show emotion + props)
+            val skits = com.skyliner2008.jarvis.avatar.AvatarSkits.ALL
+            val scenes = com.skyliner2008.jarvis.pet.PetSceneArchetype.entries.filter {
+                com.skyliner2008.jarvis.avatar.AvatarSkits.forSceneName(it.name.lowercase()) == null
+            }
+            val total = skits.size + scenes.size
             com.skyliner2008.jarvis.logDebug("JarvisAvatar", "▶️ Scene showcase: $total scenes, each played to the end")
             try {
                 var index = 0
+                for (skit in skits) {
+                    index++
+                    val label = "🎬 $index/$total · ${skit.nameTh}"
+                    val duration = pet.playSkit(skit, label = label)
+                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎬 Showcase $index/$total ${skit.id} ${duration}ms")
+                    delay(duration + SHOWCASE_GAP_MS)
+                }
                 for (archetype in scenes) {
                     index++
                     val spec = com.skyliner2008.jarvis.pet.PetSceneEngine.ARCHETYPE_SPECS.getValue(archetype)
                     val label = "🎬 $index/$total · ${spec.nameTh}"
                     val duration = pet.playScene(archetype, label = label)
                     com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎬 Showcase $index/$total ${archetype.name} ${duration}ms")
-                    delay(duration + SHOWCASE_GAP_MS)
-                }
-                for (story in moods) {
-                    index++
-                    val label = "🎬 $index/$total · ${story.nameTh}"
-                    val duration = pet.playMoodStory(story, label = label)
-                    com.skyliner2008.jarvis.logDebug("JarvisAvatar", "🎬 Showcase $index/$total ${story.name} ${duration}ms")
                     delay(duration + SHOWCASE_GAP_MS)
                 }
                 com.skyliner2008.jarvis.logDebug("JarvisAvatar", "✅ Scene showcase finished all $total scenes")
@@ -1175,12 +1178,6 @@ class JarvisViewModel(
 
     /** ชื่อ tool ที่กำลัง execute อยู่ — expose ไปยัง UI */
     val activeToolName: StateFlow<String?> = orchestrator.activeToolName
-
-    /** ผลลัพธ์ tool ล่าสุด — expose ไปยัง UI สำหรับแสดงใน PetDialogueCard */
-    val lastToolResult: StateFlow<Pair<String, String>?> = orchestrator.lastToolResult
-
-    /** ปิดกล่องข้อความ tool card */
-    fun dismissToolCard() = orchestrator.clearLastToolResult()
 
     // ─── Voice function forwarders → VoiceController ───
     fun startVoiceInput() = voice.startVoiceInput()

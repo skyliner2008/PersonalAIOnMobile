@@ -108,17 +108,17 @@ class PendingAnswerQueueTest {
     @Test
     fun `a newer result of the same tool replaces the older one`() {
         val q = PendingAnswerQueue()
-        q.addToolResult("ราคาทอง", "trading_price", "4290", nowMs = 0)
-        q.addToolResult("ราคาทองตอนนี้", "trading_price", "4291", nowMs = 1)
+        q.addToolResult("ราคาทอง", "trading_price", gold("4290"), nowMs = 0)
+        q.addToolResult("ราคาทองตอนนี้", "trading_price", gold("4291"), nowMs = 1)
         assertEquals(1, q.size)
-        assertEquals("4291", q.next(2)!!.result)
+        assertEquals(gold("4291"), q.next(2)!!.result)
     }
 
     @Test
     fun `tool answered later in a normal turn is dropped from the queue`() {
         val q = PendingAnswerQueue()
         q.addToolResult("ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", "trading_macro_calendar", "📅", nowMs = 0)
-        q.onToolAnswered("trading_macro_calendar")
+        q.onToolAnswered("trading_macro_calendar", "📅")
         assertTrue(q.isEmpty())
     }
 
@@ -142,12 +142,48 @@ class PendingAnswerQueueTest {
     @Test
     fun `requeue does not override a newer result of the same tool`() {
         val q = PendingAnswerQueue()
-        q.addToolResult("ราคาทอง", "trading_price", "4290", nowMs = 0)
+        q.addToolResult("ราคาทอง", "trading_price", gold("4290"), nowMs = 0)
         val old = q.next(1)!!
-        q.addToolResult("ราคาทอง", "trading_price", "4291", nowMs = 2)
+        q.addToolResult("ราคาทอง", "trading_price", gold("4291"), nowMs = 2)
         assertFalse(q.requeueFront(old))
-        assertEquals("4291", q.next(3)!!.result)
+        assertEquals(gold("4291"), q.next(3)!!.result)
     }
+
+    /** logcat 2026-10-01 16:24 โหมดอวตาร: "ราคา Bitcoin" → price + face change → AI said only the greeting */
+    @Test
+    fun `results answered with only a greeting are reported later, a face change is not`() {
+        val q = PendingAnswerQueue()
+        val queued = q.onGreetingOnlyAnswer(
+            listOf(
+                Triple("ราคา Bitcoin", "device_avatar_emotion", "🎭 ปรับ Avatar: อารมณ์=HAPPY Props=sparkles"),
+                Triple("ราคา Bitcoin", "trading_price", "**BTC-USD** - Real-time Price\nPrice: 83751.7700 USD")
+            ),
+            nowMs = 0
+        )
+        assertEquals(1, queued)
+        val item = q.next(nowMs = 3_000)!!
+        assertEquals("trading_price", item.toolName)
+        val prompt = PendingAnswerQueue.toPrompt(item)
+        assertTrue(prompt.contains("83751.7700") && prompt.contains("ห้ามทักทาย"))
+        assertNull(q.next(nowMs = 3_001))
+    }
+
+    /** logcat 2026-10-01 21:32–21:33: gold cut off and queued, then "ราคา Bitcoin" answered — gold was dropped */
+    @Test
+    fun `another subject of the same tool does not drop a queued result`() {
+        val q = PendingAnswerQueue()
+        q.addToolResult("ราคา ทองคำ ปัจจุบัน", "trading_price", gold("4167.0800"), nowMs = 0)
+        val btc = "**BTC-USD** - Real-time Price\nPrice: 84200.0000 USD"
+        q.onToolAnswered("trading_price", btc)
+        assertEquals(1, q.size)
+        q.addToolResult("ราคา Bitcoin", "trading_price", btc, nowMs = 1)      // cut off as well: both wait
+        assertEquals(2, q.size)
+        q.onToolAnswered("trading_price", gold("4168.1000"))                     // gold asked again and answered
+        assertEquals(btc, q.next(nowMs = 2)!!.result)
+        assertNull(q.next(nowMs = 3))
+    }
+
+    private fun gold(price: String) = "**XAUUSD=X** - Real-time Price\nPrice: $price USD"
 
     @Test
     fun `stale items expire`() {

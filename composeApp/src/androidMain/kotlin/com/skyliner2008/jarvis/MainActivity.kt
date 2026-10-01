@@ -8,8 +8,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
@@ -33,7 +33,8 @@ import androidx.lifecycle.lifecycleScope
 import android.view.WindowManager
 import android.app.KeyguardManager
 
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity: Avatar mode shows the Godot robot through a fragment (AvatarStageHost). */
+class MainActivity : FragmentActivity() {
 
     companion object {
         @Volatile
@@ -230,6 +231,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        avatarStage?.onHostStop()
         // When device display turns off and app stops in normal mode, clear any lockscreen flags
         if (::alwaysLiveManager.isInitialized &&
             alwaysLiveManager.state.value == com.skyliner2008.jarvis.service.AlwaysLiveManager.AlwaysLiveState.OFF) {
@@ -251,17 +253,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         com.skyliner2008.jarvis.automation.AndroidContextHolder.appContext = applicationContext
-
-        // Initialize Rive runtime native C++ library early
-        try {
-            System.loadLibrary("rive-android")
-        } catch (_: Throwable) {}
-        try {
-            app.rive.runtime.kotlin.core.Rive.init(applicationContext)
-            android.util.Log.i("MainActivity", "✅ Rive runtime initialized")
-        } catch (t: Throwable) {
-            android.util.Log.w("MainActivity", "Rive.init warning: ${t.message}")
-        }
 
         // Clear any leftover screen flags so normal mode never shows over lockscreen
         clearScreenFlags()
@@ -417,6 +408,15 @@ class MainActivity : ComponentActivity() {
                 }
             )
         }
+        // Avatar mode's 3D robot (Godot, own process) is shown over the Compose content
+        avatarStage = com.skyliner2008.jarvis.avatar.AvatarStageHost(this).also { it.install() }
+    }
+
+    private var avatarStage: com.skyliner2008.jarvis.avatar.AvatarStageHost? = null
+
+    override fun onStart() {
+        super.onStart()
+        avatarStage?.onHostStart()
     }
 
     override fun onNewIntent(intent: Intent) {

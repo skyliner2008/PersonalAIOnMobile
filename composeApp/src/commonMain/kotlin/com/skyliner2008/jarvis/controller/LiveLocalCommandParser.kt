@@ -86,15 +86,17 @@ object LiveLocalCommandParser {
         // "เปิด" มี "ปิด" เป็น substring — เดิม "เปิดโหมดสัตว์เลี้ยง" จึงถูกตีความเป็นคำสั่งปิดโหมด
         val withoutOpen = LiveIntentMatchers.normalize(text).replace("เปิด", "")
         val isOff = listOf("ปิดโหมด", "ออกจากโหมด").any { prefix ->
-            listOf("ควบคุม", "ขับขี่", "รถยนต์", "สัตว์เลี้ยง").any { withoutOpen.contains(prefix + it) }
+            listOf("ควบคุม", "ขับขี่", "รถยนต์", "อวตาร", "สัตว์เลี้ยง").any { withoutOpen.contains(prefix + it) }
         }
         val isOn = !isOff && hit(
             text,
-            "โหมดควบคุม", "โหมดขับขี่", "โหมดขับรถ", "โหมดรถยนต์", "โหมดสัตว์เลี้ยง", "โหมดแก้เบื่อ", "pet mode", "drive mode"
+            "โหมดควบคุม", "โหมดขับขี่", "โหมดขับรถ", "โหมดรถยนต์", "โหมดอวตาร", "โหมดสัตว์เลี้ยง", "โหมดแก้เบื่อ",
+            "avatar mode", "pet mode", "drive mode"
         )
         if (!isOn && !isOff) return null
+        // Avatar mode keeps the "pet" profile name (and the old words)
         val mode = when {
-            hit(text, "สัตว์เลี้ยง", "แก้เบื่อ", "pet") -> "pet"
+            hit(text, "อวตาร", "avatar", "สัตว์เลี้ยง", "แก้เบื่อ", "pet") -> "pet"
             hit(text, "ขับขี่", "ขับรถ", "รถยนต์", "drive") -> "drive"
             else -> "control"
         }

@@ -1,13 +1,11 @@
 package com.skyliner2008.jarvis
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.toPath
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicPropAnimation
 import com.skyliner2008.jarvis.ui.component.avatar.DynamicVectorProp
 import com.skyliner2008.jarvis.ui.component.avatar.PropPosition
 import com.skyliner2008.jarvis.ui.component.avatar.RobotFaceState
-import com.skyliner2008.jarvis.ui.component.avatar.parseHexColor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -29,17 +27,6 @@ class SvgPathTest {
         val nodes = PathParser().parsePathString(cowboyHatPath).toNodes()
         assertTrue(nodes.isNotEmpty())
         assertTrue(nodes.size >= 5)
-    }
-
-    @Test
-    fun testParseHexColor() {
-        assertEquals(Color(0xFFFFD700), parseHexColor("#FFD700"))
-        assertEquals(Color(0xFF00E5FF), parseHexColor("00E5FF"))
-        assertEquals(Color(0xFFFFFFFF), parseHexColor("#FFF"))
-        assertEquals(Color(0xFF000000), parseHexColor("#000"))
-        // Fallback on invalid hex
-        val fallback = Color(0xFF123456)
-        assertEquals(fallback, parseHexColor("not_a_color", fallback))
     }
 
     @Test

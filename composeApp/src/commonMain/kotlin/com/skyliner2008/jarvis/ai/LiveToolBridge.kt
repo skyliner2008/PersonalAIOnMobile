@@ -38,12 +38,6 @@ class LiveToolBridge(
     private val _activeToolName = MutableStateFlow<String?>(null)
     val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
 
-    private val _lastToolResult = MutableStateFlow<Pair<String, String>?>(null)
-    val lastToolResult: StateFlow<Pair<String, String>?> = _lastToolResult.asStateFlow()
-
-    fun clearLastToolResult() {
-        _lastToolResult.value = null
-    }
 
     private var collectionJob: Job? = null
     private var visionPromptJob: Job? = null
@@ -114,10 +108,18 @@ class LiveToolBridge(
      *   (เดิมผล tool ยาวๆ หายเงียบเมื่อโดน GoAway ระหว่างรัน)
      */
     /** tool ที่ผลลัพธ์คือการเปลี่ยน UI/โหมด — ถ้า session restart ไปแล้วไม่ต้องเล่าผลย้อนหลัง (greeting ของ session ใหม่พูดแทน) */
-    private val uiOnlyTools = setOf(
-        "device_avatar_emotion", "device_custom_prop", "device_pet_care",
-        "device_always_live", "vision_activate", "vision_deactivate"
-    )
+    private val uiOnlyTools = com.skyliner2008.jarvis.data.LiveProtocol.UI_ONLY_TOOLS
+
+    /**
+     * ผลของ device_avatar_emotion แบบตั้งสีหน้า — โมเดลเรียกเองเพื่อแสดงอารมณ์ ทั้งคู่กับ tool ข้อมูลก่อนพูด และหลังพูดจบ
+     * ต้องเป็นกลาง ไม่สั่งให้พูดอะไร:
+     * - เดิมสั่ง "ตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก" → โมเดลหยิบประโยคทักทายเปิดเซสชันมาพูดแทนผลราคา (logcat 2026-10-01 16:24)
+     * - แล้วเปลี่ยนเป็น "ถ้ามีผล tool อื่นให้ตอบเรื่องนั้น" → เปลี่ยนหน้าหลังรายงานอากาศจบ โมเดลตอบอากาศซ้ำ (18:19)
+     */
+    private val avatarEmotionVoiceRule =
+        "\n\n[VOICE RULE - AVATAR EMOTION] เปลี่ยนสีหน้าบนจอแล้ว — เป็นแค่ท่าทางประกอบ ไม่ต้องพูดถึง · " +
+            "ถ้าผู้ใช้ขอเปลี่ยนหน้าหรืออารมณ์เองในเทิร์นนี้ ตอบรับสั้นๆ 1 ประโยคได้ · ห้ามพูดสิ่งที่พูดไปแล้วซ้ำ " +
+            "ห้ามเรียก tool เดิมซ้ำ ห้ามถามต่อ ห้ามทักทาย ห้ามพูดว่าไม่มีหน้าตาหรือมีแค่ 10 หน้า ห้ามใช้ markdown"
 
     /**
      * server ยกเลิก call เมื่อ VAD ได้ยินเสียงแทรก (เสียงรอบข้าง หรือผู้ใช้พูดคำถามถัดไป) — ห้ามทิ้งคำถาม:
@@ -149,7 +151,7 @@ class LiveToolBridge(
             deliverCancelledResult(event, result)
             return
         }
-        runningCallsMutex.withLock { duplicateGuard.recordResult(event.callId, result) }
+        runningCallsMutex.withLock { duplicateGuard.recordResult(event.callId, result, System.currentTimeMillis()) }
         val sent = liveService.sendNativeToolResponse(
             callId = event.callId,
             toolName = event.name,
@@ -194,7 +196,7 @@ class LiveToolBridge(
                 com.skyliner2008.jarvis.tools.ToolResult("device_always_live", "Error: ${e.message}", true)
             }
             val voiceGuide = if (mode == "pet") {
-                "\n\n[VOICE RULE - PET MODE] สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดสัตว์เลี้ยงแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
+                "\n\n[VOICE RULE - AVATAR MODE] สลับเข้าสู่โหมดอวตาร (หุ่น 3D เต็มจอ) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดอวตารแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
             } else {
                 "\n\n[VOICE RULE - ALWAYS LIVE] สลับโหมดควบคุม/โหมดขับขี่/Always AI Live เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ (เช่น 'เข้าสู่โหมดควบคุมแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา' หรือ 'เปิดโหมดขับขี่เรียบร้อยแล้วค่ะ เดินทางปลอดภัยนะคะ') ห้ามอธิบายยาว ห้ามใช้ markdown"
             }
@@ -253,7 +255,7 @@ class LiveToolBridge(
                 } else if (isAll) {
                     "\n\n[VOICE RULE - MOODSET ALL] เริ่มเล่นแสดง Moodset ครบทั้งหมด 50 หน้าวนตรวจบนหน้าจอสลับทุก 4 วินาทีเรียบร้อยแล้วค่ะ — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'เริ่มแสดง Moodset ทุกหน้าครบทั้ง 50 หน้าให้บอสตรวจสอบแล้วนะคะ' ห้ามบอกว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
                 } else {
-                    "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว (ระบบมี Moodset ทั้งหมด 50 หน้า) — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ ห้ามตอบว่าไม่มีหน้าตา ห้ามพูดว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                    avatarEmotionVoiceRule
                 }
             }
             respond(event, result.result + voiceRule,
@@ -617,7 +619,13 @@ class LiveToolBridge(
             "vision_activate"
         )
         if (!isInternalUiTool && finalResultText.isNotBlank()) {
-            _lastToolResult.value = event.name to finalResultText
+            // this call's result with its own scene data, for Avatar mode (ToolSceneSync) — a job handed to the
+            // assistant, or a call the server cancelled, is told later from the report queue
+            val call = kotlinx.coroutines.currentCoroutineContext()[com.skyliner2008.jarvis.data.LiveToolCallContext]
+            val later = runningCallsMutex.withLock { event.callId in delegatedCallIds } || isCancelled(event.callId)
+            com.skyliner2008.jarvis.avatar.AvatarLiveFeed.result(
+                event.name, com.skyliner2008.jarvis.avatar.AvatarToolData.of(call, event.name), finalResultText, later
+            )
         }
 
         _activeToolName.value = null
@@ -744,7 +752,7 @@ class LiveToolBridge(
             event.name == "device_always_live" -> {
                 val mode = event.args["mode"]?.lowercase() ?: ""
                 if (mode == "pet") {
-                    "\n\n[VOICE RULE - PET MODE] สลับเข้าสู่โหมดสัตว์เลี้ยงตั้งโต๊ะ (Virtual Desk Pet) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดสัตว์เลี้ยงแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
+                    "\n\n[VOICE RULE - AVATAR MODE] สลับเข้าสู่โหมดอวตาร (หุ่น 3D เต็มจอ) แล้ว! — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารักสดใส เป็นธรรมชาติ เช่น 'เข้าโหมดอวตารแล้วฮับ พร้อมเล่นกับเจ้านายแล้ว!' (ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ เด็ดขาด) ห้ามตอบเป็นทางการ ห้ามใช้ markdown"
                 } else {
                     "\n\n[VOICE RULE - ALWAYS LIVE] สลับโหมดควบคุม/โหมดขับขี่/Always AI Live เรียบร้อยแล้ว — โปรดตอบรับสั้นๆ 1 ประโยคอย่างมั่นใจและกระชับ (เช่น 'เข้าสู่โหมดควบคุมแล้วค่ะ พร้อมรับคำสั่งตลอดเวลา' หรือ 'เปิดโหมดขับขี่เรียบร้อยแล้วค่ะ เดินทางปลอดภัยนะคะ') ห้ามอธิบายยาว ห้ามใช้ markdown"
                 }
@@ -762,7 +770,7 @@ class LiveToolBridge(
                 } else if (isAll) {
                     "\n\n[VOICE RULE - MOODSET ALL] เริ่มเล่นแสดง Moodset ครบทั้งหมด 50 หน้าวนตรวจบนหน้าจอสลับทุก 4 วินาทีเรียบร้อยแล้วค่ะ — โปรดตอบรับสั้นๆ 1 ประโยคอย่างสดใส เช่น 'เริ่มแสดง Moodset ทุกหน้าครบทั้ง 50 หน้าให้บอสตรวจสอบแล้วนะคะ' ห้ามบอกว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
                 } else {
-                    "\n\n[VOICE RULE - AVATAR EMOTION] แสดงสีหน้า Avatar บนหน้าจอเรียบร้อยแล้ว (ระบบมี Moodset ทั้งหมด 50 หน้า) — โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส และเป็นธรรมชาติ ห้ามตอบว่าไม่มีหน้าตา ห้ามพูดว่ามีแค่ 10 หน้า ห้ามใช้ markdown"
+                    avatarEmotionVoiceRule
                 }
             }
             event.name == "device_custom_prop" -> {
@@ -788,14 +796,14 @@ class LiveToolBridge(
             }
             event.name == "device_location" -> {
                 if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
-                    "\n\n[VOICE RULE - PET LOCATION & NEARBY] รายงานสถานที่ใกล้เคียงหรือที่อยู่ให้เจ้านายฟังอย่างน่ารักสดใส กระชับ 1-2 ประโยค แนะนำ 2-3 ร้าน/สถานที่เด็ด และชวนเปิดดูแผนที่ได้ฮับ ห้ามอ่านตัวเลขทศนิยมพิกัด GPS ยาวๆ ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ"
+                    "\n\n[VOICE RULE - PET LOCATION & NEARBY] เริ่มที่เนื้อหาเลย (ห้ามทักทาย): รายงานสถานที่ใกล้เคียงหรือที่อยู่ให้เจ้านายฟังอย่างน่ารักสดใส กระชับ 1-2 ประโยค แนะนำ 2-3 ร้าน/สถานที่เด็ด และชวนเปิดดูแผนที่ได้ฮับ ห้ามอ่านตัวเลขทศนิยมพิกัด GPS ยาวๆ ห้ามพูดคำว่า ปิ๊บๆ หรือ บี๊บๆ"
                 } else {
                     "\n\n[VOICE RULE - LOCATION] รายงานพิกัดและที่อยู่ปัจจุบันให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ ระบุตำบล/ย่าน อำเภอ และจังหวัด ห้ามอ่านตัวเลขทศนิยมพิกัด GPS ยาวๆ"
                 }
             }
             event.name == "device_weather" -> {
                 if (com.skyliner2008.jarvis.ai.JarvisPersona.isPetMode) {
-                    "\n\n[VOICE RULE - PET WEATHER] เล่าสภาพอากาศ อุณหภูมิ และบอกว่าฝนจะตกไหมให้เจ้านายฟังอย่างน่ารักสดใส เป็นห่วงเป็นใย 1-2 ประโยค เช่น ชวนพกร่ม หรือเตือนแดดร้อน ห้ามอ่านตัวเลขทศนิยม ห้ามใช้ markdown"
+                    "\n\n[VOICE RULE - PET WEATHER] เริ่มที่สภาพอากาศเลย (ห้ามทักทาย): เล่าอุณหภูมิ และบอกว่าฝนจะตกไหมให้เจ้านายฟังอย่างน่ารักสดใส เป็นห่วงเป็นใย 1-2 ประโยค เช่น ชวนพกร่ม หรือเตือนแดดร้อน ห้ามอ่านตัวเลขทศนิยม ห้ามใช้ markdown"
                 } else {
                     "\n\n[VOICE RULE - WEATHER] รายงานสภาพอากาศ อุณหภูมิ โอกาสฝนตก และคำแนะนำการเดินทาง/การแต่งตัวให้ผู้ใช้ฟังเป็นภาษาไทยอย่างกระชับ 2-3 ประโยค ห้ามใช้ markdown"
                 }
@@ -962,11 +970,33 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
         visionPromptJob?.cancel()
         
         collectionJob = scope.launch {
+            // the AI's words and when they are heard, for Avatar mode's tool scenes (ToolSceneSync)
+            launch {
+                liveService.speechMarks.collect { (text, heardAt) ->
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.speech(text, heardAt)
+                }
+            }
+            // the queued results handed to the AI to tell now — their scenes go up with its words
+            launch {
+                liveService.reportsSent.collect { (tool, subject) ->
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.report(tool, subject)
+                }
+            }
             // Path A: Native Tool Calls (Function Calling)
             // แต่ละ call รันใน job ของตัวเอง — tool ช้า (deep analysis / grounding) ต้องไม่บล็อก call อื่น
             // และต้องยกเลิกได้เมื่อ server ส่ง toolCallCancellation
             launch {
                 liveService.nativeToolCallFlow.collect { event ->
+                    // เทิร์นที่ตอบคำทักทายเปิดเซสชัน ก่อนผู้ใช้พูดอะไร — ไม่มีใครขอ: ไม่รัน (เดิมดึงอากาศ/BTC ของ session ก่อน
+                    // แล้วเปิดหน้าเต็มจอ Drive เอง, logcat 2026-10-01 16:51)
+                    if (liveService.inGreetingTurn) {
+                        logDebug("LiveBridge", "🛑 ${event.name} ในเทิร์นทักทายเปิดเซสชัน (ผู้ใช้ยังไม่ได้ขออะไร) — ไม่รัน (${event.args})")
+                        liveService.sendNativeToolResponse(
+                            event.callId, event.name, com.skyliner2008.jarvis.data.LiveProtocol.GREETING_TURN_TOOL_NOTE,
+                            event.sessionGeneration
+                        )
+                        return@collect
+                    }
                     // กันโมเดลวนเรียก tool เดิมด้วยค่าเดิมในเทิร์นเดียวกัน — ตอบผลเดิม ไม่รันใหม่
                     val turn = liveService.userTurnSerial
                     val dup = runningCallsMutex.withLock {
@@ -974,7 +1004,10 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                     }
                     if (dup !is DuplicateCallGuard.Decision.Run) {
                         val reply = when (dup) {
-                            is DuplicateCallGuard.Decision.Repeat -> DuplicateCallGuard.repeatNote(event.name, dup.previousResult)
+                            // spoken since the first result came back = reported already: don't make it say it again
+                            is DuplicateCallGuard.Decision.Repeat ->
+                                if (liveService.lastModelSpeechAtMs > dup.resultAtMs) DuplicateCallGuard.alreadyReportedNote(event.name)
+                                else DuplicateCallGuard.repeatNote(event.name, dup.previousResult)
                             else -> DuplicateCallGuard.stillRunningNote(event.name)
                         }
                         logDebug("LiveBridge", "🔁 ${event.name} ถูกเรียกซ้ำด้วยค่าเดิมในเทิร์นเดียวกัน — ไม่รันใหม่ (${event.args})")
@@ -982,7 +1015,7 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                         return@collect
                     }
                     runningCallsMutex.withLock {
-                        callOrigins[event.callId] = CallOrigin(turn, liveService.lastUserText)
+                        callOrigins[event.callId] = CallOrigin(turn, liveService.currentQuestion)
                         latestCallByTool[event.name] = event.callId to event.args
                     }
                     // หัวหน้า (Live) ส่งต่องานให้ลูกน้อง: ตอบรับทันที ไม่มีช่วงให้ server ยกเลิก —

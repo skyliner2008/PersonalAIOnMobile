@@ -151,12 +151,29 @@
             </intent-filter>
         </receiver>
 
+        <!-- Avatar mode: the Godot robot's engine runs in its own process (Godot 4.7 remote engine) and
+             draws into MainActivity through RemoteGodotFragment; closing Avatar mode ends the process -->
+        <service
+            android:name="org.godotengine.godot.service.GodotService"
+            android:process=":avatar"
+            android:exported="false" />
+
+        <!-- the app's end of the robot link: the engine's plugin binds here from the :avatar process -->
+        <service
+            android:name=".avatar.AvatarLinkService"
+            android:exported="false" />
+
+        <!-- the app's Godot plugin (pet_godot/scripts/app_bridge.gd talks to it as "JarvisAvatar") -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.JarvisAvatar"
+            android:value="com.skyliner2008.jarvis.avatar.AvatarGodotPlugin" />
+
         <activity
             android:exported="true"
             android:name=".MainActivity"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|locale">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

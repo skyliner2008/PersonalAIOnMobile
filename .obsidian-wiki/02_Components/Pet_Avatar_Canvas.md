@@ -1,5 +1,8 @@
 # Pet Avatar — Compose Canvas engine (eyes & motion)
 
+> **ถอดออกจากแอปแล้ว (2026-10-01)** — Engine นี้ไม่พัฒนาต่อ โค้ดทั้งหมดถูกลบ แอปใช้หุ่น Godot เป็น Engine เดียว
+> ดู [[Avatar_Mode]] และ [[Pet_Godot_Lab]] · หน้านี้เก็บไว้เป็นประวัติ
+
 เอนจินวาดหน้าสัตว์เลี้ยงแบบ Compose Canvas (อีกเอนจินคือ Rive — ดู [[Rive_Avatar_Engine]])
 หน้า LOOI: จอดำ OLED + ดวงตานีออน ไม่มีหัวหุ่นยนต์ให้เห็น
 

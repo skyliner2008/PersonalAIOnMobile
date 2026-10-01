@@ -19,10 +19,14 @@ sources:
   - composeApp/src/androidMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/RiveAvatarView.android.kt
   - composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/ui/component/avatar/PetRobotHeadAvatar.kt
 created: 2026-09-14
-updated: 2026-09-15
+updated: 2026-10-01
 ---
 
 # Rive Avatar Engine & Dual-Engine Architecture
+
+> **ถอดออกจากแอปแล้ว (2026-10-01)** — `rive-android`, `avatar.riv`, `RiveAvatarView` / `RiveAvatarBinding` /
+> `RiveMoodStories` ถูกลบ แอปใช้หุ่น Godot เป็น Engine เดียว ดู [[Avatar_Mode]] · เครื่องมือใน `rive_avatar/`
+> (Eye Lab, สคริปต์ Blender ของหุ่น) ยังอยู่ · หน้านี้เก็บไว้เป็นประวัติ
 
 ## 1. ภาพรวม (Overview)
 ระบบ Rive Avatar Engine เรนเดอร์ JARVIS Robot Avatar ด้วย **Rive CLI** คู่กับ **Compose Multiplatform**

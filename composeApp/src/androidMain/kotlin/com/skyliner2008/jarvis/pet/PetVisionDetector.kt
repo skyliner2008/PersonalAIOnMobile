@@ -78,6 +78,7 @@ class PetVisionDetector(
     private val objectDetector: ObjectDetector = ObjectDetection.getClient(objectOptions)
     private val targetTracker = PetVisionTargetTracker()
     private val gazeStabilizer = GazeStabilizer()
+    private val gazeNeutral = com.skyliner2008.jarvis.ui.component.avatar.GazeNeutral()
 
     private var isProcessing = false
     private var lastProcessTime = 0L
@@ -723,11 +724,10 @@ class PetVisionDetector(
         }
         val rawNormY = (2f * faceCenterY / imageHeight.toFloat()) - 1f
 
-        // Desk / Stand angle calibration:
-        // When the phone sits on a desk/stand, the user's face is naturally in the upper 20-35% of the frame (rawNormY ≈ -0.45f to -0.65f).
-        // Calibrate neutral elevation to this natural desk viewing line so user sitting in front looks straight ahead (0, 0).
-        val deskNeutralBiasY = -0.45f
-        val calibratedY = (rawNormY - deskNeutralBiasY) * 1.35f
+        // Up and down, "straight ahead" is wherever the user's face usually is (GazeNeutral): on a desk stand
+        // the face sits high in the frame (≈ -0.45), held in the hand low (≈ +0.35). The old fixed desk line
+        // pinned the gaze to the bottom edge when hand-held. Left and right: the camera is in the middle.
+        val calibratedY = gazeNeutral.offsetY(rawNormY, now) * 1.35f
         val calibratedX = rawNormX * 1.25f
 
         // Deadzone: if user is sitting naturally in front within deadzone, snap to dead center (0f, 0f)
@@ -744,7 +744,8 @@ class PetVisionDetector(
             val gy = (stabilizedY * 100).toInt() / 100f
             val rx = (rawNormX * 100).toInt() / 100f
             val ry = (rawNormY * 100).toInt() / 100f
-            logDebug(TAG, "👀 Face tracked at (normX=$gx, normY=$gy) [raw:($rx, $ry), scale=${gazeStabilizer.faceScaleFactor}] -> Pet gaze updated")
+            val ny = (gazeNeutral.y * 100).toInt() / 100f
+            logDebug(TAG, "👀 Face tracked at (normX=$gx, normY=$gy) [raw:($rx, $ry), straightY=$ny, scale=${gazeStabilizer.faceScaleFactor}] -> Pet gaze updated")
         }
 
         onGazeDetected(stabilizedX, stabilizedY)

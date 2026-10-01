@@ -45,6 +45,20 @@ class LiveGreetingHistoryTest {
         assertTrue(LiveProtocol.startsWithSessionGreeting(greetingReply))
     }
 
+    /** logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ถาม "ราคา Bitcoin" / "สภาพอากาศวันนี้เป็นยังไง" ได้แค่คำทักทาย */
+    @Test
+    fun `a reply that is only the avatar greeting is not an answer`() {
+        assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีฮับบอส! น้อง หุ่นยนต์ สัตว์เลี้ยง พร้อม เล่น ด้วยแล้ว ฮับ"))
+        assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีฮับบอส! น้องหุ่นยนต์สัตว์เลี้ยงพร้อมเล่นด้วยแล้วฮับ"))
+        assertTrue(LiveProtocol.isSessionGreetingOnly(greetingReply))
+        // a greeting in the model's own words (the personas no longer give one word for word)
+        assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีค่ะบอส จาวิสพร้อมช่วยแล้วค่ะ"))
+        // a real answer, or a greeting with the answer after it, is an answer
+        assertFalse(LiveProtocol.isSessionGreetingOnly("น้องจัดข้อมูลทองคำมาให้แล้วฮับ ราคาตอนนี้อยู่ที่สี่พันหนึ่งร้อยหกสิบเอ็ดดอลลาร์นะฮับบอส"))
+        assertFalse(LiveProtocol.isSessionGreetingOnly(repeatedGreetingAnswer))
+        assertFalse(LiveProtocol.isSessionGreetingOnly(""))
+    }
+
     @Test
     fun `session history drops greetings on both sides and caps length`() {
         val turns = listOf(
@@ -82,12 +96,53 @@ class LiveGreetingHistoryTest {
         assertFalse(LiveProtocol.isLiveTranscript(null))
     }
 
+    /** logcat 2026-10-01 18:19: the face change after the weather report was tagged "answer the weather question now" */
+    @Test
+    fun `only real answers are tagged as the answer to the user's question`() {
+        val asked = "สภาพ อากาศ วัน นี้ เป็น ยัง ไง"
+        val weather = LiveProtocol.tagToolResult("device_weather", asked, asked, "⛅ สภาพอากาศ: ตำบล บานา, ปัตตานี")
+        assertTrue(weather.startsWith("[ANSWER FOR]") && weather.contains(asked), weather)
+        val face = "🎭 ปรับ Avatar: อารมณ์=SAD ฉากหลัง=rainy Props=umbrella"
+        assertEquals(face, LiveProtocol.tagToolResult("device_avatar_emotion", asked, asked, face))
+        assertEquals("ok", LiveProtocol.tagToolResult("device_always_live", "เปิดโหมดสัตว์เลี้ยง", "เปิดโหมดสัตว์เลี้ยง", "ok"))
+        // a result for an earlier question while the user has moved on
+        assertTrue(LiveProtocol.tagToolResult("trading_price", "ราคาทอง", asked, "4161").startsWith("[PENDING QUESTION]"))
+        assertEquals("r", LiveProtocol.tagToolResult("trading_price", "", asked, "r"))
+        // handing a job to the assistant is not the answer: no "answer it in full now" on its one-line acknowledgement
+        val ack = LiveProtocol.delegatedAck("trading_macro_calendar")
+        assertEquals(ack, LiveProtocol.tagToolResult("trading_macro_calendar", "ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้", asked, ack))
+    }
+
     @Test
     fun `session history keeps only the newest turns`() {
-        val turns = (1..20).map { "user" to "คำถาม $it" }
+        val turns = (1..20).flatMap { listOf("user" to "คำถาม $it", "model" to "คำตอบ $it") }
         val history = LiveProtocol.buildSessionHistory(turns, maxTurns = 8)
         assertEquals(8, history.lines().size)
-        assertTrue(history.endsWith("คำถาม 20"))
-        assertFalse(history.contains("คำถาม 12\n"))
+        assertTrue(history.endsWith("คำตอบ 20"))
+        assertTrue(history.contains("ผู้ใช้: คำถาม 17"))
+        assertFalse(history.contains("คำถาม 16"))
+    }
+
+    /**
+     * logcat 2026-10-01 16:51: ประวัติของ session 16:24 (โหมดอวตาร) จบด้วย "ราคา Bitcoin" / "สภาพอากาศ…" ที่ได้แค่คำทักทาย
+     * — กด live ใหม่ โมเดลดึง BTC กับอากาศมาพูดเองทันที 2 รอบ
+     */
+    @Test
+    fun `questions that never got an answer are left out of a new session's history`() {
+        val turns = listOf(
+            "user" to "ราคา ทองคำ ปัจจุบัน",
+            "model" to "น้องจัดข้อมูลทองคำมาให้แล้วฮับ ราคาตอนนี้อยู่ที่สี่พันหนึ่งร้อยหกสิบเอ็ดดอลลาร์นะฮับบอส",
+            "user" to "ราคา Bitcoin",
+            "model" to "สวัสดีฮับบอส! น้อง หุ่นยนต์ สัตว์เลี้ยง พร้อม เล่น ด้วยแล้ว ฮับ",
+            "user" to "สภาพอากาศวันนี้เป็นยังไง",
+            "model" to "สวัสดีฮับบอส! น้องหุ่นยนต์สัตว์เลี้ยงพร้อมเล่นด้วยแล้วฮับ",
+        )
+        val history = LiveProtocol.buildSessionHistory(turns)
+        assertTrue(history.contains("ผู้ใช้: ราคา ทองคำ ปัจจุบัน"), history)
+        assertFalse(history.contains("Bitcoin"), history)
+        assertFalse(history.contains("สภาพอากาศ"), history)
+        // a reconnect in the middle of a conversation keeps them: the latest one may still be waiting for its answer
+        val reconnect = LiveProtocol.buildReconnectHistory("", turns)
+        assertTrue(reconnect.contains("ผู้ใช้: สภาพอากาศวันนี้เป็นยังไง"), reconnect)
     }
 }

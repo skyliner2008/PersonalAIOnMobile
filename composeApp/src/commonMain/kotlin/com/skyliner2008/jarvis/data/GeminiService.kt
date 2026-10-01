@@ -1283,4 +1283,8 @@ class ToolEnrichmentTimeoutException(val timeoutMs: Long) : Exception("tool enri
 /** ติดใน coroutine ของ tool call ที่มาจาก Live session — ดู [GeminiService.generateToolEnrichment] */
 class LiveToolCallContext : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
     companion object Key : kotlin.coroutines.CoroutineContext.Key<LiveToolCallContext>
+
+    /** สิ่งที่ผลของ call นี้แสดงบนฉากข้อมูลของหุ่น (tool, data) — AvatarToolData.publish เขียน, LiveToolBridge อ่าน */
+    @kotlin.jvm.Volatile
+    var avatarData: Pair<String, kotlinx.serialization.json.JsonElement>? = null
 }

@@ -1,3 +1,267 @@
+## 2026-10-02 — Live หัวหน้า/ลูกน้องผ่านบนเครื่อง + โหมดอวตาร: ฉากของงานที่ส่งลูกน้องขึ้นตอน AI เล่าผล (branch `feat/rive-eye-morph`)
+- **User Request**: "log ล่าสุด ในโหมด live" (logcat 00:18–00:20: ถามรัว 3 ข้อแบบเดิมหลังแก้รอบก่อน)
+- **ผลบนเครื่อง — ผ่านตาม flow**:
+  - "วิเคราะห์ BTC 5 มิติ" → ส่งลูกน้อง (เสร็จ 1.2 วิ) · "ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้" → ส่งลูกน้อง (0.3 วิ) — คำรับงานทั้งสอง
+    ถูกผู้ใช้พูดคำถามถัดไปทับ (ตั้งใจถามรัว)
+  - "ราคาทองคำปัจจุบันเท่าไหร่" → ตอบทันที 4170.55 (เสียงแรก 3.8 วิหลังถาม)
+  - เงียบ → "ส่วนเรื่องวิเคราะห์ Bitcoin ที่บอสขอไว้ก่อนหน้านี้…" (36 วิ) → "ส่วนเรื่องปฏิทินเศรษฐกิจสัปดาห์นี้…" (21 วิ) ทีละเรื่อง
+    ไม่มีทักทายกลางคัน ไม่มีรายงานซ้ำ ไม่มีตัวเลขหลอน
+  - ช่องเงียบก่อนแต่ละรายงาน 4.6–5.9 วิ = รอเงียบ ~2 วิ (`isConversationIdle`) + โมเดลเริ่มพูด 2.4–3.8 วิ
+  - คำทักทายเปิดเซสชันโดนเสียงคลิกขัด (VAD 00:18:30) → AI ตอบเสียงนั้นแทน ("อุ๊ย เสียงอะไรคลิก…") — น่าจะเป็นเสียงรอบข้าง
+    (เสียงหุ่นของแอปเล่นเฉพาะ demo / กล้อง / สกิตอวตาร ไม่มีตอนเริ่ม live)
+- **จำลอง log นี้ในโหมดอวตาร → บั๊กฉาก**: ผลของงานที่ส่งลูกน้องมาถึงระหว่างพูดรับงาน → การ์ดขึ้นทันที → เสียงรับงานหยุด → ปล่อยฉาก
+  แล้วทิ้ง (ทิ้งทั้งที่ AI ไม่ได้พูดถึง) → ตอน AI เล่าผลจริง (ปฏิทิน 77 วิให้หลัง) ไม่มีการ์ด — โดนทุก tool ส่งลูกน้องที่มีฉาก
+- **แก้**:
+  - `AvatarLiveFeed.Result.later` (LiveToolBridge: call ใน `delegatedCallIds` หรือถูก server ยกเลิก) · `LiveGeminiService.reportsSent`
+    → `AvatarLiveFeed.report(tool, subject)` ตอนส่งข้อค้างให้ AI เล่า
+  - `ToolSceneSync`: ผล later ไม่ขึ้นทันทีและคำพูดไม่เรียกขึ้น — รอ `onReport` แล้วขึ้นพร้อมคำแรกของคำตอบถัดไป · ผลใหม่ที่ไม่ใช่ later
+    ยกเลิกรายงานที่รออยู่ (ผู้ใช้ถามเรื่องใหม่ก่อน ข้อนั้นรอรอบส่งซ้ำ) · ฉากที่ถูกปล่อยโดยที่ AI ไม่ได้พูดถึง → รอรายงานของมัน
+- **Verify**: `ToolSceneSyncTest` +4 (ไทม์ไลน์ 00:18 จริง, คำรับงานเอ่ยชื่อเรื่อง, ผู้ใช้พูดทับรายงาน, การ์ดที่ถูกปล่อยกลับมากับรายงาน)
+  · แอป 550 เทสต์ผ่าน · ติดตั้งบน SM-S908E เปิดได้ ไม่ crash · **ยังต้องทดสอบด้วยเสียงในโหมดอวตาร**
+- เอกสาร: [[Avatar_Mode]], [[LiveGeminiService]], [[LiveToolBridge]]
+
+## 2026-10-02 — Live หัวหน้า/ลูกน้อง: ถามรัว 3 ข้อแล้ว flow รวน (ทักทายแทนตอบ, วนถามซ้ำ, รายงานซ้ำ) (branch `feat/rive-eye-morph`)
+- **User Request**: "Avatar_Mode ยังทำงานไม่ถูกต้อง ฉันเลยทดสอบในโหมด live ปรกติ ระบบ multi session ก็ยังทำงานได้ไม่ถูกต้องตาม flow
+  ที่วางไว้ — live รับคำสั่ง ส่งให้ลูกน้องไปทำ รับคำตอบจากลูกน้องมาแจ้ง user คุยโต้ตอบต่อเนื่อง ลูกน้องเสร็จจึงแจ้ง"
+  (logcat 23:28–23:32: "วิเคราะห์ BTC 5 มิติ" → "ปฏิทินตัวเลขเศรษฐกิจสัปดาห์นี้" → "ราคาทองคำปัจจุบันเท่าไหร่" ติดกัน)
+- **ลูกน้องทำงานถูก** (BTC เสร็จ 1 วิ, ปฏิทิน 0.3 วิ เข้าคิว) — **หัวหน้ารวน 5 จุด**:
+  1. ทักทายแทนตอบ: ราคาทอง (23:29:08) และรับงานปฏิทิน (23:29:59) ได้ "สวัสดีค่ะบอส จาวิสพร้อมคุยแล้วค่ะ…" — persona โหมดควบคุม
+     ยังมีประโยคทักทายคำต่อคำ "ห้ามเปลี่ยนเด็ดขาด" (แก้ไปแค่โหมดอวตาร)
+  2. วนถามซ้ำ (บั๊กจากรอบก่อน): ทักทายแทนรับงาน → นับว่ารายงานถูกกลืน → ถามปฏิทินซ้ำ ทั้งที่ส่งให้ลูกน้องแล้ว → DUPLICATE CALL →
+     โมเดลสับสนพูดราคาทอง 4170.17 ที่ไม่มีในผลใด
+  3. รายงานทองซ้ำ: ตอบเป็นข้อความล้วน → TTS อ่านแทน แต่นับว่า "ไม่ได้พูด" → ส่งซ้ำ → พูดอีกรอบ
+  4. ผลปฏิทินติดป้ายคำถามราคาทอง: call ที่ทำให้คำถามค้างที่แอปถามซ้ำ ไปหยิบประโยคล่าสุดของผู้ใช้
+  5. ป้าย `[ANSWER FOR] … ต้องพูดตอบคำถามนี้ให้ครบทันที` ติดบนคำตอบรับงาน `DELEGATED: … พูดประโยคนี้ประโยคเดียวแล้วหยุด` — สั่งขัดกันเอง
+- **แก้**:
+  - persona โหมดควบคุม: ตัดประโยคทักทายคำต่อคำ → ทักทายครั้งเดียวด้วยคำพูดของตัวเอง; หลังจากนั้นทุกคำตอบ รวมการรับงานให้ผู้ช่วย
+    และการรายงานผลที่ค้าง เริ่มที่เนื้อหา (`DynamicModelTest` เปลี่ยนเป็นเช็กกฎนี้แทนประโยคตายตัว)
+  - `settleReportDelivery`: เทิร์นที่เรียก tool = คำถามกำลังถูกทำ ไม่ส่งซ้ำ · คำตอบทาง TTS (`spokenByTts`) นับว่าพูดแล้ว
+  - `LiveGeminiService.currentQuestion`: call ระหว่างรอรายงานคำถามค้าง (ก่อนผู้ใช้พูด) เป็นของคำถามนั้น — ใช้ทั้ง `toolCallQuestions`
+    และ `CallOrigin` ของ `LiveToolBridge`
+  - `LiveProtocol.tagToolResult`: ไม่ติดป้ายบนคำตอบรับงาน (`DELEGATED:`) และ call ที่ไม่ได้รัน
+  - `stripSessionGreeting` รู้จักคำทักทายด้วยคำพูดเอง: "พร้อมช่วย", "ยินดีช่วย" (`GREETING_WORDS`)
+- **Verify**: แอป 546 เทสต์ผ่าน · ติดตั้งบน SM-S908E เปิดแอปได้ ไม่มี crash · **ยังต้องทดสอบด้วยเสียง**: ถามรัว 3 ข้อแบบเดิม
+  → รับงาน BTC/ปฏิทินสั้นๆ, ตอบทองทันที, ลูกน้องเสร็จแล้วรายงานทีละเรื่อง ไม่มีทักทายกลางคัน ไม่มีรายงานซ้ำ
+- เอกสาร: [[LiveGeminiService]], [[LiveToolBridge]]
+
+## 2026-10-01 — โหมดอวตาร: ฉากข้อมูลค้างจนพูดจบและเปลี่ยนตามหัวข้อที่พูด + ถามหลายคำสั่งติดกัน (branch `feat/rive-eye-morph`)
+- **User Request**: "ระบบสั่งหลายคำสั่งติดกันยังไม่โอเค การแสดงโมชั่นผลจาก tool ยังไม่ค่อยถูกใจ ฉากจบไว หรือฉากไม่ตรงกับที่พูด
+  ฉันต้องการให้ระยะเวลาที่แสดงฉากอยู่จนพูดจบ และเปลี่ยนฉากถ้ามีการตอบคำสั่งอื่นต่อ" (logcat 21:32–21:38)
+- **จาก log**:
+  - ราคาทองถูกเสียงแทรก → เข้าคิว → ถาม Bitcoin (trading_price ตัวเดียวกัน) → `onToolAnswered` ลบด้วยชื่อ tool → ทองไม่ได้รายงานเลย
+    (`addToolResult` / `requeueFront` ก็เทียบแค่ชื่อ tool)
+  - ตอบ BTC / Tesla+MSFT แล้วเรียก `device_avatar_emotion` หลังพูดจบ → "สวัสดีฮับบอส! วันนี้มีอะไรให้น้องช่วย…" ต่อท้าย
+    (เอกสาร Gemini: async function calling ยังไม่รองรับใน 3.1 Flash Live — ผล tool ทุกแบบทำให้พูดต่อ)
+  - อากาศ+ทอง: ผลราคามาก่อน แต่ AI พูดอากาศก่อน → ช่วงพูดเรื่องทองหุ่นยังโชว์อากาศ · ฉากจบตามเวลาตายตัวก่อน AI พูดจบ
+  - Tesla+MSFT: `AvatarToolData` ช่องเดียวต่อชื่อ tool → การ์ดเดียว · transcript มาก่อนเสียง ~3.7 เท่า (3.8 วิ vs เสียง 14.3 วิ)
+- **แก้**:
+  - pet_godot: beat `hold` ในฉากข้อมูลทั้ง 9 · `play_tool(…, hold)` / `release()` (ค้างสูงสุด 60 วิ) · คำสั่ง `tool.hold` / `release`
+  - แอป: `AvatarToolData.publish` (suspend) → `LiveToolCallContext.avatarData` ต่อ call · `AvatarLiveFeed` (ผลทีละ call + คำพูด/เวลาได้ยิน)
+    · `LiveGeminiService.speechMarks` (เวลาเสียงแรก + ความยาวเสียงที่มาถึง) · `ToolSceneSync` + `ToolSceneWords` เลือกฉากตามคำที่ได้ยิน
+    ค้างจนเสียงหยุดแล้ว release · ลบทางเก่า `lastToolResult` (LiveToolBridge → Orchestrator → ViewModel → App → AlwaysLiveScreen)
+  - `PendingAnswerQueue`: เทียบ "เรื่อง" ด้วยหัวผล (บรรทัดแรก) + ชื่อ tool แทนชื่อ tool อย่างเดียว (`subject`, `sameResult`)
+  - `LiveProtocol.isTrailingExpression` → `LiveGeminiService` ไม่เล่นเสียง/ข้อความที่พูดต่อหลังเปลี่ยนหน้าในเทิร์นที่ตอบแล้ว
+  - persona โหมดอวตาร: เรียก `device_avatar_emotion` ก่อนพูดเท่านั้น (ผล tool ข้อมูลหุ่นแสดงเป็นฉากให้เอง)
+- **Verify**: Godot scene_test ผ่าน (+ ฉาก hold ค้างเกินความยาว, release แล้วจบ, ไม่ hold จบเอง) · แอป 546 เทสต์ผ่าน
+  (`ToolSceneSyncTest` 6 ด้วยเวลา/คำจริงจาก log, `PendingAnswerQueueTest` ทอง→BTC, `AvatarLookTest` ข้อมูลต่อ call) ·
+  ติดตั้งบน SM-S908E เปิดโหมดอวตาร → ready → Back ปิด ไม่มี crash · **ยังต้องทดสอบด้วยเสียง**: อากาศ+ทอง, Tesla+MSFT, ถามรัว
+- เอกสาร: [[Avatar_Mode]] "ฉากข้อมูลตามเสียงพูด", [[LiveGeminiService]], [[LiveToolBridge]], `scenes/SCHEMA.md`
+
+## 2026-10-01 — ถามอากาศครั้งเดียว AI รายงาน 2 รอบ (เปลี่ยนหน้าหลังตอบ → ตอบซ้ำ) (branch `feat/rive-eye-morph`)
+- **User Request**: "คำสั่งแรกก็ยังทำงานมั่วอยู่ — ถาม 'สภาพอากาศวันนี้เป็นยังไง' AI แสดงผลที่หน้าจอถูกต้อง พูดตอบตรงกับผล
+  แต่เหมือนมีการทำงานซ้ำอีกรอบ" (logcat 18:19:33–18:20:04, โหมดอวตาร)
+- **ลำดับใน log**: ตอบอากาศถูก (37.9) → เรียก `device_avatar_emotion` ฉากฝน+ร่ม **หลังพูดจบ** (40.3) → "บอสฮับ ตอนนี้อยู่ที่ไหนฮับ
+  จะได้เช็คอากาศให้ถูก" → `device_weather` ซ้ำ → `[DUPLICATE CALL] … ให้พูดตอบผู้ใช้จากผลนี้ทันที` → รายงานอากาศรอบ 2 (ขึ้นต้นด้วยคำทักทาย)
+- **ต้นเหตุ** (3 ข้อความที่สั่งให้ "ตอบอีก" หลังตอบไปแล้ว):
+  1. ป้าย `[ANSWER FOR] … ต้องพูดตอบคำถามนี้ให้ครบทันที` ติดให้ผลของ **ทุก** tool ในเทิร์น รวมผลเปลี่ยนหน้า → โมเดลได้ผลเปลี่ยนหน้า
+     ที่สั่งให้ตอบเรื่องอากาศ ทั้งที่ในมือไม่มีข้อมูลอากาศ → ถามที่อยู่แล้วดึงใหม่
+  2. ข้อความกำกับของการเปลี่ยนหน้าที่แก้รอบก่อน ("ถ้ามีผล tool อื่นให้ตอบเรื่องนั้น") ใช้ได้เฉพาะตอนยังไม่ได้ตอบ
+  3. `DuplicateCallGuard.repeatNote` ("ให้พูดตอบผู้ใช้จากผลนี้ทันที") ทำมาสำหรับโมเดลที่วนเรียกโดยยังไม่พูด (09-24) ไม่ใช่หลังรายงานแล้ว
+- **แก้**:
+  - `LiveProtocol.tagToolResult` (ย้ายการติดป้ายมาเป็นฟังก์ชันที่เทสต์ได้): ไม่ติดป้าย `[ANSWER FOR]`/`[PENDING QUESTION]` ให้ `UI_ONLY_TOOLS`
+  - `avatarEmotionVoiceRule` เป็นกลาง: เป็นแค่ท่าทางประกอบ ไม่ต้องพูดถึง · ผู้ใช้ขอเปลี่ยนหน้าเองค่อยตอบรับ 1 ประโยค · ห้ามพูดซ้ำ
+    ห้ามเรียก tool เดิมซ้ำ ห้ามถามต่อ ห้ามทักทาย
+  - `DuplicateCallGuard` จำเวลาที่ได้ผล (`resultAtMs`) — เรียกซ้ำหลังโมเดลพูดไปแล้ว (`LiveGeminiService.lastModelSpeechAtMs`)
+    ตอบ `alreadyReportedNote` ("รายงานไปแล้ว ห้ามพูดผลซ้ำ จบเทิร์นได้เลย") · ยังไม่พูดใช้ `repeatNote` เดิม
+- **Verify**: แอป 539 เทสต์ผ่าน (ใหม่: `tagToolResult`, เรียกซ้ำหลังรายงาน — ด้วยเวลาจริงจาก log) · ติดตั้งบน SM-S908E เปิดแอปได้
+  ไม่มี crash · **ยังต้องทดสอบด้วยเสียง**: ถามอากาศ/ราคาในโหมดอวตาร → ตอบรอบเดียว
+- เอกสาร: [[LiveToolBridge]], [[LiveGeminiService]]
+
+## 2026-10-01 — กด live แล้วเด้งไปหน้า Drive + AI ดึง BTC/อากาศเก่ามาพูดเอง 2 รอบ (branch `feat/rive-eye-morph`)
+- **User Request**: "เมื่อกดปุ่ม live ระบบกระโดดเข้าไปที่ Starting Drive ทันที โดยที่ฉันยังไม่สั่งอะไร และเหมือนมีคำสั่งเก่าค้างอยู่
+  เช็ค BTC กับสภาพอากาศวน 2 รอบ — กดหยุดแล้วกดใหม่ รอบนี้ปกติ" (logcat 16:51–16:55)
+- **ต้นเหตุ** (ต่อจากบั๊กทักทายแทนรายงานผลของ session 16:24):
+  - ประวัติที่ส่งตอนเปิด session (`LiveProtocol.buildSessionHistory`) ตัดคำตอบที่เป็นแค่คำทักทายออก → "ราคา Bitcoin" กับ
+    "สภาพอากาศวันนี้เป็นยังไง" ค้างท้ายประวัติแบบไม่มีคำตอบ → หลัง "สวัสดีจาวิส พร้อมคุยไหม" โมเดลเรียกอากาศ + BTC +
+    เปลี่ยนหน้า + เปิดแอป "จาวิส" เอง แล้วพูดผล · รอบ 2 (16:51:52) ไม่มีเสียงผู้ใช้คั่น — ประวัติใน system instruction ยังแสดง
+    คำถามค้างอยู่ อะไรก็ตามที่ปลุกโมเดล (เสียงรอบข้าง/เสียงสะท้อน) ทำให้ตอบซ้ำ · รอบที่ 3 (16:55) ปกติเพราะคำตอบ 16:51 เข้าประวัติแล้ว
+  - `lastUserText` ไม่เคยรีเซ็ตระหว่าง session — call แรกของ session ใหม่ติดป้าย "[ANSWER FOR] <คำถามของ session ก่อน>"
+  - **เด้งไปหน้า Drive**: `device_weather` (ตั้งแต่ 2026-09-13) แต่งหุ่นตามอากาศผ่าน `triggerTestEmotion` ซึ่งเปิดหน้า Live เต็มจอเสมอ
+    — โปรไฟล์ปกติคือหน้า Drive & Control · วันนี้แดดออก (ครั้งก่อนมีเมฆ ไม่เข้าเงื่อนไขจึงไม่เด้ง) · หน้า Drive ตอนนี้เป็นหน้าหุ่นแบบภาพ
+    ไม่แสดงฉาก/ของ จึงเด้งไปเปล่าๆ
+- **แก้**:
+  - `buildSessionHistory(dropUnanswered = true)`: ตัดคำถามที่ไม่มีคำตอบตามหลังออกจากประวัติตอนเปิด session ใหม่ (reconnect ไม่ตัด)
+  - เทิร์นทักทายเปิดเซสชัน: `LiveGeminiService.inGreetingTurn` (จริงตั้งแต่ส่งคำทักทายจนผู้ใช้พูดหรือเทิร์นจบ) → `LiveToolBridge`
+    ไม่รัน tool ตอบ `LiveProtocol.GREETING_TURN_TOOL_NOTE` ("SKIPPED … ทักทายอย่างเดียวแล้วรอผู้ใช้พูด") · ไม่นับเป็นผลที่ต้องรายงาน
+    (ไม่เข้าคิว ไม่ส่งซ้ำ) · log `🛑 <tool> ในเทิร์นทักทายเปิดเซสชัน`
+  - `connectAndListen` รีเซ็ต `lastUserText` เป็นของ session ใหม่
+  - `device_weather` แต่งฉาก/ของตามอากาศเฉพาะโหมดอวตาร (`JarvisPersona.isPetMode`) — เสียงยังเล่นทุกโหมด
+- **Verify**: แอป 537 เทสต์ผ่าน (ใหม่: ประวัติจริงจาก session 16:24 — คำถามค้างหาย, reconnect ยังเก็บ) · ติดตั้งบน SM-S908E เปิดแอปได้
+  ไม่มี crash · **ยังต้องทดสอบด้วยเสียง**: กด live → ทักทายอย่างเดียว ไม่เด้ง Drive · ถามอากาศในโหมดปกติ → ไม่เด้ง Drive
+- เอกสาร: [[LiveGeminiService]], [[LiveToolBridge]], [[Avatar_Mode]]
+
+## 2026-10-01 — โหมดอวตาร: AI ทักทายแทนการรายงานผล + "PROCESS STARTED" คือ process ของหุ่น (branch `feat/rive-eye-morph`)
+- **User Request**: "บรรทัด `PROCESS STARTED (12961)` เหมือนการเริ่ม PROCESS ใหม่อีกรอบ" + "คำสั่งครั้งที่ 2 กับ 3 แสดงค่าได้ถูกต้อง
+  แต่ AI กล่าวทักทายอย่างเดียว ไม่รายงานผลที่ได้" (logcat 16:23–16:25: ราคาทอง → ราคา Bitcoin → สภาพอากาศ)
+- **PROCESS STARTED/ENDED (12961)**: process `:avatar` ของหุ่น Godot — เริ่ม 16:23:33 ตอนเข้าโหมดอวตาร (CONTROL → PET) จบ 16:25:22
+  ตอนออก ตามที่ออกแบบ (engine เปิดซ้ำใน process เดิมไม่ได้, พังก็ไม่พาแอปพัง, ปิดแล้วคืน ~1.2 GB) · แอปหลัก 9818 ไม่ได้รีสตาร์ต
+- **ทักทายแทนรายงานผล**: เทิร์น 2 "ราคา Bitcoin" โมเดลเรียก `trading_price` + `device_avatar_emotion` พร้อมกัน — ผลเปลี่ยนหน้าสั่ง
+  "โปรดตอบรับสั้นๆ 1-2 ประโยคอย่างน่ารัก สดใส" และ persona โหมดอวตารมีประโยคสั้นน่ารักแบบคำต่อคำอยู่ประโยคเดียวคือคำทักทาย
+  ("สวัสดีฮับ…! น้องหุ่นยนต์สัตว์เลี้ยงพร้อมเล่นด้วยแล้วฮับ") โดยไม่มีกฎ "ครั้งเดียวต่อเซสชัน" แบบ persona ควบคุม → พูดประโยคนั้น
+  → เทิร์น 3 (อากาศ) พูดซ้ำตามแบบเทิร์นก่อน · ผลราคา/อากาศถูกนับว่า "ตอบแล้ว" จึงหายเงียบ · session ใหม่หลังออกโหมด (16:25:25)
+  เห็นคำถามที่ไม่มีคำตอบในประวัติเลยเรียก tool ซ้ำเอง (ผลข้างเคียงของบั๊กเดียวกัน)
+- **แก้**:
+  - persona โหมดอวตาร: ตัดประโยคทักทายคำต่อคำ → ทักทายครั้งเดียวด้วยคำพูดของตัวเอง + "หลังจากนั้นทุกคำตอบ รวมหลังผล tool
+    และหลังเปลี่ยนสีหน้า เริ่มที่เนื้อหาทันที ห้ามทักทาย" (ทำตามขั้นต่อไปที่จดไว้ 09-24)
+  - `LiveToolBridge.avatarEmotionVoiceRule` (ที่เดียวแทน 2 จุดเดิม): เปลี่ยนหน้าเป็นแค่ท่าทางประกอบ → มีผล/คำถามอื่นให้ตอบเรื่องนั้น,
+    ขอเปลี่ยนหน้าอย่างเดียวค่อยตอบรับ 1 ประโยค, ห้ามทักทาย · `PET WEATHER` / `PET LOCATION` เริ่มที่เนื้อหา ห้ามทักทาย
+  - ตาข่ายกันพลาด: `LiveProtocol.isSessionGreetingOnly` + `PendingAnswerQueue.onGreetingOnlyAnswer` — เทิร์นที่มีผล tool แต่ AI
+    พูดแค่คำทักทาย → ผลเข้าคิวรายงานตอนเงียบ ("[PENDING QUESTION] … ห้ามทักทาย"), ข้าม tool เปลี่ยนหน้า (`LiveProtocol.UI_ONLY_TOOLS`
+    ใช้ร่วมกับ `LiveToolBridge`), ไม่ล้างคิวด้วย `onToolAnswered`, รายงานที่ได้แค่คำทักทายกลับมาส่งใหม่ · log `📥 AI ทักทายแทนการรายงานผล`
+- **Verify**: แอป 536 เทสต์ผ่าน (ใหม่: ข้อความจริงจาก log ใน `LiveGreetingHistoryTest`, `PendingAnswerQueueTest`) · ติดตั้งบน SM-S908E
+  เปิดแอปได้ ไม่มี crash · **ยังต้องทดสอบด้วยเสียง**: ถามราคา/อากาศในโหมดอวตาร แล้วดูว่าไม่มี `⚠️ ทักทายซ้ำ` (หรือถ้ามี ต้องตามด้วย
+  `📥 AI ทักทายแทนการรายงานผล` และ AI รายงานผลภายในไม่กี่วินาที)
+- เอกสาร: [[Avatar_Mode]], [[LiveGeminiService]], [[LiveToolBridge]]
+
+## 2026-10-01 — วิเคราะห์ log ทดสอบจริงของ Avatar mode (ผู้ใช้ทดสอบเอง 15:38–15:41) (branch `feat/rive-eye-morph`)
+- **User Request**: ส่ง "log การทดสอบ" (ถามราคาทอง, SMC M15, ทองคำห้ามิติ, โบกมือ/แปะมือ, โคลงเรือ, ทุบโต๊ะ, เขย่า)
+- **ทำงานถูก**: กล้องจับหน้า + ท่ามือ (BYE, HIGH_FIVE) → สมองตอบ · โคลงเรือ/ทุบโต๊ะ/เขย่า → `AvatarStage.react(...)` + สมอง
+  (listener เดียวกัน) · tool ผ่าน live session ตั้ง `lastToolResult` ถูกทาง (orchestrator ตัวเดียว) · `trading_price` publish ข้อมูลก่อนตอบ
+- **บั๊กที่เจอและแก้**:
+  - **หุ่นก้มมองพื้นตลอดตอนถือมือถือ**: log `normY=0.84–0.99` เพราะเส้นตรงหน้าแบบตายตัว `deskNeutralBiasY = -0.45` (ทำไว้สำหรับวางบนขาตั้ง)
+    แต่ถือในมือหน้าอยู่ล่างเฟรม (raw y ≈ +0.38 = ระดับตาหุ่นพอดีที่ระยะ ~30 ซม.) → (0.38+0.45)×1.35 ชนขอบ →
+    `GazeNeutral` ใหม่: หน้าแรกหลังหายไป >5 วิ = มองตรง แล้วเส้นค่อยๆ ตามหน้า (~8 วิ) · ขยับเร็วยังมองตาม · X คงเดิม (กล้องอยู่กลาง)
+  - **หน้านิ่งแล้วหุ่นเลิกมอง**: ค่า gaze ไม่เปลี่ยน (ชนขอบ/นิ่ง) → แอปไม่ส่ง `look` → 2.5 วิ (`LOOK_HOLD`) หุ่นมองไปทั่วเอง →
+    `AvatarModeContent` ส่งซ้ำทุก 1 วิระหว่างเห็นหน้า ((0,0) = ไม่มีใคร ปล่อยให้มองเอง)
+  - **AI สั่ง `gesture=nod` แต่หุ่นขยิบตาแทน** (เดิมแมป NOD → cheeky) → fidget `nod` ใหม่ใน `pet_character.gd` (พยักหน้า 2 ครั้ง, `_head_nod`)
+  - **log ไม่บอกว่าหุ่นได้คำสั่งอะไร** → `AvatarStage` log ทุกคำสั่ง (`→ {...}`) ยกเว้น look/voice, tool log แค่ชื่อ, tool ที่ไม่มีฉาก log "no info scene"
+  - ทางตันจากการลบ PetModeScreen: `onDismissToolCard`/`activeToolName` ของ AlwaysLiveScreen, `dismissToolCard`, `clearLastToolResult` → ลบ
+- **ไม่ใช่บั๊ก**: เสียง ALARM 15:40:14 / 15:41:40 = สมองหิว (`resolvePassiveEmotion`: satiety < 20 → ANGRY + ALARM ทุกครั้งที่ว่าง) —
+  ค่าในเครื่อง satiety 10.6 · hygiene 26 · stress 85 → พูด "ให้อาหารน้อง" / "อาบน้ำให้น้อง" (`device_pet_care`)
+- **ตรวจไม่ได้จาก log นี้**: การ์ดราคาทองขึ้นไหม — log ที่วางมาถูกกรอง (ไม่มีทั้ง `AvatarStage` และ `LiveBridge`) และ buffer มือถือเหลือแค่ ~2 นาที
+- **Verify**: Godot scene_test ผ่าน (+ เช็ก nod) · ภาพเรนเดอร์ nod = หน้าก้มลงถูกทิศ · แอป 534 เทสต์ผ่าน (`GazeNeutralTest` ใหม่ 4,
+  เทสต์ desk calibration เดิมเขียนใหม่ให้เรียกโค้ดจริง) · บน SM-S908E: `FOCUSED|gesture=nod|props=sparkles` → log
+  `→ state … eyes squint … emote sparkle` + `→ fidget nod`, หน้าจอตาหรี่ + ประกาย, Back ปิด + engine จบ
+- เอกสาร: [[Avatar_Mode]] (สายตาจากกล้อง, การอ่าน log), [[Pet_Godot_Lab]] (nod), `pet_godot/README.md`, `scenes/SCHEMA.md`
+
+## 2026-10-01 — ตรวจสอบความถูกต้อง Avatar mode (branch `feat/rive-eye-morph`)
+- **User Request**: "ตรวจสอบความถูกต้อง"
+- **บั๊กที่เจอและแก้**:
+  - เอียงมือถือแล้วหุ่นเอียงผิดทาง: แรงโน้มถ่วงของ Godot เป็นค่า Android กลับเครื่องหมาย → `atan2(g.x, -g.y)` (`app_bridge.gd`) + เทสต์
+  - คำสั่ง `stop` ตัดฉากข้อมูลของ tool ที่เข้ามาแทนละคร → `stop` ส่ง id ของละคร หยุดเฉพาะถ้ายังเล่นอยู่ + เทสต์
+  - ละครค้างเล่นต่อเมื่อสมองเปลี่ยนไปฉากที่ไม่มีละคร → หยุดทันที
+  - เปิดโหมดแล้วหุ่นเล่นผล tool เก่า (จากแชทก่อนหน้า) ซ้ำ → เล่นเฉพาะผลที่มาระหว่างเปิดโหมด
+  - คำสั่งที่ค้างคิวตอนปิดโหมดไปโผล่ตอนเปิดครั้งหน้า → `AvatarLink.clearPending()` ตอนปิด
+  - engine พังซ้ำ = เปิดใหม่ไม่รู้จบ → ตาย 3 ครั้งใน 60 วิ เลิกเริ่ม แล้วแสดงหน้าหุ่นแบบภาพ ("หุ่น 3D เปิดไม่ขึ้น — แสดงหน้าหุ่นแทน")
+  - `link` ของ plugin ถูกอ่านจาก render thread → `@Volatile` · line ending ปนกันใน `log.md` และ `MarketTechnicalToolHandler.kt` → CRLF
+- **Verify**: Godot scene_test ผ่าน (รวมเช็กเอียง + stop ตาม id) · แอป 530 เทสต์ผ่าน (ใหม่ `AvatarStageTest` 4 ตัว) + build · บน SM-S908E: เปิดโหมด → hello/ready
+  (ครั้งแรก ~5.5 วิ, ครั้งต่อไป ~3.5 วิ), จิ้มครบทุกโซน (หน้าผาก แก้มซ้าย/ขวา คาง หน้า ตัว, double tap) → สมองตอบ, ละครปาร์ตี้เล่น
+  แล้ว RESET หยุดตาม id, ไม่เล่นผล tool เก่าซ้ำ, Back ปิดโหมด + process `:avatar` จบ (2 รอบ), ไม่มี crash ·
+  crash guard: ฆ่า engine 3 ครั้ง (`run-as … kill -9`) → ครั้งที่ 1–2 เปิดใหม่เองใน ~2 วิ, ครั้งที่ 3 เลิก + จอหน้าหุ่นแบบภาพ;
+  เปิดแอปใหม่ → หุ่น 3D กลับมาปกติ · สถานะ "เลิกแล้ว" เก็บที่ `AvatarStage.failed` ที่เดียว (activity ที่สร้างใหม่เห็นตรงกับจอ)
+- **ยังต้องทดสอบด้วยมือ**: เขย่า/โคลงเรือ/ทุบโต๊ะ, ทิศการเอียงจริง, กล้องมองตามหน้า, ปากตามเสียง AI, ฉากข้อมูลของ tool ครบวงจรกับ AI จริง
+- เอกสาร: [[Avatar_Mode]] หัวข้อ "วงจรชีวิตของ engine" / "ข้อควรระวัง" / "ทดสอบ", `pet_godot/scenes/SCHEMA.md` (`stop` + id)
+
+## 2026-10-01 — Avatar mode: หุ่น Godot เป็น Engine เดียวของแอป (branch `feat/rive-eye-morph`)
+- **User Request**: "ก่อนจะฝัง godot ลบ engine เดิมทั้งหมดออกได้ ให้มี godot แค่ engine · แก้พื้นหลังหลักของ godot เป็นสีดำ" ·
+  Overlay/Drive → "ใช้ภาพจากหุ่น Godot" · Pet mode → "เปลี่ยนเป็น Avatar mode ไม่ต้องมีปุ่มควบคุม แต่ยังตอบสนองกล้อง ไจโร การเขย่า การจิ้ม"
+- **ลบ**: Engine Canvas (`PetRobotHeadAvatar` + วาดตา/moodset/neon, layer ฉากหลัง/props/foreground, มือโฮโลแกรม, missile overlay),
+  Rive (`rive-android`, `avatar.riv`, binding, mood stories), หุ่น 3D เฟรม (49 webp), `JarvisAvatar`, `PetModeScreen` (ปุ่ม/การ์ด/แดชบอร์ด),
+  `PetSettingsDialog`, `PetNeedsSidebarPanel`, การเลือก engine ใน `PetMemory` — เก็บ `AvatarEmotion`/`RobotFaceState`/`LooiMoodsetCatalog`/สมอง `PetModeController`
+- **ใหม่ (แอป)**: `avatar/` — `AvatarStage` (สะพานฝั่ง common), `AvatarLook` (58 อารมณ์+props+ฉาก → ภาษาหุ่น), `AvatarSkits` (ละคร 12 ฉาก+เสียง),
+  `AvatarToolData` (tool ส่ง map ดิบให้ฉากข้อมูล: อากาศ ราคา เทคนิคอล movers fear&greed คริปโต งบดุล แบต), `AvatarGodotPlugin` (process `:avatar`),
+  `AvatarLinkService` (Messenger), `AvatarStageHost` (RemoteGodotFragment + ปล่อย engine หลังอยู่เบื้องหลัง 30 วิ + เปิดใหม่เองถ้าตาย) ·
+  `AvatarModeScreen` · `RobotSprite` (Drive/Overlay) · `MainActivity` → FragmentActivity · manifest: `GodotService` ใน `:avatar` · Gradle: godot-lib 4.7.2
+  (AAR จาก export templates ในเครื่อง, Maven สำรอง), เฉพาะ arm64, `ignoreAssetsPattern` เก็บ `.godot` · คำสั่งเสียง "โหมดอวตาร" (คำเดิมยังใช้ได้)
+- **ใหม่ (Godot)**: `scripts/app_bridge.gd`, พื้นหลังหลักดำ, boot splash หน้าหุ่น, `--app-sim`, `--sprites`, `tools/export_to_app.ps1`, ปิด frame pacing,
+  เงาคมขึ้น (orthogonal 14 m)
+- **Verify บน SM-S908E**: เปิดโหมด→หุ่น ~3.5 วิ, 60 fps; จิ้มหน้าผาก→LOVE (ชุดชมพู ตาหัวใจ); ละครปาร์ตี้; ย้อนกลับปิดโหมด+process จบ; ฆ่า engine→เปิดใหม่เอง;
+  เบื้องหลัง 30 วิ→คืนหน่วยความจำ; Drive แสดงหน้าหุ่น; overlay ลอยแสดงหน้าหุ่น · แอป 526 เทสต์ผ่าน · Godot scene_test ผ่าน (รวมเช็ก bridge)
+- เอกสาร: [[Avatar_Mode]] (ใหม่), [[Pet_Godot_Lab]] "รอบ 8", หน้า engine เดิมติดป้าย "ถอดออกแล้ว", `pet_godot/README.md`, `scenes/SCHEMA.md` "App bridge"
+
+## 2026-09-30 — Godot lab รอบ 7: ทดสอบบนมือถือจริง (APK แยก) (branch `feat/rive-eye-morph`)
+- **User Request**: "ควรทำฉากต่อ หรือเอารวมกับ app ก่อน" → แนะนำรวมแบบเป็นขั้น → "ดำเนินการ ข้อ 1 ได้" (APK แยก + ดาวน์โหลด templates) → ต่อมือถือ
+- ใหม่: `export_presets.cfg`, `icon.png`, ETC2/ASTC, กล้อง `KEEP_WIDTH`, `.mobile` overrides (60 fps, 3D 75%), `_warm_up()`, PERF log, `.gitignore` build/
+- **Verify บน SM-S908E**: ติดตั้ง/เปิดได้, ฟอนต์ไทย+อีโมจิถูก, จอสูงพอดี, ข้อมูลสดผ่านเน็ตมือถือ, เล่นครบ 21 ฉาก — หลังแก้ 55–60 fps ทุกฉาก (ก่อนแก้ตกถึง 17),
+  VRAM 420 → 350 MB · แอปทดสอบ `com.skyliner2008.petlab` ยังติดตั้งอยู่บนมือถือ — แอปหลักไม่ถูกแตะ
+- เอกสาร: [[Pet_Godot_Lab]] หัวข้อ "รอบ 7", `pet_godot/README.md` หัวข้อ "On a phone"
+
+## 2026-09-30 — Godot lab รอบ 6: ทุก tool มีฉากของตัวเอง (`play_tool`) (branch `feat/rive-eye-morph`)
+- **User Request**: "ประมาณนี้แหละที่ต้องการ คือเป็นฉากที่รับข้อมูลสดมาแสดงได้ โดยแสดงผลสอดคล้องกับ tool ที่เรียกใช้งาน"
+- ใหม่: `director.play_tool` + `scenes/tool_scenes.json` (15 tool → 9 ฉาก, ที่เหลือ → การ์ดข้อความ), ฉาก `price_report` `technical_report` `market_movers`
+  `fear_greed_report` `crypto_overview` `battery_report`, panel `gauge` + `price`, อ่านตัวเลขจากข้อความของ tool, `data_samples/<tool>.json`,
+  `tools/save_samples.gd` (แทน `fetch_info_data.ps1`), แท็บ **ข้อมูล** ปุ่มต่อ tool, CLI `--tool=`
+- **Verify**: ดึงผลสดครบ 8 tool จากแหล่งเดียวกับแอป; headless 76/76; ตรวจเฟรมทุกฉาก; อัดคลิป 6 ฉากใหม่ — ยังไม่เข้าแอป
+- เอกสาร: [[Pet_Godot_Lab]] หัวข้อ "รอบ 6", `scenes/SCHEMA.md` (ตาราง tool → ฉาก, ข้อมูลที่แต่ละ tool ส่ง)
+
+## 2026-09-30 — Godot lab รอบ 5: ฉากข้อมูล (การ์ดโฮโลแกรม 3D + ข้อมูลจริง) (branch `feat/rive-eye-morph`)
+- **User Request**: ถามว่าเต็มจอ / กล่องข้อความ 3D-กราฟ / เซ็นเซอร์ / overlay ควรทดลองก่อนหรือหลังรวมแอป → ตอบแผน (overlay ใช้ sprite ไม่ใช่ Godot) ·
+  ผู้ใช้: "ถามสภาพอากาศวันนี้ → ฉากอากาศพร้อมอุณหภูมิที่ถูกต้อง · ถามงบดุล MSFT → Pie Chart/แผนภูมิงบการเงิน · กล่องข้อความ 3D แสดง markdown สั้นๆ"
+- ใหม่: `holo_panel.gd`, `holo_card.gdshader`, `info_sources.gd`, ฉาก `weather_report` / `stock_balance` / `answer_card`, `data_samples/`,
+  `tools/fetch_info_data.ps1`, `tools/info_live_test.gd` · ผู้กำกับ: ผูกข้อมูล `{path:format}`, `if`, `panel`/`panel_close`/`present`, บับเบิลข้างหัว ·
+  เอฟเฟกต์ฝน/หิมะทั้งฉาก · แท็บ **ข้อมูล** (ดึงสด) · `record_scenes.ps1` อัดไร้ขอบ 576×1024 (แก้บับเบิลตกขอบ)
+- **Verify**: ข้อมูลจริงจาก Open-Meteo + TradingView (แหล่งเดียวกับแอป) ทั้งผ่าน PowerShell และ HTTPRequest ใน Godot; headless 46/46; frame check ทุกฉาก;
+  อัดคลิปใหม่ทุกฉาก — ยังไม่เข้าแอป
+- เอกสาร: [[Pet_Godot_Lab]] หัวข้อ "รอบ 5", `scenes/SCHEMA.md` หัวข้อ Info scenes
+
+## 2026-09-30 — Godot lab รอบ 4: บทละคร 12 ฉาก (JSON) พร้อมให้สมอง AI เลือก/เขียน (branch `feat/rive-eye-morph`)
+- **User Request**: "สร้างบทละคร แสดงฉากต่างๆ 8-10 วินาที เน้นมีมๆ ตลกๆ น่ารัก เคลื่อนไหวได้ 360 องศา ขยับเข้าใกล้/ถอยห่าง ไม่จำกัด ·
+  อนาคตใส่สมอง AI เข้าไปในหุ่น — ซีนว่างงาน เบื่อ โกรธ ความรัก กำลังคิด สงสัย ง่วงนอน อื่นๆ"
+- ใหม่: `scene_player.gd` (ผู้กำกับ), `emotes.gd` (ชั้นการ์ตูน), `emote_mark.gdshader` (💢 เหงื่อ แบต), `scenes/*.json` 12 ฉาก + `scenes/SCHEMA.md`,
+  `tools/scene_frames.ps1`, `tools/record_scenes.ps1` + `tools/avi_to_mp4.py` · ตาใหม่ dizzy/cry/squint · roll/pitch รอบกลางตัว · โล่กางหน้าตัว
+- **Verify**: ทุกฉากรันไม่มี error/warning; contact sheet ทุกฉาก (เฟรมทุก 1 วิ) ตรวจกรอบภาพ/ข้อความไทย/สัญลักษณ์; อัดคลิป MP4 720×1280 ทุกฉาก + รวม;
+  `tools/scene_test.gd` headless 31/31 ผ่าน (รวม JSON ที่ AI เขียนแบบมีคำสั่งผิด) — ยังไม่เข้าแอป
+- เอกสาร: [[Pet_Godot_Lab]] หัวข้อ "รอบ 4"
+
+## 2026-09-30 — Godot lab รอบ 3: ชุดเกราะ, เด้งดึ๋ง, สีชุดตามอารมณ์, ฉาก 12 แบบ (branch `feat/rive-eye-morph`)
+- **User Request**: ผิวด้านลง · แขนไม่ทะลุหัว · ชุดฟ้าเปลี่ยนสีตามอารมณ์ · น่ารัก กวน เด้งดึ๋ง · อุปกรณ์แบบ Iron Man (มือเป็นปืนใหญ่จรวด/เลเซอร์/ไฟฉาย,
+  jetpack, ผ้าคลุม) · อุปกรณ์หัวเพิ่ม · ฉากเพิ่ม
+- Blender: วัสดุกึ่งด้าน · `check_arms.py` + ย้าย `ARM_PIVOT` + จูนคลิป → ทุกคลิป clear · คลิป `Fly_loop` · `robot_gear.py` อุปกรณ์ 18 ชิ้น (รวม 25)
+- Godot: `pet_character.gd` เขียนใหม่ (manual AnimationPlayer + ชั้น procedural, สีชุด, ระบบอุปกรณ์/เครื่องมือ/บิน, ท่ากวน), `effects.gd`,
+  shaders ใหม่ 3 ตัว, ฉาก +6, UI แบบแท็บ, `tools/capture.ps1`
+- **Verify**: `check_arms` clear; `inspect.gd` 25 ชิ้นไม่มี error; ภาพจาก Godot: จรวด/เลเซอร์/ไฟฉาย/โล่/บิน/ผ้าคลุม/สีชุด/ฉากใหม่ — ยังไม่เข้าแอป
+- เอกสาร: [[Pet_Godot_Lab]] หัวข้อ "รอบ 3"
+## 2026-09-30 — หุ่นรุ่น v2 ตามชีท + ตัวละครเกมใน Godot (ต้นแบบบนคอม, branch `feat/rive-eye-morph`)
+- **User Request**: "ปรับให้เหมือนต้นฉบับมากกว่านี้ … เป็นเหมือน Characters Design for Games ที่เคลื่อนไหว ท่าทางการลอย รองรับการเปลี่ยนฉากหลัง รองรับการเปลี่ยนอุปกรณ์สวมใส่"
+  + สเปกเทคนิค (quad/subdivision, แยก object หัว/ตัว/แขน/หู, UV จอแยก) · "หัวยังเล็ก ควรยาวกว่านี้" · "แขนท่อนบนควรเป็นแขนเสื้อ" · "ตรวจหัวและแขนให้เหมือนต้นแบบ"
+  - ผู้ใช้ถามถึง Godot → เลือก "Godot: ต้นแบบบนคอมก่อน" · อนุญาตดาวน์โหลด Godot 4.7.2 portable (82 MB) ไว้ที่ `C:\Godot`
+- `robot_build.py` เขียนใหม่ (v2): cage + Subdivision ทั้งหมด, หัวมีช่องจอเว้าจริง + กระจกแยก object UV 0..1, เสื้อกั๊กเป็นเปลือก solidify + แถบ T, สัดส่วนวัดจากชีทด้วยตาราง
+  (หัว 1.15×0.90, หน้าตรง/หลังม้วนมน, จอ 76%×63%, บ่ากาง 53° + แขนล่างห้อยจากใต้บ่า), AgX Medium High Contrast · `compare_sheet.ps1` / `review_views.py` ทำภาพเทียบ
+- `robot_game.py` + `export_game.py`: pivot 9 จุด, 8 คลิป (NLA), อุปกรณ์ 7 ชิ้น (CROWN, PARTY_HAT, WIZARD_HAT, CHEF_HAT, SUNGLASSES, HEADPHONES, BACKPACK) → `pet_godot/assets/`
+- `pet_godot/`: ตัวละคร + ตา shader 9 อารมณ์ + ฉาก 6 แบบ + แผงปุ่มไทย + CLI ถ่ายภาพ + `tools/inspect.gd` — เอกสาร [[Pet_Godot_Lab]]
+- **บั๊กที่เจอแล้วแก้**: Blender แครชเมื่อ export ใต้ `temp_override`; object ซ่อนทำให้ matrix_world ค้าง (อุปกรณ์ออกไปผิดมุม); `_reparent` ไม่ update (จุดศอกผิด);
+  extrude ไม่ลบหน้าเดิม (จอถูกปิด); hash แบบ sin เป็นบล็อกบน Mobile renderer
+- **Verify**: Godot import ไม่มี error; ภาพ 6 ชุด (อารมณ์/ชุด/ฉาก) ถูกต้อง; `inspect.gd` ยืนยันตำแหน่งอุปกรณ์ทุกชิ้น — ยังไม่เข้าแอป
+- **แขนรอบสุดท้าย** (ผู้ใช้ส่งชีทแขน + "เป็นชิ้นเดียวกัน แค่มี 2 สี กระดูกชิ้นเดียว", "ลอยข้างลำตัว ไม่ติดตัว"): แขนเป็นท่อ sweep ชิ้นเดียว ฟ้าบน/ขาวล่าง มีขอบรอยต่อ, ตัดจุดหมุนศอกออก (rig เหลือไหล่), เพิ่มแผ่นหลังเสื้อกั๊ก + หมุด; `renders/compare_arms.png` เทียบกับชีทแขน
+- **จอนูน**: ผู้ใช้ "กรอบดวงตาสีดำควรนูนโค้งออกมา ไม่ยุบเข้าไป ลักษณะหน้าจอนูน" → ขอบเทายกขึ้นจากหน้า + กระจกโดม CRT (`SCREEN_BULGE` 0.075), ตา/มุม UI/แว่นขยับตาม; ส่งออก + Godot ถ่ายภาพยืนยัน
+
+## 2026-09-29 — หุ่น 3D จาก Blender เป็น engine ที่ 3 ของโหมดสัตว์เลี้ยง (branch `feat/rive-eye-morph`)
+- **User Request**: "ปรับปรุงระบบสัตว์เลี้ยง โดยใช้ Blender เข้ามาช่วยในการวาด ตามแบบที่ฉันออกแบบไว้" (ชีทหุ่นยนต์ 3D: front/side/3-4/back, พาเลต, expression key)
+  - ติดตั้ง Blender MCP (Blender Lab official) + add-on `mcp-1.0.3` ใน Blender 5.2 ก่อน
+  - เลือกวิธีนำเข้า: **ตัว 3D เรนเดอร์ล่วงหน้า + ตาสด** (ไม่ใช่ 3D realtime / ไม่วาดใหม่เป็น Rive)
+- `rive_avatar/blender/robot_build.py`: สร้างหุ่นทั้งตัวด้วยโค้ดในซีน `PetRobot` (สร้างใหม่ทุกครั้ง), ภาพรีวิว 4 มุม, `render_sprites()` 49 เฟรม (7 มุม × 7 ท่าแขน) → `composeResources/files/pet3d/` + เจน `PetRobot3dFrames.kt`
+- แอป: `AvatarEngineType.ROBOT_3D` + `PetRobot3dAvatar.kt` (crossfade ตามมุมหัน, ลอย+เงา, ท่าแขนตามอารมณ์, ตา Canvas เดิมวาดในจอหุ่น) + ปุ่ม "🤖 หุ่น 3D" ใน PetSettingsDialog
+- เอกสาร: [[Pet_Robot_3D]]
+- **Verify**: `PetRobot3dAvatarTest` 7/7, `installDebug` ลง S22 Ultra สำเร็จ — ยังไม่ได้ดูบนจอจริง (เครื่องล็อกอยู่)
+
+## 2026-09-29 — แก้ Gradle CONFIGURE FAILED: error "25.0.3"
+- **User Request**: ตรวจสอบโปรเจค — Gradle Server ใน IDE แสดง `CONFIGURE FAILED` พร้อม error message "25.0.3"
+- **Root Cause**: Android Studio อัพเดท JBR เป็น **Java 25.0.3** แต่ `gradle.properties` มี `org.gradle.java.home` ชี้ไปที่ JBR ตัวนี้ → Gradle 8.14.5 ไม่รองรับ Java 25 → crash พร้อม error ที่เป็นแค่ version string
+  - CLI build ผ่านเพราะ `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`) provision JDK 21 เองแทน
+  - IDE Gradle Server อ่าน `org.gradle.java.home` ก่อน → ใช้ Java 25 → ล้มเหลว
+- **Fix**: ลบ `org.gradle.java.home=C:\\Program Files\\Android\\Android Studio\\jbr` ออกจาก `gradle.properties` — ปล่อยให้ `gradle-daemon-jvm.properties` จัดการ JVM provisioning (JDK 21) แทน
+- **Verify**: `gradlew --warning-mode all help` → BUILD SUCCESSFUL; configuration cache stored สำเร็จ
+
 ## 2026-09-25 — ตรวจ Eye Lab ทั้งระบบ: เครื่องมือ, flow, การนำไปใช้ (branch `feat/rive-eye-morph`)
 - **User Request**: "ตรวจสอบความถูกต้องของ LOOI Eye Lab เครื่องมือต่างๆ, flow การทำงาน, การปรับแต่ง และการนำไปใช้งานต่อ"
 - **บั๊กที่ยืนยันแล้วแก้**:
