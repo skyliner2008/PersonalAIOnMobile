@@ -1,6 +1,12 @@
 *.iml
 .kotlin
 .gradle
+# Avatar mode's Godot engine (100+ MB) and the robot exported from pet_godot/ -- both made by
+# pet_godot/tools/export_to_app.ps1 (without them the app builds and shows the robot's faces instead)
+composeApp/libs/godot-lib.*.aar
+composeApp/src/androidMain/godot-assets/
+# Blender's automatic backup of the previous save
+*.blend1
 **/build/
 xcuserdata
 !src/**/build/
