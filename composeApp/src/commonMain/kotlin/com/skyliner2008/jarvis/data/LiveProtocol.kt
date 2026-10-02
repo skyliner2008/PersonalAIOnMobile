@@ -85,7 +85,9 @@ object LiveProtocol {
 
     // ท้ายประโยคทักทายเปิดเซสชัน "…มีอะไรให้จาวิสช่วยวันนี้ดีคะ" — transcript ของ Live แทรกช่องว่างระหว่างคำได้
     /** คำที่บอกว่าเป็นคำทักทายเปิดเซสชัน (ต่อจาก "สวัสดี…") */
-    private val GREETING_WORDS = listOf("พร้อมคุย", "พร้อมเล่น", "พร้อมช่วย", "ยินดีช่วย")
+    // "เล่นอะไร" / "มีอะไรให้": คำทักทายของหุ่นสัตว์เลี้ยง "สวัสดีฮับบอส! วันนี้เล่นอะไรกันดีฮับ" (logcat 2026-10-02 11:42:03)
+    // และ "สวัสดีค่ะบอส มีอะไรให้ช่วยไหมคะ"
+    private val GREETING_WORDS = listOf("พร้อมคุย", "พร้อมเล่น", "พร้อมช่วย", "ยินดีช่วย", "เล่นอะไร", "มีอะไรให้")
 
     private val greetingEndPattern = Regex("""ว\s*ั\s*น\s*น\s*ี\s*้\s*ด\s*ี\s*(?:ค\s*ะ|ค\s*่\s*ะ|ค\s*ร\s*ั\s*บ)\s*[?？]?""")
 
@@ -106,7 +108,8 @@ object LiveProtocol {
         val end = greetingEndPattern.find(trimmed)?.takeIf { it.range.first < 120 }
         return when {
             end != null -> trimmed.substring(end.range.last + 1).trim()
-            trimmed.length <= 80 -> ""
+            // ประโยคสั้นไม่มีตัวเลข = คำทักทายทั้งประโยค — คำตอบจริงสั้นๆ มักมีตัวเลข ("…ทอง 4189 ดอลลาร์ มีอะไรให้ช่วยอีกไหมคะ")
+            trimmed.length <= 80 && trimmed.none { it.isDigit() } -> ""
             else -> trimmed
         }
     }
@@ -119,6 +122,14 @@ object LiveProtocol {
      * (logcat 2026-10-01 16:24 โหมดอวตาร: "ราคา Bitcoin" → "สวัสดีฮับบอส! น้องหุ่นยนต์สัตว์เลี้ยงพร้อมเล่นด้วยแล้วฮับ")
      */
     fun isSessionGreetingOnly(text: String): Boolean = text.isNotBlank() && stripSessionGreeting(text).isBlank()
+
+    /**
+     * เทิร์นที่มีผล tool จบโดยผู้ใช้ไม่ได้ยินผล: AI ไม่พูดอะไรเลย (logcat 2026-10-02 13:01:06: ราคาทองส่งถึงโมเดลแล้ว เทิร์นจบเงียบ
+     * ไม่มีเสียงไม่มีข้อความ — ผู้ใช้ไม่ได้ยินราคาทองเลย) หรือพูดแค่คำทักทาย → ผลเข้าคิวรายงานตอนเงียบ
+     * (เทิร์นที่ถูกตัดใช้ [PendingAnswerQueue.onTurnEnded]) · [spoke] = มีเสียงของ AI ในเทิร์นนี้
+     */
+    fun resultsUntold(modelText: String?, interrupted: Boolean, spoke: Boolean): Boolean =
+        !interrupted && (if (modelText == null) !spoke else isSessionGreetingOnly(modelText))
 
     /**
      * คำตอบของ tool call ในเทิร์นที่ตอบคำทักทายเปิดเซสชันของระบบ ก่อนผู้ใช้พูดอะไร — ไม่มีใครขอ ไม่รัน
@@ -144,6 +155,72 @@ object LiveProtocol {
         "device_avatar_emotion", "device_custom_prop", "device_pet_care",
         "device_always_live", "vision_activate", "vision_deactivate"
     )
+
+    /**
+     * พูด [text] ใช้เวลานานแค่ไหน เป็นหน่วยราวหนึ่งตัวอักษรไทย: สระบน/ล่างและวรรณยุกต์ไม่กินเวลา ตัวเลขอ่านเป็นคำ
+     * ("4159.43" → "สี่พันหนึ่งร้อย…") ช่องว่างและเครื่องหมายข้าม — ใช้คาดว่าคำไหนจะได้ยินเมื่อไร: ข้อความและเสียงของคำตอบ
+     * มาถึงก่อนได้ยินหลายวินาที (logcat 2026-10-02: คำตอบยาว 5 ครั้ง หน่วยละ ~93 ms คลาดกัน ±6%)
+     */
+    fun speechUnits(text: String): Double {
+        var units = 0.0
+        for (ch in text) {
+            units += when {
+                ch.isWhitespace() || ch in SPEECH_SKIP -> 0.0
+                ch.code == 0x0E31 || ch.code in 0x0E34..0x0E3A || ch.code in 0x0E47..0x0E4E -> 0.0
+                ch.isDigit() -> 3.0
+                else -> 1.0
+            }
+        }
+        return units
+    }
+
+    /** ms ต่อหน่วยของ [speechUnits] ก่อนได้วัดจากคำตอบใน session */
+    const val DEFAULT_MS_PER_SPEECH_UNIT = 93.0
+
+    private const val SPEECH_SKIP = ".,!?…:;\"'()“”%-"
+
+    /** ข้อค้างที่ถูกตัดก่อนผู้ใช้ได้ยินนานเท่านี้ = ยังไม่ถึงผู้ใช้ */
+    const val REPORT_HEARD_MIN_MS = 3_000L
+    /** มีสิ่งที่โมเดลต้องตอบ แล้ว server เงียบนานเท่านี้ = โมเดลไม่ตอบแล้ว */
+    const val MODEL_ANSWER_TIMEOUT_MS = 6_000L
+
+    /**
+     * ข้อค้างที่แอปส่งให้ AI เล่าถึงผู้ใช้แล้วหรือยัง: AI พูด (หรือ TTS อ่านแทน) ที่ไม่ใช่แค่คำทักทาย และไม่ถูกตัดก่อนผู้ใช้ได้ยิน
+     * [REPORT_HEARD_MIN_MS] ([cutAfterMs] = ได้ยินไปกี่ ms ก่อนถูกตัด, null = ไม่ถูกตัด; logcat 2026-10-02 11:42:09: รายงาน BTC
+     * ถูกตัดหลัง 0.6 วิแต่นับว่าส่งแล้ว) — หรือ AI เรียก tool ให้มัน: กำลังทำอยู่ ผลมาทางคิวเอง (ถามซ้ำทำให้เรียก tool ซ้ำแล้วสับสน,
+     * logcat 2026-10-01 23:29:58)
+     */
+    fun reportReachedUser(spoke: Boolean, greetingOnly: Boolean, cutAfterMs: Long?, toolCalls: Int): Boolean =
+        (spoke && !greetingOnly && (cutAfterMs == null || cutAfterMs >= REPORT_HEARD_MIN_MS)) || toolCalls > 0
+
+    /**
+     * โมเดลยังอาจกำลังตอบ: มีสิ่งที่ต้องตอบค้างอยู่ (ผู้ใช้พูด, ผล tool, ข้อความที่แอปส่ง) ยังไม่จบเทิร์น และ server เพิ่งเงียบ —
+     * ส่งข้อค้างตอนนี้ server ตัดคำตอบที่กำลังมาทิ้ง (logcat 2026-10-02 11:42:47: ส่งรายงาน 1.5 วิหลังผล tool)
+     */
+    fun modelMayStillAnswer(turnOpen: Boolean, serverQuietMs: Long): Boolean =
+        turnOpen && serverQuietMs < MODEL_ANSWER_TIMEOUT_MS
+
+    /**
+     * ไมค์ในเครื่องต้องเงียบนานเท่านี้ก่อนส่งข้อค้าง — ผู้ใช้เพิ่งพูดตัด AI (ภายใน 15 วิ) = กำลังถามรัว เว้นจังหวะระหว่างคำถามได้
+     * 2–3 วิ (logcat 2026-10-02 14:56:20: รายงาน BTC ส่งตอนผู้ใช้เว้น 2.5 วิระหว่างถามปฏิทินกับราคาทอง → server ตัดเทิร์นราคาทอง
+     * ทิ้งแล้วเล่า BTC แทน)
+     */
+    fun localQuietNeededMs(sinceUserCutMs: Long): Long = if (sinceUserCutMs < 15_000L) 5_000L else 2_500L
+
+    /** ข้อค้างที่แอปส่งให้ AI เล่า เมื่อเทิร์นจบ: ถึงผู้ใช้แล้ว / ยังไม่ถึง (ส่งใหม่) / รอดูเทิร์นถัดไป */
+    enum class ReportOutcome { TOLD, NOT_TOLD, WAIT }
+
+    /**
+     * [reached] = [reportReachedUser] ของเทิร์นนี้ · [userSpokeOver] = ผู้ใช้พูดหลังส่งรายงาน (หรือหลังเริ่มรอ) ·
+     * [usersTurnCut] = เทิร์นนี้เป็นคำถามใหม่ของผู้ใช้ (เรียก tool แล้ว) ที่ถูกตัดก่อน AI ได้พูด — server รับข้อความรายงานไว้
+     * แล้วเล่าในเทิร์นถัดไปได้ → รอดูหนึ่งเทิร์น (logcat 2026-10-02 14:56:22.8: เทิร์นราคาทองถูกตัด รายงาน BTC ถูกนับว่าถูกกลืน
+     * แต่ 14:56:24 AI เล่า BTC เอง → แอปส่งซ้ำ BTC ถูกเล่าสองรอบ)
+     */
+    fun reportOutcome(reached: Boolean, userSpokeOver: Boolean, usersTurnCut: Boolean, waited: Boolean): ReportOutcome = when {
+        usersTurnCut && userSpokeOver && !waited -> ReportOutcome.WAIT
+        reached && !userSpokeOver -> ReportOutcome.TOLD
+        else -> ReportOutcome.NOT_TOLD
+    }
 
     /**
      * หัวข้อของประวัติใน system instruction — เดิมเป็นแค่ "Recent Conversation History:"

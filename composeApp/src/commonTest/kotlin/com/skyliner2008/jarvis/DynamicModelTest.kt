@@ -131,6 +131,24 @@ class DynamicModelTest {
     }
 
     @Test
+    fun testPetLiveSystemPrompt_HasNoGreetingToRepeat() {
+        val persona = com.skyliner2008.jarvis.ai.JarvisPersona
+        val wasPet = persona.isPetMode
+        persona.isPetMode = true
+        try {
+            val petPrompt = persona.LIVE_SYSTEM_PROMPT
+            // logcat 2026-10-02 11:42:03: asked for BTC, the pet said its example sentence "สวัสดีฮับบอส! วันนี้เล่นอะไรกันดีฮับ"
+            // instead of "got it, my assistant is on it" — the only quoted greetings left are the app's own session openers
+            val greetings = Regex("\"สวัสดี[^\"]*\"").findAll(petPrompt).map { it.value }.toSet()
+            val openers = setOf("\"สวัสดีฮับ พร้อมเล่นแล้ว\"", "\"สวัสดีจาวิส พร้อมคุยไหม\"")
+            assertTrue(greetings.all { it in openers }, "Pet prompt must not give a greeting to repeat: $greetings")
+            assertTrue(petPrompt.contains("ห้ามทักทาย"), "Pet prompt must forbid greeting after the first answer")
+        } finally {
+            persona.isPetMode = wasPet
+        }
+    }
+
+    @Test
     fun testDefaultLiveModel_IsNewestFlashLive() {
         // 2026-09-16: console ของ project มี Gemini 3.8 Live (65K TPM, RPD ไม่จำกัด) เป็นรุ่นใหม่สุด
         assertEquals("gemini-3.8-live", ModelConfig.DEFAULT_LIVE_MODEL)

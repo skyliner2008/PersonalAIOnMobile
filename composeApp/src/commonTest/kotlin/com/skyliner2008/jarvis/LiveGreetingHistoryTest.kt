@@ -53,6 +53,10 @@ class LiveGreetingHistoryTest {
         assertTrue(LiveProtocol.isSessionGreetingOnly(greetingReply))
         // a greeting in the model's own words (the personas no longer give one word for word)
         assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีค่ะบอส จาวิสพร้อมช่วยแล้วค่ะ"))
+        // the pet's example sentence, said instead of taking the BTC job (logcat 2026-10-02 11:42:03)
+        assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีฮับบอส! วันนี้ เล่นอะไร กันดี ฮับ"))
+        assertTrue(LiveProtocol.isSessionGreetingOnly("สวัสดีค่ะบอส มีอะไรให้ช่วยไหมคะ"))
+        assertFalse(LiveProtocol.isSessionGreetingOnly("สวัสดีค่ะบอส ทองตอนนี้ 4189 ดอลลาร์ มีอะไรให้ช่วยอีกไหมคะ"))
         // a real answer, or a greeting with the answer after it, is an answer
         assertFalse(LiveProtocol.isSessionGreetingOnly("น้องจัดข้อมูลทองคำมาให้แล้วฮับ ราคาตอนนี้อยู่ที่สี่พันหนึ่งร้อยหกสิบเอ็ดดอลลาร์นะฮับบอส"))
         assertFalse(LiveProtocol.isSessionGreetingOnly(repeatedGreetingAnswer))

@@ -6,45 +6,54 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.JsonElement
 
 /**
- * What Avatar mode follows of the live AI session ([ToolSceneSync]): each tool call's result as it comes
- * back, the AI's words with the moment they will be heard, and the queued results the app hands the AI to
- * tell. Events only reach a screen that is listening — an old result is never replayed on the next visit.
+ * What Avatar mode follows of the live AI session ([ToolSceneSync]): what happens to each tool result, and
+ * the AI's words with when they will be heard. Events only reach a screen that is listening — an old result
+ * is never replayed on the next visit.
  */
 object AvatarLiveFeed {
+    /** What happens to a tool result, in the order it happens: it comes back, the queue takes it, the app hands it over. */
+    sealed interface Event
+
     /**
      * A finished tool call: [data] = what its info scene shows (null: none — a text tool's [text] may go on a card).
      * [later]: the AI tells it later, from the report queue — a job handed to the assistant, or a call the user
      * talked over.
      */
-    data class Result(val tool: String, val data: JsonElement?, val text: String, val later: Boolean = false)
+    data class Result(val tool: String, val data: JsonElement?, val text: String, val later: Boolean = false) : Event
+
+    /** The report queue took a result ([tool], the result's first line) to tell later: the AI is not telling it now. */
+    data class Deferred(val tool: String, val subject: String) : Event
 
     /** The app handed the AI a queued result to tell now: [tool] and the result's first line. */
-    data class Report(val tool: String, val subject: String)
+    data class Report(val tool: String, val subject: String) : Event
 
     /**
-     * The AI's words so far in its current answer, and when the last of them will be heard. The text arrives
-     * seconds before the voice plays it (logcat 2026-10-01 21:37: all of it in 3.8 s, the voice took 14.3 s).
+     * The AI's words so far in its current answer. Its voice started (or starts) at [startMs] and says a unit of
+     * `LiveProtocol.speechUnits` in [msPerUnit] ms: the text and the voice arrive seconds before the voice is heard
+     * (logcat 2026-10-02 09:48: all the text in 5 s, the voice took 19 s to play).
      */
-    data class Speech(val text: String, val heardAtMs: Long)
+    data class Speech(val text: String, val startMs: Long, val msPerUnit: Double)
 
-    private val _results = MutableSharedFlow<Result>(extraBufferCapacity = 16)
-    val results: SharedFlow<Result> = _results.asSharedFlow()
+    // one flow, so a result is always seen before the queue takes it
+    private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 32)
+    val events: SharedFlow<Event> = _events.asSharedFlow()
 
     private val _speech = MutableSharedFlow<Speech>(extraBufferCapacity = 64)
     val speech: SharedFlow<Speech> = _speech.asSharedFlow()
 
-    private val _reports = MutableSharedFlow<Report>(extraBufferCapacity = 8)
-    val reports: SharedFlow<Report> = _reports.asSharedFlow()
-
     fun result(tool: String, data: JsonElement?, text: String, later: Boolean = false) {
-        _results.tryEmit(Result(tool, data, text, later))
+        _events.tryEmit(Result(tool, data, text, later))
     }
 
-    fun speech(text: String, heardAtMs: Long) {
-        _speech.tryEmit(Speech(text, heardAtMs))
+    fun deferred(tool: String, subject: String) {
+        _events.tryEmit(Deferred(tool, subject))
     }
 
     fun report(tool: String, subject: String) {
-        _reports.tryEmit(Report(tool, subject))
+        _events.tryEmit(Report(tool, subject))
+    }
+
+    fun speech(text: String, startMs: Long, msPerUnit: Double) {
+        _speech.tryEmit(Speech(text, startMs, msPerUnit))
     }
 }

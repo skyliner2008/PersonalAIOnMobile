@@ -67,6 +67,23 @@
 >   - Now it waits until the app hands the result to the AI, and goes up with the AI's first words.
 >   - This applies to every handed-off job with a scene: technical, balance sheet, Fear & Greed, crypto, top movers, calendar, news and sentiment.
 >   - The 5-dimension analysis has no scene yet; the robot only speaks it.
+> - **Fixed in Avatar mode: scenes no longer flash by while the AI is still thinking.**
+>   - With several questions in a row, each answer's scene used to go up the moment its result came back. That made a quick round of scenes before the AI said a word.
+>   - Now a scene goes up only when the AI talks about it, and it stays until the voice stops.
+>   - When a word is heard is now worked out from the speech rate (about 93 ms per Thai letter, learnt during the session), not from how much voice has arrived.
+>   - Checked on the phone (11:42): the gold card came up the moment "ทองคำ" was heard, the calendar card with the first words of its report, and nothing came up while the AI was thinking.
+> - **Fixed the boss/assistant flow in Avatar mode:**
+>   - The pet persona gave "สวัสดีฮับบอส! วันนี้เล่นอะไรกันดีฮับ" as an example of its voice, and the AI said it word for word instead of "got it, my assistant is on it". The examples no longer contain greetings.
+>   - A face change in a turn the user cut off was queued as a question. The app asked it again, and the AI ran BTC a third time and gave a confusing extra report. Face and mode changes are no longer queued.
+>   - A report is no longer sent while the AI is still getting ready to answer. A report sent 1.5 s after a tool result used to cut the AI's turn.
+>   - A report the user cuts off in its first 3 seconds goes back to the queue instead of counting as told.
+> - **Fixed: an answer could go missing in normal Live mode.** The gold price reached the AI, which ended its turn without a word, so the user never heard it. Results of a turn the AI ends in silence (or with only a greeting) now go to the queue and are told when it is quiet.
+> - **Fixed: a question asked again by the app was blocked.** The tool checks judged each call by the user's latest sentence. "Analyse BTC in 5 dimensions", asked again after "the gold price", was treated as a price question and blocked, and the AI said "this question is too specific". They now judge the question the call is for.
+> - **Fixed for questions asked in a row in Avatar mode** (checked against the phone's log: BTC was told twice and the gold price never came):
+>   - A report is not sent in the short pauses between questions anymore. For 15 s after you cut the AI off, the room must be quiet for 5 s, not 2.5 s.
+>   - When your new question's turn is cut before a word, the app waits one more turn before deciding whether the report reached you. The server may tell it next, as it did here, so BTC is not told twice.
+>   - A queued answer waits up to 5 minutes, not 2, and any answer that expires is logged. Gold had waited 120 s behind long reports and was dropped silently.
+> - **Reports get a nudge when the server does not answer them.** Text the app sends has no explicit end of turn; the server judges it from the user's audio. If nothing happens 6 s after a report is sent and the room is quiet, the app tells the server the user's audio has ended. Reports are also sent sooner once it goes quiet.
 > - **Still to check by eye:** the robot following your face, the real tilt direction and the voice mouth.
 > - **Build the robot into the app:** run `powershell -ExecutionPolicy Bypass -File pet_godot\tools\export_to_app.ps1`, then build.
 >

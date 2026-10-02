@@ -319,6 +319,15 @@ class LiveAudioChunk(
     val pcm: ByteArray
 )
 
+/**
+ * คำพูดของ AI ในคำตอบนี้จนถึงตอนนี้ ([text]) — เสียงของคำตอบเริ่ม (หรือจะเริ่ม) ตอน [startAtMs] และพูดหน่วยละ [msPerUnit] ms
+ * ([LiveProtocol.speechUnits]): คำที่อยู่ตรงไหนได้ยินตอน startAtMs + หน่วยของคำก่อนหน้ามัน × msPerUnit
+ */
+data class LiveSpeechMark(val text: String, val startAtMs: Long, val msPerUnit: Double)
+
+/** ส่งข้อค้างให้ AI เล่าแล้วเงียบทั้งสองฝั่งนานเท่านี้ = ดัน server ให้ปิดเทิร์น (ดู LiveGeminiService.nudgeIfUnanswered) */
+private const val REPORT_ANSWER_WAIT_MS = 6_000L
+
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()
     data object Connecting : ConnectionState()
@@ -526,6 +535,7 @@ class LiveGeminiService(
     /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — เก็บผลไว้ตอบทีหลัง (เรียกจาก LiveToolBridge) */
     fun enqueuePendingToolResult(question: String, toolName: String, result: String) {
         synchronized(pendingAnswers) { pendingAnswers.addToolResult(question, toolName, result, System.currentTimeMillis()) }
+        _resultsDeferred.tryEmit(toolName to PendingAnswerQueue.subject(result).orEmpty())
         logDebug("LiveGemini", "📥 เก็บผล $toolName ของคำถามที่ถูกขัดไว้ตอบทีหลัง: \"${question.take(60)}\" (คิว ${pendingAnswers.size})")
         schedulePendingAnswer()
     }
@@ -569,6 +579,19 @@ class LiveGeminiService(
     /** เวลาที่ transcript ของผู้ใช้มาถึงล่าสุด — มีคำพูดหลังส่งรายงาน = รายงานอาจถูกกลืน */
     @kotlin.jvm.Volatile
     private var lastUserTranscriptAtMs = 0L
+    /**
+     * มีสิ่งที่โมเดลต้องตอบ (ผู้ใช้พูด, tool call/ผล tool, ข้อความที่แอปส่ง) และโมเดลยังไม่จบเทิร์น — ระหว่างนี้โมเดลอาจกำลังคิด
+     * (เสียงแรกมาหลังผล tool ได้หลายวินาที) ดู [LiveProtocol.modelMayStillAnswer]
+     */
+    @kotlin.jvm.Volatile
+    private var modelTurnOpen = false
+    /** เทิร์นที่ถูกตัด: ผู้ใช้ได้ยินเสียงของมันไปกี่ ms */
+    private var voiceHeardBeforeCutMs = 0L
+    /** ผู้ใช้ (หรือเสียงแทรก) ตัดเทิร์นของ AI ล่าสุดเมื่อไร — ภายใน 15 วิ = กำลังถามรัว ([LiveProtocol.localQuietNeededMs]) */
+    @kotlin.jvm.Volatile
+    private var lastUserCutAtMs = 0L
+    /** รายงานที่รอดูเทิร์นถัดไป ([LiveProtocol.ReportOutcome.WAIT]) เริ่มรอตอนไหน — 0 = ไม่ได้รอ */
+    private var reportWaitedSinceMs = 0L
 
     /**
      * คำถามที่ tool call ตอนนี้เป็นของมัน: คำถามค้างที่แอปเพิ่งถามโมเดลซ้ำ (จนกว่าผู้ใช้จะพูด) ไม่งั้นคือประโยคล่าสุดของผู้ใช้
@@ -584,13 +607,20 @@ class LiveGeminiService(
      * จบเทิร์นหลังส่งรายงาน: ผู้ใช้พูดคำถามใหม่ทับ หรือ AI ไม่ได้พูด → รายงานถูกกลืน ใส่กลับหัวคิว
      * AI พูดโดยไม่มีคำพูดใหม่ของผู้ใช้ → รายงานถึงผู้ใช้แล้ว
      */
-    private fun settleReportDelivery(modelSpoke: Boolean) {
+    private fun settleReportDelivery(reached: Boolean, usersTurnCut: Boolean) {
         val item = reportAwaitingDelivery ?: return
-        val userSpokeOver = lastUserTranscriptAtMs > reportSentAtMs
+        val userSpokeOver = lastUserTranscriptAtMs > maxOf(reportSentAtMs, reportWaitedSinceMs)
+        val outcome = LiveProtocol.reportOutcome(reached, userSpokeOver, usersTurnCut, waited = reportWaitedSinceMs > 0L)
+        if (outcome == LiveProtocol.ReportOutcome.WAIT) {
+            reportWaitedSinceMs = System.currentTimeMillis()
+            logDebug("LiveGemini", "⏸️ รายงาน \"${item.question.take(40)}\": เทิร์นนี้เป็นคำถามใหม่ของผู้ใช้ที่ถูกตัด — รอดูว่า AI เล่าเทิร์นถัดไปไหม")
+            return
+        }
         reportAwaitingDelivery = null
-        if (modelSpoke && !userSpokeOver) return
+        reportWaitedSinceMs = 0L
+        if (outcome == LiveProtocol.ReportOutcome.TOLD) return
         val requeued = synchronized(pendingAnswers) { pendingAnswers.requeueFront(item) }
-        logDebug("LiveGemini", "↩️ รายงาน \"${item.question.take(40)}\" ถูกกลืน (ผู้ใช้พูดทับ=$userSpokeOver, AI พูด=$modelSpoke) — " +
+        logDebug("LiveGemini", "↩️ รายงาน \"${item.question.take(40)}\" ถูกกลืน (ผู้ใช้พูดทับ=$userSpokeOver, ถึงผู้ใช้=$reached) — " +
             if (requeued) "ส่งใหม่หลังตอบข้อใหม่ (ครั้งที่ ${item.attempts + 2})" else "เลิกส่ง (ครบ ${PendingAnswerQueue.MAX_ATTEMPTS} ครั้ง)")
     }
 
@@ -607,9 +637,29 @@ class LiveGeminiService(
             // ไมค์ในเครื่องยังได้ยินเสียง = ผู้ใช้อาจกำลังพูด; เสียงรอบข้างดังตลอดได้ จึงยอมถ้า server เงียบนานแล้ว
             // 2.5 วิ: ผู้ใช้หยุดพูดแล้ว server ยังรอเงียบ 1.2 วิ (silenceDurationMs) ก่อนปิดเทิร์นและส่ง transcript
             // — ส่งในช่องนี้ชนคำถามที่กำลังจะเข้ามา (logcat 03:32:57: ไมค์เงียบ 1633ms แต่ transcript มาถึง 22ms ต่อมา)
-            (localQuietMs >= 2_500 || serverQuietMs >= 6_000) &&
+            (localQuietMs >= LiveProtocol.localQuietNeededMs(now - lastUserCutAtMs) || serverQuietMs >= 6_000) &&
+            !LiveProtocol.modelMayStillAnswer(modelTurnOpen, serverQuietMs) &&
             pendingUserTurnText == null && pendingModelTurnText == null && pendingModelTextParts == null &&
             synchronized(inFlightToolCalls) { inFlightToolCalls.values.none { now - it < 30_000L } }
+    }
+
+    /**
+     * ข้อความที่แอปส่ง (realtimeInput.text) ไม่มีจุดจบเทิร์นชัดเจน — server ตัดสินจากเสียงของผู้ใช้ (Live API reference:
+     * "End of turn is not explicitly specified, but is rather derived from user activity") · ปกติโมเดลเริ่มเล่าใน 1–3 วิ
+     * (8 รายงานใน log 2026-10-02) แต่โหมดอวตาร 12:57 รอ 9.9 วิ และ 27.8 วิ → 6 วิแล้วยังเงียบทั้งสองฝั่งและไมค์ในเครื่องเงียบ:
+     * ส่ง audioStreamEnd ให้ server ปิดช่วงเสียงของผู้ใช้ (เสียงไมค์ชิ้นถัดไปเปิด stream ใหม่เอง) แล้ว log ไว้ดูต่อ
+     */
+    private fun nudgeIfUnanswered(sentAtMs: Long) {
+        scope.launch {
+            delay(REPORT_ANSWER_WAIT_MS)
+            val now = System.currentTimeMillis()
+            // มีอะไรเกิดขึ้นหลังส่ง (โมเดลพูด/เรียก tool, ผู้ใช้พูด, ส่งข้อใหม่) — ไม่ต้องดัน
+            if (reportSentAtMs != sentAtMs || lastConversationActivityAtMs != sentAtMs || !isSetupComplete) return@launch
+            if (now - lastLocalVoiceAtMs < 2_500) return@launch
+            val sent = sendAudioStreamEnd()
+            logDebug("LiveGemini", "⏳ ข้อค้างที่ส่งไปยังไม่มีคำตอบ ${now - sentAtMs}ms (ไมค์เงียบ ${now - lastLocalVoiceAtMs}ms) " +
+                "— ส่ง audioStreamEnd ให้ server ปิดช่วงเสียงของผู้ใช้: $sent")
+        }
     }
 
     /** ส่งข้อค้างข้อถัดไปเมื่อเงียบจริง (รอได้ถึง 60 วิ) — ข้อที่เหลือส่งต่อหลังโมเดลตอบข้อนี้จบ */
@@ -619,10 +669,19 @@ class LiveGeminiService(
         pendingFlushJob = scope.launch {
             val deadline = System.currentTimeMillis() + 60_000L
             while (System.currentTimeMillis() < deadline) {
-                delay(750)
+                delay(250)
                 if (synchronized(pendingAnswers) { pendingAnswers.isEmpty() }) return@launch
                 val now = System.currentTimeMillis()
                 if (!isConversationIdle(now)) continue
+                // รายงานที่รอดูเทิร์นถัดไปแล้วไม่มีเทิร์นมา = ยังไม่ได้เล่า → เล่าก่อน
+                reportAwaitingDelivery?.let { waiting ->
+                    reportAwaitingDelivery = null
+                    reportWaitedSinceMs = 0L
+                    synchronized(pendingAnswers) { pendingAnswers.requeueFront(waiting) }
+                }
+                synchronized(pendingAnswers) { pendingAnswers.expire(now) }.forEach {
+                    logDebug("LiveGemini", "⌛ ข้อค้าง \"${it.question.take(40)}\" (tool=${it.toolName ?: "-"}) ค้างเกิน 5 นาที — ไม่ได้ตอบ")
+                }
                 val item = synchronized(pendingAnswers) { pendingAnswers.next(now) } ?: return@launch
                 reportAwaitingDelivery = item
                 reportSentAtMs = now
@@ -631,6 +690,7 @@ class LiveGeminiService(
                 lastConversationActivityAtMs = now
                 if (sendRealtimeText(PendingAnswerQueue.toPrompt(item))) {
                     item.toolName?.let { _reportsSent.tryEmit(it to PendingAnswerQueue.subject(item.result).orEmpty()) }
+                    nudgeIfUnanswered(now)
                 }
                 return@launch
             }
@@ -684,12 +744,26 @@ class LiveGeminiService(
     private val _audioOutputFlow = MutableSharedFlow<LiveAudioChunk>(extraBufferCapacity = 4096)
     val audioOutputFlow: Flow<LiveAudioChunk> = _audioOutputFlow.asSharedFlow()
 
-    private val _speechMarks = MutableSharedFlow<Pair<String, Long>>(extraBufferCapacity = 64)
+    private val _speechMarks = MutableSharedFlow<LiveSpeechMark>(extraBufferCapacity = 64)
     /**
-     * คำพูดของ AI ในคำตอบนี้จนถึงตอนนี้ (transcript) กับเวลาที่คำสุดท้ายของมันจะได้ยิน — transcript มาก่อนเสียงหลายวินาที
-     * (logcat 2026-10-01 21:37: ข้อความครบใน 3.8 วิ เสียงยาว 14.3 วิ) ฉากของหุ่นต้องเปลี่ยนตามเสียง ไม่ใช่ตามข้อความ
+     * คำพูดของ AI ในคำตอบนี้จนถึงตอนนี้ + เวลาที่เสียงของคำตอบเริ่ม + ความเร็วพูด — ข้อความและเสียงมาถึงก่อนได้ยินหลายวินาที
+     * (logcat 2026-10-02 09:48: ข้อความครบใน 5 วิ เสียงเล่นนาน 19 วิ) ฉากของหุ่นต้องเปลี่ยนตามเสียงที่ได้ยิน — เดิมคิดจากความยาว
+     * เสียงที่มาถึงแล้ว แต่เสียงมาล่วงหน้าข้อความไม่เท่ากัน (09:48: มาถึง 46% ของเสียงตอนข้อความถึง 40% ฉากอากาศช้าไป ~1 วิ)
      */
-    val speechMarks: Flow<Pair<String, Long>> = _speechMarks.asSharedFlow()
+    val speechMarks: Flow<LiveSpeechMark> = _speechMarks.asSharedFlow()
+
+    /** ms ต่อหน่วยเสียงพูด ([LiveProtocol.speechUnits]) — วัดจากคำตอบยาวที่พูดจบใน session นี้ */
+    @kotlin.jvm.Volatile
+    private var msPerSpeechUnit = LiveProtocol.DEFAULT_MS_PER_SPEECH_UNIT
+    /** เวลาที่ข้อความแรกของคำตอบนี้มาถึง — เป็นจุดเริ่มแทนถ้าเสียงยังไม่มา */
+    private var turnTextStartAtMs = 0L
+
+    private val _resultsDeferred = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 16)
+    /**
+     * ผล tool ที่คิวรายงานรับไว้ให้ AI เล่าทีหลัง: (tool, บรรทัดแรกของผล) — ตอนนี้ AI ไม่ได้พูดถึงมัน โหมดอวตารจึงไม่ขึ้นฉาก
+     * ของมันจนถึงรอบเล่า (call ที่ server ยกเลิก งานของลูกน้อง เทิร์นที่ถูกตัดก่อน AI ได้พูด)
+     */
+    val resultsDeferred: Flow<Pair<String, String>> = _resultsDeferred.asSharedFlow()
 
     private val _reportsSent = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 8)
     /**
@@ -943,6 +1017,9 @@ class LiveGeminiService(
         // "[ANSWER FOR] <คำถามเก่า>" แล้วโมเดลตอบคำถามเก่าซ้ำ
         lastUserText = ""
         inGreetingTurn = false
+        modelTurnOpen = false
+        reportAwaitingDelivery = null
+        reportWaitedSinceMs = 0L
         muteRestOfTurn = false
         mutedAudioBytes = 0
         turnAudioStartAtMs = 0L
@@ -1402,6 +1479,7 @@ class LiveGeminiService(
                 }
                 muteRestOfTurn = trailing
                 toolCallsThisTurn += calls.size
+                modelTurnOpen = true
                 lastConversationActivityAtMs = System.currentTimeMillis()
                 synchronized(inFlightToolCalls) { calls.forEach { c -> c.id?.let { inFlightToolCalls[it] = lastConversationActivityAtMs } } }
                 val generation = liveSessionGeneration
@@ -1430,6 +1508,11 @@ class LiveGeminiService(
                     logDebug("LiveGemini", "⚡ Interrupted (VAD/user) — flushing playback queue (audioEpoch=$audioEpoch)")
                     turnWasInterrupted = true
                     lastConversationActivityAtMs = System.currentTimeMillis()
+                    lastUserCutAtMs = lastConversationActivityAtMs
+                    // ผู้ใช้ได้ยินเสียงของเทิร์นนี้ไปนานแค่ไหนก่อนถูกตัด (เสียงมาถึงเร็วกว่าเล่น จึงเอาค่าที่น้อยกว่า)
+                    voiceHeardBeforeCutMs = if (turnAudioStartAtMs > 0L) {
+                        minOf(lastConversationActivityAtMs - turnAudioStartAtMs, audioBytesThisTurn * 1000L / OUTPUT_AUDIO_BYTES_PER_SEC)
+                    } else 0L
                     audioBytesThisTurn = 0
                     turnAudioStartAtMs = 0L
                     muteRestOfTurn = false
@@ -1518,6 +1601,7 @@ class LiveGeminiService(
                         lastUserSpeechAtMs = System.currentTimeMillis()
                         lastConversationActivityAtMs = lastUserSpeechAtMs
                         lastUserTranscriptAtMs = lastUserSpeechAtMs
+                        modelTurnOpen = true
                         // log เฉพาะชิ้นที่เพิ่มเข้ามา — เดิม log ข้อความสะสมทุกชิ้น ทำให้ logcat ยาวเป็นสิบบรรทัดต่อประโยค
                         logDebug("LiveGemini", "🎤 User +\"${chunk.trim()}\"")
 
@@ -1541,13 +1625,10 @@ class LiveGeminiService(
                         val text = mergeTranscript(pendingModelTurnText, chunk)
                         pendingModelTurnText = text
                         logDebug("LiveGemini", "🤖 JARVIS +\"${chunk.trim()}\"")
-                        // เสียงก่อนหน้าคำเหล่านี้ยาวเท่าที่มาถึงแล้ว — ได้ยินคำสุดท้ายตอน start + ความยาวนั้น
-                        val heardAt = if (turnAudioStartAtMs > 0L) {
-                            turnAudioStartAtMs + audioBytesThisTurn * 1000L / OUTPUT_AUDIO_BYTES_PER_SEC
-                        } else {
-                            lastConversationActivityAtMs
-                        }
-                        _speechMarks.tryEmit(text to heardAt)
+                        // คำไหนได้ยินเมื่อไร = เวลาเริ่มของเสียง + เวลาที่ใช้พูดคำก่อนหน้า (เสียงที่มาถึงแล้วล่วงหน้าข้อความไม่เท่ากัน)
+                        if (isFirst) turnTextStartAtMs = lastConversationActivityAtMs
+                        val start = if (turnAudioStartAtMs > 0L) turnAudioStartAtMs else turnTextStartAtMs
+                        _speechMarks.tryEmit(LiveSpeechMark(text, start, msPerSpeechUnit))
 
                         // First chunk → new bubble; later chunks → replace that bubble.
                         // (เดิม append=isFirst ทำให้ turn ใหม่ไปต่อท้าย bubble ของ turn ก่อน แล้ว replace ทับจนข้อความเก่าหาย)
@@ -1563,6 +1644,17 @@ class LiveGeminiService(
 
                 if (content.turnComplete == true) {
                     inGreetingTurn = false
+                    modelTurnOpen = false
+                    // ความเร็วพูดของเสียงนี้ — จากคำตอบยาวที่พูดจบโดยไม่ถูกตัดและไม่ถูกปิดเสียงท้าย
+                    pendingModelTurnText?.let { spoken ->
+                        val units = LiveProtocol.speechUnits(spoken)
+                        if (!turnWasInterrupted && mutedAudioBytes == 0 && units >= 40 &&
+                            audioBytesThisTurn >= 6 * OUTPUT_AUDIO_BYTES_PER_SEC
+                        ) {
+                            val measured = audioBytesThisTurn * 1000.0 / OUTPUT_AUDIO_BYTES_PER_SEC / units
+                            msPerSpeechUnit = msPerSpeechUnit * 0.7 + measured.coerceIn(60.0, 160.0) * 0.3
+                        }
+                    }
                     if (mutedAudioBytes > 0) {
                         logDebug("LiveGemini", "🔇 ไม่เล่นคำพูดต่อท้าย ${mutedAudioBytes * 1000L / OUTPUT_AUDIO_BYTES_PER_SEC}ms")
                     }
@@ -1599,12 +1691,13 @@ class LiveGeminiService(
                     val sentResults = synchronized(toolResultsThisTurn) {
                         toolResultsThisTurn.toList().also { toolResultsThisTurn.clear() }
                     }
-                    // AI พูดแค่ประโยคทักทายแทนการรายงานผล — ผู้ใช้ยังไม่ได้ยินผล นับเหมือนยังไม่ได้ตอบ
-                    // (logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ราคา BTC และอากาศ ได้แค่ "สวัสดีฮับบอส! …")
+                    // AI พูดแค่ประโยคทักทายแทนการรายงานผล หรือจบเทิร์นเงียบๆ — ผู้ใช้ยังไม่ได้ยินผล นับเหมือนยังไม่ได้ตอบ
+                    // (logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ได้แค่ "สวัสดีฮับบอส! …" · 2026-10-02 13:01:06: ราคาทองเงียบหาย)
                     val greetingOnly = modelText != null && !turnWasInterrupted && LiveProtocol.isSessionGreetingOnly(modelText)
+                    val untold = LiveProtocol.resultsUntold(modelText, turnWasInterrupted, modelSpokeThisTurn)
                     val queued = synchronized(pendingAnswers) {
-                        if (greetingOnly && sentResults.isNotEmpty()) {
-                            pendingAnswers.onGreetingOnlyAnswer(sentResults, System.currentTimeMillis())
+                        if (untold && sentResults.isNotEmpty()) {
+                            pendingAnswers.onResultsUntold(sentResults, System.currentTimeMillis())
                         } else {
                             pendingAnswers.onTurnEnded(
                                 userText, turnWasInterrupted, modelSpokeThisTurn, toolCallsThisTurn, sentResults,
@@ -1613,7 +1706,14 @@ class LiveGeminiService(
                         }
                     }
                     if (queued > 0) {
-                        val why = if (greetingOnly) "AI ทักทายแทนการรายงานผล" else "เทิร์นถูกตัดก่อน AI ได้พูด"
+                        sentResults.filter { it.second !in LiveProtocol.UI_ONLY_TOOLS }.forEach { (_, tool, result) ->
+                            _resultsDeferred.tryEmit(tool to PendingAnswerQueue.subject(result).orEmpty())
+                        }
+                        val why = when {
+                            greetingOnly -> "AI ทักทายแทนการรายงานผล"
+                            untold -> "AI จบเทิร์นโดยไม่พูดผล"
+                            else -> "เทิร์นถูกตัดก่อน AI ได้พูด"
+                        }
                         logDebug("LiveGemini", "📥 $why — เก็บ $queued ข้อไว้ตอบทีหลัง " +
                             "(${if (toolCallsThisTurn == 0) "คำถาม: \"${userText?.take(60)}\"" else sentResults.joinToString { it.second }})")
                     }
@@ -1626,7 +1726,13 @@ class LiveGeminiService(
                     // รายงานที่ส่งไปได้แค่คำทักทายกลับมา = ถูกกลืน ส่งใหม่ — แต่ถ้าเทิร์นนั้นเรียก tool แปลว่าคำถามกำลังถูกทำอยู่
                     // (ส่งให้ผู้ช่วยแล้ว ผลจะมาทางคิวเอง): ส่งซ้ำทำให้โมเดลเรียก tool ซ้ำแล้วสับสนพูดเรื่องอื่น
                     // (logcat 2026-10-01 23:29:58–23:30:15: ปฏิทินถูกถามซ้ำ → DUPLICATE CALL → พูดราคาทองตัวเลขที่ไม่มีในผลใด)
-                    settleReportDelivery(((modelSpokeThisTurn || spokenByTts) && !greetingOnly) || toolCallsThisTurn > 0)
+                    settleReportDelivery(
+                        reached = LiveProtocol.reportReachedUser(
+                            spoke = modelSpokeThisTurn || spokenByTts, greetingOnly = greetingOnly,
+                            cutAfterMs = if (turnWasInterrupted) voiceHeardBeforeCutMs else null, toolCalls = toolCallsThisTurn
+                        ),
+                        usersTurnCut = turnWasInterrupted && toolCallsThisTurn > 0 && !modelSpokeThisTurn
+                    )
                     toolCallsThisTurn = 0
                     modelSpokeThisTurn = false
                     if (answered || queued > 0 || hadReport) schedulePendingAnswer()
@@ -1647,6 +1753,7 @@ class LiveGeminiService(
                     pendingModelTextParts = null
                     audioBytesThisTurn = 0
                     turnWasInterrupted = false
+                    voiceHeardBeforeCutMs = 0L
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1750,7 +1857,10 @@ class LiveGeminiService(
             json.encodeToString(msg)
         }
         // log เฉพาะเมื่อส่งเข้า websocket จริง — เดิม log เสมอทำให้ดูเหมือนส่งสำเร็จทั้งที่ session ตาย (เคส GoAway 2026-08-18)
-        if (sent) logDebug("LiveGemini", "⬆ Sent realtime text: ${text.take(80)}")
+        if (sent) {
+            modelTurnOpen = true
+            logDebug("LiveGemini", "⬆ Sent realtime text: ${text.take(80)}")
+        }
         return sent
     }
 
@@ -1803,6 +1913,7 @@ class LiveGeminiService(
         }
         if (sent) {
             logDebug("LiveGemini", "✅ Tool response sent: $toolName callId=$callId → ${result.take(200)}")
+            modelTurnOpen = true
             // จำไว้ — ถ้าเทิร์นนี้ถูกตัดก่อน AI ได้พูด ผลนี้ต้องเข้าคิวตอบทีหลัง (ส่งถึงโมเดลแล้วแต่คำตอบถูกทิ้ง)
             synchronized(inFlightToolCalls) { inFlightToolCalls.remove(callId) }
             lastConversationActivityAtMs = System.currentTimeMillis()

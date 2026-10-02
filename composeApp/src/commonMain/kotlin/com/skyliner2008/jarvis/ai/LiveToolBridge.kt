@@ -173,7 +173,10 @@ class LiveToolBridge(
 
         // Enforce the profile selected from the user's actual request before executing tools.
         // This prevents the Live model from expanding one analysis request into Deep+SMC+TA+D1 chains.
-        val userPrompt = liveService.lastUserText
+        // The request is the question this call is for — a question the app asked the model again is not the user's
+        // latest sentence (logcat 2026-10-02 11:42:46, 12:57:44: "วิเคราะห์ BTC 5 มิติ" asked again after
+        // "ราคาทองคำ…" was judged as a price question, blocked, and reported as "this question is too specific")
+        val userPrompt = runningCallsMutex.withLock { callOrigins[event.callId]?.question } ?: liveService.currentQuestion
         val turnKey = "turn-${liveService.userTurnSerial}"
 
         // Always Live Guard: If Gemini mistakenly calls trading tools when user meant Always Live / Control / Drive mode
@@ -972,8 +975,14 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
         collectionJob = scope.launch {
             // the AI's words and when they are heard, for Avatar mode's tool scenes (ToolSceneSync)
             launch {
-                liveService.speechMarks.collect { (text, heardAt) ->
-                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.speech(text, heardAt)
+                liveService.speechMarks.collect { mark ->
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.speech(mark.text, mark.startAtMs, mark.msPerUnit)
+                }
+            }
+            // results the report queue took — the AI tells them later, so their scenes wait for that
+            launch {
+                liveService.resultsDeferred.collect { (tool, subject) ->
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.deferred(tool, subject)
                 }
             }
             // the queued results handed to the AI to tell now — their scenes go up with its words

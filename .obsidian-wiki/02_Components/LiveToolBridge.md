@@ -18,6 +18,9 @@
 - Redirect guard ทุกตัวผ่าน `canRedirectMisroutedTool(tool, prompt)` = tool อยู่ในกลุ่มที่ model มักเรียกผิด **และคำขอไม่ใช่คำถามเทรด** (กันเคส "ราคาทองจะไปที่ 2400" เปิด Google Maps)
 - Navigation ต้องมีคำกริยาเดินทางชัดเจน (ไม่ใช้ "ไปที่" เดี่ยวๆ)
 - Trading AI Profile: TF เริ่มต้น M15/H1/H4 แต่ **อนุญาต D1/W1 เมื่อผู้ใช้ระบุเอง**; counter ต่อ turn อยู่ใต้ mutex
+- guard ทุกตัวใน `handleNativeToolCall` ตัดสินจาก **คำถามของ call นั้น** (`CallOrigin.question` ← `liveService.currentQuestion` ตอนเรียก)
+  ไม่ใช่ประโยคล่าสุดของผู้ใช้ — คำถามค้างที่แอปถามโมเดลซ้ำ ("วิเคราะห์ BTC 5 มิติ") หลังผู้ใช้ถาม "ราคาทองคำ…" เคยถูกตัดสินเป็นคำถามราคา
+  → profile guard บล็อก deep analysis → รายงานว่า "คำถามนี้เจาะจงเกินไป ใช้ตัวอื่นแทน" (logcat 2026-10-02 11:42:46, 12:57:44)
 - `device_notification_reply` ข้อความเดิมภายใน 20 วินาทีถูกบล็อก (กันส่งซ้ำ)
 
 - **เทิร์นทักทายเปิดเซสชัน**: tool call ก่อนผู้ใช้พูดอะไรใน session (`liveService.inGreetingTurn`) ไม่รัน ตอบ
@@ -26,7 +29,8 @@
 - **ผลทีละ call ให้โหมดอวตาร**: หลังรัน tool (ที่ไม่ใช่ UI) ส่ง `AvatarLiveFeed.result(tool, AvatarToolData.of(call, tool), text)` —
   ข้อมูลฉากอยู่ใน `LiveToolCallContext` ของ call นั้น · ส่งต่อ `liveService.speechMarks` → `AvatarLiveFeed.speech` (แทน `lastToolResult` เดิม)
   · `later = true` เมื่อ call ถูกส่งให้ลูกน้อง (`delegatedCallIds`) หรือถูก server ยกเลิก — ผลนั้น AI เล่าทีหลังจากคิว · ส่งต่อ
-  `liveService.reportsSent` → `AvatarLiveFeed.report` (ฉากขึ้นตอน AI เริ่มเล่า ไม่ใช่ตอนพูดรับงาน)
+  `liveService.reportsSent` → `AvatarLiveFeed.report` (ฉากขึ้นตอน AI เริ่มเล่า ไม่ใช่ตอนพูดรับงาน) · `liveService.resultsDeferred`
+  → `AvatarLiveFeed.deferred` · `speechMarks` ส่งต่อเป็น `AvatarLiveFeed.speech(text, startMs, msPerUnit)`
 
 ## 🗣️ ข้อความกำกับเสียง (`[VOICE RULE - …]` ต่อท้ายผล tool)
 - **ห้ามมีแค่ "ตอบรับสั้นๆ น่ารัก"** ในผลของ tool ที่โมเดลเรียกประกอบ — โมเดลจะหยิบประโยคทักทายเปิดเซสชันมาพูดแทนผลจริง

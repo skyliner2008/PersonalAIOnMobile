@@ -10,8 +10,12 @@ package com.skyliner2008.jarvis.data
  * pure logic (ไม่มี I/O) — LiveGeminiService เป็นคนตัดสินจังหวะส่ง
  */
 class PendingAnswerQueue(
-    private val maxItems: Int = 3,
-    private val ttlMs: Long = 120_000L
+    private val maxItems: Int = 5,
+    /**
+     * ข้อที่ค้างเกินนี้ไม่ตอบแล้ว — เดิม 2 นาที แต่รายงานยาวหลายข้อต่อกัน (BTC 5 มิติ ~40 วิ/ข้อ) ทำให้ราคาทองหมดอายุก่อนถึงคิว
+     * แล้วหายเงียบ (logcat 2026-10-02 14:56:22 → 14:58:23)
+     */
+    private val ttlMs: Long = 300_000L
 ) {
     data class Item(
         val question: String,
@@ -67,6 +71,13 @@ class PendingAnswerQueue(
         items.removeAll { same(it.question, t) }
     }
 
+    /** เอาข้อที่ค้างเกิน [ttlMs] ออก คืนข้อที่เอาออก — ให้ log ไว้ ไม่หายเงียบ */
+    fun expire(nowMs: Long): List<Item> {
+        val old = items.filter { nowMs - it.addedAtMs > ttlMs }
+        items.removeAll { nowMs - it.addedAtMs > ttlMs }
+        return old
+    }
+
     /** ข้อถัดไปที่ยังไม่หมดอายุ (เอาออกจากคิว) */
     fun next(nowMs: Long): Item? {
         while (items.isNotEmpty()) {
@@ -109,16 +120,19 @@ class PendingAnswerQueue(
     ): Int {
         if (!interrupted || modelSpoke) return 0
         if (toolCalls == 0 && !userText.isNullOrBlank()) return if (addUnanswered(userText, nowMs)) 1 else 0
-        sentResults.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }
-        return sentResults.size
+        // ผลเปลี่ยนหน้า/โหมดไม่ใช่คำถาม (logcat 2026-10-02 11:42:14: เข้าคิวเป็นคำถาม → แอปถามซ้ำ → AI รัน BTC ครั้งที่ 3)
+        val reports = sentResults.filter { it.second !in LiveProtocol.UI_ONLY_TOOLS }
+        reports.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }
+        return reports.size
     }
 
     /**
-     * เทิร์นที่มีผล tool แต่ AI พูดแค่ประโยคทักทายเปิดเซสชัน ([LiveProtocol.isSessionGreetingOnly]) — ผู้ใช้ยังไม่ได้ยินผล
-     * เหมือนเทิร์นที่ถูกตัด: ผลเข้าคิวรายงานตอนเงียบ (logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ราคา BTC และอากาศหายเงียบ)
-     * ผลของ tool เปลี่ยนหน้าตา/โหมด ([LiveProtocol.UI_ONLY_TOOLS]) ไม่ใช่เรื่องที่ต้องรายงาน คืนจำนวนที่เข้าคิว
+     * เทิร์นที่มีผล tool แต่ผู้ใช้ไม่ได้ยินผล ([LiveProtocol.resultsUntold]): AI พูดแค่ประโยคทักทายเปิดเซสชัน
+     * (logcat 2026-10-01 16:24–16:25 โหมดอวตาร: ราคา BTC และอากาศหายเงียบ) หรือจบเทิร์นเงียบๆ (2026-10-02 13:01:06: ราคาทอง)
+     * — เหมือนเทิร์นที่ถูกตัด: ผลเข้าคิวรายงานตอนเงียบ · ผลของ tool เปลี่ยนหน้าตา/โหมด ([LiveProtocol.UI_ONLY_TOOLS])
+     * ไม่ใช่เรื่องที่ต้องรายงาน คืนจำนวนที่เข้าคิว
      */
-    fun onGreetingOnlyAnswer(sentResults: List<Triple<String, String, String>>, nowMs: Long): Int {
+    fun onResultsUntold(sentResults: List<Triple<String, String, String>>, nowMs: Long): Int {
         val reports = sentResults.filter { it.second !in LiveProtocol.UI_ONLY_TOOLS }
         reports.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }
         return reports.size

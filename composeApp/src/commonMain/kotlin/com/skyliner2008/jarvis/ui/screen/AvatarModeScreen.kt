@@ -177,23 +177,33 @@ internal fun AvatarModeContent(
         )
     }
     LaunchedEffect(sceneSync) {
-        AvatarLiveFeed.results.collect { r ->
-            val data = r.data
-                ?: if (r.tool in TEXT_CARD_TOOLS && r.text.isNotBlank()) JsonPrimitive(r.text.take(CARD_TEXT_MAX)) else null
-            if (data == null) {
-                logDebug("AvatarStage", "tool ${r.tool}: no info scene for it")
-            } else {
-                val now = Clock.System.now().toEpochMilliseconds()
-                val subject = PendingAnswerQueue.subject(r.text).orEmpty()
-                sceneSync.onResult(ToolSceneSync.Item(r.tool, data, ToolSceneWords.of(r.tool, data), now, r.later, subject), now)
+        AvatarLiveFeed.events.collect { e ->
+            val now = Clock.System.now().toEpochMilliseconds()
+            when (e) {
+                is AvatarLiveFeed.Result -> {
+                    val data = e.data
+                        ?: if (e.tool in TEXT_CARD_TOOLS && e.text.isNotBlank()) JsonPrimitive(e.text.take(CARD_TEXT_MAX)) else null
+                    if (data == null) {
+                        logDebug("AvatarStage", "tool ${e.tool}: no info scene for it")
+                    } else {
+                        logDebug("AvatarStage", "tool ${e.tool}: scene waits for the AI to ${if (e.later) "report it" else "talk about it"}")
+                        val subject = PendingAnswerQueue.subject(e.text).orEmpty()
+                        sceneSync.onResult(ToolSceneSync.Item(e.tool, data, ToolSceneWords.of(e.tool, data), now, e.later, subject), now)
+                    }
+                }
+                is AvatarLiveFeed.Deferred -> {
+                    logDebug("AvatarStage", "tool ${e.tool}: queued, its scene waits for the report")
+                    sceneSync.onDeferred(e.tool, e.subject)
+                }
+                is AvatarLiveFeed.Report -> {
+                    logDebug("AvatarStage", "tool ${e.tool}: handed to the AI, its scene comes with the first words")
+                    sceneSync.onReport(e.tool, e.subject, now)
+                }
             }
         }
     }
     LaunchedEffect(sceneSync) {
-        AvatarLiveFeed.speech.collect { sceneSync.onSpeech(it.text, it.heardAtMs, Clock.System.now().toEpochMilliseconds()) }
-    }
-    LaunchedEffect(sceneSync) {
-        AvatarLiveFeed.reports.collect { sceneSync.onReport(it.tool, it.subject, Clock.System.now().toEpochMilliseconds()) }
+        AvatarLiveFeed.speech.collect { sceneSync.onSpeech(it.text, it.startMs, it.msPerUnit, Clock.System.now().toEpochMilliseconds()) }
     }
     LaunchedEffect(activeAvatarState.isSpeaking) {
         sceneSync.onSpeaking(activeAvatarState.isSpeaking, Clock.System.now().toEpochMilliseconds())
