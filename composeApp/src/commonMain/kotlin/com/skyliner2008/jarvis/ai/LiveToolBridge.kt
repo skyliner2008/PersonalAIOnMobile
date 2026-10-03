@@ -1,6 +1,7 @@
 package com.skyliner2008.jarvis.ai
 
 import com.skyliner2008.jarvis.data.ConversationTurn
+import com.skyliner2008.jarvis.data.DEAF_STRIKES_TO_RECONNECT
 import com.skyliner2008.jarvis.data.GeminiService
 import com.skyliner2008.jarvis.data.LiveGeminiService
 import com.skyliner2008.jarvis.data.LiveToolCallEvent
@@ -48,6 +49,11 @@ class LiveToolBridge(
     /** ช่วงเวลาที่บล็อกการสั่งเปิดกล้องซ้ำ — ยาวกว่ารอบ 2-turn pipeline (รอ turn 15s + 20s) */
     private val VISION_REACTIVATE_BLOCK_MS = 40_000L
 
+    /** a job for the assistant done within this is answered in the same turn, no hand-over ([handOverIfSlow]) */
+    private val QUICK_ANSWER_MS = 1_500L
+    /** the robot's words when the server still does not hear the user after a fresh session (no emoji: Godot's default font, emoji not checked on the phone) */
+    private val DEAF_STILL_NOTICE = "ยังไม่ได้ยินเสียงเลยฮับ ลองเช็คเน็ต หรือเปิดใหม่อีกทีนะ"
+
     // Trading AI Profile guard: keep one analysis family per user turn and only M15/H1/H4 by default.
     // tool call รันขนานกันแล้ว → counter ต้องอยู่ใต้ mutex
     private val tradingProfileMutex = kotlinx.coroutines.sync.Mutex()
@@ -78,8 +84,49 @@ class LiveToolBridge(
     private val latestCallByTool = mutableMapOf<String, Pair<String, Map<String, String>>>()
     /** call ที่ตอบรับไปแล้วและส่งต่อให้ลูกน้องทำ — ผลจริงเข้าคิวรายงาน ไม่ส่งเป็น toolResponse */
     private val delegatedCallIds = mutableSetOf<String>()
+    /** calls whose result went (or is going) to the model as its answer: never handed to the assistant after that */
+    private val answeredCallIds = ArrayDeque<String>()
     /** กันเรียก tool เดิมด้วยค่าเดิมวนซ้ำในเทิร์นเดียวกัน (ใช้ภายใต้ runningCallsMutex) */
     private val duplicateGuard = DuplicateCallGuard()
+
+    /**
+     * Every tool call at work, by call id — Avatar mode's task list and working card. One slot ("the latest tool")
+     * lost the 5-dimension job to the face change the model called with it (simulation of logcat 2026-10-02 15:26).
+     */
+    private val jobs = mutableMapOf<String, com.skyliner2008.jarvis.avatar.AvatarLiveFeed.Job>()
+
+    private fun jobStarted(event: LiveToolCallEvent, question: String, delegated: Boolean) {
+        synchronized(jobs) {
+            if (event.callId in jobs) return
+            jobs[event.callId] = com.skyliner2008.jarvis.avatar.AvatarLiveFeed.Job(
+                event.callId, event.name, event.args, question, delegated, cancelled = false, startedAtMs = System.currentTimeMillis()
+            )
+        }
+        publishJobs()
+    }
+
+    private fun jobEnded(callId: String) {
+        // the queue first: a job handed over has just put its result there — publishing the job's end alone left the
+        // robot's list empty for a moment and the job's pill blinked out and back (simulation, rapid questions)
+        com.skyliner2008.jarvis.avatar.AvatarLiveFeed.reports(liveService.reportSnapshot())
+        if (synchronized(jobs) { jobs.remove(callId) } != null) publishJobs()
+    }
+
+    /** A quick job that ran past [QUICK_ANSWER_MS] went to the assistant: off the working card, onto the task list. */
+    private fun jobHandedOver(callId: String) {
+        val changed = synchronized(jobs) { jobs[callId]?.let { jobs[callId] = it.copy(delegated = true) } != null }
+        if (changed) publishJobs()
+    }
+
+    private fun jobsCancelled(ids: List<String>) {
+        val changed = synchronized(jobs) {
+            ids.mapNotNull { id -> jobs[id]?.let { jobs[id] = it.copy(cancelled = true) } }.isNotEmpty()
+        }
+        if (changed) publishJobs()
+    }
+
+    private fun publishJobs() =
+        com.skyliner2008.jarvis.avatar.AvatarLiveFeed.jobs(synchronized(jobs) { jobs.values.sortedBy { it.startedAtMs } })
 
     /** turn ที่ผู้ใช้เรียก custom tool / skill แบบ chain — ขั้นตอนของ skill กำหนด TF เอง จึงไม่ให้ profile guard ไปขวาง */
     private var skillChainTurnKey: String = ""
@@ -139,15 +186,61 @@ class LiveToolBridge(
             logDebug("LiveBridge", "🚫 ไม่ส่งผล ${event.name} callId=${event.callId} — ถูกยกเลิก (superseded=$superseded)")
             return
         }
-        liveService.enqueuePendingToolResult(origin.question, event.name, result)
+        liveService.enqueuePendingToolResult(origin.question, event.name, result, key = event.callId)
+    }
+
+    /**
+     * This call's result goes to the model as its answer now — false: the call went to the assistant or the server
+     * cancelled it, and its result goes to the report queue. Decided once and under the lock: a quick job's result
+     * and its hand-over at [QUICK_ANSWER_MS] ([handOverIfSlow]) cannot both happen.
+     */
+    private suspend fun answerNow(callId: String): Boolean = runningCallsMutex.withLock {
+        when {
+            callId in cancelledCallIds -> false
+            callId in answeredCallIds -> true
+            callId in delegatedCallIds -> false
+            else -> {
+                answeredCallIds.addLast(callId)
+                while (answeredCallIds.size > 64) answeredCallIds.removeFirst()
+                true
+            }
+        }
+    }
+
+    /**
+     * A job for the assistant that is not done in [QUICK_ANSWER_MS]: the boss says it is on it (the `DELEGATED:`
+     * acknowledgement) and the result goes to the report queue. One that finished in time was answered in this turn;
+     * one the server cancelled meanwhile gets no response at all (Live API) — its result is queued like any cancelled
+     * call's.
+     */
+    private suspend fun handOverIfSlow(event: LiveToolCallEvent, job: Job) {
+        val startedAt = System.currentTimeMillis()
+        if (kotlinx.coroutines.withTimeoutOrNull(QUICK_ANSWER_MS) { job.join() } != null) {
+            if (runningCallsMutex.withLock { event.callId in answeredCallIds }) {
+                logDebug("LiveBridge", "⚡ ${event.name} เสร็จใน ${System.currentTimeMillis() - startedAt} ms — หัวหน้าตอบเอง ไม่ส่งลูกน้อง")
+            }
+            return
+        }
+        val handOver = runningCallsMutex.withLock {
+            if (event.callId in answeredCallIds || event.callId in cancelledCallIds || job.isCompleted) false
+            else delegatedCallIds.add(event.callId)
+        }
+        if (!handOver) return
+        jobHandedOver(event.callId)
+        liveService.sendNativeToolResponse(
+            callId = event.callId,
+            toolName = event.name,
+            result = com.skyliner2008.jarvis.data.LiveProtocol.delegatedAck(event.name),
+            sessionGeneration = event.sessionGeneration
+        )
+        logDebug("LiveBridge", "👷 ส่งต่อ ${event.name} ให้ผู้ช่วยทำเบื้องหลัง — ยังไม่เสร็จใน $QUICK_ANSWER_MS ms (${event.args})")
     }
 
     private suspend fun respond(event: LiveToolCallEvent, result: String, deliverIfStale: Boolean = false) {
         // tool บางตัวจับ CancellationException ไว้เองแล้วคืน error ปกติ — ถ้าไม่เช็คตรงนี้เราจะส่งผล
         // ของ call ที่ server ยกเลิกไปแล้ว (เคสจริง 2026-09-16: SMC analysis ถูกยกเลิกแต่ยังส่ง response)
         // งานของลูกน้อง (ตอบรับไปแล้ว) หรือ call ที่ server ยกเลิก → ผลเข้าคิวรายงาน
-        val delegated = runningCallsMutex.withLock { event.callId in delegatedCallIds }
-        if (delegated || isCancelled(event.callId)) {
+        if (!answerNow(event.callId)) {
             deliverCancelledResult(event, result)
             return
         }
@@ -537,6 +630,7 @@ class LiveToolBridge(
         }
 
         _activeToolName.value = event.name
+        jobStarted(event, userPrompt, delegated = runningCallsMutex.withLock { event.callId in delegatedCallIds })
 
         // Signal alerts must never probe MT5 symbol discovery first. The alert pipeline owns
         // source selection: DEMO/PAPER -> TradingView; LIVE+connected -> MT5; LIVE+offline -> TV.
@@ -625,7 +719,7 @@ class LiveToolBridge(
             // this call's result with its own scene data, for Avatar mode (ToolSceneSync) — a job handed to the
             // assistant, or a call the server cancelled, is told later from the report queue
             val call = kotlinx.coroutines.currentCoroutineContext()[com.skyliner2008.jarvis.data.LiveToolCallContext]
-            val later = runningCallsMutex.withLock { event.callId in delegatedCallIds } || isCancelled(event.callId)
+            val later = !answerNow(event.callId)
             com.skyliner2008.jarvis.avatar.AvatarLiveFeed.result(
                 event.name, com.skyliner2008.jarvis.avatar.AvatarToolData.of(call, event.name), finalResultText, later
             )
@@ -967,6 +1061,12 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
         }
     }
 
+    /** Stops following the session (a replay that ends; the app restarts collecting for each session instead). */
+    fun stopCollecting() {
+        collectionJob?.cancel()
+        visionPromptJob?.cancel()
+    }
+
     fun startCollecting(memoryContextProvider: () -> String) {
         // เคลียร์ Job เก่าออกก่อนเพื่อป้องกันการเรียก Tool ซ้ำซ้อน (Duplicate Collectors)
         collectionJob?.cancel()
@@ -979,6 +1079,21 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                     com.skyliner2008.jarvis.avatar.AvatarLiveFeed.speech(mark.text, mark.startAtMs, mark.msPerUnit)
                 }
             }
+            // the user's words as the server hears them (Avatar mode's listening / thinking scenes), and the report
+            // queue as the robot's task list shows it (a snapshot a few times a second: no change of the queue is missed)
+            synchronized(jobs) { jobs.clear() }
+            publishJobs()
+            launch {
+                while (true) {
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.reports(liveService.reportSnapshot())
+                    kotlinx.coroutines.delay(250)
+                }
+            }
+            launch {
+                liveService.textOutputFlow.collect {
+                    if (it.role == "user") com.skyliner2008.jarvis.avatar.AvatarLiveFeed.heard(System.currentTimeMillis())
+                }
+            }
             // results the report queue took — the AI tells them later, so their scenes wait for that
             launch {
                 liveService.resultsDeferred.collect { (tool, subject) ->
@@ -989,6 +1104,25 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
             launch {
                 liveService.reportsSent.collect { (tool, subject) ->
                     com.skyliner2008.jarvis.avatar.AvatarLiveFeed.report(tool, subject)
+                }
+            }
+            // the phone heard the user but the server did not (a deaf session): the robot says so, and when the app
+            // opens a fresh session
+            launch {
+                liveService.deafUtterances.collect { strikes ->
+                    when {
+                        strikes < DEAF_STRIKES_TO_RECONNECT -> com.skyliner2008.jarvis.avatar.AvatarLiveFeed.notice("ไม่ได้ยินเลยฮับ พูดอีกทีได้ไหม")
+                        // still deaf after a fresh session (the next one waits DEAF_RECONNECT_EVERY_MS)
+                        strikes > DEAF_STRIKES_TO_RECONNECT -> com.skyliner2008.jarvis.avatar.AvatarLiveFeed.notice(DEAF_STILL_NOTICE)
+                        // the third: deafReconnects says what happens
+                    }
+                }
+            }
+            launch {
+                liveService.deafReconnects.collect { fresh ->
+                    com.skyliner2008.jarvis.avatar.AvatarLiveFeed.notice(
+                        if (fresh) "ขอต่อสายใหม่แป๊บนะฮับ…" else DEAF_STILL_NOTICE
+                    )
                 }
             }
             // Path A: Native Tool Calls (Function Calling)
@@ -1027,41 +1161,17 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                         callOrigins[event.callId] = CallOrigin(turn, liveService.currentQuestion)
                         latestCallByTool[event.name] = event.callId to event.args
                     }
-                    // หัวหน้า (Live) ส่งต่องานให้ลูกน้อง: ตอบรับทันที ไม่มีช่วงให้ server ยกเลิก —
-                    // งานจริงรันเบื้องหลังผ่านเส้นทางเดิมทั้งหมด (guard, TF, การ์ดแชท) แล้วรายงานผลผ่านคิวตอนเงียบ
+                    // หัวหน้า (Live) ได้งานของลูกน้อง: ลงมือเองก่อน — งานที่เสร็จใน QUICK_ANSWER_MS (ปฏิทิน 0.3 วิ, 5 มิติ 1.2 วิ)
+                    // ตอบในเทิร์นนี้เลย; งานที่ยังไม่เสร็จจึงส่งต่อให้ลูกน้อง: ตอบรับ แล้วผลเข้าคิวรายงานตอนเงียบ ผ่านเส้นทางเดิม
+                    // ทั้งหมด (guard, TF, การ์ดแชท) — เดิมตอบรับทันทีทุกงาน งานเร็วก็ต้องฟัง "รับทราบ" แล้วรอรายงานอีก 4–6 วิ
+                    // (ผู้ใช้อนุมัติ 2026-10-03) · ระหว่างรอ server ยกเลิกได้ (ผู้ใช้ถามข้อต่อไป): ผลเข้าคิวเหมือน call ที่ถูกยกเลิก
+                    // ยกเว้นตอนโมเดลตอบข้อค้างที่แอปส่งให้ (ไม่มีใครรอพูด): รันในเทิร์นนี้เลย ไม่ส่งต่อแม้ช้า
                     val inSkillChain = skillChainTurnKey.isNotBlank() && skillChainTurnKey == "turn-${liveService.userTurnSerial}"
-                    if (LiveIntentMatchers.isDelegatedTool(event.name) && !inSkillChain) {
-                        runningCallsMutex.withLock { delegatedCallIds.add(event.callId) }
-                        liveService.sendNativeToolResponse(
-                            callId = event.callId,
-                            toolName = event.name,
-                            result = com.skyliner2008.jarvis.data.LiveProtocol.delegatedAck(event.name),
-                            sessionGeneration = event.sessionGeneration
-                        )
-                        logDebug("LiveBridge", "👷 ส่งต่อ ${event.name} ให้ผู้ช่วยทำเบื้องหลัง (${event.args})")
-                        launch(com.skyliner2008.jarvis.data.LiveToolCallContext()) {
-                            try {
-                                handleNativeToolCall(event, memoryContextProvider())
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                logError("LiveBridge", "Delegated tool ${event.name} failed", e)
-                                liveService.enqueuePendingToolResult(
-                                    liveService.lastUserText, event.name,
-                                    "ดึงข้อมูลไม่สำเร็จ: ${e.message} — บอกผู้ใช้ตรงๆ ห้ามเดาตัวเลข"
-                                )
-                            } finally {
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                                    runningCallsMutex.withLock {
-                                        delegatedCallIds.remove(event.callId)
-                                        callOrigins.remove(event.callId)
-                                    }
-                                }
-                                _activeToolName.value = null
-                            }
-                        }
-                        return@collect
+                    val answeringReport = liveService.answeringReport
+                    if (answeringReport && LiveIntentMatchers.isDelegatedTool(event.name)) {
+                        logDebug("LiveBridge", "🧾 ${event.name} ในเทิร์นตอบข้อค้าง — รันเลย ไม่ส่งลูกน้อง (${event.args})")
                     }
+                    val mayHandOver = LiveIntentMatchers.isDelegatedTool(event.name) && !inSkillChain && !answeringReport
                     val job = launch(com.skyliner2008.jarvis.data.LiveToolCallContext(), start = kotlinx.coroutines.CoroutineStart.LAZY) {
                         try {
                             handleNativeToolCall(event, memoryContextProvider())
@@ -1071,17 +1181,23 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                             throw e
                         } catch (e: Exception) {
                             logError("LiveBridge", "Native tool handling error", e)
+                            // a job the user waits on for a report must say it failed (answer now, or the queue)
+                            if (mayHandOver) respond(event, "ดึงข้อมูลไม่สำเร็จ: ${e.message} — บอกผู้ใช้ตรงๆ ห้ามเดาตัวเลข")
                         } finally {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                                 runningCallsMutex.withLock {
                                     runningCalls.remove(event.callId)
                                     callOrigins.remove(event.callId)
+                                    delegatedCallIds.remove(event.callId)
                                 }
                             }
+                            jobEnded(event.callId)
+                            if (mayHandOver) _activeToolName.value = null
                         }
                     }
                     runningCallsMutex.withLock { runningCalls[event.callId] = job }
                     job.start()
+                    if (mayHandOver) launch { handOverIfSlow(event, job) }
                 }
             }
 
@@ -1091,6 +1207,7 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
             launch {
                 liveService.toolCallCancellationFlow.collect { ids ->
                     markCancelled(ids)
+                    jobsCancelled(ids)
                     val running = runningCallsMutex.withLock { ids.count { it in runningCalls } }
                     if (running > 0) logDebug("LiveBridge", "🚫 Server cancelled $running running tool call(s): $ids — รันต่อเพื่อส่งผลถ้าเป็นเสียงรบกวน")
                 }

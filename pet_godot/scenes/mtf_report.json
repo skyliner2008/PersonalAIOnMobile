@@ -1,0 +1,33 @@
+{
+  "id": "mtf_report",
+  "title": "หลายไทม์เฟรม",
+  "mood": "analytical",
+  "needs": "mtf",
+  "tags": ["multi_timeframe", "mtf", "alignment", "signal", "info", "trading_multi_timeframe"],
+  "description": "ผลของ trading_multi_timeframe: กราฟแท่งสัญญาณของแต่ละไทม์เฟรม (1W … 15m, คะแนน −1 ขาย … +1 ซื้อ) → ช่องสัญญาณ + RSI รายไทม์เฟรม หุ่นดีใจเมื่อหลายไทม์เฟรมไปทางซื้อพร้อมกัน",
+  "duration": 11.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "หลายไทม์เฟรม {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "cyber"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "bars", "at": "top", "beam": "R", "money": false,
+      "title": "รายไทม์เฟรม · {symbol}", "subtitle": "−1 ขาย … +1 ซื้อ", "bars": "{tf_bars}"},
+    {"t": 2.6, "do": "say", "text": "{align_th}", "dur": 2.2},
+    {"t": 4.6, "do": "emotion", "name": "happy", "if": "align_dir == up"},
+    {"t": 4.6, "do": "hop", "height": 0.25, "dur": 0.55, "if": "align_dir == up"},
+    {"t": 4.7, "do": "emote", "kind": "star", "count": 2, "if": "align_dir == up"},
+    {"t": 4.6, "do": "eyes", "name": "sad", "dur": 1.8, "if": "align_dir == down"},
+    {"t": 4.7, "do": "emote", "kind": "sweat", "count": 2, "if": "align_dir == down"},
+    {"t": 4.6, "do": "tilt_head", "deg": 12, "dur": 0.3, "if": "align_dir == flat"},
+    {"t": 4.7, "do": "emote", "kind": "question", "count": 1, "if": "align_dir == flat"},
+
+    {"t": 5.8, "do": "emotion", "name": "talk"},
+    {"t": 5.8, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 6.0, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 3,
+      "title": "สัญญาณ + RSI", "items": "{tf_tiles}"},
+    {"t": 9.2, "do": "hold"},
+    {"t": 9.9, "do": "present", "side": "R", "on": false}
+  ]
+}

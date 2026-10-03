@@ -184,14 +184,10 @@ class PetStateMachine {
             return null
         }
 
+        // hunger, tiredness and boredom are not complaints any more: the robot eats, sleeps and plays by itself
+        // (PetSelfCare) — a hungry robot used to turn angry with an alarm every minute in Avatar mode, which has no
+        // feed button (logcat 2026-10-03 00:16:37, 00:17:42)
         return when {
-            // หิวจัดมาก (โมโหหิว) → โกรธ
-            needs.satiety < 20f -> EmotionTransitionResult(
-                emotion = AvatarEmotion.ANGRY,
-                statusText = "หิวจัดแล้วน้าา!! ให้อาหารน้องหน่อยยย! 🍖😡",
-                soundAction = { RobotSoundPlayer.playAlarm() },
-                durationMs = 5000L
-            )
             // สภาพแย่รวม → เศร้า
             needs.satiety < 25f && needs.hygiene < 30f && needs.stress > 50f -> EmotionTransitionResult(
                 emotion = AvatarEmotion.SAD,
@@ -199,27 +195,12 @@ class PetStateMachine {
                 soundAction = { RobotSoundPlayer.playConfused() },
                 durationMs = 8000L
             )
-            // เหนื่อยมาก → หลับเอง
-            needs.energy < 15f -> EmotionTransitionResult(
-                emotion = AvatarEmotion.SLEEPING,
-                statusText = "เหนื่อยมากก... หลับก่อนน้าา Zzz 💤",
-                soundAction = { RobotSoundPlayer.playYawn() },
-                durationMs = Long.MAX_VALUE
-            )
             // เครียดสูง → งอน
             needs.stress > 70f -> EmotionTransitionResult(
                 emotion = AvatarEmotion.POUT,
                 statusText = "เครียดจังเลย... อย่าทิ้งน้องไว้คนเดียวน้าา 😤",
                 soundAction = { RobotSoundPlayer.playConfused() },
                 durationMs = 5000L
-            )
-            // ไม่มีใครเล่นด้วย + ไม่มีความสุข → เบื่อ
-            needs.happiness < 25f && countRecentInteractions(InteractionType.PAT, 300_000L) == 0
-                    && countRecentInteractions(InteractionType.PET_HEAD, 300_000L) == 0 -> EmotionTransitionResult(
-                emotion = AvatarEmotion.BORED,
-                statusText = "เบื่ออออ ไม่มีใครมาเล่นด้วยเลยย 😑💭",
-                soundAction = { RobotSoundPlayer.playYawn() },
-                durationMs = 10000L
             )
             // สบายดีทุกอย่าง → null (ให้คง IDLE ต่อไป)
             else -> null

@@ -1,0 +1,20 @@
+{
+    "symbol": "BTCUSDT",
+    "interval": "1h",
+    "price": 86396.01,
+    "smc_trend": "BULLISH",
+    "smc_zone": "PREMIUM",
+    "smc_event": "BOS_UP",
+    "range_high": 85649.95,
+    "range_low": 83186.0,
+    "range_pos": 130.27902351914602,
+    "premium_from": 85033.9625,
+    "equilibrium": 84417.975,
+    "discount_to": 83801.9875,
+    "bull_ob": 0,
+    "bear_ob": 0,
+    "bull_fvg": 4,
+    "bear_fvg": 1,
+    "eqh": 86670.36,
+    "eql": 86062.28
+}

@@ -58,6 +58,21 @@ enum class RobotSound {
 object RobotSoundPlayer {
     var handler: ((RobotSound) -> Unit)? = null
 
+    /**
+     * Until when the robot's own sound plays (+ a short tail) — the mic hears it through the speaker: it is not the
+     * user talking (UserVoiceDetector; logcat 2026-10-02 23:31:13 ALARM and 23:32:24 CONFUSED turned on "กำลังฟัง").
+     */
+    @kotlin.jvm.Volatile
+    var selfSoundUntilMs: Long = 0L
+        private set
+
+    /** The platform's player: a sound of [durationMs] starts now ([nowMs]). */
+    fun notePlaying(durationMs: Long, nowMs: Long) {
+        selfSoundUntilMs = maxOf(selfSoundUntilMs, nowMs + durationMs + SELF_SOUND_TAIL_MS)
+    }
+
+    private const val SELF_SOUND_TAIL_MS = 300L
+
     fun play(sound: RobotSound) {
         handler?.invoke(sound)
     }

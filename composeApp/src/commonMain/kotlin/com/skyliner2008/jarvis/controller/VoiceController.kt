@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** an utterance this long (the detector's talking, its 0.7 s hold included) is one the Live server should hear */
+private const val MIN_UTTERANCE_MS = 1_000L
+
 /**
  * Phase-3 refactor: แยก Live Voice (mic stream, audio out, mute, error) ออกจาก JarvisViewModel
  * coupling กับแชท/หน่วยความจำผ่าน lambda ที่ VM ส่งให้ — controller ไม่รู้จัก VM โดยตรง
@@ -43,6 +46,15 @@ class VoiceController(
 
     private val _isAiSpeaking = MutableStateFlow(false)
     val isAiSpeaking: StateFlow<Boolean> = _isAiSpeaking.asStateFlow()
+
+    private val _userVoice = MutableStateFlow(false)
+    /**
+     * The user talking to the AI ([UserVoiceDetector]: ends 0.7 s after the voice, not a click, not the AI's voice or
+     * the robot's own sounds) — the robot's "listening" and the app's LISTENING face.
+     */
+    val userVoice: StateFlow<Boolean> = _userVoice.asStateFlow()
+    private val userVoiceDetector = UserVoiceDetector()
+    private var utteranceStartMs = 0L
 
     private val _voiceError = MutableStateFlow<String?>(null)
     val voiceError: StateFlow<String?> = _voiceError.asStateFlow()
@@ -89,6 +101,15 @@ class VoiceController(
             val speaking = volume > speechThreshold
             // เกณฑ์ต่ำกว่า UI — เสียงพูดหลัง AEC/NoiseSuppressor เบา 0.05 จับไม่ได้ (logcat 03:25:05 คิวคิดว่าเงียบขณะผู้ใช้พูด)
             if (volume > voiceActivityThreshold && !_isAiSpeaking.value) orchestrator.noteLiveUserVoice()
+            val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            val ownSound = _isAiSpeaking.value || ttsFallbackSpeaking || now < com.skyliner2008.jarvis.sound.RobotSoundPlayer.selfSoundUntilMs
+            val talking = userVoiceDetector.onLevel(volume, now, suppressed = ownSound)
+            if (talking != _userVoice.value) {
+                // an utterance the Live server should hear (a deaf session reconnects: LiveGeminiService.noteLocalUtterance)
+                if (talking) utteranceStartMs = now
+                else if (!ownSound && now - utteranceStartMs >= MIN_UTTERANCE_MS) orchestrator.noteLiveUtterance(utteranceStartMs, now)
+                _userVoice.value = talking
+            }
             onUserSpeakingChanged(speaking)
         }
         // เสียง AI ยังเล่นอยู่ในลำโพง (server จบเทิร์นก่อนเล่นจบนาน) — คิวคำถามค้างต้องรอ
@@ -115,6 +136,8 @@ class VoiceController(
 
     fun startVoiceInput() {
         if (_isListening.value) return
+        userVoiceDetector.reset()                       // the mic is not running yet: no race with its thread
+        _userVoice.value = false
         _isListening.value = true
         _voiceError.value = null
         _isMuted.value = false // Start unmuted
@@ -410,6 +433,7 @@ class VoiceController(
         _isMuted.value = false
         _isAiSpeaking.value = false
         _audioLevel.value = 0f
+        _userVoice.value = false
         playbackFinishJob?.cancel()
         pcmAudioEngine.isRobotVoiceEnabled = false
         pcmAudioEngine.stopRecording()

@@ -233,6 +233,21 @@ class SmcFlowAlertProvider(private val smcApi: SmcApiService) {
     suspend fun fetchFormatted(rawSymbol: String): String {
         val d = fetch(rawSymbol)
         d["error"]?.let { return "❌ SMC Flow: $it" }
+        // the signals on the robot's card (Avatar mode); the key=value lines stay for the AI
+        com.skyliner2008.jarvis.avatar.AvatarToolData.publish("trading_smc_flow", mapOf(
+            "title" to "SMC Flow · ${d["symbol"]} (${d["timeframe"]})",
+            "markdown" to buildString {
+                appendLine("ราคา **${d["close"]}** · โครงสร้าง **${d["structure_bias"]}**")
+                val recipes = d["smc_recipes"]?.takeIf { it.isNotBlank() && it != "-" }?.let { " · สูตร $it" }.orEmpty()
+                appendLine("- **SMC**: สัญญาณ ${d["smc_signal"]}$recipes")
+                appendLine("- **EMA 14/60**: ${d["ema14_60_state"]} · ตัดกัน ${d["ema14_60_cross"]}")
+                appendLine("- **UT Bot**: เทรนด์ ${d["utbot_trend"]} · สัญญาณ ${d["utbot_signal"]} · stop ${d["utbot_stop"]}")
+                if (d["fib_golden_bottom"] != null) {
+                    append("- **Fib golden zone**: ${d["fib_golden_bottom"]} – ${d["fib_golden_top"]}")
+                    if (d["in_fib_golden"] == "1") append(" (ราคาอยู่ในโซน)")
+                }
+            }
+        ))
         return buildString {
             appendLine("## 🌊 SMC Flow System — ${d["symbol"]} (${d["timeframe"]}) [${d["source"]}]")
             appendLine("close=${d["close"]}")

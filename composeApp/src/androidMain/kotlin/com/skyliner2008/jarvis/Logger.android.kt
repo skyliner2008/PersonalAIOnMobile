@@ -5,6 +5,7 @@ import android.util.Log
 actual fun logDebug(tag: String, message: String) {
     // logcat: mask key แบบโชว์หัว-ท้าย เพื่อ debug ได้ว่าใช้ key ไหน (ตามที่ user ต้องการ)
     val masked = maskSensitiveForLogcat(message)
+    LogTap.sink?.invoke(tag, masked)
     // Log.d จำกัด ~4000 bytes/บรรทัด — แบ่ง chunk ให้ log ยาวแสดงครบ ไม่ถูกตัดกลางข้อความ
     // Android's local JVM test stubs throw for android.util.Log.*. Logging must
     // never change application/test control flow, so keep the real logcat path
@@ -27,6 +28,7 @@ actual fun logDebug(tag: String, message: String) {
 }
 
 actual fun logError(tag: String, message: String, throwable: Throwable?) {
+    LogTap.sink?.invoke(tag, "ERROR " + maskSensitiveForLogcat(message) + (throwable?.let { " — ${it.message}" } ?: ""))
     runCatching {
         if (throwable != null) {
             // ไม่ส่ง throwable เข้า Log.e ตรงๆ เพราะ stacktrace อาจมี URL ที่แนบ API key

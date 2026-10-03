@@ -16,6 +16,7 @@ extends Node3D
 ##   --frames=<dir> [--every=1]   while the scene plays, save a frame every N seconds (scene time) to <dir>
 ##   --data=<file.json>           data for an info scene (default: its tool's saved result in data_samples/)
 ##   --tool=<name> [--data=…]     show a tool's result the way the app will: director.play_tool(name, result)
+##   --stop-at=<seconds>          stop the scene then (looping scenes such as listening never end by themselves)
 ##   --tab=<n>                    open the n-th tab of the panel (0 = อารมณ์ … 7 = ข้อมูล)
 ##   --app-sim=<file.json>        app mode on the desktop: the app's commands from a file (app_bridge.gd)
 ##   --sprites=<dir>              render the robot's faces for the app's overlay / drive screen and quit
@@ -131,6 +132,9 @@ func _ready() -> void:
 		await get_tree().create_timer(0.4).timeout
 		var result = JSON.parse_string(FileAccess.get_file_as_string(_args["data"])) if _args.has("data") else _sample_result(_args["tool"])
 		director.play_tool(_args["tool"], result)
+	if _args.has("stop-at") and (_args.has("scene") or _args.has("tool")):
+		await get_tree().create_timer(float(_args["stop-at"])).timeout
+		director.stop()
 
 
 func _load_json(path: String) -> Dictionary:

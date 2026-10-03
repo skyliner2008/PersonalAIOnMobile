@@ -26,16 +26,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.skyliner2008.jarvis.avatar.AvatarActivity
+import com.skyliner2008.jarvis.avatar.AvatarCards
 import com.skyliner2008.jarvis.avatar.AvatarLiveFeed
 import com.skyliner2008.jarvis.avatar.AvatarLookMapper
 import com.skyliner2008.jarvis.avatar.AvatarSkits
 import com.skyliner2008.jarvis.avatar.AvatarStage
+import com.skyliner2008.jarvis.avatar.AvatarTasks
 import com.skyliner2008.jarvis.avatar.ToolSceneSync
 import com.skyliner2008.jarvis.avatar.ToolSceneWords
 import com.skyliner2008.jarvis.camera.CameraPreviewView
 import com.skyliner2008.jarvis.data.PendingAnswerQueue
 import com.skyliner2008.jarvis.logDebug
+import com.skyliner2008.jarvis.avatar.ScreenDimmer
 import com.skyliner2008.jarvis.pet.PetModeController
+import com.skyliner2008.jarvis.pet.PetSelfCare
 import com.skyliner2008.jarvis.pet.PetVisionProcessor
 import com.skyliner2008.jarvis.pet.TouchZone
 import com.skyliner2008.jarvis.sound.RobotSoundPlayer
@@ -43,27 +48,24 @@ import com.skyliner2008.jarvis.ui.component.avatar.AvatarEmotion
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
 import com.skyliner2008.jarvis.ui.component.avatar.RobotSprite
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.JsonPrimitive
-
-/** Tools whose text answer goes on the robot's markdown card (tools with data get their own scene). */
-private val TEXT_CARD_TOOLS = setOf(
-    "trading_news", "search_web", "summarize_text", "translate_text", "calculate", "convert_units",
-    "device_location", "trading_sentiment", "trading_macro_calendar"
-)
-private const val CARD_TEXT_MAX = 700
 
 /**
  * Avatar mode — the Godot robot fullscreen, no buttons (Android back closes it). The pet brain
  * ([petController]) still owns the mood: touches on the robot, the camera's face tracking, shakes and
  * tilts (wired in AlwaysLiveScreen) and the AI's faces all go through it; this screen sends its state
  * to the robot, plays its skits, puts tool results on the robot's info scenes while the AI talks about
- * them ([ToolSceneSync]) and streams camera frames to the live session while the AI's eyes are open.
+ * them ([ToolSceneSync]), shows it listening / thinking / at work between answers ([AvatarActivity],
+ * from the live session's own state [voiceSession]), keeps the jobs the user waits to hear about on its task
+ * list ([AvatarTasks]) and streams camera frames to the live session while the AI's eyes are open.
  */
 @Composable
 internal fun AvatarModeContent(
     activeAvatarState: AvatarState,
+    voiceSession: AvatarState,
     petController: PetModeController,
     petVisionProcessor: PetVisionProcessor?,
     isAiVisionOn: Boolean,
@@ -84,6 +86,7 @@ internal fun AvatarModeContent(
     val ready by AvatarStage.ready.collectAsState()
     val failed by AvatarStage.failed.collectAsState()
     val stateRef = rememberUpdatedState(activeAvatarState)
+    val sessionRef = rememberUpdatedState(voiceSession)
     val endLive = rememberUpdatedState(onEndLive)
     val barrageDone = rememberUpdatedState(onMissileBarrageFinished)
 
@@ -138,14 +141,21 @@ internal fun AvatarModeContent(
         AvatarLookMapper.trickFidget(activeAvatarState.faceState.eyeTrick)?.let { AvatarStage.fidget(it) }
     }
 
-    // skits the pet brain starts (its own, or the closest one for an old story scene)
+    // skits the pet brain starts (its own, or the closest one for an old story scene); the scene's item goes with it
+    // (the snack the robot eats: {"item": "pizza"})
     var playingSkit by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeAvatarState.faceState.sceneId, activeAvatarState.faceState.sceneName) {
         val sceneName = activeAvatarState.faceState.sceneName
         val skit = if (sceneName.isNotBlank()) AvatarSkits.forSceneName(sceneName) else null
         val playing = playingSkit
+        val item = activeAvatarState.faceState.sceneItem
         when {
-            skit != null -> { AvatarStage.playScene(skit.id); playingSkit = skit.id }
+            skit != null -> {
+                AvatarStage.playScene(skit.id, if (item.isNotBlank()) kotlinx.serialization.json.buildJsonObject {
+                    put("item", JsonPrimitive(item))
+                } else null)
+                playingSkit = skit.id
+            }
             // the scene ended, or a scene without a skit took over: its look shows at once (a tool's
             // info scene that took the stage meanwhile is not cut off)
             playing != null -> { AvatarStage.stopScene(playing); playingSkit = null }
@@ -182,7 +192,7 @@ internal fun AvatarModeContent(
             when (e) {
                 is AvatarLiveFeed.Result -> {
                     val data = e.data
-                        ?: if (e.tool in TEXT_CARD_TOOLS && e.text.isNotBlank()) JsonPrimitive(e.text.take(CARD_TEXT_MAX)) else null
+                        ?: if (AvatarCards.wants(e.tool) && e.text.isNotBlank()) JsonPrimitive(AvatarCards.text(e.text)) else null
                     if (data == null) {
                         logDebug("AvatarStage", "tool ${e.tool}: no info scene for it")
                     } else {
@@ -213,6 +223,90 @@ internal fun AvatarModeContent(
             delay(100L)
             sceneSync.tick(Clock.System.now().toEpochMilliseconds())
         }
+    }
+
+    // between answers: listening while the user talks, pondering until the AI answers, a "working" card while
+    // a tool runs — never over a tool's scene (AvatarActivity)
+    val activity = remember {
+        AvatarActivity(
+            play = { id, data -> AvatarStage.playScene(id, data) },
+            stop = { AvatarStage.stopScene(it) },
+            hear = { AvatarStage.hear(it) }
+        )
+    }
+    LaunchedEffect(activity) {
+        AvatarLiveFeed.heardAtMs.collect { if (it > 0L) activity.onHeard(it) }
+    }
+    // the jobs the user still waits to hear about (handed to the assistant, waiting to be told, being told)
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.flow.combine(AvatarLiveFeed.jobs, AvatarLiveFeed.reports) { jobs, reports -> AvatarTasks.board(jobs, reports) }
+            .collect { board ->
+                logDebug("AvatarStage", "tasks ${board.joinToString { "${it.tool ?: "ask"}:${it.state.word}" }.ifEmpty { "-" }}")
+                AvatarStage.tasks(AvatarTasks.json(board))
+            }
+    }
+    LaunchedEffect(activity) {
+        var last = AvatarActivity.Kind.NONE
+        while (true) {
+            delay(100L)
+            val s = sessionRef.value
+            val tool = AvatarTasks.foreground(AvatarLiveFeed.jobs.value)
+            activity.update(
+                nowMs = Clock.System.now().toEpochMilliseconds(),
+                userTalking = s.isUserSpeaking,
+                userLevel = s.audioLevel,
+                aiSpeaking = s.isSpeaking,
+                tool = tool,
+                toolSceneUp = sceneSync.current != null,
+                resultWaiting = sceneSync.hasWaiting
+            )
+            if (activity.current != last) {
+                logDebug("AvatarStage", "activity ${last.name} → ${activity.current.name}${tool?.let { " (${it.tool})" } ?: ""}")
+                last = activity.current
+            }
+            // the robot's idle life counts the quiet (PetSelfCare): a conversation starts it over, the user's voice wakes it
+            petController.onAvatarTick(
+                active = s.isUserSpeaking || s.isSpeaking || activity.current != AvatarActivity.Kind.NONE ||
+                    sceneSync.current != null || AvatarLiveFeed.jobs.value.isNotEmpty() || AvatarLiveFeed.reports.value.isNotEmpty(),
+                userVoice = s.isUserSpeaking
+            )
+        }
+    }
+
+    // the quiet on the screen (PetSelfCare): from 90 s the screen's eyelids sag and blink, at 120 s they shut and the
+    // screen goes down to 1 %; a voice or a touch: the screen as bright as before and the eyelids open slowly
+    DisposableEffect(Unit) {
+        AvatarStage.eyelids(open = 1f, secs = 0f)
+        onDispose {
+            ScreenDimmer.restore()
+            AvatarStage.eyelids(open = 1f, secs = 0f)
+        }
+    }
+    LaunchedEffect(petController) {
+        var last = PetSelfCare.Stage.AWAKE
+        petController.idleStage.collectLatest { stage ->
+            val from = last
+            last = stage
+            if (stage != from) logDebug("AvatarStage", "idle ${from.name} → ${stage.name}")
+            when (stage) {
+                PetSelfCare.Stage.AWAKE -> if (from != PetSelfCare.Stage.AWAKE) {
+                    ScreenDimmer.restore()
+                    AvatarStage.eyelids(open = 1f, secs = if (from == PetSelfCare.Stage.ASLEEP) 2.2f else 0.5f)
+                }
+                PetSelfCare.Stage.DROWSY -> Unit
+                PetSelfCare.Stage.EYELIDS -> AvatarStage.eyelidsDrowsy(30f)
+                PetSelfCare.Stage.ASLEEP -> {
+                    AvatarStage.eyelids(open = 0f, secs = 1.5f)
+                    delay(1_600L)                     // the eyelids shut first, then the screen dims
+                    ScreenDimmer.dim(0.01f)
+                }
+            }
+        }
+    }
+
+    // what the robot tells the user itself (the AI did not hear them, a fresh session is on its way)
+    LaunchedEffect(Unit) {
+        AvatarLiveFeed.notices.collect { AvatarStage.say(it, 3.5f) }
     }
 
     // the robot's events: touches go to the pet brain, back closes Avatar mode
@@ -271,6 +365,8 @@ internal fun AvatarModeContent(
  * zone forehead / left_cheek / right_cheek / chin / face / body) as the pet brain's touch reaction.
  */
 internal fun PetModeController.onAvatarTouch(kind: String, zone: String) {
+    // any touch starts the quiet over; asleep or drowsy, the touch wakes it and that is all it does
+    if (noteTouch()) return
     val cheek = if (zone == "left_cheek") TouchZone.LEFT_CHEEK else TouchZone.RIGHT_CHEEK
     val isCheek = zone == "left_cheek" || zone == "right_cheek"
     when (kind) {

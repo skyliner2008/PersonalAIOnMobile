@@ -17,9 +17,13 @@ signal finished(id: String)
 const EMOTES := preload("res://scripts/emotes.gd")
 const FX := preload("res://scripts/effects.gd")
 const HOLO := preload("res://scripts/holo_panel.gd")
+const ACTIVITY := preload("res://scripts/activity_fx.gd")
+const CARE := preload("res://scripts/care_fx.gd")
 const SCENE_DIR := "res://scenes"
 const BUBBLE_MAX := 440.0               # widest speech-bubble line (canvas px, the screen is 720 wide)
 const MAX_HOLD := 60.0                  # seconds a held scene waits for release() before it goes on by itself
+const MAX_LOOP := 120.0                 # seconds a looping scene ("loop") plays before it ends by itself
+const HEARD_FOR := 0.6                  # seconds a hear() level counts; after that the voice meter keeps its own rhythm
 ## where panels go (`"at"` in a panel beat); the pet steps back to the lower left to present them
 ## (PRESENTER_SPOT) and its speech bubble moves beside its head
 const PANEL_AT := {
@@ -38,11 +42,22 @@ var stage: Node                        # has set_background(name)
 var scenes := {}                       # id -> Dictionary
 var tool_scenes := {}                  # app tool name -> {scene, extra}; "*" = any other tool (scenes/tool_scenes.json)
 var playing := ""
+## true while a scene with "keep_pose" takes over from the one before: the pet stays as that one left it (lying
+## down, getting up) and the app bridge does not put the app's look back in between
+var continuing := false
 
 var _time := 0.0
 var _duration := 0.0
 var _hold_wanted := false              # play_tool(…, hold): wait at the scene's "hold" beat until release()
 var _hold_left := 0.0                  # > 0: waiting there (the scene's clock is stopped)
+var _loop_from := -1.0                 # >= 0: at its end the scene goes back to this time (listening, thinking …)
+var _max_loop := MAX_LOOP              # "max_loop": seconds a looping scene goes on by itself (0 = until stopped)
+var _played := 0.0                     # seconds the scene has played, loops included
+var _activity: Array = []              # activity_fx nodes ("listen" / "think" effects): they last until the scene ends
+var _props: Array = []                 # care_fx props (a snack, foam, a shower, a ball): gone when the scene ends
+var _panel_beats := {}                 # panel id -> its beat as written, to fill again when update() brings new data
+var _heard := 0.0                      # the user's voice level from the app (hear()), 0..1
+var _heard_age := 99.0
 var _beats: Array = []
 var _next := 0
 var _tweens: Array = []
@@ -143,6 +158,9 @@ func _load_scenes() -> void:
 ## until release(), so it stays up as long as the AI talks.
 func play_tool(tool: String, result, extra := {}, hold := false) -> String:
 	var id := scene_for_tool(tool)
+	# a tool that answered with text this time (an empty scan, an error) goes on the text card
+	if not (result is Dictionary or result is Array) and str(scenes.get(id, {}).get("needs", "answer")) != "answer":
+		id = tool_scenes.get("*", {}).get("scene", "answer_card")
 	play(id, tool_data(tool, result, extra))
 	_hold_wanted = hold and playing == id
 	return id
@@ -200,9 +218,9 @@ func list() -> Array:
 	return out
 
 
-## Seconds since the current scene started.
+## Seconds the current scene has played (loops included; a hold stops the clock).
 func elapsed() -> float:
-	return _time
+	return _played
 
 
 func play(id: String, data := {}) -> void:
@@ -217,23 +235,33 @@ func play_json(text: String, data := {}) -> void:
 		play_data(scene, data)
 
 
+## "keep_pose": true — the scene starts from wherever the last one left the pet (getting up from where it lay),
+## instead of from home.
 func play_data(scene: Dictionary, data := {}) -> void:
+	var keep_pose := bool(scene.get("keep_pose", false))
 	if playing != "":
-		stop()
-	_data = HOLO.derive(data if not data.is_empty() else scene.get("data", {}))
+		continuing = keep_pose
+		_end(not keep_pose)
+		continuing = false
+	_data = HOLO.derive(_with_task(data if not data.is_empty() else scene.get("data", {})))
 	var ready_scene := scene
-	if not _restore_tweens.is_empty():   # a new scene cuts the walk home short: start from home
+	if not _restore_tweens.is_empty():   # a new scene cuts the walk home short: start from home (or from right there)
 		for t in _restore_tweens:
 			if is_instance_valid(t):
 				t.kill()
 		_restore_tweens.clear()
-		pet.position = Vector3.ZERO
-		pet.rotation = Vector3.ZERO
-		pet.body_roll = 0.0
-		pet.body_pitch = 0.0
-		camera.fov = _fov_home
+		if not keep_pose:
+			pet.position = Vector3.ZERO
+			pet.rotation = Vector3.ZERO
+			pet.body_roll = 0.0
+			pet.body_pitch = 0.0
+			camera.fov = _fov_home
 	playing = ready_scene.get("id", "custom")
 	_duration = float(ready_scene.get("duration", 9.0))
+	_loop_from = float(ready_scene.get("loop", -1.0))
+	_max_loop = float(ready_scene.get("max_loop", MAX_LOOP))
+	_played = 0.0
+	_panel_beats.clear()
 	_beats = (ready_scene.get("beats", []) as Array).duplicate()
 	_beats.sort_custom(func(a, b): return float(a.get("t", 0.0)) < float(b.get("t", 0.0)))
 	_next = 0
@@ -247,6 +275,11 @@ func play_data(scene: Dictionary, data := {}) -> void:
 
 
 func stop() -> void:
+	_end(true)
+
+
+## Ends the scene; [walk_home] false: the pet stays where it is (the next scene picks it up from there).
+func _end(walk_home: bool) -> void:
 	if playing == "":
 		return
 	var id := playing
@@ -260,6 +293,14 @@ func stop() -> void:
 	_caption.visible = false
 	_bubble.visible = false
 	_shake_left = 0.0
+	for fx in _activity:
+		if is_instance_valid(fx):
+			fx.close()
+	_activity.clear()
+	for p in _props:
+		if is_instance_valid(p):
+			p.queue_free()
+	_props.clear()
 	camera.position = _cam_home
 	for pid in _panels:
 		if is_instance_valid(_panels[pid]):
@@ -267,11 +308,11 @@ func stop() -> void:
 	_panels.clear()
 	pet.present("L", false)
 	pet.present("R", false)
-	_restore_pet()
+	_restore_pet(walk_home)
 	finished.emit(id)
 
 
-func _restore_pet() -> void:
+func _restore_pet(walk_home := true) -> void:
 	if pet.flying:
 		pet.set_fly(false)
 	for slot in pet.worn.keys():
@@ -284,6 +325,12 @@ func _restore_pet() -> void:
 	pet.suit_follows_emotion = true
 	pet.set_emotion("normal")
 	pet.look(Vector2.ZERO)
+	pet.mouth_override = -1.0                     # a snack's chomping, cut short
+	if not walk_home:                             # the next scene picks the pet up as it is (shut eyes, nodded head)
+		_restore_tweens = []
+		pet.scene_active = false
+		return
+	pet.blink_override = -1.0                     # eyes held shut ("blink" beats)
 	pet.lean(0.0, 0.4)
 	pet.tilt_head(0.0, 0.4)
 	pet.body_roll = wrapf(pet.body_roll, -PI, PI)
@@ -298,6 +345,7 @@ func _restore_pet() -> void:
 	t.tween_property(pet, "body_pitch", 0.0, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(pet, "position", Vector3.ZERO, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.tween_property(pet, "rotation", Vector3.ZERO, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(pet, "_head_nod", 0.0, 0.4).set_trans(Tween.TRANS_SINE)
 	t.tween_property(camera, "fov", _fov_home, 0.5)
 	_restore_tweens = [t]
 	pet.scene_active = false
@@ -313,10 +361,13 @@ func _process(delta: float) -> void:
 			release()
 	else:
 		_time += delta
+		_played += delta
 		while _next < _beats.size() and float(_beats[_next].get("t", 0.0)) <= _time:
 			var beat: Dictionary = _beats[_next]
 			_next += 1
 			if not beat.has("if") or _cond(beat["if"]):
+				if beat.get("do", "") == "panel":    # kept as written: update() fills it again
+					_panel_beats[str(beat.get("id", "panel"))] = beat
 				_run(_fill(beat))
 			if playing == "":                # a beat may end the scene
 				return
@@ -335,12 +386,69 @@ func _process(delta: float) -> void:
 			_face_camera()
 	_prev_pos = pos
 	if _time >= _duration:
-		stop()
+		if _loop_from >= 0.0 and _loop_from < _duration and (_max_loop <= 0.0 or _played < _max_loop):
+			_rewind(_loop_from)
+		else:
+			stop()
+
+
+## A looping scene ("loop": t) goes on from time t again: the beats from there run once more.
+func _rewind(t: float) -> void:
+	_time = t
+	_next = 0
+	while _next < _beats.size() and float(_beats[_next].get("t", 0.0)) < t:
+		_next += 1
+
+
+## New data for the scene that plays (the app's tool changed while "working" shows): its panels fill
+## again from it, the scene goes on where it is.
+func update(data: Dictionary) -> void:
+	if playing == "":
+		return
+	_data = HOLO.derive(_with_task(data))
+	for pid in _panel_beats:
+		_open_panel(_fill(_panel_beats[pid]))
+
+
+## The user's voice level (0..1) while they talk to the AI: the "listen" effect's meter follows it.
+func hear(level: float) -> void:
+	_heard = clampf(level, 0.0, 1.0)
+	_heard_age = 0.0
+
+
+func _heard_level() -> float:
+	return _heard if _heard_age < HEARD_FOR else -1.0
+
+
+## A tool's "task" (what the robot is doing while the tool runs, from tool_scenes.json) and the call's
+## "detail" (its symbol / place / query and timeframe) for the "working" scene: data {tool, args}.
+func _with_task(data: Dictionary) -> Dictionary:
+	var tool := str(data.get("tool", ""))
+	if tool == "" or data.has("task"):
+		return data
+	var d := data.duplicate(true)
+	var entry: Dictionary = tool_scenes.get(tool, {})
+	d["task"] = entry.get("task", "กำลังจัดการให้อยู่")
+	var args = d.get("args", {})
+	if args is Dictionary:
+		var parts := []
+		for key in ["symbol", "symbols", "ticker", "query", "location", "city", "exchange", "market", "text", "expression"]:
+			var v := str(args.get(key, "")).strip_edges()
+			if v != "":
+				parts.append(v.left(28) + ("…" if v.length() > 28 else ""))
+				break
+		for key in ["interval", "timeframe"]:
+			if str(args.get(key, "")) != "":
+				parts.append(str(args[key]))
+				break
+		d["detail"] = " · ".join(parts)
+	return d
 
 
 ## Camera shake and the caption / bubble timers; they also run between scenes (the app's reactions and
 ## bubbles use them), the bubble follows the head.
 func _update_overlays(delta: float) -> void:
+	_heard_age += delta
 	if _shake_left > 0.0:
 		_shake_left -= delta
 		var k := _shake_amount * clampf(_shake_left * 4.0, 0.0, 1.0)
@@ -359,6 +467,9 @@ func _update_overlays(delta: float) -> void:
 		else:
 			var p := camera.unproject_position(top)
 			var view := get_viewport().get_visible_rect().size
+			var fit := _bubble.get_combined_minimum_size()   # the size set in say() can lag the new text a frame
+			if _bubble.size != fit:
+				_bubble.size = fit
 			var at := Vector2(p.x - _bubble.size.x * 0.5, p.y - _bubble.size.y - 24.0)       # above the head
 			if _bubble_side == "right":                  # beside the head (panels take the space above)
 				at = Vector2(p.x + 70.0, p.y + 30.0)
@@ -485,6 +596,16 @@ func _run(b: Dictionary) -> void:
 			pet.lean(float(b.get("deg", 12.0)), dur)
 		"tilt_head":
 			pet.tilt_head(float(b.get("deg", 15.0)), dur)
+		"head_nod":                         # the face tips down (+) as it nods off, 0 = level (stays until the next)
+			_ease(_tween().tween_property(pet, "_head_nod", float(b.get("deg", 20.0)), dur), b.get("ease", "sine"))
+		"blink":                            # hold the eyelids: 0 open … 1 shut; -1 = blinking on its own again
+			var shut := float(b.get("shut", 1.0))
+			if shut < 0.0:
+				pet.blink_override = -1.0
+			else:
+				if pet.blink_override < 0.0:
+					pet.blink_override = 0.0
+				_ease(_tween().tween_property(pet, "blink_override", clampf(shut, 0.0, 1.0), dur), b.get("ease", "sine"))
 		"fidget":
 			pet.fidget(b.get("name", ""))
 		"look":
@@ -519,6 +640,7 @@ func _run(b: Dictionary) -> void:
 					if is_instance_valid(_panels[key]):
 						_panels[key].close()
 					_panels.erase(key)
+					_panel_beats.erase(key)
 		"present":                          # raise an arm towards a panel, like showing it off
 			pet.present(b.get("side", "R"), bool(b.get("on", true)))
 		"hold":                             # everything is shown: wait here while the app's AI talks
@@ -532,9 +654,12 @@ func _run(b: Dictionary) -> void:
 ## auto = right while a panel is up. Long lines wrap instead of running off a portrait screen.
 func say(text: String, secs := 1.8, side := "auto") -> void:
 	_bubble_text.text = text
-	var wide := _bubble_text.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x > BUBBLE_MAX
+	var w := _bubble_text.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 34).x
+	var wide := w > BUBBLE_MAX
 	_bubble_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if wide else TextServer.AUTOWRAP_OFF
-	_bubble_text.custom_minimum_size = Vector2(BUBBLE_MAX if wide else 0.0, 0.0)
+	# a little slack: drawn on a canvas scaled down (a small window) Thai runs a few % wider than measured
+	_bubble_text.custom_minimum_size = Vector2(BUBBLE_MAX if wide else ceilf(w * 1.07), 0.0)
+	_bubble_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# wrap at the final width now: a label that was never laid out wraps at width 0 (a letter per line),
 	# and the bubble would keep that tall cached minimum size
 	_bubble_text.size = Vector2(BUBBLE_MAX if wide else 0.0, 0.0)
@@ -582,8 +707,9 @@ func _open_panel(b: Dictionary) -> void:
 	panel.setup(str(b.get("type", "text")), p)
 	panel.open(float(b.get("reveal", 0.55)))
 	_panels[pid] = panel
-	if b.has("beam"):
-		_beam(pet.muzzle_position(str(b["beam"])), panel.position + Vector3(0, -panel.size.y * 0.5, 0))
+	if b.has("beam"):                     # to the card's bottom edge ("anchor": "bottom": its position)
+		var edge := panel.position if str(b.get("anchor", "")) == "bottom" else panel.position + Vector3(0, -panel.size.y * 0.5, 0)
+		_beam(pet.muzzle_position(str(b["beam"])), edge)
 
 
 ## The projector beam from the hand to the bottom edge of a panel as it opens.
@@ -770,6 +896,24 @@ func _effect(b: Dictionary) -> void:
 			EMOTES.stage_weather(_world(), b["name"] == "snow", dur, float(b.get("amount", 1.0)))
 		"flash":
 			FX.explosion(_world(), pet.global_position + Vector3(0, 1.0, 0.8))
+		"snack":                           # eaten in three bites (kind: donut / burger / pizza / cake / ice_cream / popcorn)
+			_props.append(CARE.snack(pet, str(b.get("kind", "donut"))))
+		"bubbles":                         # soap foam on the head, bubbles rising
+			_props.append(CARE.bubbles(pet, dur))
+		"shower":                          # a shower head pouring water on the pet
+			_props.append(CARE.shower(pet, dur))
+		"splash":                          # water flying off as it shakes itself dry
+			CARE.splash(_world(), pet.global_position + Vector3(0, 1.1, 0))
+		"ball":                            # keepy-uppy on the head, the last header at the lens
+			var ball: Node3D = CARE.beach_ball()
+			_world().add_child(ball)
+			_props.append(ball)
+			CARE.keepy_uppy(ball, pet, camera, int(b.get("bounces", 4)))
+		"listen", "think":                 # lasts until the scene ends (listening / thinking scenes)
+			var fx := ACTIVITY.new()
+			pet.add_child(fx)
+			fx.setup(b["name"], pet.to_local(pet.head_node().global_position), _heard_level)
+			_activity.append(fx)
 		"rocket_at_viewer":                # straight at the lens; bursts just in front of it (screen flash)
 			var from: Vector3 = pet.muzzle_position(b.get("side", "R"))
 			var target := camera.global_position - camera.global_basis.z * 1.1

@@ -42,7 +42,11 @@ class PetModeController(
         private const val PASSIVE_EMOTION_COOLDOWN_MS = 60_000L
         /** ค้างท้ายเรื่องสั้นๆ ก่อนคืนหน้าปกติ */
         const val SCENE_TAIL_MS = 300L
-        private const val YAWN_COOLDOWN_MS = 90_000L
+        /** what it picks for itself when it eats (pet_godot "snack" kinds; the voice can ask for a food prop) */
+        private val SELF_FOODS = listOf("donut", "burger", "pizza", "cake", "ice_cream", "popcorn")
+        /** its own scenes of the quiet: drowsiness may take over from them */
+        private val OWN_SCENES = setOf(AvatarSkits.EAT, AvatarSkits.BATH, AvatarSkits.PLAY_BALL, AvatarSkits.IDLE_PLAY,
+            AvatarSkits.WAKE).map { it.sceneName }.toSet()
         private const val LOUD_NOISE_COOLDOWN_MS = 8_000L
         var activeInstance: PetModeController? = null
             private set
@@ -96,6 +100,26 @@ class PetModeController(
     private val _needsState = MutableStateFlow(PetNeedsState(lastUpdateTimestamp = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()))
     val needsState: StateFlow<PetNeedsState> = _needsState.asStateFlow()
 
+    // ─── Idle life (PetSelfCare): Avatar mode has no care buttons — quiet for 30 s it plays (or eats, bathes),
+    //     60 s drowsy, 90 s the screen's eyelids sag, 120 s asleep with the screen at 1 %; a voice or a touch wakes it ───
+    private val selfCare = PetSelfCare()
+    private val _idleStage = MutableStateFlow(PetSelfCare.Stage.AWAKE)
+    /** where the quiet has got to — Avatar mode shows it on the screen (eyelids, brightness) */
+    val idleStage: StateFlow<PetSelfCare.Stage> = _idleStage.asStateFlow()
+    private var idleStageSinceMs = 0L
+    /** last time someone talked (the user or the AI), a tool ran or a result waited ([onAvatarTick]) */
+    private var lastConversationAtMs = 0L
+    /** last touch, shake, gesture or care reaction (not the idle loop's own moods) */
+    private var lastReactionAtMs = 0L
+    /** this quiet stretch has had its own act (play / eat / bathe) */
+    private var actedThisStretch = false
+    /** the idle life's clock (tests run it fast) */
+    internal var nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() }
+
+    /** asleep (the screen dark): the user's voice or a touch wakes it */
+    val isAsleep: Boolean
+        get() = _idleStage.value == PetSelfCare.Stage.ASLEEP
+
     // ─── Face Recognition (5 Slots) ────────────────────────────────────────────
     private val _faceProfiles = MutableStateFlow(PetFaceProfile.createDefaultSlots())
     val faceProfiles: StateFlow<List<PetFaceProfile>> = _faceProfiles.asStateFlow()
@@ -122,6 +146,11 @@ class PetModeController(
         logDebug(TAG, "🟢 start(): Starting PetModeController idle loop & vision hooks")
         activeInstance = this
         lastInteractionTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+        // the user just opened it: the quiet starts now
+        lastConversationAtMs = nowMs()
+        lastReactionAtMs = lastConversationAtMs
+        actedThisStretch = false
+        setIdleStage(PetSelfCare.Stage.AWAKE)
         PetCustomPropStore.loadCustomProps()
 
         // Load PetMemory and restore NeedsState
@@ -279,6 +308,7 @@ class PetModeController(
 
     /** Show an emotion for a moment, then return to IDLE if it is still the one on screen. */
     private fun showTransientEmotion(emotion: AvatarEmotion, statusText: String?, durationMs: Long) {
+        lastReactionAtMs = nowMs()
         val generation = ++emotionGeneration
         onUpdateAvatarState(avatarStateProvider().copy(emotion = emotion, statusText = statusText))
         scope.launch {
@@ -291,34 +321,183 @@ class PetModeController(
     }
 
     // ─── Pet Needs & Care Functions (StateMachine-Based) ─────────────────────
+    // the robot's own scenes for them (eat / bath / play_ball in pet_godot), the same as when it sees to itself
     fun feedPet(specificFood: PropType? = null) {
         notifyInteraction()
+        wakeUpFromIdle("บอสให้อาหาร", getUp = false)
         playScene(PetSceneArchetype.EATING, specificFood)
         val result = stateMachine.processTouch(InteractionType.FEED, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
         // the scene plays its own timed sounds: drop the reaction's one-shot sound
         applyStateMachineResult(result.copy(soundAction = null), InteractionType.FEED)
+        selfCare.done(PetSelfCare.Act.EAT, nowMs())
     }
 
     fun cleanPet() {
         notifyInteraction()
+        wakeUpFromIdle("บอสพาอาบน้ำ", getUp = false)
         playScene(PetSceneArchetype.BATH_CLEAN)
         val result = stateMachine.processTouch(InteractionType.CLEAN, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
         // the scene plays its own timed sounds: drop the reaction's one-shot sound
         applyStateMachineResult(result.copy(soundAction = null), InteractionType.CLEAN)
+        selfCare.done(PetSelfCare.Act.BATHE, nowMs())
     }
 
     fun playWithPet() {
         notifyInteraction()
+        wakeUpFromIdle("บอสชวนเล่น", getUp = false)
         playScene(PetSceneArchetype.PLAY_GAMING)
         val result = stateMachine.processTouch(InteractionType.PLAY, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
         // the scene plays its own timed sounds: drop the reaction's one-shot sound
         applyStateMachineResult(result.copy(soundAction = null), InteractionType.PLAY)
+        selfCare.done(PetSelfCare.Act.PLAY, nowMs())
     }
 
+    /** Asked to sleep: off to sleep at once (eyes shut, the screen dark), unless it is not sleepy at all (it says so). */
     fun putToSleep() {
         val result = stateMachine.processTouch(InteractionType.SLEEP, TouchZone.FACE_CENTER, _needsState.value, avatarStateProvider().emotion)
-        applyStateMachineResult(result, InteractionType.SLEEP, TouchZone.FACE_CENTER)
+        if (result.emotion != AvatarEmotion.SLEEPING) {
+            applyStateMachineResult(result, InteractionType.SLEEP, TouchZone.FACE_CENTER)
+            return
+        }
+        result.needsUpdate?.let { _needsState.value = it(_needsState.value) }
+        PetMemoryStore.logInteraction(InteractionType.SLEEP, TouchZone.FACE_CENTER, "sleeping")
+        fallAsleep("บอสพาไปนอน")
     }
+
+    // ─── Idle life (PetSelfCare) ───
+
+    /**
+     * Avatar mode, ten times a second. [active]: someone talks (the user or the AI), a tool runs, a result waits to
+     * be told or a tool's scene is up — the quiet starts over, and a drowsy robot snaps awake. [userVoice]: the user
+     * talks — that also wakes it from its sleep (the AI's own voice does not: its "ฝันดีฮับ" after "พาน้องนอน", an
+     * alert in the night).
+     */
+    fun onAvatarTick(active: Boolean, userVoice: Boolean) {
+        val now = nowMs()
+        if (active) {
+            lastConversationAtMs = now
+            val stage = _idleStage.value
+            if (stage == PetSelfCare.Stage.DROWSY || stage == PetSelfCare.Stage.EYELIDS || (stage == PetSelfCare.Stage.ASLEEP && userVoice)) {
+                wakeUpFromIdle(if (userVoice) "มีเสียงพูด" else "AI พูด")
+            }
+        }
+        idleTick(now)
+    }
+
+    /**
+     * A finger on the screen (anywhere, any kind of touch): the quiet starts over. Asleep or drowsy, it wakes up
+     * and the touch is spent on that — returns true (no tap reaction on top).
+     */
+    fun noteTouch(): Boolean {
+        lastReactionAtMs = nowMs()
+        if (_idleStage.value == PetSelfCare.Stage.AWAKE) return false
+        wakeUpFromIdle("แตะหน้าจอ")
+        return true
+    }
+
+    private fun setIdleStage(stage: PetSelfCare.Stage) {
+        if (_idleStage.value == stage) return
+        idleStageSinceMs = nowMs()
+        _idleStage.value = stage
+    }
+
+    /** The quiet so far: 30 s its own act, then drowsy, eyelids and sleep ([PetSelfCare.nextStage]). */
+    private fun idleTick(now: Long) {
+        val stage = _idleStage.value
+        if (stage == PetSelfCare.Stage.ASLEEP) return
+        val current = avatarStateProvider()
+        val quietFor = now - maxOf(lastConversationAtMs, lastReactionAtMs)
+        if (quietFor < selfCare.playAfterMs) actedThisStretch = false
+        val scene = current.faceState.sceneName
+        // a demo on the screen (the moodset pages, the scene showcase) is not quiet time
+        val demo = current.statusText?.startsWith("🎭") == true ||
+            current.faceState.speechText?.let { it.startsWith("🎬") || it.startsWith("🎭") } == true
+        // free: nothing of anyone else's on — its own scenes of the quiet may give way to the next one
+        val free = !current.isSpeaking && !current.isDizzy && !demo && (scene.isBlank() || scene in OWN_SCENES)
+        if (stage == PetSelfCare.Stage.AWAKE && !actedThisStretch && quietFor >= selfCare.playAfterMs && free &&
+            scene.isBlank() && (current.emotion == AvatarEmotion.IDLE || current.emotion == AvatarEmotion.BORED)) {
+            actedThisStretch = true
+            selfCareAct(now)
+            return
+        }
+        when (selfCare.nextStage(stage, quietFor, now - idleStageSinceMs)) {
+            PetSelfCare.Stage.DROWSY -> if (stage == PetSelfCare.Stage.AWAKE && free) becomeDrowsy()
+            PetSelfCare.Stage.EYELIDS -> if (stage == PetSelfCare.Stage.DROWSY) {
+                logDebug(TAG, "😪 หนังตาหย่อน (เงียบ ${quietFor / 1000} วิ)")
+                setIdleStage(PetSelfCare.Stage.EYELIDS)
+            }
+            PetSelfCare.Stage.ASLEEP -> if (stage == PetSelfCare.Stage.EYELIDS) fallAsleep("เงียบ ${quietFor / 1000} วิ")
+            else -> {}
+        }
+    }
+
+    /** 30 s into the quiet: it eats when hungry, bathes when dirty, otherwise plays by itself. */
+    private fun selfCareAct(now: Long) {
+        val n = _needsState.value
+        val act = selfCare.act(n)
+        logDebug(TAG, "🤖 ว่าง 30 วิ: ${act ?: "เหนื่อยเกินจะเล่น"} — อิ่ม ${n.satiety.toInt()}% พลังงาน ${n.energy.toInt()}% " +
+            "สะอาด ${n.hygiene.toInt()}% สุข ${n.happiness.toInt()}%")
+        when (act) {
+            PetSelfCare.Act.EAT -> {
+                _needsState.value = n.eatMeal()
+                playSkit(AvatarSkits.EAT, item = SELF_FOODS.random())
+            }
+            PetSelfCare.Act.BATHE -> {
+                _needsState.value = n.bathe()
+                playSkit(AvatarSkits.BATH)
+            }
+            PetSelfCare.Act.PLAY -> {
+                _needsState.value = n.playAlone()
+                playSkit(listOf(AvatarSkits.PLAY_BALL, AvatarSkits.IDLE_PLAY).random())
+            }
+            null -> return
+        }
+        selfCare.done(act, now)
+    }
+
+    /** 60 s into the quiet: it nods off — the head drops, the eyes close (a looping scene until it sleeps or wakes). */
+    private fun becomeDrowsy() {
+        logDebug(TAG, "🥱 ง่วง สัปหงก — พลังงาน ${_needsState.value.energy.toInt()}%")
+        val skit = AvatarSkits.DROWSY
+        startScene(RobotFaceState(emotionName = skit.emotion.name.lowercase(), sceneName = skit.sceneName), skit.nameTh,
+            skit.cues, durationMs = Long.MAX_VALUE, triggerMissileBarrage = false)
+        setIdleStage(PetSelfCare.Stage.DROWSY)
+    }
+
+    /** Asleep: it lies down and sleeps (Avatar mode shuts the screen's eyelids and dims the screen) until woken. */
+    fun fallAsleep(why: String) {
+        if (isAsleep) return
+        val n = _needsState.value
+        logDebug(TAG, "😴 หลับ ($why) — พลังงาน ${n.energy.toInt()}% อิ่ม ${n.satiety.toInt()}%")
+        val skit = AvatarSkits.SLEEP
+        startScene(RobotFaceState(emotionName = skit.emotion.name.lowercase(), sceneName = skit.sceneName), skit.nameTh,
+            skit.cues, durationMs = Long.MAX_VALUE, triggerMissileBarrage = false)
+        selfCare.slept(nowMs())
+        setIdleStage(PetSelfCare.Stage.ASLEEP)
+    }
+
+    /**
+     * Awake again ([why] for the log): from sleep it gets up with its wake-up scene ([getUp]; Avatar mode brightens
+     * the screen and opens the eyelids slowly), from drowsiness it just perks up. The quiet starts over.
+     */
+    fun wakeUpFromIdle(why: String, getUp: Boolean = true) {
+        val stage = _idleStage.value
+        if (stage == PetSelfCare.Stage.AWAKE) return
+        activeSceneJob?.cancel()
+        activeSceneEndJob?.cancel()
+        lastReactionAtMs = nowMs()
+        actedThisStretch = false
+        logDebug(TAG, "⏰ ตื่น ($why) จาก ${stage.name} — พลังงาน ${_needsState.value.energy.toInt()}%")
+        setIdleStage(PetSelfCare.Stage.AWAKE)
+        if (stage == PetSelfCare.Stage.ASLEEP && getUp) {
+            playSkit(AvatarSkits.WAKE)
+        } else {
+            onUpdateAvatarState(avatarStateProvider().copy(emotion = AvatarEmotion.IDLE, faceState = RobotFaceState(), statusText = null))
+        }
+    }
+
+    /** What it did lately ("กิน 12 นาทีก่อน · นอน 40 นาทีก่อน"), for device_pet_care's status; "" = nothing lately. */
+    fun selfCareNote(): String = selfCare.recent(nowMs())
 
     /**
      * นำผลลัพธ์จาก StateMachine มาแสดงผล (อัปเดต Needs, เสียง, Avatar State, และบันทึกลง PetMemory)
@@ -341,13 +520,25 @@ class PetModeController(
             _needsState.value = updateFn(_needsState.value)
         }
         result.soundAction?.invoke()
+        if (logToMemory) lastReactionAtMs = nowMs()
 
+        // a shake or a call while it sleeps or dozes: it wakes into the reaction (the screen brightens, the eyelids
+        // open) — out of its sleepy scene
+        val wakes = logToMemory && _idleStage.value != PetSelfCare.Stage.AWAKE && result.emotion != AvatarEmotion.SLEEPING
+        if (wakes) {
+            activeSceneJob?.cancel()
+            activeSceneEndJob?.cancel()
+            actedThisStretch = false
+            logDebug(TAG, "⏰ ตื่น (${type.name.lowercase()}) จาก ${_idleStage.value.name} — พลังงาน ${_needsState.value.energy.toInt()}%")
+            setIdleStage(PetSelfCare.Stage.AWAKE)
+        }
         val isDizzyNow = result.emotion == AvatarEmotion.DIZZY
         val generation = ++emotionGeneration
         onUpdateAvatarState(current.copy(
             emotion = result.emotion,
             isDizzy = isDizzyNow,
-            statusText = result.statusText
+            statusText = result.statusText,
+            faceState = if (wakes) RobotFaceState() else current.faceState
         ))
 
         if (logToMemory) {
@@ -455,11 +646,12 @@ class PetModeController(
      * — ใช้จากปุ่มเดโม่และคำสั่งเสียง
      * @return ความยาวของฉาก (ms)
      */
-    fun playSkit(skit: AvatarSkit, label: String? = null): Long {
+    fun playSkit(skit: AvatarSkit, label: String? = null, item: String = ""): Long {
         val face = RobotFaceState(
             emotionName = skit.emotion.name.lowercase(),
             sceneName = skit.sceneName,
-            speechText = label
+            speechText = label,
+            sceneItem = item
         )
         val duration = skit.durationMs + SCENE_TAIL_MS
         startScene(face, skit.nameTh, skit.cues, duration, triggerMissileBarrage = false)
@@ -738,7 +930,6 @@ class PetModeController(
         idleJob = scope.launch {
             var lastDecayTime = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
             var lastPassiveTime = 0L
-            var lastYawnTime = 0L
             while (isActive) {
                 delay(Random.nextLong(2800, 5200))
 
@@ -770,6 +961,7 @@ class PetModeController(
                     }
                 }
 
+
                 // If busy, speaking or playing a scene, don't wander gaze abruptly
                 if (current.isSpeaking || current.emotion == AvatarEmotion.LISTENING || current.isDizzy ||
                     current.faceState.sceneName.isNotBlank()
@@ -777,49 +969,10 @@ class PetModeController(
                     continue
                 }
 
+                // naps (low energy, nobody around for 2.5 / 10 minutes) are PetSelfCare's: the robot lies down in its
+                // sleep scene instead of only closing its eyes where it stands
                 when {
-                    // หลับลึกเมื่อไม่มีการแตะเล่นนานเกิน 150 วินาที เฉพาะเมื่อพลังงานต่ำ (<= 35%)
-                    inactiveDuration > 150_000L && _needsState.value.energy <= 35f -> {
-                        if (current.emotion != AvatarEmotion.SLEEPING) {
-                            RobotSoundPlayer.playYawn()
-                            onUpdateAvatarState(current.copy(
-                                emotion = AvatarEmotion.SLEEPING,
-                                gazeOffsetX = 0f,
-                                gazeOffsetY = 0f,
-                                statusText = "หลับฟี้ๆ อยู่บนโต๊ะ Zzz..."
-                            ))
-                        }
-                    }
-                    // พักสายตาเมื่อไม่มีการใช้งานยาวนานมาก (> 10 นาที) แม้พลังงานจะยังเหลือ
-                    inactiveDuration > 600_000L -> {
-                        if (current.emotion != AvatarEmotion.SLEEPING) {
-                            RobotSoundPlayer.playYawn()
-                            onUpdateAvatarState(current.copy(
-                                emotion = AvatarEmotion.SLEEPING,
-                                gazeOffsetX = 0f,
-                                gazeOffsetY = 0f,
-                                statusText = "พักสายตาแป๊บนึงน้า Zzz..."
-                            ))
-                        }
-                    }
-                    // หาวนอนเมื่อเงียบนานเกิน 60 วินาที และพลังงานเริ่มลดลง (<= 60%)
-                    inactiveDuration > 60_000L && current.emotion == AvatarEmotion.IDLE &&
-                            _needsState.value.energy <= 60f && now - lastYawnTime >= YAWN_COOLDOWN_MS -> {
-                        // once per cooldown: this branch used to fire on every loop tick (3-5 s)
-                        lastYawnTime = now
-                        RobotSoundPlayer.playYawn()
-                        onUpdateAvatarState(current.copy(
-                            emotion = AvatarEmotion.SLEEPING,
-                            statusText = "หาวว... เริ่มง่วงแล้วน้า Zzz"
-                        ))
-                        delay(2500)
-                        if (avatarStateProvider().emotion == AvatarEmotion.SLEEPING) {
-                            onUpdateAvatarState(avatarStateProvider().copy(
-                                emotion = AvatarEmotion.IDLE,
-                                statusText = null
-                            ))
-                        }
-                    }
+                    // (yawning and nodding off are the drowsy scene's now: PetSelfCare, 60 s of quiet)
                     // Screensaver Eye Tricks: เมื่อปล่อยจอทิ้งไว้เกินกำหนด และอยู่ในสถานะ IDLE
                     inactiveDuration > (_idleScreensaverDelaySeconds.value * 1000L) &&
                     current.emotion == AvatarEmotion.IDLE &&
@@ -975,13 +1128,13 @@ class PetModeController(
                 }
                 return
             }
-            // พลังงานต่ำ (<= 30f) หลับพักผ่อนตามธรรมชาติ
-            if (current.emotion == AvatarEmotion.IDLE || current.emotion == AvatarEmotion.BORED) {
-                logDebug(TAG, "😴 Low energy (${_needsState.value.energy}%) + face absent -> Sleeping")
-                RobotSoundPlayer.playYawn()
+            // พลังงานต่ำ: เหงาเหมือนกัน — sleep comes from the quiet (PetSelfCare: 2 minutes without a voice or a
+            // touch), not from an empty camera: the user may be talking from out of its view
+            if (current.emotion == AvatarEmotion.IDLE && current.faceState.sceneName.isBlank()) {
+                logDebug(TAG, "😴 Face absent, low energy (${_needsState.value.energy}%) -> BORED (sleep follows the quiet)")
                 onUpdateAvatarState(current.copy(
-                    emotion = AvatarEmotion.SLEEPING,
-                    statusText = "พลังงานหมดแล้ว... ขอหลับก่อนน้า Zzz 💤"
+                    emotion = AvatarEmotion.BORED,
+                    statusText = "บอสหายไปไหนน้า... น้องง่วงแล้ว 🥱"
                 ))
             }
         } else if (emotion == AvatarEmotion.BORED) {

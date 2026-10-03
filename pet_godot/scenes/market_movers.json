@@ -3,8 +3,9 @@
   "title": "ขึ้น/ลงแรงสุด",
   "mood": "excited",
   "needs": "movers",
-  "tags": ["top_gainers", "top_losers", "movers", "ranking", "crypto", "info", "trading_top_gainers", "trading_top_losers"],
-  "description": "ผลของ trading_top_gainers / trading_top_losers: กราฟแท่ง 3D 6 อันดับแรกตาม % เปลี่ยนแปลง (เขียวขึ้น แดงลง) หุ่นตื่นเต้นเมื่อเป็นขาขึ้น หรือทำหน้าเศร้าเมื่อเป็นขาลง",
+  "tags": ["top_gainers", "top_losers", "scan", "overbought", "oversold", "volume", "bollinger", "movers", "ranking", "crypto", "info",
+    "trading_top_gainers", "trading_top_losers", "trading_overbought_scan", "trading_oversold_scan", "trading_volume_breakout", "trading_bollinger_scan"],
+  "description": "ผลของ trading_top_gainers / trading_top_losers และสแกนเนอร์ (overbought / oversold / volume / bollinger): กราฟแท่ง 3D 5 อันดับแรก (คู่ USDT, เหรียญละแท่ง) ตาม % เปลี่ยนแปลง หรือตาม RSI สำหรับสแกน RSI หุ่นตอบสนองตามชนิดของรายการ (extra react: up / down / hot / cold / volume / squeeze)",
   "duration": 9.0,
   "beats": [
     {"t": 0.0, "do": "caption", "text": "{list_title} ตอนนี้", "dur": 1.1},
@@ -13,15 +14,34 @@
     {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
     {"t": 0.6, "do": "present", "side": "R"},
     {"t": 1.0, "do": "panel", "id": "rank", "type": "bars", "at": "top", "beam": "R", "money": false,
-      "title": "{list_title}", "subtitle": "% เปลี่ยนแปลงวันนี้", "bars": "{movers}"},
+      "title": "{list_title}", "subtitle": "{list_subtitle}", "bars": "{movers}"},
     {"t": 2.4, "do": "say", "text": "อันดับ 1: {best_symbol} {best_change}", "dur": 2.2},
-    {"t": 4.7, "do": "emotion", "name": "happy", "if": "up"},
-    {"t": 4.7, "do": "hop", "height": 0.3, "dur": 0.6, "if": "up"},
-    {"t": 4.8, "do": "effect", "name": "confetti", "if": "up"},
-    {"t": 4.8, "do": "say", "text": "ตลาดคึกคัก!", "dur": 1.8, "if": "up"},
-    {"t": 4.7, "do": "eyes", "name": "sad", "dur": 2.0, "if": "!up"},
-    {"t": 4.8, "do": "emote", "kind": "sweat", "count": 2, "if": "!up"},
-    {"t": 4.8, "do": "say", "text": "แดงกันทั้งกระดาน…", "dur": 1.8, "if": "!up"},
+
+    {"t": 4.7, "do": "emotion", "name": "happy", "if": "react == up or !react and up"},
+    {"t": 4.7, "do": "hop", "height": 0.3, "dur": 0.6, "if": "react == up or !react and up"},
+    {"t": 4.8, "do": "effect", "name": "confetti", "if": "react == up or !react and up"},
+    {"t": 4.8, "do": "say", "text": "ตลาดคึกคัก!", "dur": 1.8, "if": "react == up or !react and up"},
+
+    {"t": 4.7, "do": "eyes", "name": "sad", "dur": 2.0, "if": "react == down or !react and !up"},
+    {"t": 4.8, "do": "emote", "kind": "sweat", "count": 2, "if": "react == down or !react and !up"},
+    {"t": 4.8, "do": "say", "text": "แดงกันทั้งกระดาน…", "dur": 1.8, "if": "react == down or !react and !up"},
+
+    {"t": 4.7, "do": "eyes", "name": "surprised", "dur": 1.6, "if": "react == hot"},
+    {"t": 4.8, "do": "emote", "kind": "exclaim", "count": 1, "if": "react == hot"},
+    {"t": 4.8, "do": "say", "text": "RSI สูงลิ่ว ระวังย่อ!", "dur": 1.8, "if": "react == hot"},
+
+    {"t": 4.7, "do": "tilt_head", "deg": 12, "dur": 0.3, "if": "react == cold"},
+    {"t": 4.8, "do": "emote", "kind": "question", "count": 1, "if": "react == cold"},
+    {"t": 4.8, "do": "say", "text": "โดนเทหนัก ลุ้นเด้งไหม?", "dur": 1.8, "if": "react == cold"},
+
+    {"t": 4.7, "do": "emotion", "name": "surprised", "if": "react == volume"},
+    {"t": 4.8, "do": "emote", "kind": "bolt", "count": 3, "if": "react == volume"},
+    {"t": 4.8, "do": "say", "text": "วอลุ่มทะลักเข้ามา!", "dur": 1.8, "if": "react == volume"},
+
+    {"t": 4.7, "do": "squash", "amount": -0.2, "if": "react == squeeze"},
+    {"t": 4.8, "do": "emote", "kind": "exclaim", "count": 1, "if": "react == squeeze"},
+    {"t": 4.8, "do": "say", "text": "กราฟบีบตัว รอเบรก!", "dur": 1.8, "if": "react == squeeze"},
+
     {"t": 7.0, "do": "hold"},
     {"t": 8.3, "do": "present", "side": "R", "on": false}
   ]

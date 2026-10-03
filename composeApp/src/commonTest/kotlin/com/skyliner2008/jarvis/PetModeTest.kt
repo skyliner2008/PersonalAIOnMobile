@@ -26,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -1345,11 +1346,12 @@ class PetModeTest {
         val spamResult = stateMachine.processTouch(InteractionType.POKE, TouchZone.LEFT_CHEEK, normalNeeds, AvatarEmotion.IDLE)
         assertEquals(AvatarEmotion.ANGRY, spamResult.emotion)
 
-        // 6. Passive emotion: Hungry -> ANGRY
-        val hungryNeeds = PetNeedsState(satiety = 10f)
-        val hungryPassive = stateMachine.resolvePassiveEmotion(hungryNeeds, AvatarEmotion.IDLE)
-        assertNotNull(hungryPassive)
-        assertEquals(AvatarEmotion.ANGRY, hungryPassive.emotion)
+        // 6. Passive emotion: hunger is no complaint any more — it eats by itself (PetSelfCare); a pet in a bad way
+        //    all round is still sad
+        assertNull(stateMachine.resolvePassiveEmotion(PetNeedsState(satiety = 10f), AvatarEmotion.IDLE))
+        val miserable = stateMachine.resolvePassiveEmotion(PetNeedsState(satiety = 10f, hygiene = 10f, stress = 80f), AvatarEmotion.IDLE)
+        assertNotNull(miserable)
+        assertEquals(AvatarEmotion.SAD, miserable.emotion)
     }
 
     @Test
@@ -1647,8 +1649,9 @@ class PetModeTest {
         assertTrue(currentState.statusText?.contains("เหงา") == true)
     }
 
+    /** Sleep comes from the quiet (PetSelfCare: 2 minutes without a voice or a touch), not from an empty camera. */
     @Test
-    fun `onFaceAbsenceTimeout transitions to SLEEPING when energy is low`() = runBlocking {
+    fun `onFaceAbsenceTimeout with low energy is lonely, not asleep`() = runBlocking {
         var currentState = AvatarState(emotion = AvatarEmotion.IDLE)
         val scope = CoroutineScope(SupervisorJob())
         val controller = PetModeController(
@@ -1665,9 +1668,10 @@ class PetModeTest {
 
         assertEquals(20f, controller.needsState.value.energy, 0.1f)
 
-        // When energy <= 30f, face absence timeout allows falling asleep
+        // the user may be talking from out of the camera's view: it does not fall asleep on them
         controller.onFaceAbsenceTimeout(AvatarEmotion.SLEEPING)
-        assertEquals(AvatarEmotion.SLEEPING, currentState.emotion)
+        assertEquals(AvatarEmotion.BORED, currentState.emotion)
+        assertTrue(!controller.isAsleep)
         controller.stop()
     }
 

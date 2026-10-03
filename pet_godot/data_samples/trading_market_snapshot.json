@@ -1,0 +1,27 @@
+[
+    {
+        "symbol": "S&P500",
+        "close": "7666.4500",
+        "change": "0.19%"
+    },
+    {
+        "symbol": "NASDAQ",
+        "close": "26871.5960",
+        "change": "0.04%"
+    },
+    {
+        "symbol": "DOW",
+        "close": "50926.5600",
+        "change": "0.04%"
+    },
+    {
+        "symbol": "VIX",
+        "close": "15.9700",
+        "change": "-2.56%"
+    },
+    {
+        "symbol": "Oil",
+        "close": "89.2200",
+        "change": "-3.93%"
+    }
+]

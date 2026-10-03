@@ -662,6 +662,7 @@ fun AlwaysLiveScreen(
         if (currentProfile == AlwaysLiveProfile.PET) {
             AvatarModeContent(
                 activeAvatarState = activeAvatarState,
+                voiceSession = avatarState,
                 petController = petController,
                 petVisionProcessor = petVisionProcessor,
                 isAiVisionOn = isCameraPipOpen,

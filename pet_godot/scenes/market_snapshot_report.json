@@ -1,0 +1,27 @@
+{
+  "id": "market_snapshot_report",
+  "title": "ตลาดโลกวันนี้",
+  "mood": "analytical",
+  "needs": "movers",
+  "tags": ["market_snapshot", "indices", "sp500", "nasdaq", "vix", "oil", "info", "trading_market_snapshot"],
+  "description": "ผลของ trading_market_snapshot: ช่องตัวเลขดัชนีหลัก (S&P500 / NASDAQ / DOW / VIX / น้ำมัน) พร้อม % วันนี้สีเขียว/แดง → กราฟแท่ง % เปลี่ยนแปลง หุ่นดีใจเมื่อส่วนใหญ่บวก",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "{list_title}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "city"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 3,
+      "title": "{list_title}", "items": "{mover_tiles}"},
+    {"t": 2.4, "do": "say", "text": "บวก {ups} · ลบ {downs}", "dur": 2.0},
+    {"t": 4.6, "do": "panel", "id": "main", "type": "bars", "at": "top", "beam": "R", "money": false,
+      "title": "% เปลี่ยนแปลงวันนี้", "bars": "{movers}"},
+    {"t": 5.6, "do": "emotion", "name": "happy", "if": "mostly_up"},
+    {"t": 5.6, "do": "emote", "kind": "sparkle", "count": 2, "if": "mostly_up"},
+    {"t": 5.6, "do": "eyes", "name": "sad", "dur": 1.8, "if": "!mostly_up"},
+    {"t": 5.7, "do": "emote", "kind": "sweat", "count": 2, "if": "!mostly_up"},
+    {"t": 8.2, "do": "hold"},
+    {"t": 8.9, "do": "present", "side": "R", "on": false}
+  ]
+}

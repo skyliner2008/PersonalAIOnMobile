@@ -123,7 +123,7 @@ class PetSceneDemoVoiceTest {
         val archetypes = PetSceneArchetype.entries.map { it.name.lowercase() }
             .filter { AvatarSkits.forSceneName(it) == null }
         val names = AvatarSkits.ALL.map { it.sceneName } + archetypes
-        assertEquals(23, names.size)
+        assertEquals(26, names.size)
         assertEquals(names.size, names.toSet().size)
     }
 }

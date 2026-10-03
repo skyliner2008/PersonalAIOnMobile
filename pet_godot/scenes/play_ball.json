@@ -1,0 +1,29 @@
+{
+  "id": "play_ball",
+  "title": "เล่นบอลคนเดียว",
+  "mood": "playful",
+  "tags": ["play", "ball", "alone", "bored", "self_care"],
+  "description": "ไม่มีใครเล่นด้วย เลยฝึกโหม่งบอล ลูกบอลชายหาดตกลงมา เด้งบนหัวไปมา ลูกสุดท้ายโหม่งแรงเกินพุ่งใส่จอ โป๊ก! จอสั่น ตกใจ แล้วหัวเราะ อีกรอบไหม?",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ฝึกโหม่งบอล!", "dur": 2.4},
+    {"t": 0.0, "do": "emotion", "name": "happy"},
+    {"t": 0.4, "do": "look", "x": 0.0, "y": 0.8},
+    {"t": 1.0, "do": "effect", "name": "ball", "bounces": 4},
+    {"t": 1.45, "do": "hop", "height": 0.1, "dur": 0.4},
+    {"t": 2.3, "do": "hop", "height": 0.1, "dur": 0.4},
+    {"t": 2.4, "do": "emote", "kind": "note", "count": 2, "dur": 1.0},
+    {"t": 3.15, "do": "hop", "height": 0.1, "dur": 0.4},
+    {"t": 4.0, "do": "hop", "height": 0.2, "dur": 0.5},
+    {"t": 4.2, "do": "look", "x": 0.0, "y": 0.0},
+    {"t": 4.9, "do": "shake", "amount": 0.1, "dur": 0.4},
+    {"t": 4.9, "do": "emotion", "name": "surprised"},
+    {"t": 4.9, "do": "emote", "kind": "exclaim", "count": 1},
+    {"t": 5.2, "do": "say", "text": "โป๊ก! โดนจอ", "dur": 1.4},
+    {"t": 6.4, "do": "emotion", "name": "happy"},
+    {"t": 6.4, "do": "fidget", "name": "cheeky"},
+    {"t": 7.0, "do": "emote", "kind": "note", "count": 3, "dur": 1.2},
+    {"t": 7.2, "do": "say", "text": "อีกรอบไหม?", "dur": 1.4},
+    {"t": 8.2, "do": "fidget", "name": "spin"}
+  ]
+}

@@ -737,19 +737,12 @@ fun App(
     }
 
     if (showAlwaysLive) {
-        var userSpeakingHold by remember { mutableStateOf(false) }
-
-        LaunchedEffect(audioLevel, isAiSpeaking) {
-            if (isAiSpeaking) {
-                userSpeakingHold = false
-            } else if (audioLevel > 0.035f) {
-                userSpeakingHold = true
-            } else if (userSpeakingHold) {
-                // Hold user speaking state for 700ms silence so micro-pauses between syllables don't jitter
-                kotlinx.coroutines.delay(700)
-                userSpeakingHold = false
-            }
-        }
+        // the user talking to the AI: VoiceController's UserVoiceDetector — held 700 ms over pauses, then it ends.
+        // The hold kept here before was a delay inside an effect keyed on the mic level: every new level restarted it,
+        // so it never ran out while the mic was on and Avatar mode's "กำลังฟัง" stayed on in silence (logcat
+        // 2026-10-02 23:31–23:34); the robot's own sounds counted as the user too.
+        val userVoice by viewModel.userVoice.collectAsStateWithLifecycle()
+        val userSpeakingHold = userVoice && !isAiSpeaking
 
         val (avatarEmotion, statusText) = remember(
             testEmotionOverride, testStatusOverride,
@@ -792,6 +785,7 @@ fun App(
                 emotion = avatarEmotion,
                 audioLevel = if (isAiSpeaking || userSpeakingHold) audioLevel else 0f,
                 isSpeaking = isAiSpeaking || isTyping,
+                isUserSpeaking = userSpeakingHold && !isAiSpeaking,
                 statusText = statusText,
                 faceState = testFaceStateOverride ?: RobotFaceState()
             )

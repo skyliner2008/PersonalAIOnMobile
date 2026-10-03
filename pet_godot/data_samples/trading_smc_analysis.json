@@ -1,0 +1,20 @@
+{
+    "symbol": "XAUUSD",
+    "interval": "1h",
+    "price": 4184.15,
+    "smc_trend": "NEUTRAL",
+    "smc_zone": "PREMIUM",
+    "smc_event": "",
+    "range_high": 4193.09,
+    "range_low": 4139.265,
+    "range_pos": 83.39061774268363,
+    "premium_from": 4179.63375,
+    "equilibrium": 4166.1775,
+    "discount_to": 4152.7212500000005,
+    "bull_ob": 0,
+    "bear_ob": 0,
+    "bull_fvg": 3,
+    "bear_fvg": 2,
+    "eqh": 4219.415,
+    "eql": 4177.72
+}

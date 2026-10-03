@@ -83,20 +83,40 @@ shows its text on the markdown card.
 | `trading_fundamental_analysis` | `stock_balance` | balance sheet as two 3D columns (assets = liabilities + equity), a 3D donut of the capital structure, 3D bars of revenue / net income / free cash flow (TTM), and a markdown summary. The pet wears a fedora |
 | `trading_price` | `price_report` | a large price that counts up, the day's move with ▲/▼ in green or red, the previous close, a 52-week range marker. The pet cheers a jump ≥ 3 % and sweats a drop ≤ −3 % |
 | `trading_technical_analysis` | `technical_report` | a 3D rating dial (strong sell … strong buy), an RSI dial with 30/70 zones, and tiles for MACD / ADX / ATR / RSI / BB / close. The pet wears headphones |
-| `trading_top_gainers` / `_losers` | `market_movers` | 3D bars of the top coins by % change (green or red); confetti or a sweat drop |
+| `trading_deep_analysis_suite` | `deep_analysis_report` | the "5 dimensions": a 0–100 score dial coloured by the LSD trend's side, tiles for LSD trend / orderflow / momentum / Fibo hot zones, then Fibonacci strength bars (gold = hot). Stars for a strong score |
+| `trading_multi_timeframe` | `mtf_report` | a bar per timeframe (−1 sell … +1 buy), then signal + RSI tiles. The pet hops when most timeframes buy |
+| `trading_sentiment` | `sentiment_report` | a 0–100 sentiment dial, the 4 pillars as bars, retail vs top-trader long % and taker buy/sell; the contrarian alert in a bubble |
+| `trading_smc_analysis` / `_structure` | `smc_report` | where the price sits in its structure range (discount / premium zones, the range's low and high at the ends), trend + BOS/CHoCH + levels + FVG/OB tiles, the nearest liquidity. A sweat drop when the trend and the zone disagree |
+| `trading_market_snapshot` | `market_snapshot_report` | S&P500 / NASDAQ / DOW / VIX / oil tiles with today's %, then % bars |
+| `trading_top_gainers` / `_losers`, scans (`overbought` / `oversold` / `volume_breakout` / `bollinger`) | `market_movers` | 3D bars of the top coins by % change (RSI for the RSI scans); a reaction per list: confetti, a sweat drop, "ระวังย่อ", "ลุ้นเด้ง", bolts, a squash |
 | `trading_fear_greed` | `fear_greed_report` | a 0–100 dial in five zones plus the last 7 days as bars. The pet shivers at extreme fear and puts on sunglasses at extreme greed |
 | `trading_crypto_overview` | `crypto_overview` | tiles for market cap, 24 h change, volume and coins, then a BTC/ETH/others dominance donut. The pet wears the astronaut helmet |
 | `device_battery_status` | `battery_report` | a battery dial and the battery gauge over the head. Charging → bolts, low → sleepy |
-| text tools (`trading_news`, `search_web`, `summarize_text`, …) | `answer_card` | a markdown card (headings, bold, bullets, quote) that the pet holds up |
+| text tools (`trading_news`, `trading_macro_calendar`, `trading_strategy_signal`, `search_web`, `calculate`, …) | `answer_card` | a markdown card (headings, bold, bullets, quote) that the pet holds up; long cards grow upwards so they never cover its head |
 
-Panels (`scripts/holo_panel.gd`): `weather`, `price`, `balance`, `gauge`, `pie`, `bars`, `kpi`, `text` (markdown).
+**The jobs the user waits for** (Avatar mode's boss/worker flow: a question handed to the assistant is told
+later): `scripts/task_hud.gd` shows each one as a pill in the lower right corner — running, done and waiting
+to be told, being told — labelled with the user's own question (app command `tasks`, `scenes/SCHEMA.md`).
+
+**Between answers** the app plays looping scenes (`avatar/AvatarActivity.kt` in the app): `listening`
+while the user talks (sound waves from the head, a meter that follows the user's voice), `pondering` until
+the AI answers (lights circling over the head), `working` while a tool runs (a progress card with the
+tool's task — "กำลังวิเคราะห์ 5 มิติ… BTCUSDT · 1h" — from `task` in `tool_scenes.json`).
+
+Panels (`scripts/holo_panel.gd`): `weather`, `price`, `balance`, `gauge`, `pie`, `bars`, `kpi`, `text` (markdown), `progress`.
 Filling, conditions, the data each tool sends and panel beats are in `scenes/SCHEMA.md` ("Info scenes").
 
 ```bat
 C:\Godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tools/save_samples.gd   &:: refresh data_samples\ (live)
 C:\Godot\Godot_v4.7.2-stable_win64_console.exe --path . -- --tool=trading_price                          &:: a tool's saved result on its scene
 C:\Godot\Godot_v4.7.2-stable_win64_console.exe --path . -- --tool=trading_price --data=my_result.json
+powershell -File tools\tool_frames.ps1 -Data <dir of <tool>.json> -Out <dir>                       &:: every result → contact sheets
+powershell -File tools\scene_frames.ps1 -Out <dir> -Scenes listening,pondering,working -StopAt 5   &:: looping scenes
 ```
+
+Real results for every tool come from the app: `RUN_LIVE_TESTS=1 SCENE_SAMPLES_DIR=<dir> gradlew
+:composeApp:testDebugUnitTest --tests "*AvatarSceneDataLiveDump*"` calls the tools for real and saves what
+Avatar mode would send the robot.
 
 ## Scenes (skits)
 
@@ -142,6 +162,8 @@ recording window has to fit on the screen (see Rules).
 | `scripts/effects.gd` | rockets + explosions, laser, flashlight beam, energy shield, jet flames |
 | `scripts/scene_player.gd` | the director: plays `scenes/*.json`, meme caption + speech bubble, camera shake / zoom, brings the pet home afterwards |
 | `scripts/emotes.gd` | comic layer: floating symbols (♥ ? ! Z ♪ ✦ ★ … ⚡ 💢 sweat), idea bulb, confetti, snot bubble, big heart, dizzy stars, rain cloud, battery gauge |
+| `scripts/care_fx.gd` | the robot's own care (the app's PetSelfCare): a snack eaten in three bites (donut, burger, pizza, cake, ice cream, popcorn), soap foam and bubbles, a shower, a shake-dry splash, a beach ball for keepy-uppy |
+| `scripts/eyelids.gd` + `shaders/eyelids.gdshader` | the screen's eyelids as the robot falls asleep in the app (heavy blinks, shut, opening slowly) |
 | `scripts/holo_panel.gd` | hologram info panels (weather, balance, pie, bars, kpi, markdown text), number formats, derived data (`derive`) |
 | `scripts/info_sources.gd` | lab only: live tool results from the same sources as the app's tools (Open-Meteo, TradingView scanner, alternative.me, CoinGecko), in the same shape |
 | `data_samples/<tool>.json` | a saved result per tool (what the app would pass to `play_tool`), `answer_card.json`; refreshed by `tools/save_samples.gd` |
@@ -157,6 +179,7 @@ recording window has to fit on the screen (see Rules).
 | `tools/inspect.gd` | headless check of where the body parts and every item end up |
 | `tools/capture.ps1` | batch screenshots with a timeout per run (a run can hang on exit) |
 | `tools/scene_frames.ps1` | plays scenes, saves a frame every N seconds, builds a contact sheet per scene |
+| `tools/sleep_frames.gd` | frames of falling asleep and waking up the app's way (drowsy, eyelids, shut, `wake_up`): `--script res://tools/sleep_frames.gd -- --out=<dir>` |
 | `tools/scene_test.gd` | headless director test (`--headless --script res://tools/scene_test.gd`): catalogue, cutting a scene off, an AI-written scene with an unknown verb, the pet back home afterwards |
 | `tools/record_scenes.ps1`, `tools/avi_to_mp4.py` | scene videos (movie writer → Blender → MP4) |
 | `tools/save_samples.gd` | headless: refreshes `data_samples/` with live results of every mapped tool |
@@ -190,8 +213,8 @@ C:\Godot\Godot_v4.7.2-stable_win64_console.exe --headless --path pet_godot --imp
 
 Screenshots (after `--`): `--shot=out.png --state=<emotion>,<item+item>,<bg>[,<action+action>] --wait=1.5 --hide-ui [--turn=180]`,
 actions `fire_L`, `fire_R`, `fly`, `fidget_<name>`, `poke`. Or `tools\capture.ps1 -Out dir -Shots @(@{name=..; state=..; wait=..})`.
-Scenes: `--scene=<id> [--data=<file.json>] [--quit-at-end] [--frames=<dir> --every=1]` (info scenes
-take their tool's `data_samples/` file when `--data` is not given); tools: `--tool=<name> [--data=<result.json>]`.
+Scenes: `--scene=<id> [--data=<file.json>] [--quit-at-end] [--frames=<dir> --every=1] [--stop-at=<s>]` (info scenes
+take their tool's `data_samples/` file when `--data` is not given; `--stop-at` ends a looping scene); tools: `--tool=<name> [--data=<result.json>]`.
 
 ## Rules
 

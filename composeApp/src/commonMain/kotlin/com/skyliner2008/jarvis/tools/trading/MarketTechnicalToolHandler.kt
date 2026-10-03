@@ -79,6 +79,10 @@ internal class MarketTechnicalToolHandler(
                 appendLine("=".repeat(40))
                 @Suppress("UNCHECKED_CAST")
                 val snapshot = result as Map<String, Map<String, String>>
+                val rows = snapshot.filterValues { !it.containsKey("error") }.map { (name, data) ->
+                    mapOf("symbol" to name, "close" to data["price"], "change" to data["change_pct"])
+                }
+                if (rows.isNotEmpty()) AvatarToolData.publishRows("trading_market_snapshot", rows)
                 snapshot.forEach { (name, data) ->
                     if (!data.containsKey("error")) {
                         val dir = data["direction"] ?: ""
@@ -96,6 +100,7 @@ internal class MarketTechnicalToolHandler(
                 }
                 @Suppress("UNCHECKED_CAST")
                 val list = result as List<Map<String, String>>
+                if (list.isNotEmpty()) AvatarToolData.publishRows("trading_market_snapshot", list)
                 append(formatScanResults(title, list))
             }
         }
@@ -187,33 +192,37 @@ internal class MarketTechnicalToolHandler(
         val symbol   = args["symbol"]   ?: return "Missing required argument: symbol"
         val resolvedExchange = api.resolveExchange(symbol, args["exchange"])
         val data = api.getMultiTimeframeAnalysis(symbol, resolvedExchange)
+        val signals = data.values.map { it["signal"] ?: "N/A" }
+        val buyCount  = signals.count { it.contains("BUY") }
+        val sellCount = signals.count { it.contains("SELL") }
+        val alignment = when {
+            buyCount >= 4  -> "Strong alignment (BUY)"
+            sellCount >= 4 -> "Strong alignment (SELL)"
+            buyCount > sellCount -> "Mostly bullish"
+            sellCount > buyCount -> "Mostly bearish"
+            else -> "Mixed signals"
+        }
+        // one row per timeframe for Avatar mode's robot (pet_godot mtf_report)
+        if (data.isNotEmpty()) {
+            AvatarToolData.publish("trading_multi_timeframe", mapOf(
+                "symbol" to symbol.uppercase(), "alignment" to alignment,
+                "buy_count" to buyCount, "sell_count" to sellCount,
+                "timeframes" to data.map { (tf, ta) ->
+                    mapOf("tf" to tf, "signal" to (ta["signal"] ?: "N/A"), "rsi" to ta["RSI"], "score" to ta["recommend_score"])
+                }
+            ))
+        }
 
         return buildString {
             appendLine("Multi-Timeframe Analysis - ${symbol.uppercase()}")
             appendLine("-".repeat(40))
-
-            val signals = mutableListOf<String>()
-            for (entry in data) {
-                val tf = entry.key
-                val taData = entry.value
+            for ((tf, taData) in data) {
                 val signal = taData["signal"] ?: "N/A"
                 val rsi    = taData["RSI"]    ?: "N/A"
                 val score  = taData["recommend_score"] ?: "N/A"
-                val emoji  = signalEmoji(signal)
-                appendLine("$emoji $tf: $signal | RSI: $rsi | Score: $score")
-                signals.add(signal)
+                appendLine("${signalEmoji(signal)} $tf: $signal | RSI: $rsi | Score: $score")
             }
-
             appendLine("")
-            val buyCount  = signals.count { it.contains("BUY") }
-            val sellCount = signals.count { it.contains("SELL") }
-            val alignment = when {
-                buyCount >= 4  -> "Strong alignment (BUY)"
-                sellCount >= 4 -> "Strong alignment (SELL)"
-                buyCount > sellCount -> "Mostly bullish"
-                sellCount > buyCount -> "Mostly bearish"
-                else -> "Mixed signals"
-            }
             appendLine("Alignment: $alignment")
         }
     }
@@ -222,6 +231,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 30
         val results = api.getBollingerSqueeze(exchange, limit)
+        if (results.isNotEmpty()) AvatarToolData.publishRows("trading_bollinger_scan", results)
         return formatScanResults("🔥 Bollinger Squeeze — $exchange (กำลัง Breakout)", results, extraKey = "BB.width")
     }
 
@@ -229,6 +239,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getOversoldSymbols(exchange, limit)
+        if (results.isNotEmpty()) AvatarToolData.publishRows("trading_oversold_scan", results)
         return formatScanResults("🟢 Oversold Scan (RSI < 30) — $exchange", results, extraKey = "RSI")
     }
 
@@ -236,6 +247,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getOverboughtSymbols(exchange, limit)
+        if (results.isNotEmpty()) AvatarToolData.publishRows("trading_overbought_scan", results)
         return formatScanResults("🔴 Overbought Scan (RSI > 70) — $exchange", results, extraKey = "RSI")
     }
 
@@ -243,6 +255,7 @@ internal class MarketTechnicalToolHandler(
         val exchange = args["exchange"] ?: "BINANCE"
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getVolumeBreakout(exchange, limit)
+        if (results.isNotEmpty()) AvatarToolData.publishRows("trading_volume_breakout", results)
         return formatScanResults("🌋 Volume Breakout — $exchange", results, extraKey = "volume")
     }
 
@@ -250,6 +263,22 @@ internal class MarketTechnicalToolHandler(
         val rawSymbol = args["symbol"]?.trim()?.takeIf { it.isNotEmpty() }
         val unified = api.getUnifiedCompositeSentiment(rawSymbol)
         val targetName = if (unified.isGlobalMacro) "GLOBAL MACRO" else unified.target.uppercase()
+        // for Avatar mode's robot (pet_godot sentiment_report)
+        AvatarToolData.publish("trading_sentiment", buildMap {
+            put("symbol", targetName)
+            put("sentiment", unified.compositeScore)
+            put("sentiment_label", unified.compositeLabel)
+            put("sentiment_th", unified.labelThai)
+            put("pillars", unified.pillars.map { p ->
+                mapOf("name" to pillarName(p.name), "short" to pillarShortName(p.name), "weight" to p.weightPct, "score" to p.score)
+            })
+            unified.binancePositioning?.let { b ->
+                put("retail_long", b.retailLongAccountPct)
+                put("top_long", b.topTraderLongPositionPct)
+                put("taker_ratio", b.takerBuySellRatio)
+            }
+            unified.contrarianAlert?.let { put("contrarian", it) }
+        })
 
         // ส่งให้ AI Gemini สังเคราะห์มิติจิตวิทยาและ Contrarian Opportunity
         val prompt = buildString {
@@ -302,14 +331,7 @@ internal class MarketTechnicalToolHandler(
             appendLine("| เสาหลัก | น้ำหนัก | คะแนน | รายละเอียด |")
             appendLine("| :--- | :---: | :---: | :--- |")
             unified.pillars.forEach { p ->
-                val shortName = when {
-                    p.name.contains("News") -> "📰 ข่าวสาร/โซเชียล"
-                    p.name.contains("Market F&G") || p.name.contains("CNN") -> "🌡️ สภาวะตลาดรวม"
-                    p.name.contains("Positioning") -> "🐋 สัญญาอนุพันธ์"
-                    p.name.contains("Technical") -> "📊 เทคนิคัลโมเมนตัม"
-                    else -> p.name
-                }
-                appendLine("| $shortName | ${p.weightPct}% | **${"%.1f".format(p.score)}** | ${p.detail} |")
+                appendLine("| ${pillarName(p.name)} | ${p.weightPct}% | **${"%.1f".format(p.score)}** | ${p.detail} |")
             }
             appendLine("")
 
@@ -337,6 +359,23 @@ internal class MarketTechnicalToolHandler(
             appendLine("### 🧠 บทวิเคราะห์ & Contrarian Intelligence")
             appendLine(aiSynthesis.trim())
         }
+    }
+
+    private fun pillarName(name: String): String = when {
+        name.contains("News") -> "📰 ข่าวสาร/โซเชียล"
+        name.contains("Market F&G") || name.contains("CNN") -> "🌡️ สภาวะตลาดรวม"
+        name.contains("Positioning") -> "🐋 สัญญาอนุพันธ์"
+        name.contains("Technical") -> "📊 เทคนิคัลโมเมนตัม"
+        else -> name
+    }
+
+    /** A pillar's name short enough to stand under a bar on the robot's chart. */
+    private fun pillarShortName(name: String): String = when {
+        name.contains("News") -> "ข่าว"
+        name.contains("Market F&G") || name.contains("CNN") -> "ตลาดรวม"
+        name.contains("Positioning") -> "อนุพันธ์"
+        name.contains("Technical") -> "เทคนิค"
+        else -> name.take(8)
     }
 
     internal suspend fun executeFearGreed(args: Map<String, String>): String {
@@ -478,6 +517,14 @@ internal class MarketTechnicalToolHandler(
                 intentAddon = "You are a professional news analyst. Be concise and objective."
             )
         } catch (_: Exception) { "AI analysis unavailable." }
+        // the headlines on the robot's card (Avatar mode)
+        AvatarToolData.publish("trading_news", mapOf(
+            "title" to "ข่าวล่าสุด · ${symbol?.uppercase() ?: "ตลาดโลก"}",
+            "markdown" to items.take(5).mapIndexed { i, item ->
+                val source = item["source"]?.takeIf { it.isNotBlank() }?.let { " _(${it})_" }.orEmpty()
+                "${i + 1}. **${item["title"]?.trim()?.take(90)}**$source"
+            }.joinToString("\n")
+        ))
 
         return buildString {
             appendLine("🗞️ **News Technical Analysis - ${symbol?.uppercase() ?: "Global"}**")
@@ -515,6 +562,7 @@ internal class MarketTechnicalToolHandler(
         val eventsText = events.joinToString("\n") {
             "[${it["status"]}] [${it["impact"]}] ${it["country"]}: ${it["title"]} (${it["date_time"]}) -> คาดการณ์: ${it["forecast"]}, ครั้งก่อน: ${it["previous"]}"
         }
+        AvatarToolData.publish("trading_macro_calendar", mapOf("title" to "ปฏิทินเศรษฐกิจ", "markdown" to calendarCard(events)))
 
         val aiAnalysis = try {
             geminiService.generateToolEnrichment(
@@ -551,6 +599,28 @@ internal class MarketTechnicalToolHandler(
             appendLine("")
             appendLine("🔦 **AI Strategic Preview**")
             appendLine(aiAnalysis)
+        }
+    }
+
+    /**
+     * The calendar on the robot's card: the coming events first (high impact before medium), then the last
+     * ones out; a line each — impact, time (Thai), name, currency, forecast / previous.
+     */
+    internal fun calendarCard(events: List<Map<String, String>>, max: Int = 5): String {
+        fun rank(e: Map<String, String>) = when (e["impact"]?.lowercase()) { "high" -> 0; "medium" -> 1; else -> 2 }
+        val (coming, out) = events.partition { it["status"] == "UPCOMING" }
+        val picked = (coming.sortedBy { rank(it) }.take(max) + out.take((max - coming.size).coerceAtLeast(0)))
+        return picked.joinToString("\n") { e ->
+            val dot = when (rank(e)) { 0 -> "🔴"; 1 -> "🟠"; else -> "🟡" }
+            // "ศ. 02 ต.ค. 19:30 น. (ไทย) | 08:30 ET" → "ศ. 19:30"
+            val parts = e["date_time"].orEmpty().substringBefore(" น.").trim().split(" ")
+            val time = if (parts.size >= 4) "${parts[0]} ${parts.last()}" else parts.joinToString(" ")
+            val numbers = listOfNotNull(
+                e["forecast"]?.takeIf { it.isNotBlank() && it != "-" }?.let { "คาด $it" },
+                e["previous"]?.takeIf { it.isNotBlank() && it != "-" }?.let { "ก่อน $it" }
+            ).joinToString(" / ")
+            val done = if (e["status"] == "UPCOMING") "" else " ✅"
+            "- $dot `$time` **${e["title"]}** (${e["country"]})$done" + if (numbers.isNotEmpty()) " · $numbers" else ""
         }
     }
 

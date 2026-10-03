@@ -272,4 +272,32 @@ data class PetNeedsState(
             lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
         )
     }
+
+    // ─── What the robot does for itself (PetSelfCare): no affection — nobody looked after it ───
+
+    /** It eats a meal of its own 🍩 */
+    fun eatMeal(): PetNeedsState = copy(
+        satiety = (satiety + 50f).coerceIn(0f, 100f),
+        happiness = (happiness + 8f).coerceIn(0f, 100f),
+        stress = (stress - 10f).coerceIn(0f, 100f),
+        lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
+    )
+
+    /** It takes a bath 🛁 */
+    fun bathe(): PetNeedsState = copy(
+        hygiene = 100f,
+        happiness = (happiness + 6f).coerceIn(0f, 100f),
+        stress = (stress - 8f).coerceIn(0f, 100f),
+        lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
+    )
+
+    /** It plays on its own ⚽ — fun, a little tiring, a little hungry-making and messy */
+    fun playAlone(): PetNeedsState = copy(
+        happiness = (happiness + 15f).coerceIn(0f, 100f),
+        energy = (energy - 5f).coerceIn(0f, 100f),
+        satiety = (satiety - 3f).coerceIn(0f, 100f),
+        hygiene = (hygiene - 3f).coerceIn(0f, 100f),
+        stress = (stress - 10f).coerceIn(0f, 100f),
+        lastUpdateTimestamp = Clock.System.now().toEpochMilliseconds()
+    )
 }

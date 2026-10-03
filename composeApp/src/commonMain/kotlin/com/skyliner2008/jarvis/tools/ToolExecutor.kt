@@ -81,7 +81,11 @@ object ToolExecutor {
      * @param call  ToolCall ที่ได้จาก Gemini function calling response
      * @return ToolResult ที่จะส่งกลับไปให้ Gemini
      */
+    /** Tests that replay a live session: answer tool calls without the network (null in the app). */
+    internal var testOverride: (suspend (ToolCall) -> ToolResult)? = null
+
     suspend fun execute(call: ToolCall, memoryContext: String = ""): ToolResult {
+        testOverride?.let { return it(call) }
         return try {
             // โมเดลบางตัว/บางรอบส่ง arg key พิมพ์ใหญ่ปน (เช่น condition_VALUE จาก Live API)
             // — normalize key เป็นตัวเล็กทั้งหมด (tool definitions ใช้ snake_case ตัวเล็กอยู่แล้ว ปลอดภัยกับทุก tool)

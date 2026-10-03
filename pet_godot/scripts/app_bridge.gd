@@ -14,10 +14,17 @@ extends Node
 ##                                                (director.play_tool); hold: it waits on its last picture
 ##   {"t":"release"}                              …until this: the AI finished talking about it
 ##   {"t":"scene", "id":"party"}                  a skit; {"t":"stop", "id":"party"} ends it if it still plays
-##                                                (no id: whatever plays)
+##                                                (no id: whatever plays). The same id again with "data" while
+##                                                it plays: new data for it (the "working" card), no restart
+##   {"t":"hear", "level":0.4}                    the user's voice while they talk (the "listening" meter)
+##   {"t":"tasks", "items":[{id, tool, args, question, state}]}   the jobs the user still waits to hear about
+##                                                (running / ready / telling) as pills in the lower right corner
 ##   {"t":"say", "text":"…", "secs":3}            speech bubble
 ##   {"t":"effect", "name":"confetti"}            one effect (scene_player effect names)
 ##   {"t":"fidget", "name":"hop"}                 hop / spin / tilt / wiggle / peek / cheeky / nod ("" = any)
+##   {"t":"eyelids", "open":0, "secs":1.5}        the screen's eyelids (the robot's sleep): 1 none … 0 shut;
+##   {"t":"eyelids", "drowsy":30}                 …or heavy-eyed for 30 s (eyelids.gd). While they show, any tap
+##                                                anywhere is a "tap" (zone "screen" off the pet): it wakes the robot
 ## Events: hello (attached: send everything), ready (warmed up), touch {kind, zone}, scene {id, state}, back
 ##
 ## Without the plugin (desktop) it reads the same commands from --app-sim=<file.json>:
@@ -25,6 +32,8 @@ extends Node
 
 const PLUGIN := "JarvisAvatar"
 const EMOTES := preload("res://scripts/emotes.gd")
+const TASK_HUD := preload("res://scripts/task_hud.gd")
+const EYELIDS := preload("res://scripts/eyelids.gd")
 const DRAG_PX := 28.0            # canvas px a finger moves before a touch is a drag
 const STROKE_PX := 60.0          # a stroke down the head / up under the chin
 const DOUBLE_TAP := 0.28         # seconds a tap waits for a second one (double tap = tickle)
@@ -38,6 +47,8 @@ var pet: Node3D
 var director: Node
 var camera: Camera3D
 var plugin: Object = null
+var tasks: CanvasLayer                 # task_hud.gd: the jobs the user waits to hear about
+var eyelids: CanvasLayer               # eyelids.gd: the screen's eyelids while the robot falls asleep
 
 var _state := {}                 # the app's last state
 var _applied_eyes := ""
@@ -58,6 +69,11 @@ func setup(st: Node3D, p: Node3D, d: Node, cam: Camera3D, sim_path := "") -> voi
 	pet = p
 	director = d
 	camera = cam
+	tasks = TASK_HUD.new()
+	tasks.director = director
+	st.add_child(tasks)
+	eyelids = EYELIDS.new()
+	st.add_child(eyelids)
 	director.started.connect(func(id: String): _send("scene", {"id": id, "state": "started"}))
 	director.finished.connect(_on_scene_finished)
 	if Engine.has_singleton(PLUGIN):
@@ -80,7 +96,11 @@ static func wanted() -> bool:
 	return Engine.has_singleton(PLUGIN)
 
 
+var last_event := []                   # [name, data] of the last event sent (tests)
+
+
 func _send(name: String, data := {}) -> void:
+	last_event = [name, data]
 	var json := JSON.stringify(data)
 	if plugin:
 		plugin.call("sendEvent", name, json)
@@ -115,8 +135,19 @@ func handle(c: Dictionary) -> void:
 		"release":
 			director.release()
 		"scene":
+			var id := str(c.get("id", ""))
 			var data = c.get("data", {})
-			director.play(str(c.get("id", "")), data if data is Dictionary else {})
+			if not data is Dictionary:
+				data = {}
+			if id != "" and director.playing == id and not data.is_empty():
+				director.update(data)
+			else:
+				director.play(id, data)
+		"hear":
+			director.hear(float(c.get("level", 0.0)))
+		"tasks":
+			var items = c.get("items", [])
+			tasks.set_tasks(items if items is Array else [])
 		"stop":                                # a tool's scene that took over from the skit keeps playing
 			var id := str(c.get("id", ""))
 			if id == "" or director.playing == id:
@@ -128,6 +159,11 @@ func handle(c: Dictionary) -> void:
 		"fidget":
 			if not pet.scene_active:
 				pet.fidget(str(c.get("name", "")))
+		"eyelids":
+			if c.has("drowsy"):
+				eyelids.drowsy(float(c.get("drowsy", 30.0)))
+			else:
+				eyelids.set_open(float(c.get("open", 1.0)), float(c.get("secs", 0.6)))
 		_:
 			push_warning("app command not understood: %s" % [c])
 
@@ -173,7 +209,8 @@ func _on_scene_finished(id: String) -> void:
 	_send("scene", {"id": id, "state": "finished"})
 	# the scene put the pet back as it was before it; the app's state may have moved on meanwhile
 	_applied_eyes = ""
-	if not _state.is_empty():
+	# a scene that picks up where this one left the pet ("keep_pose": getting up from sleep) keeps its stage too
+	if not _state.is_empty() and not director.continuing:
 		_apply_state()
 
 
@@ -264,6 +301,10 @@ func input(event: InputEvent) -> void:
 func _release(pos: Vector2) -> void:
 	var zone: String = _touch["zone"]
 	var d: Vector2 = pos - (_touch["start"] as Vector2)
+	if eyelids and eyelids.open_amount() < 0.98:      # eyes heavy or shut: any touch anywhere wakes it (the app's call)
+		_tap_left = 0.0
+		_send("touch", {"kind": "tap", "zone": "screen" if zone == "none" else zone})
+		return
 	if _touch["moved"]:
 		var kind := "drag"
 		if zone == "forehead" and d.y > STROKE_PX:

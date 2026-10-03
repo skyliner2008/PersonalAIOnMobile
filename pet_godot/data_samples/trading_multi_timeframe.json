@@ -1,0 +1,38 @@
+{
+    "symbol": "BTCUSDT",
+    "alignment": "Strong alignment (BUY)",
+    "buy_count": 4,
+    "sell_count": 0,
+    "timeframes": [
+        {
+            "tf": "1W",
+            "signal": "STRONG BUY",
+            "rsi": "63.1789",
+            "score": "0.536"
+        },
+        {
+            "tf": "1D",
+            "signal": "HOLD",
+            "rsi": "N/A",
+            "score": "0.000"
+        },
+        {
+            "tf": "4h",
+            "signal": "STRONG BUY",
+            "rsi": "70.8909",
+            "score": "0.558"
+        },
+        {
+            "tf": "1h",
+            "signal": "STRONG BUY",
+            "rsi": "68.6541",
+            "score": "0.512"
+        },
+        {
+            "tf": "15m",
+            "signal": "STRONG BUY",
+            "rsi": "62.9646",
+            "score": "0.512"
+        }
+    ]
+}

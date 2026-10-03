@@ -727,6 +727,18 @@ class StrategySignalProvider(private val smcApi: SmcApiService) {
                 gate = fusion.gate
             )
         }
+        // the decision and the timeframes on the robot's card (Avatar mode); the indicator matrix stays for the AI
+        com.skyliner2008.jarvis.avatar.AvatarToolData.publish("trading_strategy_signal", mapOf(
+            "title" to "สัญญาณกลยุทธ์ · $normalized",
+            "markdown" to buildString {
+                appendLine("**${fusion.decision}** · คะแนน ${fmt(fusion.score)} · มั่นใจ ${fusion.confidencePct}%")
+                appendLine("ไทม์เฟรมตรงกัน ${fusion.alignedTimeframes}/${fusion.totalTimeframes} · ราคา $latestClose")
+                signals.forEach { s ->
+                    appendLine("- **${s.timeframe}** ${s.decision} · เทรนด์ ${s.trend} · โมเมนตัม ${s.momentum}")
+                }
+                append(if (fusion.gate == "PASS") "> ผ่านเกณฑ์: หลายไทม์เฟรมยืนยันกัน" else "> ยังไม่ใช่จังหวะเข้า (${fusion.gate})")
+            }
+        ))
         return buildString {
             appendLine("## 📡 TradingView Signal Intelligence — $normalized [TV-ONLY]")
             appendLine("Decision=${fusion.decision} | score=${fmt(fusion.score)} | confidence=${fusion.confidencePct}% | gate=${fusion.gate}")

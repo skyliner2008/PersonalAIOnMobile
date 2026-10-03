@@ -1,0 +1,50 @@
+{
+  "id": "smc_report",
+  "title": "SMC โครงสร้างราคา",
+  "mood": "analytical",
+  "needs": "smc",
+  "tags": ["smc", "structure", "premium", "discount", "orderblock", "fvg", "liquidity", "info", "trading_smc_analysis", "trading_smc_structure"],
+  "description": "ผลของ trading_smc_analysis / trading_smc_structure: หน้าปัดตำแหน่งราคาในกรอบโครงสร้าง (Discount ≤ 25% … Premium ≥ 75%) ปลายทั้งสองคือราคา Low/High ของกรอบ → เทรนด์ เหตุการณ์ BOS/CHoCH ระดับ Premium / Equilibrium / Discount และ FVG / OB → สภาพคล่องที่ใกล้ที่สุดเหนือและใต้ราคา หุ่นเตือนเมื่อโครงสร้างกับโซนราคาขัดกัน",
+  "duration": 14.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "SMC {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "cyber"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "gauge", "at": "top", "beam": "R",
+      "title": "ราคาในกรอบโครงสร้าง · {symbol}", "subtitle": "{interval}", "value": "{pos_gauge}", "min": 0, "max": 100,
+      "text": "{pos_text}", "label": "{zone_th}", "min_text": "{range_low:group}", "max_text": "{range_high:group}",
+      "zones": [
+        {"to": 25, "color": "#3DDC97", "label": "Discount"},
+        {"to": 75, "color": "#9AA7B8", "label": ""},
+        {"to": 100, "color": "#FF5A6E", "label": "Premium"}
+      ]},
+    {"t": 2.4, "do": "say", "text": "โครงสร้าง{trend_th} · ราคาอยู่{zone_th}", "dur": 2.2},
+    {"t": 3.6, "do": "eyes", "name": "surprised", "dur": 1.4, "if": "smc_setup == caution"},
+    {"t": 3.7, "do": "emote", "kind": "sweat", "count": 2, "if": "smc_setup == caution"},
+    {"t": 3.7, "do": "emote", "kind": "star", "count": 2, "if": "smc_setup in [long, short]"},
+    {"t": 3.6, "do": "tilt_head", "deg": 10, "dur": 0.3, "if": "smc_setup == wait"},
+
+    {"t": 5.0, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 5.0, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 3,
+      "title": "โครงสร้าง · {symbol}", "items": [
+        {"label": "เทรนด์", "value": "{trend_th}", "sub": "{event_th}", "good": "{trend_good}"},
+        {"label": "ราคา", "value": "{price:group}", "sub": "{pos_text} ของกรอบ"},
+        {"label": "FVG", "value": "{fvg_text}", "sub": "OB {ob_text}"},
+        {"label": "Premium ≥", "value": "{premium_from:group}", "sub": "โซนขาย"},
+        {"label": "Equilibrium", "value": "{equilibrium:group}", "sub": "50% ของกรอบ"},
+        {"label": "Discount ≤", "value": "{discount_to:group}", "sub": "โซนซื้อ"}
+      ]},
+    {"t": 6.2, "do": "say", "text": "{setup_th}", "dur": 2.2},
+
+    {"t": 9.0, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 3,
+      "title": "สภาพคล่องใกล้ราคา", "items": [
+        {"label": "เหนือราคา (EQH)", "value": "{eqh_text}", "sub": "Buy-side"},
+        {"label": "ราคาตอนนี้", "value": "{price:group}", "sub": "{zone_th}"},
+        {"label": "ใต้ราคา (EQL)", "value": "{eql_text}", "sub": "Sell-side"}
+      ]},
+    {"t": 12.2, "do": "hold"},
+    {"t": 12.9, "do": "present", "side": "R", "on": false}
+  ]
+}

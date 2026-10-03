@@ -328,6 +328,13 @@ data class LiveSpeechMark(val text: String, val startAtMs: Long, val msPerUnit: 
 /** ส่งข้อค้างให้ AI เล่าแล้วเงียบทั้งสองฝั่งนานเท่านี้ = ดัน server ให้ปิดเทิร์น (ดู LiveGeminiService.nudgeIfUnanswered) */
 private const val REPORT_ANSWER_WAIT_MS = 6_000L
 
+/** the phone heard the user; no transcript or barge-in from the server this long after = it did not hear (noteLocalUtterance) */
+private const val DEAF_CHECK_MS = 7_000L
+/** utterances in a row the server did not hear before the app opens a fresh session */
+internal const val DEAF_STRIKES_TO_RECONNECT = 3
+/** at most one such fresh session this often (a session setup costs tokens: TPM) */
+private const val DEAF_RECONNECT_EVERY_MS = 300_000L
+
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()
     data object Connecting : ConnectionState()
@@ -532,9 +539,20 @@ class LiveGeminiService(
     @kotlin.jvm.Volatile
     private var lastConversationActivityAtMs = 0L
 
+    /**
+     * The report queue now: the report being told (handed to the AI, not settled yet) first, then what waits —
+     * Avatar mode's task list shows it, so a job taken on is never out of sight until it has been told.
+     */
+    fun reportSnapshot(): List<PendingAnswerQueue.View> {
+        val telling = reportAwaitingDelivery
+        val waiting = synchronized(pendingAnswers) { pendingAnswers.snapshot() }
+        return listOfNotNull(telling?.let { PendingAnswerQueue.View(it.toolName, it.question, true, it.addedAtMs, it.key) }) +
+            waiting.map { PendingAnswerQueue.View(it.toolName, it.question, false, it.addedAtMs, it.key) }
+    }
+
     /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — เก็บผลไว้ตอบทีหลัง (เรียกจาก LiveToolBridge) */
-    fun enqueuePendingToolResult(question: String, toolName: String, result: String) {
-        synchronized(pendingAnswers) { pendingAnswers.addToolResult(question, toolName, result, System.currentTimeMillis()) }
+    fun enqueuePendingToolResult(question: String, toolName: String, result: String, key: String? = null) {
+        synchronized(pendingAnswers) { pendingAnswers.addToolResult(question, toolName, result, System.currentTimeMillis(), key) }
         _resultsDeferred.tryEmit(toolName to PendingAnswerQueue.subject(result).orEmpty())
         logDebug("LiveGemini", "📥 เก็บผล $toolName ของคำถามที่ถูกขัดไว้ตอบทีหลัง: \"${question.take(60)}\" (คิว ${pendingAnswers.size})")
         schedulePendingAnswer()
@@ -544,6 +562,80 @@ class LiveGeminiService(
     @kotlin.jvm.Volatile
     private var lastLocalVoiceAtMs = 0L
     fun noteLocalUserVoice() { lastLocalVoiceAtMs = System.currentTimeMillis() }
+
+    // ─── A session that does not hear (logcat 2026-10-03 08:39–08:41: the phone heard six utterances, the mic at
+    //     3–21 %, the app sent every audio chunk, the server sent no transcript and no answer; at 08:43:52 it closed
+    //     another session with INTERNAL_ERROR) ───
+    /** the server showed it heard the user: a transcript of their words or a barge-in */
+    @kotlin.jvm.Volatile
+    private var lastServerHeardAtMs = 0L
+    /** reset by the server's transcript (the socket's reader), counted by the utterance checks */
+    @kotlin.jvm.Volatile
+    private var deafStrikes = 0
+    private var lastDeafReconnectAtMs = 0L
+    /** the app dropped a deaf session's socket itself (its close was not answered): the connect loop reconnects */
+    @kotlin.jvm.Volatile
+    private var deafReconnectPending = false
+    /** the deaf session being closed: a resumption handle it sends now is not kept (the app wants a fresh session) */
+    @kotlin.jvm.Volatile
+    private var deafSessionClosing: DefaultWebSocketSession? = null
+    private val _deafUtterances = MutableSharedFlow<Int>(extraBufferCapacity = 4)
+    /** the phone heard the user and the server did not — how many times in a row (Avatar mode says so on the robot) */
+    val deafUtterances: SharedFlow<Int> = _deafUtterances.asSharedFlow()
+    private val _deafReconnects = MutableSharedFlow<Boolean>(extraBufferCapacity = 2)
+    /** true: a fresh session is on its way; false: still deaf after one, the user should check the connection */
+    val deafReconnects: SharedFlow<Boolean> = _deafReconnects.asSharedFlow()
+
+    /**
+     * The phone heard the user say something from [startMs] to [endMs] (VoiceController's UserVoiceDetector). When the
+     * server shows no sign of it within [DEAF_CHECK_MS] — no transcript, no barge-in, no answer under way — that is a
+     * strike; [DEAF_STRIKES_TO_RECONNECT] in a row and the app opens a fresh session (no resumption: the old one is
+     * deaf), at most once per [DEAF_RECONNECT_EVERY_MS]. Every strike is logged.
+     */
+    fun noteLocalUtterance(startMs: Long, endMs: Long) {
+        if (!isSetupComplete) return
+        scope.launch {
+            delay(DEAF_CHECK_MS)
+            if (!isSetupComplete || userRequestedDisconnect) return@launch
+            // a transcript, a barge-in or an answer since the user started: the server heard (an answer may beat its transcript)
+            if (lastServerHeardAtMs >= startMs - 500L || lastModelOutputAtMs >= startMs) {
+                deafStrikes = 0
+                return@launch
+            }
+            // the AI is talking, a reply or a tool is under way: not a deaf session
+            if (localOutputActive || modelTurnOpen || synchronized(inFlightToolCalls) { inFlightToolCalls.isNotEmpty() }) return@launch
+            deafStrikes++
+            logDebug("LiveGemini", "🙉 ผู้ใช้พูด ${endMs - startMs}ms แต่ server ไม่ได้ยิน (ไม่มี transcript ใน ${DEAF_CHECK_MS}ms) — ครั้งที่ $deafStrikes ติดกัน")
+            _deafUtterances.tryEmit(deafStrikes)
+            if (deafStrikes < DEAF_STRIKES_TO_RECONNECT) return@launch
+            val now = System.currentTimeMillis()
+            if (now - lastDeafReconnectAtMs < DEAF_RECONNECT_EVERY_MS) {
+                if (deafStrikes == DEAF_STRIKES_TO_RECONNECT) {
+                    logDebug("LiveGemini", "🙉 ยังไม่ได้ยินหลังเปิด session ใหม่แล้ว — ไม่เปิดซ้ำ (บอกผู้ใช้ให้ตรวจเน็ต/เปิด Live ใหม่ภายหลัง)")
+                    _deafReconnects.tryEmit(false)
+                    emitTextToChat(
+                        "⚠️ Live ไม่ได้ยินเสียงพูด — เครื่องได้ยินเสียงคุณแต่ server ของ Gemini ไม่ตอบ (เปิด session ใหม่แล้วก็ยังไม่ได้ยิน) " +
+                            "ลองตรวจอินเทอร์เน็ต หรือปิดแล้วเปิด Live ใหม่อีกสักครู่"
+                    )
+                }
+                return@launch
+            }
+            deafStrikes = 0
+            lastDeafReconnectAtMs = now
+            logDebug("LiveGemini", "🔁 server ไม่ได้ยินผู้ใช้ $DEAF_STRIKES_TO_RECONNECT ครั้งติด — เปิด session ใหม่ (ไม่ใช้ resumption)")
+            _deafReconnects.tryEmit(true)
+            val deafSession = webSocketSession ?: return@launch
+            deafSessionClosing = deafSession
+            sessionResumptionHandle = null
+            runCatching { deafSession.close(CloseReason(CloseReason.Codes.NORMAL, "deaf session — reconnecting")) }
+            // a server that does not answer the close: drop the socket — the connect loop reconnects
+            delay(5_000L)
+            if (webSocketSession === deafSession && deafSession.isActive) {
+                deafReconnectPending = true
+                deafSession.cancel(kotlinx.coroutines.CancellationException("deaf session"))
+            }
+        }
+    }
 
     /**
      * เครื่องกำลังเล่นเสียงออกลำโพง (เสียง AI ที่ยังเล่นค้าง หรือ TTS สำรองของเทิร์นที่ไม่มีเสียง)
@@ -597,6 +689,14 @@ class LiveGeminiService(
      * คำถามที่ tool call ตอนนี้เป็นของมัน: คำถามค้างที่แอปเพิ่งถามโมเดลซ้ำ (จนกว่าผู้ใช้จะพูด) ไม่งั้นคือประโยคล่าสุดของผู้ใช้
      * (logcat 2026-10-01 23:29:58: ปฏิทินที่แอปถามซ้ำถูกติดป้ายเป็นคำถามราคาทองที่ผู้ใช้พูดล่าสุด)
      */
+    /**
+     * The model is answering something the app handed it from the report queue, and the user has not spoken since:
+     * nobody waits to talk. A tool it calls now runs in this turn instead of going to the assistant — a question
+     * asked again ("[PENDING QUESTION] ก่อนหน้านี้ผู้ใช้ถามว่า …") would otherwise get "รับทราบ…" and one more wait.
+     */
+    val answeringReport: Boolean
+        get() = reportAwaitingDelivery != null && lastUserTranscriptAtMs <= reportSentAtMs
+
     val currentQuestion: String
         get() {
             val report = reportAwaitingDelivery
@@ -1311,6 +1411,12 @@ class LiveGeminiService(
                 logDebug("LiveGemini", "🔁 Server closed session (GoAway/timeout) — auto-reconnecting (attempt $attempt/$maxRetries)")
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) {
+                    if (deafReconnectPending) {
+                        deafReconnectPending = false
+                        logDebug("LiveGemini", "🔁 ปิด session ที่ไม่ได้ยินเสียงเอง (server ไม่ตอบการปิด) — เชื่อมต่อใหม่")
+                        attempt = 1
+                        continue
+                    }
                     if (timedOutWaitingForSetup) {
                         logDebug("LiveGemini", "⏱️ setupComplete timeout caught — falling back immediately without handshake delay")
                         if (!sessionWasReady && liveModelChain.size > 1 && fallbackCount < liveModelChain.size) {
@@ -1398,7 +1504,7 @@ class LiveGeminiService(
             // logDebug("LiveGemini", "⬇ Parsed from: $rawJson")
 
             msg.sessionResumptionUpdate?.let { update ->
-                if (update.resumable == true && !update.newHandle.isNullOrBlank()) {
+                if (update.resumable == true && !update.newHandle.isNullOrBlank() && webSocketSession !== deafSessionClosing) {
                     sessionResumptionHandle = update.newHandle
                     val nowMs = System.currentTimeMillis()
                     if (nowMs - lastResumptionLogAtMs >= resumptionLogIntervalMs) {
@@ -1508,6 +1614,7 @@ class LiveGeminiService(
                     logDebug("LiveGemini", "⚡ Interrupted (VAD/user) — flushing playback queue (audioEpoch=$audioEpoch)")
                     turnWasInterrupted = true
                     lastConversationActivityAtMs = System.currentTimeMillis()
+                    lastServerHeardAtMs = lastConversationActivityAtMs
                     lastUserCutAtMs = lastConversationActivityAtMs
                     // ผู้ใช้ได้ยินเสียงของเทิร์นนี้ไปนานแค่ไหนก่อนถูกตัด (เสียงมาถึงเร็วกว่าเล่น จึงเอาค่าที่น้อยกว่า)
                     voiceHeardBeforeCutMs = if (turnAudioStartAtMs > 0L) {
@@ -1601,6 +1708,8 @@ class LiveGeminiService(
                         lastUserSpeechAtMs = System.currentTimeMillis()
                         lastConversationActivityAtMs = lastUserSpeechAtMs
                         lastUserTranscriptAtMs = lastUserSpeechAtMs
+                        lastServerHeardAtMs = lastUserSpeechAtMs
+                        deafStrikes = 0
                         modelTurnOpen = true
                         // log เฉพาะชิ้นที่เพิ่มเข้ามา — เดิม log ข้อความสะสมทุกชิ้น ทำให้ logcat ยาวเป็นสิบบรรทัดต่อประโยค
                         logDebug("LiveGemini", "🎤 User +\"${chunk.trim()}\"")
@@ -1701,7 +1810,7 @@ class LiveGeminiService(
                         } else {
                             pendingAnswers.onTurnEnded(
                                 userText, turnWasInterrupted, modelSpokeThisTurn, toolCallsThisTurn, sentResults,
-                                System.currentTimeMillis()
+                                System.currentTimeMillis(), heardMs = if (turnWasInterrupted) voiceHeardBeforeCutMs else null
                             )
                         }
                     }
@@ -1712,6 +1821,7 @@ class LiveGeminiService(
                         val why = when {
                             greetingOnly -> "AI ทักทายแทนการรายงานผล"
                             untold -> "AI จบเทิร์นโดยไม่พูดผล"
+                            modelSpokeThisTurn -> "คำตอบถูกตัดหลังได้ยินแค่ ${voiceHeardBeforeCutMs}ms"
                             else -> "เทิร์นถูกตัดก่อน AI ได้พูด"
                         }
                         logDebug("LiveGemini", "📥 $why — เก็บ $queued ข้อไว้ตอบทีหลัง " +

@@ -28,8 +28,11 @@ class PetSceneScriptTest {
         assertEquals(AvatarSkits.LOVE, skitFor(PetSceneArchetype.SUPER_LOVE))
         assertEquals(AvatarSkits.SAD, skitFor(PetSceneArchetype.DRAMATIC_CRY))
         assertEquals(AvatarSkits.PARTY, skitFor(PetSceneArchetype.CELEBRATION))
+        // the care scenes are the robot's own care skits (it eats, bathes and plays by itself: PetSelfCare)
+        assertEquals(AvatarSkits.EAT, skitFor(PetSceneArchetype.EATING))
+        assertEquals(AvatarSkits.BATH, skitFor(PetSceneArchetype.BATH_CLEAN))
+        assertEquals(AvatarSkits.PLAY_BALL, skitFor(PetSceneArchetype.PLAY_GAMING))
         assertNull(skitFor(PetSceneArchetype.DRINKING))
-        assertNull(skitFor(PetSceneArchetype.EATING))
     }
 
     @Test
@@ -45,7 +48,7 @@ class AvatarSkitsTest {
 
     @Test
     fun `every skit has its sounds inside the skit, in order`() {
-        assertEquals(12, AvatarSkits.ALL.size)
+        assertEquals(18, AvatarSkits.ALL.size)
         assertEquals(AvatarSkits.ALL.size, AvatarSkits.ALL.map { it.id }.toSet().size)
         for (skit in AvatarSkits.ALL) {
             assertTrue(skit.cues.isNotEmpty(), "no sound for ${skit.id}")

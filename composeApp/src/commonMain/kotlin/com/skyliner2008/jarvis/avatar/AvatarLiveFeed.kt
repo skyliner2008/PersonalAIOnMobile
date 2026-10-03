@@ -1,14 +1,19 @@
 package com.skyliner2008.jarvis.avatar
 
+import com.skyliner2008.jarvis.data.PendingAnswerQueue
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonElement
 
 /**
- * What Avatar mode follows of the live AI session ([ToolSceneSync]): what happens to each tool result, and
- * the AI's words with when they will be heard. Events only reach a screen that is listening — an old result
- * is never replayed on the next visit.
+ * What Avatar mode follows of the live AI session: what happens to each tool result and the AI's words with
+ * when they will be heard ([ToolSceneSync]); the tool calls at work, the report queue ([AvatarTasks]: the robot's
+ * task list) and the user's words as the server hears them ([AvatarActivity]). Events only reach a screen that is
+ * listening — an old result is never replayed on the next visit.
  */
 object AvatarLiveFeed {
     /** What happens to a tool result, in the order it happens: it comes back, the queue takes it, the app hands it over. */
@@ -34,12 +39,62 @@ object AvatarLiveFeed {
      */
     data class Speech(val text: String, val startMs: Long, val msPerUnit: Double)
 
+    /** A tool and its [args] (the symbol, the place …): what the working card shows. */
+    data class ToolRun(val tool: String, val args: Map<String, String>)
+
+    /**
+     * A tool call at work ([id] = the call's id), for the question the user asked ([question]). [delegated]: handed to
+     * the assistant, told later from the report queue; [cancelled]: the server dropped the call (the user talked over
+     * it) — it runs on and its result is told later too.
+     */
+    data class Job(
+        val id: String,
+        val tool: String,
+        val args: Map<String, String>,
+        val question: String,
+        val delegated: Boolean,
+        val cancelled: Boolean,
+        val startedAtMs: Long,
+    )
+
     // one flow, so a result is always seen before the queue takes it
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 32)
     val events: SharedFlow<Event> = _events.asSharedFlow()
 
     private val _speech = MutableSharedFlow<Speech>(extraBufferCapacity = 64)
     val speech: SharedFlow<Speech> = _speech.asSharedFlow()
+
+    private val _jobs = MutableStateFlow<List<Job>>(emptyList())
+    /** Every tool call at work, oldest first. */
+    val jobs: StateFlow<List<Job>> = _jobs.asStateFlow()
+
+    private val _reports = MutableStateFlow<List<PendingAnswerQueue.View>>(emptyList())
+    /** The report queue: the report being told first, then what waits to be told. */
+    val reports: StateFlow<List<PendingAnswerQueue.View>> = _reports.asStateFlow()
+
+    private val _heardAtMs = MutableStateFlow(0L)
+    /** When the server last heard words from the user (its transcript of the user's voice grew). */
+    val heardAtMs: StateFlow<Long> = _heardAtMs.asStateFlow()
+
+    private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Something the robot tells the user itself, in a speech bubble (the AI did not hear them, a fresh session …). */
+    val notices: SharedFlow<String> = _notices.asSharedFlow()
+
+    fun notice(text: String) {
+        _notices.tryEmit(text)
+    }
+
+    fun jobs(list: List<Job>) {
+        _jobs.value = list
+    }
+
+    fun reports(list: List<PendingAnswerQueue.View>) {
+        if (_reports.value != list) _reports.value = list
+    }
+
+    fun heard(atMs: Long) {
+        _heardAtMs.value = atMs
+    }
 
     fun result(tool: String, data: JsonElement?, text: String, later: Boolean = false) {
         _events.tryEmit(Result(tool, data, text, later))

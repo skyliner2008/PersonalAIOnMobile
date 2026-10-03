@@ -1,0 +1,39 @@
+{
+  "id": "deep_analysis_report",
+  "title": "วิเคราะห์ 5 มิติ",
+  "mood": "analytical",
+  "needs": "deep",
+  "tags": ["deep_analysis", "5d", "lsd", "orderflow", "momentum", "fibonacci", "info", "trading_deep_analysis_suite"],
+  "description": "ผลของ trading_deep_analysis_suite: หน้าปัดคะแนนรวม 0–100 (สีตามทิศ LSD ขึ้น/ลง) → 4 มิติ LSD Trend / Orderflow / Momentum / Fibo Hot Zone → กราฟแท่งความแรงแต่ละระดับ Fibonacci (สีทอง = Hot) หุ่นได้ดาวเมื่อคะแนนแข็งแรง",
+  "duration": 14.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "วิเคราะห์ 5 มิติ {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "cyber"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "gauge", "at": "top", "beam": "R",
+      "title": "คะแนนรวม · {symbol}", "subtitle": "{interval} · {price:group}",
+      "value": "{deep_score}", "min": 0, "max": 100, "text": "{deep_score:0}", "label": "สัญญาณ{deep_word} · LSD {lsd_th}",
+      "min_text": "0", "max_text": "100", "zones": "{deep_zones}"},
+    {"t": 2.4, "do": "say", "text": "คะแนน {deep_score:0}/100 · {deep_word}", "dur": 2.0},
+    {"t": 2.6, "do": "emote", "kind": "star", "count": 3, "if": "deep_strong"},
+    {"t": 2.6, "do": "tilt_head", "deg": 10, "dur": 0.3, "if": "!deep_strong"},
+
+    {"t": 4.8, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 2,
+      "title": "4 มิติ · {symbol}", "items": [
+        {"label": "LSD Trend", "value": "{lsd_th}", "sub": "ยืนยัน {lsd_tf}/4 ไทม์เฟรม", "good": "{lsd_good}"},
+        {"label": "Orderflow", "value": "{flow_th}", "sub": "Δ {flow_delta:1} · สะสม {flow_cum:0}", "good": "{flow_good}"},
+        {"label": "Momentum", "value": "{momentum_th}", "sub": "{momentum_sub}", "good": "{momentum_good}"},
+        {"label": "Fibo Hot Zone", "value": "{hot_count} โซน", "sub": "{fibo_hot}"}
+      ]},
+    {"t": 5.0, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 5.8, "do": "say", "text": "{deep_say}", "dur": 2.4},
+
+    {"t": 8.8, "do": "panel", "id": "main", "type": "bars", "at": "top", "beam": "R", "money": false,
+      "title": "ระดับ Fibonacci", "subtitle": "คะแนน /10 · สีทอง = Hot", "bars": "{fibo_bars}", "if": "fibo_bars"},
+    {"t": 9.8, "do": "say", "text": "โซนที่แรง: {fibo_hot}", "dur": 2.0, "if": "hot_count"},
+    {"t": 12.2, "do": "hold"},
+    {"t": 12.9, "do": "present", "side": "R", "on": false}
+  ]
+}

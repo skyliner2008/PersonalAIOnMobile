@@ -646,6 +646,8 @@ class JarvisOrchestrator(
 
     /** ไมค์ในเครื่องได้ยินเสียงพูด — คิวคำถามค้างจะไม่ส่งข้อความแทรกตอนผู้ใช้กำลังพูด */
     fun noteLiveUserVoice() = liveService.noteLocalUserVoice()
+    /** the phone heard the user say something ([startMs]..[endMs]): did the Live server hear it? (LiveGeminiService) */
+    fun noteLiveUtterance(startMs: Long, endMs: Long) = liveService.noteLocalUtterance(startMs, endMs)
 
     /** รายงานผลงานเบื้องหลัง (agent task/backtest) ผ่านคิวของ Live — ส่งตอนเงียบจริง ไม่พูดทับผู้ใช้ */
     fun enqueueLiveReport(title: String, speech: String) =

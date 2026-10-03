@@ -1,0 +1,31 @@
+{
+  "id": "drowsy",
+  "title": "ง่วง สัปหงก",
+  "mood": "sleepy",
+  "tags": ["sleepy", "drowsy", "nodding_off", "idle", "self_care"],
+  "description": "ไม่มีใครคุยด้วยนาน ตาปรือ ค่อยๆ สัปหงก หัวตกลง ตาปิด แล้วสะดุ้งเงยหน้าลืมตา ก่อนหัวจะค่อยๆ ตกลงอีก ตาปิดนานขึ้นเรื่อยๆ วนไปจนกว่าจะหลับหรือมีคนเรียก",
+  "duration": 7.0,
+  "loop": 1.0,
+  "max_loop": 0,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "sleepy"},
+    {"t": 0.2, "do": "say", "text": "หาววว~", "dur": 1.3},
+    {"t": 0.3, "do": "move", "to": [0.0, -0.12, 0.0], "dur": 2.5, "ease": "sine"},
+    {"t": 0.5, "do": "emote", "kind": "zzz", "count": 2, "dur": 2.0},
+    {"t": 1.0, "do": "blink", "shut": 0.9, "dur": 2.0},
+    {"t": 1.0, "do": "head_nod", "deg": 24, "dur": 2.2},
+    {"t": 1.2, "do": "pitch", "deg": 10, "dur": 2.2, "ease": "sine"},
+    {"t": 1.4, "do": "tilt_head", "deg": 8, "dur": 2.0},
+    {"t": 3.4, "do": "head_nod", "deg": -4, "dur": 0.22, "ease": "back"},
+    {"t": 3.4, "do": "pitch", "deg": -3, "dur": 0.25, "ease": "back"},
+    {"t": 3.4, "do": "blink", "shut": 0.1, "dur": 0.15},
+    {"t": 3.4, "do": "hop", "height": 0.07, "dur": 0.35},
+    {"t": 3.45, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 3.9, "do": "head_nod", "deg": 8, "dur": 1.4},
+    {"t": 3.9, "do": "pitch", "deg": 4, "dur": 1.4, "ease": "sine"},
+    {"t": 4.0, "do": "blink", "shut": 0.6, "dur": 1.2},
+    {"t": 4.6, "do": "emote", "kind": "zzz", "count": 3, "dur": 2.2},
+    {"t": 5.6, "do": "blink", "shut": 0.8, "dur": 1.0},
+    {"t": 5.8, "do": "lean", "deg": -5, "dur": 1.2}
+  ]
+}

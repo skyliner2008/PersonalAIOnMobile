@@ -1,3 +1,101 @@
+## 2026-10-03 — Live: พูดแล้ว AI ไม่ได้ยิน → ตัวจับ session ที่ไม่ได้ยินเสียง เปิด session ใหม่เอง (branch `feat/rive-eye-morph`)
+- **User Request**: "จาก log เหมือน AI ไม่ได้ยินเสียง ที่พูด พูดไปแล้วไม่ทำงาน" (logcat 08:36–08:43)
+- **หลักฐาน**: 08:39–08:41 เครื่องได้ยินผู้ใช้ 6 ครั้ง (`activity NONE → LISTENING`, Mic 15/18/6/3/3/21%) → `PONDERING` → ว่างที่ 3.5 วิ
+  เพราะไม่มี transcript · ไม่มี `🎤 User +` เลยสักบรรทัด · เสียงส่งออกครบ (`Audio chunks streaming` เดินต่อ ไม่มี `send skipped`) ·
+  ไม่มี exception ในทาง Live · 08:43:52 session ปิดด้วย INTERNAL_ERROR แล้วต่อใหม่ · ทางเสียงของแอปไม่ได้แก้ตั้งแต่ build 00:16
+  ที่คุยได้ปกติ → server ไม่ได้ยิน (free tier, `gemini-3.1-flash-live-preview`) ไม่ใช่บั๊กของรอบนี้ · แอปแก้ต้นเหตุไม่ได้
+- **แก้ (ตรวจจับแล้วเปิดใหม่)**: `LiveGeminiService.noteLocalUtterance` ← `JarvisOrchestrator.noteLiveUtterance` ← `VoiceController`
+  (คำพูดยาว ≥ 1 วิ ไม่ใช่เสียง AI/เอฟเฟกต์) · 7 วิไม่มี transcript/`interrupted`/คำตอบของ AI และไม่มีเทิร์น/tool ค้าง = ไม่ได้ยิน
+  (log `🙉`) · 3 ครั้งติด → ล้าง resumption handle (handle ที่มาช้าจาก session เดิมไม่เก็บ) ปิด socket ลูปเชื่อมต่อเปิด session ใหม่
+  (log `🔁`; server ไม่ตอบการปิด 5 วิ → ตัดเอง) · 1 ครั้งต่อ 5 นาที · เปิดแล้วยังไม่ได้ยิน → แชทบอกให้ตรวจเน็ต/เปิด Live ใหม่ ·
+  โหมดอวตาร: หุ่นบอกในบอลลูน (`AvatarLiveFeed.notices` → `AvatarStage.say`)
+- **log เดียวกันยืนยันชีวิตตอนว่างบนมือถือ**: ง่วง 08:37:32 → หนังตา 08:38:02 → หลับ 08:38:32 → แตะจอ → ตื่น 08:38:45 →
+  อาบน้ำ 08:39:16 (30 วิ) → ง่วง 08:39:46 (60 วิ) → เสียงผู้ใช้ปลุก 08:39:59
+- **สังเกต (ไม่ได้แก้)**: เข้าโหมดอวตารด้วยการเปิด Live แล้วกด "🤖 อวตาร" = เปิด session 2 ครั้ง (CONTROL แล้ว PET) — setup แต่ละครั้งกิน
+  token (TPM ของ free tier)
+- **Verify**: แอป 608 เทสต์ผ่าน (ข้าม 6: ต่อเน็ต) · เครื่องจำลอง 10/10 (`RUN_SIM_TESTS=1`) — `deaf_server` ใหม่: ผู้ใช้พูด 3 ครั้ง
+  server ไม่ได้ยิน → `🙉` 3 ครั้ง → `🔁` → แอปปิด socket (หุ่นฟัง → คิด → หยุดที่ 3.5 วิ เหมือน log จริง) · อีก 9 สถานการณ์ไม่มี `🙉` ·
+  **ยังต้องลองบนมือถือ**
+- เอกสาร: [[LiveGeminiService]] "session ที่ไม่ได้ยินเสียง", [[Avatar_Mode]], [[LiveToolBridge]]
+
+## 2026-10-03 — อวตาร: หัวหน้าตอบงานเร็วเอง + หุ่นดูแลตัวเอง (เล่น กิน อาบน้ำ ง่วง หลับ จอมืด) (branch `feat/rive-eye-morph`)
+- **User Request**: "เรื่องให้ AI ตอบงานสั้นๆ เองทันทีแทนที่จะส่งให้ลูกน้องทำ ดำเนินการได้ และตรวจสอบระบบพารามิเตอร์ หิว ง่วงนอน อาบน้ำ เล่น
+  … เราได้นำปุ่มพวกนั้นออกไปแล้ว แต่เหมือนฟังก์ชันยังอยู่ ฉันต้องการให้หุ่นจัดการเองได้เลย กิน นอน เล่น" + ไทม์ไลน์ระหว่างทำ: เงียบ 30 วิ
+  เล่นเอง, 60 วิ ง่วง สัปหงก, 90 วิ หน้าจอบนล่างหรี่เข้าหากัน, 120 วิ ปิดสนิท จอเหลือ 1%, เสียงพูด/จิ้มจอ → สว่างคืน ลืมตา ตื่นนอน
+- **log ผู้ใช้ 00:16–00:18**: ALARM 00:16:37 และ 00:17:42 ห่างกันหนึ่งนาที = ความต้องการหิว (อิ่ม < 20 → ANGRY + ALARM) ซึ่งไม่มีปุ่ม
+  ให้อาหารแล้ว · อากาศตอบตรง 2 วิ · "ตื่นๆ" → AI ทักทายซ้ำ (บันทึกไว้ ยังไม่แก้)
+- **งานเร็ว** (`LiveToolBridge.handOverIfSlow`, `QUICK_ANSWER_MS` 1.5 วิ, `answerNow`): รันก่อน เสร็จทันตอบในเทิร์นนั้น ไม่ทันจึงส่ง
+  `DELEGATED:` · `PendingAnswerQueue.onTurnEnded(heardMs)`: คำตอบจากผล tool ที่ได้ยินไม่ถึง 3 วิ → เข้าคิวเล่าใหม่ · เครื่องจำลอง 9 สถานการณ์
+- **หุ่นดูแลตัวเอง** (`pet/PetSelfCare` + `PetModeController.onAvatarTick/noteTouch/fallAsleep/wakeUpFromIdle`, `idleStage`):
+  เงียบ 30 วิ กิน (หิว) / อาบน้ำ (สกปรก) / เล่น · 60 วิ `drowsy` · 90 วิ หนังตาของจอ · 120 วิ `sleep` + หนังตาปิด + จอ 1%
+  (`avatar/ScreenDimmer` ← MainActivity) · ปลุกด้วยเสียงผู้ใช้หรือแตะ (เสียง AI ไม่ปลุก) → จอสว่าง หนังตาเปิด 2.2 วิ `wake_up` ·
+  เลิกบ่นหิว/ง่วง/เบื่อใน `resolvePassiveEmotion` · `PetNeedsState.eatMeal/bathe/playAlone` · `device_pet_care status` บอกล่าสุดทำอะไร ·
+  persona ข้อ 13
+- **pet_godot**: `care_fx.gd`, `eyelids.gd` + `shaders/eyelids.gdshader`, ฉาก `eat` `bath` `play_ball` `drowsy` `sleep` `wake_up`,
+  beat `head_nod` `blink`, ฉาก `max_loop` `keep_pose` (`director.continuing`), เอฟเฟกต์ `snack` `bubbles` `shower` `splash` `ball`,
+  คำสั่ง `eyelids`, แตะตอนหนังตาขึ้น = tap · `AvatarSkits` +6 (EAT BATH PLAY_BALL DROWSY SLEEP WAKE; ฉากเก่า eating/bath_clean/
+  play_gaming ใช้ฉากใหม่)
+- **เครื่องจำลองเจอ**: คำตอบงานเร็วที่ถูกพูดทับแล้วเข้าคิว → ตอนเล่าซ้ำไม่มีฉาก (ฉากถูกใช้ไปแล้ว) → `ToolSceneSync.onDeferred` รับฉาก
+  ที่ขึ้นอยู่ / รอขึ้นกลับเข้าคิว
+- **Verify**: แอป 607 เทสต์ผ่าน (ข้าม 15) · เครื่องจำลอง 9/9 (`RUN_SIM_TESTS=1`) · `PetSelfCareTest` 6 + `PetIdleLifeTest` 6 ·
+  `scene_test.gd` 191 PASS · ภาพ: ของว่าง (โดนัท/เบอร์เกอร์) กัดสามคำ, อาบน้ำ, โหม่งบอล, ง่วง → หนังตา → หลับ → ลืมตาตื่น ·
+  **ยังต้องลองบนมือถือ**
+- เอกสาร: [[Avatar_Mode]] "ชีวิตตอนว่าง", [[LiveToolBridge]], [[LiveGeminiService]], `pet_godot/scenes/SCHEMA.md`
+
+## 2026-10-02 — อวตาร: "กำลังฟัง" ค้างทั้งที่ไม่มีเสียง (branch `feat/rive-eye-morph`)
+- **User Request**: "รอบนี้ทำได้ดี แต่ Avatar_Mode ขึ้นกำลังฟังตลอด ทั้งที่ยังไม่มีเสียงอะไร มันปรกติหรือไม่" (logcat 23:28–23:32)
+- **flow รอบนี้ถูก**: BTC/ปฏิทินส่งลูกน้อง (คำรับทราบถูกคำถามถัดไปตัดทั้งคู่) · ราคาทอง 4134.35 ตอบทันที · BTC เล่า 23:30:10 (คะแนน 60
+  ขาลง) · ปฏิทินเล่า 23:30:41 · รายการงานบนจอ: running → ready → telling → ว่าง ✓
+- **log ในเครื่อง**: `activity NONE → LISTENING` 23:29:24 (Mic 4% หลังเสียง WAKE_UP), 23:31:13 (Mic 7% เสียง ALARM ของหุ่น) ค้าง 57 วิ,
+  23:32:25 (Mic 13% เสียง CONFUSED ตอนเขย่า) ค้างจนปิดโหมด 23:34:33 · ระหว่างค้าง `User speaking: true | Mic: 0%`
+- **ต้นเหตุ**: (1) `delay(700)` ใน `LaunchedEffect(audioLevel, isAiSpeaking)` ของ App.kt — ระดับไมค์เปลี่ยนทุก buffer จึงไม่เคยหน่วงครบ
+  (2) เสียงเอฟเฟกต์ของหุ่นเข้าไมค์แล้วนับเป็นผู้ใช้
+- **แก้**: `controller/UserVoiceDetector` (เกณฑ์ 0.035 + 3 เท่าเสียงพื้นหลัง, ต่อเนื่อง ≥ 0.25 วิ, จบ 0.7 วิ, ไม่นับเสียง AI/TTS/เอฟเฟกต์)
+  ใน `VoiceController.userVoice` · `RobotSoundPlayer.selfSoundUntilMs` ← `RobotSoundEngine` · App.kt ใช้ `viewModel.userVoice`
+- **Verify**: `UserVoiceDetectorTest` 6 (ห้องเงียบระดับแกว่ง → จบใน 0.8 วิ, คลิก 100 ms ไม่นับ, เสียงหุ่นไม่นับ, ฝนตลอดไม่นับ แต่เสียงพูด
+  ทับฝนนับ) · แอป 591 เทสต์ผ่าน (ข้าม 13) · ติดตั้งบน SM-S908E · **ยังต้องลองบนมือถือ**: เงียบ → หุ่นไม่ฟัง, เสียงเตือนหิว/เขย่า → ไม่ฟัง
+- เอกสาร: [[Avatar_Mode]]
+
+## 2026-10-02 — อวตาร: ตรวจเชิงลึก tool + หัวหน้า/ลูกน้อง ด้วยเครื่องจำลอง → รายการงานบนจอหุ่น (branch `feat/rive-eye-morph`)
+- **User Request**: "ตรวจสอบเชิงลึก Avatar_Mode เกี่ยวการเรียกใช้ tool และระบบ multi task อีกครั้ง มันยังสับสน และทำงานถูกต้อง
+  ไม่ถูกต้อง"
+- **log**: ในเครื่องไม่มี session หลังติดตั้ง 16:56 (process `:avatar` ไม่ได้เริ่มอีก) · session ล่าสุด 15:26 ถูกต้องทุกเรื่อง — เล่าตรงผล tool
+  (BTC 5 มิติ คะแนน 70, ปฏิทิน NFP 89K/ว่างงาน 4.1%, อากาศ 29°C) แต่คำ "รับทราบ" ของ BTC/ปฏิทินถูกคำถามถัดไปตัด
+- **เครื่องจำลอง** (`androidUnitTest/.../sim/LiveSessionSim.kt` + `AvatarMultiTaskSimTest`, `RUN_SIM_TESTS=1`): โค้ด live ของแอปจริง
+  (`LiveGeminiService` เฟรม/เทิร์น/คิว, `LiveToolBridge` ส่งลูกน้อง, `ToolSceneSync`, `AvatarActivity`, `AvatarTasks`) กับ server ปลอม
+  ตามพฤติกรรมใน log วันนี้ · seam: `LogTap.sink`, `ToolExecutor.testOverride`, `LiveToolBridge.stopCollecting` · 7 สถานการณ์
+  → ทุกเรื่องเล่าครบครั้งเดียว ฉากขึ้นตรงคำของมัน
+- **เจอ**: (1) "รับทราบ" ถูกตัดใน 0.1–0.5 วิ + ผลรอเล่านาน (BTC เสร็จวิที่ 5.8 เล่าวิที่ 27) → ผู้ใช้ไม่รู้ว่ารับ/เสร็จ/รอ ·
+  (2) บั๊ก: การ์ดทำงานช่องเดียว — call เปลี่ยนหน้าทับงาน 5 มิติ, call ที่ server ยกเลิกยังยึดการ์ด · (3) คำถามที่แอปถามซ้ำถูกส่งลูกน้องอีกรอบ
+- **แก้**: รายการงานบนจอหุ่น (`AvatarTasks` ← `AvatarLiveFeed.jobs`/`reports`, `LiveGeminiService.reportSnapshot`, call id ติดไปกับข้อในคิว
+  `PendingAnswerQueue.Item.key`, `AvatarStage.tasks` → `task_hud.gd`) · งานตาม call id (`LiveToolBridge.jobs`) · การ์ดทำงาน =
+  `AvatarTasks.foreground` · `LiveGeminiService.answeringReport` → ไม่ส่งลูกน้องในเทิร์นตอบข้อค้าง (log `🧾`)
+- **Verify**: สถานการณ์จำลอง 7/7 ผ่าน (timeline `composeApp/build/sim/`) · แอป 585 เทสต์ผ่าน (ข้าม 13: ต่อเน็ต 6 + จำลอง 7) ·
+  pet_godot `scene_test.gd` 149 PASS · ภาพเม็ดงานบนฉากราคา/ฉากฟัง · **ยังต้องลองด้วยเสียงบนมือถือ**
+- **เสนอให้ผู้ใช้ตัดสิน**: งานเร็ว (ปฏิทิน 0.3 วิ, 5 มิติ local 1.2 วิ) ยังต้อง "รับทราบ" แล้วเล่าทีหลังอีก 4–6 วิ — ถ้ารอผลสั้นๆ (~1.5 วิ) ก่อนส่ง
+  ลูกน้อง งานเร็วจะตอบรวดเดียว แต่เปลี่ยน flow หัวหน้า/ลูกน้องที่ผู้ใช้วางไว้
+- เอกสาร: [[Avatar_Mode]], [[LiveToolBridge]], [[LiveGeminiService]], `pet_godot/scenes/SCHEMA.md` ("tasks")
+
+## 2026-10-02 — อวตาร: ฉากกำลังฟัง/คิด/ทำงาน + ทุก tool มีฉาก (5 มิติ, หลายไทม์เฟรม, sentiment, SMC …) (branch `feat/rive-eye-morph`)
+- **User Request**: "ระหว่างที่ AI ยังคิด กำลังคิด กำลังฟัง ฉันอยากให้มีฉากกำลังคิด กำลังฟัง ตรวจสอบ Tool อื่นๆ เชื่อมโยงกับฉาก
+  เช่น การวิเคราะห์ 5 มิติ ยังไม่มีการแสดงผลในฉาก และตรวจสอบทุก tool ให้แสดงผลในฉากได้อย่างสวยงาม โดยการทดสอบเรียก tool จริง
+  และ cap รูป ตรวจสอบความถูกต้อง"
+- **ฉากระหว่างคำตอบ** (`avatar/AvatarActivity.kt` + pet_godot `listening` / `pondering` / `working`, `scripts/activity_fx.gd`):
+  ฉากวน (`"loop"`), คลื่นเสียงตามเสียงผู้ใช้ (`hear`), ลูกแสงรอบหัว, การ์ด "กำลัง…" ของ tool ที่รัน (`task` ใน `tool_scenes.json`,
+  panel `progress`) · สัญญาณใหม่: `AvatarState.isUserSpeaking`, `AvatarLiveFeed.working` / `heardAtMs`
+- **ฉากข้อมูลใหม่ 5 ฉาก**: `deep_analysis_report` (5 มิติ), `mtf_report`, `sentiment_report`, `smc_report`, `market_snapshot_report` ·
+  สแกน 4 ตัวใช้ `market_movers` (`bar_field`, `react`) · การ์ดสั้นจาก tool: ข่าว ปฏิทิน สัญญาณกลยุทธ์ SMC Flow ·
+  การ์ดของ tool อื่นทุกตัว (`AvatarCards`) แทนรายชื่อ 9 ตัว · ToolSceneWords ของ tool ใหม่
+- **ตรวจด้วยข้อมูลจริง**: `AvatarSceneDataLiveDump` เรียก 32 tool → `tools/tool_frames.ps1` render → ดูภาพทีละฉาก แล้วแก้:
+  ชื่อโซนบนหน้าปัดชนหัวการ์ด · บรรทัดใต้ตัวเลขชนขอบ (การ์ดหน้าปัดสูงขึ้น) · บับเบิลตัดคำกลางคำ/ล้นขอบ (ข้อความสั้นลง, ช่องว่าง +7%) ·
+  การ์ดยาวบังหัวหุ่น (`anchor: bottom` โตขึ้นด้านบน + หุ่นต่ำลง) · การ์ดสัญญาณกลยุทธ์/SMC Flow เป็นกองตัวเลข (tool ทำการ์ดเอง) ·
+  สแกนว่างไปฉากแท่ง → error (ข้อความไปการ์ดเสมอ, รายการที่ไม่มีวาดว่าง) · `null` / ISO ในการ์ด · % ใต้ 1% แสดง 2 ตำแหน่ง
+- **Verify**: แอป 573 เทสต์ผ่าน (ข้าม 6 ตัวที่ต้องต่อเน็ต) รวม `AvatarActivityTest` 8, `AvatarCardsTest` 4 · pet_godot `scene_test.gd`
+  145 PASS (ฉากวน, `hear`, การ์ดทำงานเปลี่ยน tool โดยไม่เริ่มใหม่, ข้อความไปการ์ด, 5 ฉากใหม่เล่นได้) · render ทุก tool จากข้อมูลจริง
+  32 ตัว + 3 ฉากระหว่างคำตอบ ไม่มี script error · `export_to_app.ps1` + ติดตั้งบน SM-S908E ·
+  **ยังต้องลองด้วยเสียงบนมือถือ** (จังหวะฉากฟัง/คิดเทียบกับเสียงจริง)
+- เอกสาร: [[Avatar_Mode]], [[Pet_Godot_Lab]], `pet_godot/scenes/SCHEMA.md`, `pet_godot/README.md`
+
 ## 2026-10-02 — ตรวจด้วยเสียงหลังแก้ถามรัว: live ปกติ + อวตารผ่าน (branch `feat/rive-eye-morph`)
 - **User Request**: "log ล่าสุด" (15:26–15:28: live ปกติทักทาย → เข้าโหมดอวตาร → BTC 5 มิติ → ปฏิทิน → ราคาทอง → อากาศ)
 - **อวตารผ่าน** (logcat ในเครื่อง):

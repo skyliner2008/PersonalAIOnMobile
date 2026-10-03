@@ -1,0 +1,28 @@
+{
+  "id": "bath",
+  "title": "อาบน้ำ",
+  "mood": "happy",
+  "tags": ["bath", "shower", "clean", "dirty", "self_care"],
+  "description": "ฝักบัวโผล่มาเหนือหัว น้ำไหลซู่ ฟองสบู่พอกหัว ฟองลอยรอบตัว ร้องเพลงลัลล้า หมุนตัวใต้ฝักบัว แล้วสะบัดตัวให้แห้ง น้ำกระเด็น บรึ๋ย! ตัววิ้งๆ สะอาดเอี่ยม",
+  "duration": 10.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "เวลาอาบน้ำ~", "dur": 2.4},
+    {"t": 0.0, "do": "emotion", "name": "happy"},
+    {"t": 0.3, "do": "effect", "name": "shower", "dur": 5.2},
+    {"t": 0.8, "do": "eyes", "name": "happy", "dur": 4.6},
+    {"t": 1.0, "do": "effect", "name": "bubbles", "dur": 5.0},
+    {"t": 1.2, "do": "say", "text": "ลัลล้า~", "dur": 1.4},
+    {"t": 1.4, "do": "emote", "kind": "note", "count": 3, "dur": 1.6},
+    {"t": 2.2, "do": "fidget", "name": "wiggle"},
+    {"t": 3.2, "do": "turn", "by": 360, "dur": 1.2, "ease": "sine"},
+    {"t": 4.6, "do": "fidget", "name": "wiggle"},
+    {"t": 4.8, "do": "emote", "kind": "note", "count": 3, "dur": 1.4},
+    {"t": 6.0, "do": "vibrate", "amount": 0.07, "dur": 0.8},
+    {"t": 6.0, "do": "effect", "name": "splash"},
+    {"t": 6.1, "do": "say", "text": "บรึ๋ยย!", "dur": 1.0},
+    {"t": 7.2, "do": "emotion", "name": "love"},
+    {"t": 7.2, "do": "emote", "kind": "sparkle", "count": 6, "dur": 1.6},
+    {"t": 7.6, "do": "say", "text": "สะอาดเอี่ยม!", "dur": 1.6},
+    {"t": 8.4, "do": "hop", "height": 0.2}
+  ]
+}

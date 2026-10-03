@@ -140,6 +140,8 @@ data class AvatarState(
     val emotion: AvatarEmotion = AvatarEmotion.IDLE,
     val audioLevel: Float = 0f,
     val isSpeaking: Boolean = false,
+    /** the user is talking to the AI (the mic hears them, held 700 ms over short pauses) */
+    val isUserSpeaking: Boolean = false,
     val glowIntensity: Float = 0.5f,
     val statusText: String? = null,
     val gazeOffsetX: Float = 0f,

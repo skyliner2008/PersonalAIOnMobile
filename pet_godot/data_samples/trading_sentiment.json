@@ -1,0 +1,36 @@
+{
+    "symbol": "BTC",
+    "sentiment": 72.5136,
+    "sentiment_label": "Greed",
+    "sentiment_th": "เชื่อมั่น / โลภ (Greed)",
+    "pillars": [
+        {
+            "name": "📰 ข่าวสาร/โซเชียล",
+            "short": "ข่าว",
+            "weight": 30,
+            "score": 69.0
+        },
+        {
+            "name": "🌡️ สภาวะตลาดรวม",
+            "short": "ตลาดรวม",
+            "weight": 25,
+            "score": 72.0
+        },
+        {
+            "name": "🐋 สัญญาอนุพันธ์",
+            "short": "อนุพันธ์",
+            "weight": 30,
+            "score": 87.712
+        },
+        {
+            "name": "📊 เทคนิคัลโมเมนตัม",
+            "short": "เทคนิค",
+            "weight": 15,
+            "score": 50.0
+        }
+    ],
+    "retail_long": 47.73,
+    "top_long": 66.14,
+    "taker_ratio": 1.1356,
+    "contrarian": "🟢 Contrarian Alert: เกิดสัญญาณ Short Squeeze! รายย่อยแห่เปิด Short แต่ Smart Money ถือ Long หนาแน่น ลุ้นดีดกิน SL ฝั่ง Short"
+}

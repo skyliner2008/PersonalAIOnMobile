@@ -68,7 +68,7 @@ object AvatarStage {
     /** Logged (but not gaze and voice, many a second; a tool's data only by name), so a test log shows what the robot was told. */
     private fun send(command: JsonObject) {
         when ((command["t"] as? JsonPrimitive)?.content) {
-            "look", "voice" -> Unit
+            "look", "voice", "hear", "tasks" -> Unit
             "tool" -> logDebug(TAG, "→ tool ${(command["tool"] as? JsonPrimitive)?.content}")
             else -> logDebug(TAG, "→ $command")
         }
@@ -114,7 +114,17 @@ object AvatarStage {
     /** The AI finished talking about the held tool scene: it plays to its end. */
     fun releaseScene() = send(buildJsonObject { put("t", "release") })
 
-    fun playScene(id: String) = send(buildJsonObject { put("t", "scene"); put("id", id) })
+    /** Scene [id] with [data] (null: its own); the same id again with data while it plays gives it new data. */
+    fun playScene(id: String, data: JsonObject? = null) = send(buildJsonObject {
+        put("t", "scene"); put("id", id)
+        if (data != null) put("data", data)
+    })
+
+    /** The robot's task list ([AvatarTasks]): the jobs the user still waits to hear about; empty hides it. */
+    fun tasks(items: kotlinx.serialization.json.JsonArray) = send(buildJsonObject { put("t", "tasks"); put("items", items) })
+
+    /** The user's voice level 0..1 while they talk to the AI (the listening scene's meter). */
+    fun hear(level: Float) = send(buildJsonObject { put("t", "hear"); put("level", level.coerceIn(0f, 1f)) })
 
     /** Ends scene [id] if it is still the one playing (a tool's scene that took over keeps going); "" = any. */
     fun stopScene(id: String = "") = send(buildJsonObject { put("t", "stop"); if (id.isNotEmpty()) put("id", id) })
@@ -126,6 +136,24 @@ object AvatarStage {
     fun effect(name: String) = send(buildJsonObject { put("t", "effect"); put("name", name) })
 
     fun fidget(name: String = "") = send(buildJsonObject { put("t", "fidget"); put("name", name) })
+
+    /** How open the screen's eyelids were last asked to be (1 = none), for a new engine. */
+    private var lidsOpen = 1f
+
+    /**
+     * The screen's eyelids (the robot's sleep, PetSelfCare): from top and bottom, [open] 1 = none … 0 = shut, over
+     * [secs]. Kept, and sent again when a new engine attaches.
+     */
+    fun eyelids(open: Float, secs: Float) {
+        lidsOpen = open.coerceIn(0f, 1f)
+        send(buildJsonObject { put("t", "eyelids"); put("open", lidsOpen); put("secs", secs) })
+    }
+
+    /** Heavy eyelids for [secs]: they sag and blink, each time a little more shut (90 s of quiet until sleep). */
+    fun eyelidsDrowsy(secs: Float) {
+        lidsOpen = 0.2f
+        send(buildJsonObject { put("t", "eyelids"); put("drowsy", secs) })
+    }
 
     /** Platform: the engine stopped (the app went to the background, or it is being restarted). */
     fun onEngineStopped() {
@@ -143,9 +171,12 @@ object AvatarStage {
         _failed.value = true
     }
 
-    /** Platform: a new engine attached to the link — it gets the current look first. */
+    /** Platform: a new engine attached to the link — it gets the current look first (and shut eyelids stay shut). */
     fun onEngineAttached() {
         lastState?.let { platformSend?.invoke(it) }
+        if (lidsOpen < 1f) {
+            platformSend?.invoke(buildJsonObject { put("t", "eyelids"); put("open", lidsOpen); put("secs", 0f) }.toString())
+        }
     }
 
     /** Platform: an event from the engine. */

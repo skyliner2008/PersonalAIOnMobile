@@ -16,6 +16,9 @@
 | `userTurnFinalFlow` | ประโยคผู้ใช้ที่พูดจบ | 1 ครั้ง/turn เมื่อ model เริ่มตอบหรือ turn จบ — ใช้กับคำสั่งลัดฝั่งเครื่อง |
 | `nativeToolCallFlow` | `LiveToolCallEvent` (+`sessionGeneration`) | buffer 64 — ลูป WebSocket ไม่ถูกบล็อกระหว่างรัน tool |
 | `toolCallCancellationFlow` | id ที่ server ยกเลิก | bridge ยกเลิก job และไม่ส่ง response |
+| `reportSnapshot()` (ฟังก์ชัน) | `PendingAnswerQueue.View` — ข้อที่กำลังเล่า (ส่งให้ AI แล้ว ยังไม่ settle) + ข้อที่รอ | รายการงานบนจอหุ่น (`AvatarTasks`) · ผลที่ bridge ใส่คิวมี `key` = call id |
+| `answeringReport` | โมเดลกำลังตอบข้อค้างที่แอปส่งให้ และผู้ใช้ยังไม่ได้พูด | bridge ไม่ส่งลูกน้องในเทิร์นนี้ |
+| `deafUtterances` / `deafReconnects` | ครั้งที่ server ไม่ได้ยินผู้ใช้ติดกัน / เปิด session ใหม่ (`true`) หรือเปิดแล้วยังไม่ได้ยิน (`false`) | bridge ส่งต่อเป็นคำพูดของหุ่น (`AvatarLiveFeed.notices`) |
 
 ## 🛡️ ความเสถียรของ session
 - **Session resumption**: ส่ง `session_resumption: {}` ตั้งแต่ครั้งแรก (server จึงส่ง handle), ส่ง handle ตอน reconnect
@@ -55,7 +58,9 @@
   ส่ง `[PENDING QUESTION]` ตอนเงียบ · คำถามที่ถูกตัดก่อนเรียก tool ก็เข้าคิว แล้วแอปถามโมเดลซ้ำ — call ช่วงนั้นเป็นของคำถามนั้น
   (`currentQuestion`) · รายงานที่ได้แค่คำทักทายกลับมาส่งใหม่ **เว้นแต่**เทิร์นนั้นเรียก tool (กำลังทำอยู่) · คำตอบทาง TTS นับว่าพูดแล้ว
   · รายงานที่ถูกตัดก่อนผู้ใช้ได้ยิน 3 วิ (`voiceHeardBeforeCutMs`) ส่งใหม่ (`LiveProtocol.reportReachedUser`) · เทิร์นที่ถูกตัด:
-  ผลเปลี่ยนหน้า/โหมด (`UI_ONLY_TOOLS`) ไม่เข้าคิวเป็นคำถาม (`PendingAnswerQueue.onTurnEnded`)
+  ผลเปลี่ยนหน้า/โหมด (`UI_ONLY_TOOLS`) ไม่เข้าคิวเป็นคำถาม (`PendingAnswerQueue.onTurnEnded`) · **คำตอบจากผล tool ที่ผู้ใช้ได้ยินไม่ถึง
+  3 วิ** (`onTurnEnded(heardMs = voiceHeardBeforeCutMs)`) → ผลเข้าคิวเล่าใหม่เหมือนรายงาน (log `📥 คำตอบถูกตัดหลังได้ยินแค่ …ms`) —
+  งานเร็วของลูกน้องตอบในเทิร์นตัวเองแล้ว (2026-10-03, [[LiveToolBridge]]) · คำตอบคุยเล่น (ไม่มี tool) ที่ถูกตัดไม่ถามซ้ำ
 - **ผลที่ผู้ใช้ไม่ได้ยิน** (`LiveProtocol.resultsUntold` → `PendingAnswerQueue.onResultsUntold`): เทิร์นที่มีผล tool แล้ว AI จบเงียบๆ
   (ไม่มีเสียงไม่มีข้อความ) หรือพูดแค่คำทักทาย → ผลเข้าคิวรายงาน (logcat 2026-10-02 13:01:06: ราคาทองส่งถึงโมเดลแล้วเทิร์นจบเงียบ ผู้ใช้
   ไม่ได้ยินเลย — watchdog 12 วิเดิมจับแค่ "เงียบและไม่จบเทิร์น") · คำทักทายรู้จัก "เล่นอะไร" / "มีอะไรให้" เพิ่ม · ประโยคสั้นที่มีตัวเลข
@@ -80,6 +85,18 @@
   · **ตัวอย่างประโยคใน persona ก็นับ**: persona สัตว์เลี้ยงข้อ 2 ยกตัวอย่างน้ำเสียงเป็น "สวัสดีฮับบอส! วันนี้เล่นอะไรกันดีฮับ" และข้อ 12
   (เห็นหน้า) "สวัสดีฮับบอส! วันนี้เหนื่อยไหมฮับ" — โมเดลพูดประโยคแรกคำต่อคำแทนคำรับงาน BTC (logcat 2026-10-02 11:42:03) ·
   `DynamicModelTest`: คำทักทายในเครื่องหมายคำพูดของ persona สัตว์เลี้ยงเหลือแค่ข้อความเปิดเซสชันของแอป
+- **session ที่ไม่ได้ยินเสียง** (`noteLocalUtterance`, 2026-10-03): logcat 08:39–08:41 เครื่องได้ยินผู้ใช้ 6 ครั้ง (ไมค์ 3–21%) ส่งเสียงครบ
+  (ไม่มี `send skipped`) แต่ server ไม่ส่ง transcript และไม่ตอบเลย · 08:43:52 อีก session ปิดด้วย INTERNAL_ERROR · ทางเสียงของแอป
+  ไม่ได้เปลี่ยนตั้งแต่ build 00:16 ที่คุยได้ปกติ → ปัญหาฝั่ง server (free tier) แอปแก้ต้นเหตุไม่ได้ จึงตรวจจับแล้วเปิดใหม่:
+  - `VoiceController` แจ้งทุกคำพูดที่ `UserVoiceDetector` จับได้ยาว ≥ 1 วิ (`MIN_UTTERANCE_MS`, ไม่นับช่วงเสียง AI/เอฟเฟกต์)
+    → `JarvisOrchestrator.noteLiveUtterance`
+  - 7 วิต่อมา (`DEAF_CHECK_MS`) ถ้า server ไม่มี transcript หรือ `interrupted` (`lastServerHeardAtMs`), AI ไม่ได้ส่งเสียง/ข้อความ
+    ตั้งแต่ผู้ใช้เริ่มพูด (`lastModelOutputAtMs` — คำตอบอาจมาก่อน transcript) และไม่มีคำตอบ/tool ค้าง = ไม่ได้ยิน (log `🙉 ผู้ใช้พูด …ms แต่ server ไม่ได้ยิน … ครั้งที่ N ติดกัน`) · transcript ของผู้ใช้รีเซ็ตตัวนับ
+  - ครบ 3 ครั้งติด → ล้าง resumption handle (session เดิมหูหนวก) ปิด socket แล้วลูปเชื่อมต่อเปิด session ใหม่พร้อม `buildReconnectHistory`
+    (log `🔁 server ไม่ได้ยินผู้ใช้ 3 ครั้งติด`) · server ไม่ตอบการปิดใน 5 วิ → ตัด socket เอง (`deafReconnectPending`, log `🔁 ปิด session
+    ที่ไม่ได้ยินเสียงเอง`)
+  - เปิดใหม่ได้ 1 ครั้งต่อ 5 นาที (`DEAF_RECONNECT_EVERY_MS` — setup กิน TPM) · เปิดแล้วยังไม่ได้ยิน → ข้อความในแชทให้ตรวจเน็ต/เปิด Live ใหม่
+  - เครื่องจำลอง: `LiveSessionSim.Options(deafServer = true)` · สถานการณ์ปกติต้องไม่มี `🙉`
 
 ## 🗣️ รองรับเสียง (Voice Config)
 ระบบรองรับเสียง prebuilt กว่า 30 แบบ (Aoede เป็นค่าเริ่มต้น)

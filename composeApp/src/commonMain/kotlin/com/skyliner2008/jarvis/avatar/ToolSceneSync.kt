@@ -83,6 +83,9 @@ class ToolSceneSync(
 
     val current: Item? get() = shown
 
+    /** A result may still come up with the AI's words: it waits for them, is due, or is the report just handed over. */
+    val hasWaiting: Boolean get() = waiting.isNotEmpty() || due.isNotEmpty() || reporting != null
+
     fun onResult(item: Item, nowMs: Long) {
         prune(nowMs)
         if (item.later) {
@@ -96,11 +99,24 @@ class ToolSceneSync(
         waiting.add(item)
     }
 
-    /** The report queue took a result ([tool], its first line [subject]): the AI tells it later, when it is handed over. */
+    /**
+     * The report queue took a result ([tool], its first line [subject]): the AI tells it later, when it is handed over.
+     * Also the one on screen, when the user cut its answer before hearing much of it (a quick job answered in its
+     * own turn, then told again as a report: its scene must come back with the report — simulation 2026-10-03).
+     */
     fun onDeferred(tool: String, subject: String) {
-        val item = pick(waiting, tool, subject) ?: return
-        waiting.remove(item)
-        queued.add(item)
+        pick(waiting, tool, subject)?.let {
+            waiting.remove(it)
+            queued.add(it)
+            return
+        }
+        pick(due.map { it.item }, tool, subject)?.let { item ->
+            due.removeAll { it.item === item }
+            queued.add(item)
+            return
+        }
+        // still up: it goes back to the queue when it comes down (not "spoken")
+        pick(listOfNotNull(shown), tool, subject)?.spoken = false
     }
 
     /** The app hands the AI a result to tell now ([tool], its first line [subject]): its card goes up with the AI's first words. */
@@ -234,6 +250,26 @@ object ToolSceneWords {
         "device_location" to listOf("อยู่ที่", "ตำแหน่ง", "แถว"),
         "trading_sentiment" to listOf("sentiment", "ความเชื่อมั่น", "อารมณ์ตลาด"),
         "trading_macro_calendar" to listOf("ปฏิทิน", "ตัวเลขเศรษฐกิจ"),
+        "trading_deep_analysis_suite" to listOf("5มิติ", "ห้ามิติ", "lsd", "orderflow", "ออเดอร์โฟลว์", "โมเมนตัม", "ฟีโบ", "คะแนนรวม"),
+        "trading_multi_timeframe" to listOf("ไทม์เฟรม", "timeframe", "รายสัปดาห์", "4ชั่วโมง"),
+        "trading_smc_analysis" to listOf("smc", "premium", "discount", "พรีเมียม", "ดิสเคาท์", "orderblock", "ออเดอร์บล็อก", "fvg", "สภาพคล่อง"),
+        "trading_smc_structure" to listOf("โครงสร้าง", "structure", "bos", "choch", "premium", "discount", "พรีเมียม", "ดิสเคาท์"),
+        "trading_smc_flow" to listOf("smc", "utbot", "ema14", "golden", "โกลเด้น"),
+        "trading_smc_liquidity" to listOf("สภาพคล่อง", "liquidity", "eqh", "eql"),
+        "trading_smc_orderblocks" to listOf("orderblock", "ออเดอร์บล็อก", "บล็อก"),
+        "trading_smc_sweeps" to listOf("sweep", "สวีป", "กวาด"),
+        "trading_market_snapshot" to listOf("s&p", "แนสแด็ก", "nasdaq", "ดาวโจนส์", "vix", "ตลาดหุ้น", "ตลาดโลก", "น้ำมัน"),
+        "trading_overbought_scan" to listOf("overbought", "ซื้อมากเกิน", "rsiสูง"),
+        "trading_oversold_scan" to listOf("oversold", "ขายมากเกิน", "rsiต่ำ"),
+        "trading_volume_breakout" to listOf("วอลุ่ม", "volume", "ปริมาณซื้อขาย"),
+        "trading_bollinger_scan" to listOf("bollinger", "บอลลิงเจอร์", "squeeze", "สควีซ"),
+        "trading_elliot_modern_analysis" to listOf("elliott", "elliot", "เอลเลียต", "คลื่น"),
+        "trading_harmonic_scan" to listOf("harmonic", "ฮาร์โมนิก", "แพทเทิร์น"),
+        "trading_combined" to listOf("ภาพรวม", "สรุปรวม", "confluence"),
+        "trading_strategy_signal" to listOf("กลยุทธ์", "strategy", "สัญญาณเทรด"),
+        "trading_position_sizing" to listOf("ล็อต", "lot", "ขนาดไม้", "ความเสี่ยงต่อไม้"),
+        "trading_correlation_matrix" to listOf("correlation", "ความสัมพันธ์", "สหสัมพันธ์"),
+        "get_current_datetime" to listOf("วันที่", "เวลา", "นาฬิกา"),
     )
 
     /** what the AI calls a ticker (it says "ทองคำ", "Tesla" — not the code) */

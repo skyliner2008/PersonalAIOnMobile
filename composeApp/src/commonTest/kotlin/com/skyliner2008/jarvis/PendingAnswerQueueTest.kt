@@ -87,6 +87,25 @@ class PendingAnswerQueueTest {
         assertTrue(q.isEmpty())
     }
 
+    /**
+     * A quick job is answered in its own turn now (LiveToolBridge QUICK_ANSWER_MS) — an answer the user talks over
+     * before hearing 3 s of it is told again later, as the report it used to be would have been.
+     */
+    @Test
+    fun `answer cut within three seconds of its voice is told again later`() {
+        val q = PendingAnswerQueue()
+        val btc = Triple("วิเคราะห์ BTC 5 มิติ", "trading_deep_analysis_suite", "Deep Analysis…")
+        assertEquals(1, q.onTurnEnded(null, interrupted = true, modelSpoke = true, toolCalls = 1,
+            sentResults = listOf(btc), nowMs = 0, heardMs = 1_900))
+        assertEquals("trading_deep_analysis_suite", q.next(1)!!.toolName)
+        assertEquals(0, q.onTurnEnded(null, interrupted = true, modelSpoke = true, toolCalls = 1,
+            sentResults = listOf(btc), nowMs = 2, heardMs = 7_000), "heard long enough")
+        // a chat answer cut early is not a question to ask again
+        assertEquals(0, q.onTurnEnded("เล่าเรื่องตลกหน่อย", interrupted = true, modelSpoke = true, toolCalls = 0,
+            sentResults = emptyList(), nowMs = 3, heardMs = 800))
+        assertTrue(q.isEmpty())
+    }
+
     @Test
     fun `question cut before any tool call is queued without a result`() {
         val q = PendingAnswerQueue()

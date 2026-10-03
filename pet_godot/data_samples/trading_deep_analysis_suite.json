@@ -1,0 +1,47 @@
+{
+    "symbol": "BTCUSDT",
+    "interval": "1h",
+    "price": 86348.01,
+    "deep_score": 50,
+    "lsd_state": "BULLISH",
+    "lsd_tf": 1,
+    "flow_label": "STRONG BUYING PRESSURE",
+    "flow_delta": 483.6070365654562,
+    "flow_cum": 4735.332347266262,
+    "poc": 84093.1815,
+    "momentum": "REVERSAL",
+    "momentum_up": false,
+    "squeeze": false,
+    "fibo": [
+        {
+            "label": "0.0",
+            "level": 83023.69,
+            "score": 10,
+            "hot": true
+        },
+        {
+            "label": "0.382",
+            "level": 84509.31092,
+            "score": 10,
+            "hot": true
+        },
+        {
+            "label": "0.5",
+            "level": 84968.22,
+            "score": 4,
+            "hot": false
+        },
+        {
+            "label": "0.618",
+            "level": 85427.12908,
+            "score": 2,
+            "hot": false
+        },
+        {
+            "label": "1.0",
+            "level": 86912.75,
+            "score": 2,
+            "hot": false
+        }
+    ]
+}

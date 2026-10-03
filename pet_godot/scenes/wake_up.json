@@ -1,0 +1,29 @@
+{
+  "id": "wake_up",
+  "title": "ตื่นนอน",
+  "mood": "happy",
+  "tags": ["wake_up", "morning", "stretch", "self_care"],
+  "description": "ตื่นจากตรงที่นอนอยู่ ลืมตาช้าๆ ลุกขึ้นตั้งตัว ฟ้าสว่าง ยืดเส้นยืดสายชูแขน หาว แล้วยิ้มสดใส ตื่นแล้วฮับ!",
+  "duration": 5.0,
+  "keep_pose": true,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "sleepy"},
+    {"t": 0.2, "do": "roll", "deg": 0, "dur": 1.2, "ease": "back"},
+    {"t": 0.2, "do": "pitch", "deg": 0, "dur": 1.0, "ease": "sine"},
+    {"t": 0.2, "do": "move", "to": [0.0, 0.0, 0.0], "dur": 1.2, "ease": "back"},
+    {"t": 0.3, "do": "head_nod", "deg": 0, "dur": 0.8},
+    {"t": 0.4, "do": "blink", "shut": 0.0, "dur": 1.4},
+    {"t": 0.8, "do": "background", "name": "sunny"},
+    {"t": 1.5, "do": "present", "side": "L", "on": true},
+    {"t": 1.5, "do": "present", "side": "R", "on": true},
+    {"t": 1.5, "do": "squash", "amount": 0.15},
+    {"t": 1.6, "do": "say", "text": "ยืดเส้นยืดสาย~", "dur": 1.2},
+    {"t": 1.9, "do": "blink", "shut": -1},
+    {"t": 2.6, "do": "present", "side": "L", "on": false},
+    {"t": 2.6, "do": "present", "side": "R", "on": false},
+    {"t": 2.8, "do": "emotion", "name": "happy"},
+    {"t": 2.8, "do": "emote", "kind": "sparkle", "count": 4, "dur": 1.2},
+    {"t": 3.0, "do": "say", "text": "ตื่นแล้วฮับ!", "dur": 1.5},
+    {"t": 3.6, "do": "hop", "height": 0.2}
+  ]
+}

@@ -12,6 +12,7 @@ extends Node3D
 ##   bars      3D bar chart: bars [{label, value, color?}] (negative values hang below the line)
 ##   kpi       a grid of numbers: items [{label, value, sub?, good?}]
 ##   text      short markdown: # headings, **bold**, *italic*, - bullets, > quotes, `code`
+##   progress  a job under way: spinner, `task` ("กำลังวิเคราะห์ 5 มิติ"), `detail` (symbol · timeframe), a scan bar
 ## Common params: title, subtitle, size [w, h] in metres.
 
 const CARD_SHADER := preload("res://shaders/holo_card.gdshader")
@@ -56,6 +57,10 @@ var _fonts := {}
 var _text_view: SubViewport              # markdown cards: the text is drawn here and shown on the glass
 var _text_label: RichTextLabel
 var _text_pad := 0
+var _spinner: Node3D                     # progress cards: turns while the job runs
+var _scan: Node3D                        # progress cards: a light that sweeps along the track
+var _task_label: Label3D                 # progress cards: "…" grows after the task
+var _task_text := ""
 
 
 # ---------------------------------------------------------------- data helpers (static)
@@ -123,8 +128,7 @@ static func derive(data: Dictionary) -> Dictionary:
 		d["trend_strong"] = numf(d.get("ADX")) >= 25.0
 		d["trend_word"] = "แรง (ADX ≥ 25)" if d["trend_strong"] else "อ่อน (ADX < 25)"
 		d["day_up"] = numf(d.get("change")) >= 0.0
-		d["signal_th"] = {"STRONG BUY": "ซื้อแรง", "BUY": "ซื้อ", "HOLD": "กลางๆ", "NEUTRAL": "กลางๆ", "SELL": "ขาย",
-			"STRONG SELL": "ขายแรง"}.get(str(d.get("signal", "")).to_upper(), str(d.get("signal", "")))
+		d["signal_th"] = signal_th(str(d.get("signal", "")))
 	# trading_fear_greed: value, classification, trend "v0,v1,..." (newest first)
 	if d.has("classification") and d.has("value"):
 		var v := numf(d["value"])
@@ -154,13 +158,32 @@ static func derive(data: Dictionary) -> Dictionary:
 				continue
 			seen[label] = true
 			var ch := numf(row.get("change"))
-			bars.append({"label": label, "value": ch, "text": "%+.1f%%" % ch, "color": "#3DDC97" if ch >= 0.0 else "#FF5A6E"})
+			var bar := {"label": label, "value": ch, "text": "%+.1f%%" % ch, "color": "#3DDC97" if ch >= 0.0 else "#FF5A6E"}
+			if str(d.get("bar_field", "")) == "RSI":           # overbought / oversold scans: the RSI itself
+				var rsi := numf(row.get("RSI"))
+				bar = {"label": label, "value": rsi, "text": "%.0f" % rsi,
+					"color": "#FF9A4C" if rsi >= 70.0 else ("#4FA3FF" if rsi <= 30.0 else "#9AA7B8")}
+			bar["text"] = pct(ch, true) if not str(d.get("bar_field", "")) == "RSI" else bar["text"]
+			bars.append(bar)
 			if bars.size() == 5:
 				break
 		d["movers"] = bars
 		d["best_symbol"] = bars[0]["label"]
 		d["best_change"] = bars[0]["text"]
 		d["up"] = numf(d["items"][0].get("change")) >= 0.0
+		# every row as a tile (market snapshot: S&P500, NASDAQ, DOW, VIX, oil)
+		var tiles := []
+		var ups := 0
+		for row in d["items"].slice(0, 6):
+			var ch := numf(row.get("change"))
+			ups += 1 if ch >= 0.0 else 0
+			var close = num(row.get("close"))
+			tiles.append({"label": str(row.get("symbol", row.get("name", ""))), "value": group(float(close)) if close != null else "–",
+				"sub": pct(ch, true), "good": ch >= 0.0})
+		d["mover_tiles"] = tiles
+		d["ups"] = ups
+		d["downs"] = tiles.size() - ups
+		d["mostly_up"] = ups * 2 >= tiles.size()
 	# trading_crypto_overview (CoinGecko global)
 	if d.has("btc_dominance"):
 		var btc := numf(d["btc_dominance"])
@@ -176,8 +199,138 @@ static func derive(data: Dictionary) -> Dictionary:
 		d["full"] = level >= 95.0
 		d["level01"] = level / 100.0
 		d["charging_th"] = "กำลังชาร์จ ⚡" if bool(d.get("charging", false)) else "ไม่ได้ชาร์จ"
+	_derive_analysis(d)
 	d["currencySymbol"] = CURRENCY.get(str(d.get("currency", "USD")), "")
 	return d
+
+
+## STRONG BUY … STRONG SELL in Thai (the app's TradingView ratings).
+static func signal_th(sig: String) -> String:
+	return {"STRONG BUY": "ซื้อแรง", "BUY": "ซื้อ", "HOLD": "กลางๆ", "NEUTRAL": "กลางๆ", "SELL": "ขาย",
+		"STRONG SELL": "ขายแรง"}.get(sig.strip_edges().to_upper(), sig)
+
+
+## A TradingView rating score (-1 sell … +1 buy) as a colour.
+static func score_color(s: float) -> String:
+	if s >= 0.5: return "#3DDC97"
+	if s >= 0.1: return "#9BE36B"
+	if s > -0.1: return "#9AA7B8"
+	if s > -0.5: return "#FF9A4C"
+	return "#FF4D5E"
+
+
+## true / false for a direction, "" (plain colour on a kpi tile) when there is none.
+static func _good(up: bool, down: bool):
+	return true if up else (false if down else "")
+
+
+## The fields of the analysis tools' scenes: deep analysis (5 dimensions), multi-timeframe, sentiment, SMC.
+static func _derive_analysis(d: Dictionary) -> void:
+	# trading_deep_analysis_suite: deep_score 0-100 = how strong the setup is; LSD trend gives the side
+	if d.has("deep_score"):
+		var s := numf(d["deep_score"])
+		var lsd := str(d.get("lsd_state", "")).to_upper()
+		var side := "up" if lsd == "BULLISH" else ("down" if lsd == "BEARISH" else "flat")
+		var hue: Array = {"up": ["#9BE36B", "#3DDC97"], "down": ["#FF9A7A", "#FF5A6E"], "flat": ["#E6C35C", "#FFD24A"]}[side]
+		d["deep_dir"] = side
+		d["deep_word"] = "แข็งแรง" if s >= 70.0 else ("ปานกลาง" if s >= 40.0 else "อ่อน")
+		d["deep_strong"] = s >= 70.0
+		d["deep_zones"] = [{"to": 40, "color": "#5A6878", "label": "อ่อน"}, {"to": 70, "color": hue[0], "label": ""},
+			{"to": 100, "color": hue[1], "label": "แข็งแรง"}]       # no label at the top: the title is there
+		d["lsd_th"] = {"up": "ขาขึ้น", "down": "ขาลง", "flat": "ไซด์เวย์"}[side]
+		d["lsd_good"] = _good(side == "up", side == "down")
+		var flow := str(d.get("flow_label", "")).to_upper()
+		d["flow_th"] = {"STRONG BUYING PRESSURE": "แรงซื้อหนัก", "STRONG SELLING PRESSURE": "แรงขายหนัก",
+			"BUYING EFFORT": "มีแรงซื้อ", "SELLING EFFORT": "มีแรงขาย"}.get(flow, "สมดุล")
+		d["flow_good"] = _good(flow.contains("BUY"), flow.contains("SELL"))
+		var mom := str(d.get("momentum", "")).to_upper()
+		var mom_up := bool(d.get("momentum_up", true))
+		d["momentum_th"] = {"EXPANSION": "เร่งตัว", "SQUEEZE": "บีบตัว", "REVERSAL": "แผ่วลง"}.get(mom, mom)
+		d["momentum_sub"] = ("AO ชี้ขึ้น" if mom_up else "AO ชี้ลง") + (" · Squeeze!" if bool(d.get("squeeze", false)) else "")
+		d["momentum_good"] = _good(mom == "EXPANSION" and mom_up, mom == "EXPANSION" and not mom_up)
+		var bars := []
+		var hot := []
+		if d.get("fibo") is Array:
+			for f in d["fibo"]:
+				if not f is Dictionary:
+					continue
+				var sc := numf(f.get("score"))
+				var is_hot := bool(f.get("hot", false))
+				bars.append({"label": str(f.get("label", "")), "value": sc, "text": "%d" % roundi(sc),
+					"color": "#FFC247" if is_hot else "#4FA3FF"})
+				if is_hot:
+					hot.append(str(f.get("label", "")))
+		d["fibo_bars"] = bars
+		d["hot_count"] = hot.size()
+		d["fibo_hot"] = ", ".join(hot) if not hot.is_empty() else "ไม่มี"
+		d["deep_say"] = "LSD %s · %s · โมเมนตัม%s" % [d["lsd_th"], d["flow_th"], d["momentum_th"]]
+	# trading_multi_timeframe: timeframes [{tf, signal, rsi, score}]
+	if d.get("timeframes") is Array and not d["timeframes"].is_empty():
+		var bars := []
+		var tiles := []
+		for row in d["timeframes"]:
+			if not row is Dictionary:
+				continue
+			var sc := numf(row.get("score"))
+			var th := signal_th(str(row.get("signal", "")))
+			var rsi = num(row.get("rsi"))
+			bars.append({"label": str(row.get("tf", "")), "value": sc, "text": th, "color": score_color(sc)})
+			tiles.append({"label": str(row.get("tf", "")), "value": th, "sub": "RSI %.0f" % rsi if rsi != null else "RSI –",
+				"good": _good(sc >= 0.1, sc <= -0.1)})
+		d["tf_bars"] = bars
+		d["tf_tiles"] = tiles
+		var buys := int(numf(d.get("buy_count")))
+		var sells := int(numf(d.get("sell_count")))
+		d["align_dir"] = "up" if buys > sells else ("down" if sells > buys else "flat")
+		if buys > sells:
+			d["align_th"] = "ฝั่งซื้อ %d จาก %d ไทม์เฟรม" % [buys, tiles.size()]
+		elif sells > buys:
+			d["align_th"] = "ฝั่งขาย %d จาก %d ไทม์เฟรม" % [sells, tiles.size()]
+		else:
+			d["align_th"] = "สัญญาณยังขัดกัน"
+	# trading_sentiment: sentiment 0-100, pillars [{short, score, weight}], positioning
+	if d.has("sentiment") and d.get("pillars") is Array:
+		var v := numf(d["sentiment"])
+		d["senti_zone"] = "extreme_fear" if v < 25 else ("fear" if v < 45 else ("neutral" if v <= 55 else ("greed" if v <= 75 else "extreme_greed")))
+		d["senti_word"] = {"extreme_fear": "กลัวสุดขีด", "fear": "กลัว", "neutral": "กลางๆ", "greed": "โลภ", "extreme_greed": "โลภสุดขีด"}[d["senti_zone"]]
+		var bars := []
+		for p in d["pillars"]:
+			if p is Dictionary:
+				var sc := numf(p.get("score"))
+				bars.append({"label": str(p.get("short", p.get("name", ""))), "value": sc, "text": "%.0f" % sc,
+					"color": _fg_color(sc).to_html(false)})
+		d["pillar_bars"] = bars
+		d["has_positioning"] = d.get("retail_long") != null
+		d["taker_good"] = _good(numf(d.get("taker_ratio"), 1.0) > 1.02, numf(d.get("taker_ratio"), 1.0) < 0.98)
+		var alert := str(d.get("contrarian", "")).replace("**", "").strip_edges()
+		if alert != "":
+			var cut := alert.find("!")
+			d["contrarian_short"] = alert.substr(0, cut + 1) if cut > 0 and cut < 70 else alert.left(60) + ("…" if alert.length() > 60 else "")
+	# trading_smc_analysis / trading_smc_structure: where the price sits in its structure range
+	if d.has("smc_zone"):
+		var pos := numf(d.get("range_pos"), 50.0)
+		d["pos_gauge"] = clampf(pos, 0.0, 100.0)
+		d["pos_text"] = "%d%%" % roundi(pos)
+		var zone := str(d["smc_zone"]).to_upper()
+		d["zone_th"] = {"PREMIUM": "โซนแพง (Premium)", "DISCOUNT": "โซนถูก (Discount)"}.get(zone, "โซนกลาง")
+		var trend := str(d.get("smc_trend", "")).to_upper()
+		d["trend_th"] = {"BULLISH": "ขาขึ้น", "BEARISH": "ขาลง"}.get(trend, "ไซด์เวย์")
+		d["trend_good"] = _good(trend == "BULLISH", trend == "BEARISH")
+		d["event_th"] = {"BOS_UP": "BOS ขึ้น", "BOS_DOWN": "BOS ลง", "CHOCH_UP": "CHoCH → ขึ้น",
+			"CHOCH_DOWN": "CHoCH → ลง"}.get(str(d.get("smc_event", "")).to_upper(), "ยังไม่มี")
+		var setup := "wait"
+		if trend == "BULLISH" and zone == "DISCOUNT": setup = "long"
+		elif trend == "BEARISH" and zone == "PREMIUM": setup = "short"
+		elif (trend == "BULLISH" and zone == "PREMIUM") or (trend == "BEARISH" and zone == "DISCOUNT"): setup = "caution"
+		d["smc_setup"] = setup
+		d["setup_th"] = {"long": "รอจังหวะ Long ที่ OB / FVG", "short": "รอจังหวะ Short ที่ OB / FVG",
+			"caution": "ระวัง อย่าไล่ราคา", "wait": "รอโครงสร้างชัดก่อน"}[setup]
+		d["fvg_text"] = "▲%d ▼%d" % [int(numf(d.get("bull_fvg"))), int(numf(d.get("bear_fvg")))]
+		d["ob_text"] = "▲%d ▼%d" % [int(numf(d.get("bull_ob"))), int(numf(d.get("bear_ob")))]
+		var eqh = num(d.get("eqh"))
+		var eql = num(d.get("eql"))
+		d["eqh_text"] = group(float(eqh)) if eqh != null else "–"
+		d["eql_text"] = group(float(eql)) if eql != null else "–"
 
 
 static func _fg_color(v: float) -> Color:
@@ -293,7 +446,7 @@ func setup(k: String, p: Dictionary) -> void:
 	else:
 		size = {"weather": Vector2(2.1, 1.5), "balance": Vector2(2.1, 1.6), "pie": Vector2(2.1, 1.45),
 			"bars": Vector2(2.1, 1.45), "kpi": Vector2(2.1, 0.9), "text": Vector2(1.9, 0.8),
-			"gauge": Vector2(2.1, 1.45), "price": Vector2(2.1, 1.45)}.get(k, Vector2(2.0, 1.2))
+			"gauge": Vector2(2.1, 1.52), "price": Vector2(2.1, 1.45), "progress": Vector2(2.1, 0.8)}.get(k, Vector2(2.0, 1.2))
 	add_child(_content)
 	match k:
 		"weather": _build_weather(p)
@@ -303,6 +456,7 @@ func setup(k: String, p: Dictionary) -> void:
 		"kpi": _build_kpi(p)
 		"gauge": _build_gauge(p)
 		"price": _build_price(p)
+		"progress": _build_progress(p)
 		_: _build_text(p)
 	_make_card()
 
@@ -385,6 +539,11 @@ func _dot(x: float, y: float, c: Color, r := 0.035) -> void:
 	m.material_override = _chart_material(c)
 	m.position = Vector3(x, y, 0.04)
 	_content.add_child(m)
+
+
+## A panel's list field: an Array, or empty when the data had none (a "{ref}" to a missing field gives "–").
+static func _list(v) -> Array:
+	return v if v is Array else []
 
 
 func _color(item: Dictionary, i: int) -> Color:
@@ -640,7 +799,7 @@ func _build_balance(p: Dictionary) -> void:
 func _build_pie(p: Dictionary) -> void:
 	var sym: String = p.get("currencySymbol", "$")
 	_title(p)
-	var slices: Array = p.get("slices", [])
+	var slices: Array = _list(p.get("slices"))
 	var total := 0.0
 	for s in slices:
 		total += maxf(0.0, float(_num(s.get("value"), 0.0)))
@@ -727,7 +886,7 @@ func _quad(st: SurfaceTool, n: Vector3, a: Vector3, b: Vector3, c: Vector3, d: V
 func _build_bars(p: Dictionary) -> void:
 	var sym: String = p.get("currencySymbol", "$")
 	_title(p)
-	var bars: Array = p.get("bars", [])
+	var bars: Array = _list(p.get("bars"))
 	if bars.is_empty():
 		return
 	var hi := 0.0
@@ -736,9 +895,10 @@ func _build_bars(p: Dictionary) -> void:
 		var v := float(_num(b.get("value"), 0.0))
 		hi = maxf(hi, v)
 		lo = minf(lo, v)
-	var area := size.y - 0.8
+	var neg_pad := 0.1 if lo < 0.0 else 0.0                 # room for the value under a bar that hangs down
+	var area := size.y - 0.8 - neg_pad
 	var unit := area / maxf(hi - lo, 1e-9)                  # metres per value unit
-	var base := -size.y * 0.5 + 0.28 + (-lo) * unit
+	var base := -size.y * 0.5 + 0.28 + neg_pad + (-lo) * unit
 	var span := size.x - 0.4
 	var slot := span / bars.size()
 	var w := minf(0.32, slot * 0.55)
@@ -788,7 +948,9 @@ func _build_gauge(p: Dictionary) -> void:
 	dial.position = center
 	_content.add_child(dial)
 	var angle := func(v: float) -> float: return -PI * 0.5 + (v - lo) / maxf(hi - lo, 1e-9) * PI
-	var zones: Array = p.get("zones", [{"to": hi, "color": "#4FA3FF"}])
+	var zones: Array = _list(p.get("zones"))
+	if zones.is_empty():
+		zones = [{"to": hi, "color": "#4FA3FF"}]
 	var from := lo
 	for z in zones:
 		var to := numf(z.get("to"), hi)
@@ -823,10 +985,10 @@ func _build_gauge(p: Dictionary) -> void:
 	_on_reveal.append(func():
 		pivot.create_tween().tween_property(pivot, "rotation:z", target, 1.2).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT))
 	var shown := str(p.get("text", "")) if str(p.get("text", "")) != "" else (str(roundi(value)) if absf(hi - lo) > 5.0 else "%.2f" % value)
-	_label(shown, 0.0, center.y - 0.2, 0.16, TEXT, 0, 800, 0.2)
+	_label(shown, 0.0, center.y - 0.19, 0.16, TEXT, 0, 800, 0.2)
 	if str(p.get("label", "")) != "":
 		var lc = p.get("label_color")
-		_label(str(p["label"]), 0.0, center.y - 0.36, 0.09, Color(str(lc)) if lc is String and lc != "" else ACCENT, 0, 700, 0.2)
+		_label(str(p["label"]), 0.0, center.y - 0.345, 0.09, Color(str(lc)) if lc is String and lc != "" else ACCENT, 0, 700, 0.2)
 	_label(str(p.get("min_text", _short(lo))), -0.6, center.y - 0.07, 0.06, DIM, 0, 500, 0.16)
 	_label(str(p.get("max_text", _short(hi))), 0.6, center.y - 0.07, 0.06, DIM, 0, 500, 0.16)
 
@@ -894,7 +1056,7 @@ func _build_price(p: Dictionary) -> void:
 # ---------------------------------------------------------------- kpi grid
 
 func _build_kpi(p: Dictionary) -> void:
-	var items: Array = p.get("items", [])
+	var items: Array = _list(p.get("items"))
 	var cols := int(p.get("columns", mini(3, maxi(1, items.size()))))
 	var rows := int(ceil(items.size() / float(maxi(cols, 1))))
 	var has_title: bool = str(p.get("title", "")) != ""
@@ -907,14 +1069,55 @@ func _build_kpi(p: Dictionary) -> void:
 		var cx := -size.x * 0.5 + 0.1 + cw * (i % cols + 0.5)
 		var cy := top - 0.24 - 0.36 * floorf(i / float(cols))
 		_chip(cx, cy - 0.02, cw - 0.05, 0.32)
-		_label(str(it.get("label", "")), cx, cy + 0.08, 0.065, DIM, 0, 500, 0.03)
+		_label(str(it.get("label", "")), cx, cy + 0.085, 0.07, DIM, 0, 500, 0.03)
 		var good = it.get("good")                   # true / false (or "true" / "false" text), null = plain
 		var vc := TEXT
 		if good != null and str(good) != "":
 			vc = GOOD if str(good).to_lower() in ["true", "1", "yes"] else BAD
 		_label(str(it.get("value", "")), cx, cy - 0.04, 0.11, vc, 0, 700, 0.03)
 		if str(it.get("sub", "")) != "":
-			_label(str(it["sub"]), cx, cy - 0.13, 0.055, DIM, 0, 500, 0.03)
+			_label(str(it["sub"]), cx, cy - 0.13, 0.062, DIM, 0, 500, 0.03)
+
+
+# ---------------------------------------------------------------- progress (a tool at work)
+
+## A job under way: a spinner, what is being done (`task`) and on what (`detail`), a light sweeping a track.
+func _build_progress(p: Dictionary) -> void:
+	_spinner = Node3D.new()
+	_spinner.position = Vector3(-size.x * 0.5 + 0.27, 0.05, 0.1)
+	_content.add_child(_spinner)
+	var arc := MeshInstance3D.new()
+	arc.mesh = _donut_slice(0.12, 0.165, 0.05, 0.0, TAU * 0.72)
+	arc.material_override = _chart_material(ACCENT)
+	_spinner.add_child(arc)
+	var tip := MeshInstance3D.new()
+	var ts := SphereMesh.new()
+	ts.radius = 0.034
+	ts.height = 0.068
+	tip.mesh = ts
+	tip.material_override = _chart_material(Color(0.95, 0.98, 1.0))
+	tip.position = Vector3(sin(TAU * 0.72) * 0.1425, cos(TAU * 0.72) * 0.1425, 0.02)
+	_spinner.add_child(tip)
+	var left := -size.x * 0.5 + 0.5
+	_task_text = str(p.get("task", p.get("title", "")))
+	_task_label = _label(_task_text, left, 0.13, 0.15, TEXT, -1, 700)
+	if str(p.get("detail", "")) != "":
+		_label(str(p["detail"]), left, -0.07, 0.105, ACCENT, -1, 600)
+	var y := -size.y * 0.5 + 0.13
+	var track := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(size.x - 0.3, 0.018, 0.01)
+	track.mesh = tb
+	track.material_override = _chart_material(Color(0.25, 0.42, 0.55))
+	track.position = Vector3(0, y, 0.05)
+	_content.add_child(track)
+	_scan = MeshInstance3D.new()
+	var sb := BoxMesh.new()
+	sb.size = Vector3(0.42, 0.03, 0.02)
+	(_scan as MeshInstance3D).mesh = sb
+	(_scan as MeshInstance3D).material_override = _chart_material(ACCENT)
+	_scan.position = Vector3(0, y, 0.07)
+	_content.add_child(_scan)
 
 
 # ---------------------------------------------------------------- markdown text
@@ -972,6 +1175,9 @@ func open(dur := 0.5) -> void:
 		_mat.set_shader_parameter("size", size)
 		_mat.set_shader_parameter("content", _text_view.get_texture())
 		_mat.set_shader_parameter("has_content", true)
+		if str(params.get("anchor", "")) == "bottom":      # "pos" is the bottom edge: a long text grows upwards
+			position.y = _home.y + size.y * 0.5
+			_home = position
 	_content.scale = Vector3(1.0, 0.001, 1.0)
 	var t := create_tween()
 	t.tween_method(func(v: float): _mat.set_shader_parameter("reveal", v), 0.0, 1.0, dur).set_trans(Tween.TRANS_SINE)
@@ -992,6 +1198,14 @@ func _process(delta: float) -> void:
 	_t += delta
 	if _opened:
 		position.y = _home.y + sin(_t * 1.3) * 0.015            # a gentle float
+	if _spinner:
+		_spinner.rotation.z -= delta * 5.5
+		var span := size.x - 0.3 - 0.42
+		_scan.position.x = -span * 0.5 + span * (0.5 - 0.5 * cos(_t * 2.2))   # sweeps there and back
+		var dots: String = ["", ".", "..", "..."][int(_t * 2.5) % 4]
+		if _task_label.text != _task_text + dots:
+			_task_label.text = _task_text + dots
+			_place_label(_task_label, -size.x * 0.5 + 0.5, -1)       # keep its left edge put
 	if _icon == null:
 		return
 	var sun := _icon.get_node_or_null("Sun")

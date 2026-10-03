@@ -23,10 +23,18 @@ class PendingAnswerQueue(
         val result: String?,
         val addedAtMs: Long,
         /** ส่งไปแล้วกี่ครั้ง — รายงานที่ถูกคำถามใหม่กลืนจะถูกส่งซ้ำ */
-        val attempts: Int = 0
+        val attempts: Int = 0,
+        /** the tool call it came from (Avatar mode's task list: one pill per job, from running to told) */
+        val key: String? = null
     )
 
+    /** One thing in the queue as Avatar mode's task list shows it; [telling] = handed to the AI, being told now. */
+    data class View(val toolName: String?, val question: String, val telling: Boolean, val addedAtMs: Long, val key: String? = null)
+
     private val items = ArrayDeque<Item>()
+
+    /** What waits to be told, oldest first. */
+    fun snapshot(): List<Item> = items.toList()
 
     val size: Int get() = items.size
     fun isEmpty(): Boolean = items.isEmpty()
@@ -40,13 +48,13 @@ class PendingAnswerQueue(
     }
 
     /** tool ที่ server ยกเลิกเพราะผู้ใช้ถามเรื่องอื่นต่อ — รันจนเสร็จแล้ว เก็บผลไว้ตอบทีหลัง */
-    fun addToolResult(question: String, toolName: String, result: String, nowMs: Long) {
+    fun addToolResult(question: String, toolName: String, result: String, nowMs: Long, key: String? = null) {
         val q = question.trim()
         // ผลเก่าของเรื่องเดียวกัน (tool + หัวผลเดียวกัน) ถูกแทนด้วยผลใหม่; ข้อ "ยังไม่ได้ตอบ" ของประโยคเดียวกันถูกแทนด้วยผลจริง
         // (ไม่ลบผลของ tool อื่นที่บังเอิญติดประโยคเดียวกัน — ถามรัว ประโยคล่าสุดอาจไม่ใช่ของ call นี้; ไม่ลบผลของ
         // tool เดียวกันคนละเรื่อง — ราคาทองกับราคา Bitcoin)
         items.removeAll { sameResult(it, toolName, result) || (it.toolName == null && same(it.question, q)) }
-        push(Item(q.ifBlank { "(คำถามก่อนหน้า)" }, toolName, result, nowMs))
+        push(Item(q.ifBlank { "(คำถามก่อนหน้า)" }, toolName, result, nowMs, key = key))
     }
 
     /**
@@ -108,7 +116,10 @@ class PendingAnswerQueue(
      * เทิร์นเพิ่งจบ — เก็บสิ่งที่ผู้ใช้ยังไม่ได้ยินเข้าคิว คืนจำนวนที่เข้าคิว
      * - ถูกตัดก่อน AI ได้พูดและก่อนเรียก tool → คำถามเข้าคิว (ให้โมเดลเรียก tool ใหม่เอง)
      * - tool ส่งผลถึงโมเดลแล้ว แต่ถูกตัดก่อน AI ได้พูด → ผลเข้าคิว (logcat 2026-09-24 01:34, 01:36)
-     * AI พูดไปแล้วบางส่วน = ผู้ใช้ได้ยินแล้ว ไม่ตอบซ้ำ
+     * - คำตอบจากผล tool ที่ผู้ใช้ได้ยินไม่ถึง [LiveProtocol.REPORT_HEARD_MIN_MS] ([heardMs] = ได้ยินไปกี่ ms ก่อนถูกตัด) → ผลเข้าคิว
+     *   เหมือนรายงานที่ถูกตัดเร็ว: งานเร็วของลูกน้องตอบในเทิร์นของมันเองแล้ว (LiveToolBridge QUICK_ANSWER_MS, 2026-10-03)
+     *   — เดิมเป็นรายงานจากคิว ถูกพูดทับใน 3 วิแรกก็เล่าใหม่
+     * AI พูดไปแล้วนานพอ (หรือไม่รู้ว่าได้ยินนานเท่าไร) = ผู้ใช้ได้ยินแล้ว ไม่ตอบซ้ำ
      */
     fun onTurnEnded(
         userText: String?,
@@ -116,10 +127,12 @@ class PendingAnswerQueue(
         modelSpoke: Boolean,
         toolCalls: Int,
         sentResults: List<Triple<String, String, String>>,
-        nowMs: Long
+        nowMs: Long,
+        heardMs: Long? = null
     ): Int {
-        if (!interrupted || modelSpoke) return 0
-        if (toolCalls == 0 && !userText.isNullOrBlank()) return if (addUnanswered(userText, nowMs)) 1 else 0
+        if (!interrupted) return 0
+        if (toolCalls == 0 && !userText.isNullOrBlank()) return if (!modelSpoke && addUnanswered(userText, nowMs)) 1 else 0
+        if (modelSpoke && (heardMs == null || heardMs >= LiveProtocol.REPORT_HEARD_MIN_MS)) return 0
         // ผลเปลี่ยนหน้า/โหมดไม่ใช่คำถาม (logcat 2026-10-02 11:42:14: เข้าคิวเป็นคำถาม → แอปถามซ้ำ → AI รัน BTC ครั้งที่ 3)
         val reports = sentResults.filter { it.second !in LiveProtocol.UI_ONLY_TOOLS }
         reports.forEach { (question, tool, result) -> addToolResult(question, tool, result, nowMs) }

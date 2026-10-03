@@ -1,0 +1,24 @@
+{
+  "id": "pondering",
+  "title": "กำลังคิด",
+  "mood": "thoughtful",
+  "tags": ["thinking", "live", "activity", "waiting"],
+  "description": "ผู้ใช้พูดจบ AI กำลังคิดคำตอบ: หุ่นมองขึ้นข้างบนสลับซ้ายขวา เอียงหัว ลูกแสงสามดวงไล่กันรอบหัวแบบวงโหลด วนจนแอปสั่งหยุด (AI เริ่มพูด หรือเริ่มเรียก tool)",
+  "duration": 4.4,
+  "loop": 0.6,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "normal"},
+    {"t": 0.0, "do": "effect", "name": "think"},
+    {"t": 0.0, "do": "move", "to": [0, 0, 0], "dur": 0.5},
+    {"t": 0.05, "do": "eyes", "name": "normal"},
+    {"t": 0.1, "do": "look", "x": 0.55, "y": 0.7},
+    {"t": 0.15, "do": "tilt_head", "deg": 12, "dur": 0.4},
+
+    {"t": 0.6, "do": "lean", "deg": -4, "dur": 1.2},
+    {"t": 2.2, "do": "look", "x": -0.5, "y": 0.65},
+    {"t": 2.25, "do": "tilt_head", "deg": -10, "dur": 0.5},
+    {"t": 2.3, "do": "lean", "deg": 4, "dur": 1.2},
+    {"t": 3.9, "do": "look", "x": 0.55, "y": 0.7},
+    {"t": 3.95, "do": "tilt_head", "deg": 12, "dur": 0.5}
+  ]
+}

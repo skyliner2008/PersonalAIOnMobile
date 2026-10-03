@@ -1,0 +1,44 @@
+{
+  "id": "sentiment_report",
+  "title": "ความเชื่อมั่นตลาด",
+  "mood": "analytical",
+  "needs": "sentiment",
+  "tags": ["sentiment", "positioning", "contrarian", "pillars", "info", "trading_sentiment"],
+  "description": "ผลของ trading_sentiment: หน้าปัดดัชนีความเชื่อมั่น 0–100 ห้าโซน → กราฟแท่ง 4 เสาหลัก (ข่าว / ตลาดรวม / อนุพันธ์ / เทคนิค) → สัดส่วน Long ของรายย่อยกับรายใหญ่และ Taker Buy/Sell พร้อมเตือน Contrarian",
+  "duration": 13.0,
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "ความเชื่อมั่น {symbol}", "dur": 1.1},
+    {"t": 0.0, "do": "background", "name": "space"},
+    {"t": 0.0, "do": "emotion", "name": "talk"},
+    {"t": 0.2, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.6, "do": "present", "side": "R"},
+    {"t": 1.0, "do": "panel", "id": "main", "type": "gauge", "at": "top", "beam": "R",
+      "title": "ดัชนีความเชื่อมั่น · {symbol}", "subtitle": "4 เสาหลัก", "value": "{sentiment}", "min": 0, "max": 100,
+      "text": "{sentiment:1}", "label": "{senti_word} · {sentiment_label}",
+      "zones": [
+        {"to": 25, "color": "#FF4D5E", "label": "กลัวสุด"},
+        {"to": 45, "color": "#FF9A4C", "label": "กลัว"},
+        {"to": 55, "color": "#FFD24A", "label": ""},
+        {"to": 75, "color": "#9BE36B", "label": "โลภ"},
+        {"to": 100, "color": "#3DDC97", "label": "โลภสุด"}
+      ]},
+    {"t": 2.4, "do": "say", "text": "ความเชื่อมั่น {sentiment:0}/100 — {senti_word}", "dur": 2.0},
+    {"t": 3.6, "do": "emote", "kind": "sweat", "count": 2, "if": "senti_zone in [extreme_fear, fear]"},
+    {"t": 3.6, "do": "emote", "kind": "star", "count": 3, "if": "senti_zone in [greed, extreme_greed]"},
+    {"t": 3.6, "do": "tilt_head", "deg": 10, "dur": 0.3, "if": "senti_zone == neutral"},
+
+    {"t": 4.8, "do": "tilt_head", "deg": 0, "dur": 0.3},
+    {"t": 4.8, "do": "panel", "id": "main", "type": "bars", "at": "top", "beam": "R", "money": false,
+      "title": "4 เสาหลัก", "subtitle": "คะแนน 0–100", "bars": "{pillar_bars}"},
+    {"t": 8.2, "do": "panel", "id": "main", "type": "kpi", "at": "top", "beam": "R", "columns": 3,
+      "title": "สัดส่วนสัญญาอนุพันธ์", "if": "has_positioning", "items": [
+        {"label": "รายย่อย Long", "value": "{retail_long:1}%", "sub": "บัญชีรายย่อย"},
+        {"label": "รายใหญ่ Long", "value": "{top_long:1}%", "sub": "Top traders"},
+        {"label": "Taker Buy/Sell", "value": "{taker_ratio:2}", "sub": "> 1 ซื้อมากกว่า", "good": "{taker_good}"}
+      ]},
+    {"t": 9.0, "do": "say", "text": "{contrarian_short}", "dur": 2.6, "if": "contrarian_short"},
+    {"t": 9.0, "do": "emote", "kind": "exclaim", "count": 1, "if": "contrarian_short"},
+    {"t": 11.4, "do": "hold"},
+    {"t": 12.1, "do": "present", "side": "R", "on": false}
+  ]
+}

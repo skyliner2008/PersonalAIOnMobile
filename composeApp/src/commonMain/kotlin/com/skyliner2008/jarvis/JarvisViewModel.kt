@@ -684,6 +684,9 @@ class JarvisViewModel(
     private val _isUserSpeaking = MutableStateFlow(false)
     val isUserSpeaking: StateFlow<Boolean> = _isUserSpeaking.asStateFlow()
 
+    /** The user talking to the AI, held over pauses (VoiceController's UserVoiceDetector). */
+    val userVoice: StateFlow<Boolean> get() = voice.userVoice
+
     private val _isAiVisionRequested = MutableStateFlow(false)
     val isAiVisionRequested: StateFlow<Boolean> = _isAiVisionRequested.asStateFlow()
 

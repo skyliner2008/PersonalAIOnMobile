@@ -184,10 +184,138 @@ func _initialize() -> void:
 	await _wait(0.1)
 	_check(is_zero_approx(pet.sway), "tilt: lying flat, no lean")
 	Input.set_gravity(Vector3.ZERO)
+	# between answers: looping scenes that play until the app stops them (listening / pondering / working)
+	app.handle({"t": "scene", "id": "listening"})
+	app.handle({"t": "hear", "level": 0.5})
+	await _wait(0.2)
+	_check(director._heard_level() > 0.4 and director._activity.size() == 1, "listening: the voice meter hears the user")
+	await _wait(6.2)                                   # longer than the scene (5.6 s)
+	_check(director.playing == "listening" and director.elapsed() > 6.0, "listening loops past its length")
+	app.handle({"t": "stop", "id": "listening"})
+	_check(director.playing == "" and director._activity.is_empty(), "stop ends listening, its waves go")
+	await _wait(0.3)
+	app.handle({"t": "scene", "id": "working", "data": {"tool": "trading_deep_analysis_suite", "args": {"symbol": "BTCUSDT", "interval": "1h"}}})
+	await _wait(1.0)
+	_check(director._data.get("task", "") == "กำลังวิเคราะห์ 5 มิติ" and director._data.get("detail", "") == "BTCUSDT · 1h",
+		"working: the task and the call's detail")
+	_check(director._panels.has("task") and director._panels["task"].kind == "progress", "working: the progress card is up")
+	var before: float = director.elapsed()
+	app.handle({"t": "scene", "id": "working", "data": {"tool": "trading_price", "args": {"symbol": "XAUUSD=X"}}})
+	await _wait(0.2)
+	_check(director._data.get("task", "") == "กำลังดึงราคา" and director.elapsed() > before,
+		"working: the next tool updates the card without starting over")
+	app.handle({"t": "tool", "tool": "trading_price", "result": price_row})   # the result's scene takes over
+	await _wait(0.1)
+	_check(director.playing == "price_report" and director._activity.is_empty(), "a tool's scene replaces the working card")
+	director.stop()
+	# the jobs the user still waits to hear about: a pill each, labelled with the question (or the tool's task)
+	app.handle({"t": "tasks", "items": [
+		{"id": "fc_1", "tool": "trading_deep_analysis_suite", "args": {"symbol": "BTCUSDT"}, "question": "วิเคราะห์ BTC 5 มิติ", "state": "running"},
+		{"id": "fc_3", "tool": "trading_sentiment", "args": {"symbol": "BTC"}, "question": "", "state": "ready"}]})
+	_check(app.tasks.count() == 2, "tasks: a pill per job")
+	_check(app.tasks.label_for({"tool": "trading_sentiment", "args": {"symbol": "BTC"}, "question": ""}) == "วัดความเชื่อมั่น BTC",
+		"tasks: without a question the pill names the tool's task")
+	app.handle({"t": "tasks", "items": [
+		{"id": "fc_1", "tool": "trading_deep_analysis_suite", "args": {}, "question": "วิเคราะห์ BTC 5 มิติ", "state": "telling"}]})
+	_check(app.tasks.count() == 1 and app.tasks._pills["fc_1"]["state"] == "telling", "tasks: a job told now, the other gone")
+	app.handle({"t": "tasks", "items": []})
+	_check(app.tasks.count() == 0, "tasks: an empty list clears them")
+	# a tool that answered with text (an empty scan) goes on the card, not on its chart
+	_check(director.play_tool("trading_bollinger_scan", "No data.") == "answer_card", "text from a chart tool goes on the card")
+	director.stop()
+	# every info scene plays its saved / real-shaped data without errors up to its hold
+	for tool in ["trading_deep_analysis_suite", "trading_multi_timeframe", "trading_sentiment", "trading_smc_analysis", "trading_market_snapshot"]:
+		var sample = JSON.parse_string(FileAccess.get_file_as_string("res://data_samples/%s.json" % tool))
+		_check(sample is Dictionary or sample is Array, "%s sample loaded" % tool)
+		director.play_tool(tool, sample)
+		await _wait(0.1)
+		_check(director.playing == director.scene_for_tool(tool), "%s plays %s" % [tool, director.playing])
+		director.stop()
+	await _wait(0.8)
+	await _self_care(director, pet, app)
 	app.queue_free()
 
 	print("RESULT ", "ok" if _fails == 0 else "%d failed" % _fails)
 	quit(1 if _fails else 0)
+
+
+## The robot's own life in the quiet (the app's PetSelfCare): a snack bite by bite, a bath, a ball; then drowsy,
+## asleep under shut eyelids, a tap anywhere, and up again from where it lay.
+func _self_care(director: Node, pet: Node3D, app: Node) -> void:
+	app.handle({"t": "state", "emotion": "normal", "items": []})      # the look each scene comes back to
+	var care = load("res://scripts/care_fx.gd")
+	for food in ["donut", "burger", "pizza", "cake", "ice_cream", "popcorn", "coffee"]:
+		var made: Array = care._food(food)
+		_check((made[0] as Node3D).get_child_count() >= 3, "snack %s builds" % food)
+		(made[0] as Node3D).free()
+	director.play("eat", {"item": "pizza"})
+	await _wait(2.0)
+	_check(director._props.size() == 1 and pet.mouth_override >= 0.0, "eat: the snack is up, the mouth is the snack's")
+	await _wait(3.4)
+	_check(pet.mouth_override < 0.0 and not is_instance_valid(director._props[0]), "eat: three bites, gone, the mouth free again")
+	director.stop()
+	director.play("eat")
+	await _wait(2.6)
+	director.stop()
+	_check(pet.mouth_override < 0.0, "eat cut short: the mouth is free")
+	director.play("bath")
+	await _wait(1.5)
+	_check(director._props.size() == 2, "bath: a shower and foam")
+	director.stop()
+	await _wait(0.1)
+	_check(director._props.is_empty(), "bath cut short: the shower and the foam go")
+	director.play("play_ball")
+	await _wait(1.2)
+	var ball: Node3D = director._props[0]
+	var top: float = ball.global_position.y
+	await _wait(2.0)
+	_check(is_instance_valid(ball) and ball.global_position.y < top, "play_ball: the ball came down on the head")
+	await _wait(7.5)
+	_check(director.playing == "" and not is_instance_valid(ball), "play_ball finished, the ball is gone")
+	await _wait(1.0)
+	_home(pet, "after playing ball")
+	# drowsy, then asleep from where it nodded off, then up from where it lay
+	director.play("drowsy")
+	await _wait(3.0)
+	_check(pet._head_nod > 10.0 and pet.blink_override > 0.6, "drowsy: the head drops, the eyes close")
+	await _wait(5.0)
+	_check(director.playing == "drowsy" and director.elapsed() > 7.5, "drowsy loops past its length")
+	director.play("sleep")
+	_check(pet.blink_override > 0.3 and pet._head_nod > 3.0, "sleep: picks up the nodding-off pose (no jump home)")
+	await _wait(3.4)
+	_check(absf(pet.body_roll - deg_to_rad(76.0)) < 0.1 and pet.blink_override > 0.95, "sleep: lying down, eyes shut")
+	await _wait(7.0)
+	_check(director.playing == "sleep" and director.elapsed() > 10.0, "sleep loops until something wakes it")
+	app.handle({"t": "eyelids", "open": 0.0, "secs": 0.3})
+	await _wait(0.4)
+	_check(app.eyelids.open_amount() < 0.01 and app.eyelids._rect.visible, "eyelids: shut")
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	down.position = Vector2(5, 5)
+	app.input(down)
+	var up := InputEventScreenTouch.new()
+	up.position = Vector2(5, 5)
+	app.input(up)
+	_check(app.last_event.size() == 2 and app.last_event[0] == "touch" and app.last_event[1].get("zone", "") == "screen",
+		"eyelids shut: a tap in a corner is a tap (it wakes the robot)")
+	app.handle({"t": "eyelids", "open": 1.0, "secs": 0.4})
+	director.play("wake_up")
+	await _wait(0.1)
+	_check(absf(pet.body_roll) > 0.5 and pet.blink_override > 0.9, "wake_up: from where it lay, eyes still shut")
+	await _wait(0.5)
+	_check(app.eyelids.open_amount() > 0.99 and not app.eyelids._rect.visible, "eyelids: open again")
+	await _wait(5.0)
+	_check(director.playing == "" and pet.blink_override < 0.0, "wake_up finished, blinking on its own")
+	await _wait(1.0)
+	_home(pet, "after waking up")
+	app.handle({"t": "eyelids", "drowsy": 6.0})
+	var lowest := 1.0
+	for k in 30:
+		await _wait(0.2)
+		lowest = minf(lowest, app.eyelids.open_amount())
+	_check(lowest < 0.1 and app.eyelids.open_amount() < 0.5, "eyelids drowsy: heavy blinks, ending nearly shut")
+	app.handle({"t": "eyelids", "open": 1.0, "secs": 0.0})
+	_check(not app.eyelids._rect.visible, "eyelids: open at once")
 
 
 func _home(pet: Node3D, when: String) -> void:

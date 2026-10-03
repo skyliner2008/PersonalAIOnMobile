@@ -1,0 +1,26 @@
+{
+  "id": "sleep",
+  "title": "นอนหลับ",
+  "mood": "asleep",
+  "tags": ["sleep", "asleep", "night", "self_care"],
+  "description": "หลับไปแล้ว ฟ้ามืด ตาปิดสนิท ค่อยๆ เอนนอนตะแคงกลางอากาศ หายใจเข้าออกช้าๆ Zzz ลอยขึ้น ฟองน้ำมูกพองยุบ วนไปจนกว่าจะมีคนปลุก",
+  "duration": 9.0,
+  "loop": 3.0,
+  "max_loop": 0,
+  "keep_pose": true,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "sleepy"},
+    {"t": 0.0, "do": "blink", "shut": 1.0, "dur": 0.8},
+    {"t": 0.3, "do": "background", "name": "night"},
+    {"t": 0.4, "do": "head_nod", "deg": 6, "dur": 1.2},
+    {"t": 0.5, "do": "pitch", "deg": 0, "dur": 1.2, "ease": "sine"},
+    {"t": 0.6, "do": "move", "to": [0.0, -0.32, 0.0], "dur": 2.2, "ease": "sine"},
+    {"t": 0.8, "do": "roll", "deg": 76, "dur": 2.2, "ease": "sine"},
+    {"t": 1.0, "do": "tilt_head", "deg": 0, "dur": 0.8},
+    {"t": 3.0, "do": "emote", "kind": "zzz", "count": 3, "dur": 2.4, "rise": 0.5},
+    {"t": 3.6, "do": "effect", "name": "snot_bubble", "dur": 3.0},
+    {"t": 4.5, "do": "squash", "amount": -0.04},
+    {"t": 6.0, "do": "emote", "kind": "zzz", "count": 3, "dur": 2.4, "rise": 0.5},
+    {"t": 7.2, "do": "squash", "amount": -0.04}
+  ]
+}

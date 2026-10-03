@@ -82,6 +82,8 @@ object RobotSoundEngine {
                 val samples = waveformCache.getOrPut(type) {
                     generateWaveform(type)
                 }
+                // the mic will hear it: not the user talking (UserVoiceDetector)
+                com.skyliner2008.jarvis.sound.RobotSoundPlayer.notePlaying(samples.size * 1000L / SAMPLE_RATE, System.currentTimeMillis())
                 playPcmStatic(samples)
             } catch (e: Exception) {
                 logError(TAG, "Error playing sound $type: ${e.message}")

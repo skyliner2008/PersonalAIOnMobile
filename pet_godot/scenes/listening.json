@@ -1,0 +1,23 @@
+{
+  "id": "listening",
+  "title": "กำลังฟัง",
+  "mood": "attentive",
+  "tags": ["listening", "live", "activity", "voice"],
+  "description": "ระหว่างผู้ใช้พูดกับ AI ในโหมดอวตาร: หุ่นขยับเข้ามาใกล้ ตาโตเอียงหัวตั้งใจฟัง คลื่นเสียงออกจากสองข้างหัว แถบวัดเสียงใต้ตัวขยับตามเสียงผู้ใช้ (คำสั่ง hear จากแอป) พยักหน้าเป็นระยะ วนจนแอปสั่งหยุด",
+  "duration": 5.6,
+  "loop": 1.0,
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "normal"},
+    {"t": 0.0, "do": "look", "x": 0, "y": 0},
+    {"t": 0.0, "do": "effect", "name": "listen"},
+    {"t": 0.0, "do": "move", "to": [0, 0.05, 0.7], "dur": 0.6, "ease": "back"},
+    {"t": 0.05, "do": "eyes", "name": "surprised", "dur": 0.5},
+    {"t": 0.3, "do": "tilt_head", "deg": 10, "dur": 0.4},
+
+    {"t": 1.0, "do": "lean", "deg": 4, "dur": 1.4},
+    {"t": 2.2, "do": "tilt_head", "deg": 5, "dur": 0.8},
+    {"t": 3.0, "do": "fidget", "name": "nod"},
+    {"t": 3.6, "do": "lean", "deg": -3, "dur": 1.4},
+    {"t": 4.6, "do": "tilt_head", "deg": 11, "dur": 0.7}
+  ]
+}

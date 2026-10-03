@@ -24,15 +24,44 @@ The app plays them with **`director.play_tool(tool_name, result)`**:
 | `trading_fundamental_analysis` | `stock_balance` | balance-sheet columns → capital-structure donut → revenue/income/FCF bars → summary |
 | `trading_price` | `price_report` | big price, day move in green/red, previous close, 52-week range marker |
 | `trading_technical_analysis` | `technical_report` | rating dial (strong sell…strong buy) → RSI dial with 30/70 zones → MACD/ADX/ATR/RSI/BB/close tiles |
-| `trading_top_gainers` / `trading_top_losers` | `market_movers` | bars of the top coins by % change (one per coin, USDT pairs) |
+| `trading_deep_analysis_suite` | `deep_analysis_report` | score dial 0–100 coloured by the LSD trend's side → LSD trend / orderflow / momentum / Fibo hot zone tiles → Fibonacci strength bars (gold = hot) |
+| `trading_multi_timeframe` | `mtf_report` | a bar per timeframe (−1 sell … +1 buy) → signal + RSI tiles; a hop when most timeframes buy |
+| `trading_sentiment` | `sentiment_report` | sentiment dial 0–100 (five zones) → the 4 pillars as bars → retail / top-trader long % and taker buy/sell, a contrarian warning |
+| `trading_smc_analysis` / `trading_smc_structure` | `smc_report` | where the price sits in its structure range (discount ≤ 25 %, premium ≥ 75 %, the range's low/high at the dial's ends) → trend, BOS/CHoCH, premium / equilibrium / discount, FVG / OB → the nearest liquidity above and below |
+| `trading_market_snapshot` | `market_snapshot_report` | S&P500 / NASDAQ / DOW / VIX / oil tiles with today's % → % bars |
+| `trading_top_gainers` / `trading_top_losers`, the scans `trading_overbought_scan` / `trading_oversold_scan` / `trading_volume_breakout` / `trading_bollinger_scan` | `market_movers` | bars of the top 5 coins by % change (RSI for the RSI scans; one per coin, USDT pairs); a reaction per list (`react`) |
 | `trading_fear_greed` | `fear_greed_report` | 0–100 dial with five zones + the last 7 days |
 | `trading_crypto_overview` | `crypto_overview` | market cap / 24 h change / volume / coins tiles → BTC/ETH/others dominance donut |
 | `device_battery_status` | `battery_report` | battery dial + battery gauge over the head; charging / low / full reactions |
-| `trading_news`, `search_web`, `summarize_text`, `translate_text`, `calculate`, `convert_units`, any other | `answer_card` | the tool's text as a markdown card |
+| `trading_news`, `trading_macro_calendar`, `trading_strategy_signal`, `trading_smc_flow` (a short `{title, markdown}` the tool makes for the card), `search_web`, `calculate`, the other analyses, any other | `answer_card` | the tool's text as a markdown card (the app shortens it: `avatar/AvatarCards.kt`) |
+
+A tool that answers with text instead of its data (an empty scan, an error) gets the text card, whatever
+its own scene is.
+
+**Between answers** (Avatar mode, the app's `avatar/AvatarActivity.kt`): looping scenes that play until the
+app stops them or a tool's scene takes over.
+
+| Scene | When | Shows |
+|---|---|---|
+| `listening` | the user talks to the AI | leans in, sound waves leave both sides of the head, a voice meter under the pet follows the user's voice (`hear`) |
+| `pondering` | the user has finished, the AI hasn't answered yet | looks up from side to side, three lights chase each other round a ring over the head |
+| `working` | a tool runs (and until the AI talks about its result) | steps to the presenting spot and holds up a progress card: spinner, the tool's `task` ("กำลังวิเคราะห์ 5 มิติ"), the call's `detail` ("BTCUSDT · 1h"), a scanning light; data `{tool, args}` |
+
+**The robot's own life** (Avatar mode, the app's `pet/PetSelfCare.kt`): when nobody talks to it or touches it.
+
+| Scene | When | Shows |
+|---|---|---|
+| `eat` | 30 s of quiet, hungry | "หิวจัง…", a snack pops up in front of the face and is eaten in three bites (the mouth snaps, crumbs fly); data `{item}`: `donut` (default) `burger` `pizza` `cake` `ice_cream` `popcorn` |
+| `bath` | 30 s of quiet, dirty | a shower head pours water on it, soap foam on the head, bubbles rising, a spin, then it shakes itself dry (splash) and sparkles |
+| `play_ball` | 30 s of quiet (or `idle_play`) | a beach ball bounced on the head, the last header goes at the lens: bonk, the screen shakes, a laugh |
+| `drowsy` | 60 s of quiet, until it sleeps or wakes (`max_loop` 0) | nodding off: the head drops, the eyes close, it jerks awake and droops again |
+| `sleep` | 120 s of quiet (`keep_pose`, `max_loop` 0) | lies down on its side, eyes shut, night, Zzz and a snot bubble — under the app's shut eyelids |
+| `wake_up` | woken by the user's voice or a touch (`keep_pose`) | gets up from where it lay, opens its eyes, morning, stretches: "ตื่นแล้วฮับ!" |
 
 When a scene ends, the director brings the pet home: back to the centre, facing the camera, with its
 previous outfit, emotion `normal` and a suit colour that follows emotion again. A scene doesn't need
-to clean up after itself.
+to clean up after itself. A scene with `"keep_pose": true` starts from wherever the last one left the pet
+instead (it gets up from where it lay); between the two the app's look is not put back.
 
 ## File
 
@@ -46,12 +75,16 @@ The comments below are only notes; real scene files are plain JSON.
   "tags": ["angry", "poked", "tsundere"],// what situations it fits (for choosing)
   "description": "…",                    // one or two sentences in plain words (for choosing)
   "duration": 10.0,                      // seconds; the scene stops here
+  "loop": 1.0,                           // optional: at the end, go back to this time (until stopped, at most 120 s)
+  "max_loop": 0,                         // optional: seconds a looping scene goes on by itself (0 = until stopped)
+  "keep_pose": true,                     // optional: start where the last scene left the pet, not at home
   "beats": [ {"t": 0.0, "do": "caption", "text": "…", "dur": 3.0}, … ]
 }
 ```
 
 Each beat runs once, when the scene clock passes `t` (seconds). Beats with the same `t` start
-together. Most beats take `dur` (seconds, default 0.6) and some take `ease`.
+together. Most beats take `dur` (seconds, default 0.6) and some take `ease`. In a looping scene the beats
+from `loop` on run again every round (the intro before it once).
 
 ## Stage
 
@@ -91,6 +124,8 @@ Keep captions short (up to about 25 Thai characters). A caption at `t` 0 sets up
 | `eyes` | `name`, `dur` (0 = until the next emotion) | eyes only: every emotion's eyes plus `dizzy` (@ @ spinning), `cry` (T T with running tears), `squint` (> <) |
 | `suit` | `color` (`"#RRGGBB"` or `"auto"`) | colour of the blue suit parts; `auto` follows the emotion again |
 | `look` | `x`, `y` (−1 … 1) | where the eyes (and a little the body) look; 0,0 = at the viewer |
+| `head_nod` | `deg`, `dur`, `ease` | tip the face down (+) as it nods off; 0 = level (stays until the next `head_nod`) |
+| `blink` | `shut` (0 open … 1 shut; −1 = blinking by itself again), `dur` | hold the eyelids: closing slowly while drowsy, shut asleep |
 
 ### Moving
 
@@ -153,6 +188,17 @@ Effects:
 - `rocket_at_viewer`: a rocket from the hand (`side`) straight at the lens, which bursts into a screen flash.
 - `flash`: a small explosion in front of the pet.
 - `rain` / `snow`: rain or snow over the whole stage (`dur`, `amount`).
+- `snack`: a snack in front of the face, eaten in three bites a second apart (1, 2, 3 s after it appears): the mouth opens
+  and snaps shut, crumbs fly, it shrinks, then the mouth chews (`kind`: donut / burger / pizza / cake / ice_cream /
+  popcorn; anything else is a donut). `scripts/care_fx.gd`
+- `bubbles`: soap foam piled on the head and bubbles rising round the body (`dur`).
+- `shower`: a chrome shower head over the pet pouring water on it (`dur`).
+- `splash`: water flying off the pet as it shakes itself dry.
+- `ball`: a beach ball dropped on the head, bounced `bounces` − 1 times (0.85 s apart), the last header at the lens: it
+  bonks the glass and drops away (put a `shake` beat there).
+- `listen`: sound waves from both sides of the head and a voice meter under the pet, following the user's
+  voice (the app's `hear`; without it a talking rhythm). Lasts until the scene ends (`scripts/activity_fx.gd`).
+- `think`: three lights chasing each other round a tilted ring over the head. Lasts until the scene ends.
 
 ## Info scenes: data and panels
 
@@ -216,8 +262,21 @@ The director adds these before the scene starts (`holo_panel.gd` → `derive`):
   - `fg_zone`: `extreme_fear` `fear` `neutral` `greed` `extreme_greed`;
   - `fg_days`: bars of the last days, oldest first.
 - **movers** (`items` rows with `change`):
-  - `movers`: bars for the top 5 coins, one per coin, USDT pairs first;
-  - `best_symbol`, `best_change`, `up`.
+  - `movers`: bars for the top 5 coins, one per coin, USDT pairs first (`bar_field: "RSI"` in the tool's extra: the RSI instead of the %);
+  - `best_symbol`, `best_change`, `up`;
+  - `mover_tiles` (every row as a kpi tile: price, today's %), `ups`, `downs`, `mostly_up`.
+- **deep analysis** (`deep_score`):
+  - `deep_word` (อ่อน / ปานกลาง / แข็งแรง), `deep_strong` (≥ 70), `deep_dir` (`up` / `down` / `flat` from the LSD trend), `deep_zones` (the dial's zones in that side's colours);
+  - `lsd_th`, `lsd_good`, `flow_th`, `flow_good`, `momentum_th`, `momentum_sub`, `momentum_good` (`good` = true / false / "" for a kpi tile);
+  - `fibo_bars`, `hot_count`, `fibo_hot`, `deep_say`.
+- **multi-timeframe** (`timeframes`):
+  - `tf_bars` (score per timeframe), `tf_tiles` (signal + RSI), `align_dir` (`up` / `down` / `flat`), `align_th`.
+- **sentiment** (`sentiment` + `pillars`):
+  - `senti_zone` / `senti_word` (like fear & greed), `pillar_bars`, `has_positioning`, `taker_good`, `contrarian_short`.
+- **SMC** (`smc_zone`):
+  - `pos_gauge` (0 … 100), `pos_text`, `zone_th`, `trend_th`, `trend_good`, `event_th`;
+  - `smc_setup`: `long` (bullish + discount), `short` (bearish + premium), `caution` (the two disagree), `wait`; `setup_th`;
+  - `fvg_text`, `ob_text`, `eqh_text`, `eql_text`.
 - **crypto overview** (`btc_dominance`):
   - `dominance` slices (BTC / ETH / others);
   - `up`: the 24 h change is not negative.
@@ -240,6 +299,11 @@ map before turning it into text for the AI, so the bridge only has to pass that 
 | `fear_greed` | `getFearGreedIndex`: `value, classification, trend` ("71,73,…", newest first) |
 | `crypto` | `getCryptoGlobal`: `total_market_cap_usd, total_volume_24h_usd, btc_dominance, eth_dominance, market_cap_change_24h, active_cryptocurrencies, markets` |
 | `battery` | `level` (0-100), `charging` (true/false) (`DeviceControlExecutor.executeBatteryStatus`) |
+| `deep` | `runLocalDeepSuite`: `symbol, interval, price, deep_score (0-100), lsd_state, lsd_tf, flow_label, flow_delta, flow_cum, poc, momentum (EXPANSION / SQUEEZE / REVERSAL), momentum_up, squeeze, fibo [{label, level, score 1-10, hot}]` |
+| `mtf` | `executeMultiTimeframe`: `symbol, alignment, buy_count, sell_count, timeframes [{tf, signal, rsi, score}]` |
+| `sentiment` | `executeSentiment`: `symbol, sentiment (0-100), sentiment_label, sentiment_th, pillars [{name, short, weight, score}], retail_long, top_long, taker_ratio, contrarian` |
+| `smc` | `SmcToolExecutor.publishSmc`: `symbol, interval, price, smc_trend, smc_zone, smc_event, range_high, range_low, range_pos (% of the range), premium_from, equilibrium, discount_to, bull_ob, bear_ob, bull_fvg, bear_fvg, eqh, eql` |
+| `task` | the app's tool call for `working`: `tool, args`; or `task, detail` as they are |
 | `answer` | `title, markdown, say`, or the text of any tool |
 
 `data_samples/<tool>.json` holds a saved result for each tool (and `answer_card.json`). To refresh
@@ -249,7 +313,7 @@ them from the live sources, run `Godot --headless --script res://tools/save_samp
 
 | do | Fields | What it does |
 |---|---|---|
-| `panel` | `id`, `type`, `at` or `pos [x,y,z]`, `title`, `subtitle`, `size [w,h]`, `beam` (`L`/`R`), plus the type's fields | a hologram card materialises (from the bottom up, a projector beam from the hand); a new panel with the same `id` replaces the old one |
+| `panel` | `id`, `type`, `at` or `pos [x,y,z]`, `title`, `subtitle`, `size [w,h]`, `beam` (`L`/`R`), `anchor` (`bottom`: `pos` is the bottom edge, a long text card grows upwards), plus the type's fields | a hologram card materialises (from the bottom up, a projector beam from the hand); a new panel with the same `id` replaces the old one |
 | `panel_close` | `id` (or `all`) | the card folds away |
 | `present` | `side` (`R`), `on` (true/false) | the pet raises an arm up towards the panel, like showing it off |
 | `hold` | | everything is shown: when the app asked for a hold (`play_tool(…, hold)`), the scene's clock stops here until `release()` (at most 60 s) and the rest (the arm going down) plays after; otherwise nothing. Every info scene has one, just before its outro |
@@ -268,6 +332,9 @@ Panel types (every field can be filled from the data):
 - `text`: `text` (markdown: `#` headings, `**bold**`, `*italic*`, `-` bullets, `>` quote, `` `code` ``, and +/−% coloured). The card fits its height to the text.
 - `gauge`: `value`, `min`, `max`, `zones: [{to, color, label?}]`, `text` (instead of the number), `label` (line under it), `min_text` / `max_text`. A 3D half-dial whose needle springs to the value. Used for the rating, RSI, fear & greed and battery.
 - `price`: reads the `trading_price` fields itself. Shows the big price (it counts up), the day's move with ▲/▼ in green/red, the previous close, and a 52-week range bar with a marker when both ends are known.
+- `progress`: `task`, `detail`. A job under way: a spinner, the task with "…" growing after it, the detail, a light sweeping a track.
+
+A list field that isn't there (a `"{ref}"` to a missing field) draws an empty chart instead of failing.
 
 ## Writing a good skit
 
@@ -311,11 +378,14 @@ Commands (the plugin's `command` signal):
 | `react` | `name`: shake / heavy_shake / boat / thump / face_up / loud / poke | a body reaction (wobble, stars, jump, screen rattle); the emotion that follows comes in the next `state` |
 | `tool` | `tool`, `result` (map / rows / text), `extra`, `hold` | `play_tool`: the tool's info scene; `hold`: it waits on its last picture (its `hold` beat) while the AI talks about it |
 | `release` | | the AI finished talking about the held scene: it plays to its end |
-| `scene` | `id`, `data` | a skit |
+| `scene` | `id`, `data` | a skit or a looping scene (`listening`, `pondering`, `working`); the same `id` again with `data` while it plays gives it the new data (the working card shows the next tool) instead of starting over |
+| `hear` | `level` (0..1) | the user's voice while they talk to the AI: the `listen` effect's meter (about 12 a second) |
+| `tasks` | `items`: `[{id, tool, args, question, state}]` | the jobs the user still waits to hear about, as pills in the lower right corner (`scripts/task_hud.gd`, at most 3 + "+N งาน"): `running` (handed to the assistant, amber, pulsing) "กำลังทำ", `ready` (done, waiting to be told, green) "เสร็จ รอเล่า", `telling` (cyan, pulsing) "กำลังเล่า"; labelled with the user's question, or the tool's `task` and symbol. The same `id` keeps its pill from running to told; an empty list clears them |
 | `stop` | `id` (optional) | ends that scene if it is still the one playing (a tool's scene that took over keeps going); no `id`: whatever plays |
 | `say` | `text`, `secs`, `at` | a speech bubble outside scenes |
 | `effect` | `name` (+ that effect's fields) | one effect: confetti, flash, big_heart, battery, bulb … |
 | `fidget` | `name`: hop / spin / tilt / wiggle / peek / cheeky / nod | a quick move (the AI's face gestures; `nod` = two nods, the AI agreeing) |
+| `eyelids` | `open` (1 none … 0 shut), `secs`; or `drowsy` (seconds) | the screen's eyelids (`scripts/eyelids.gd`): dark lids from the top and the bottom with an eye-shaped opening, over everything. `drowsy`: heavy blinks, each a little more shut, ending nearly shut (90–120 s of quiet); `open 0` asleep, `open 1` over 2.2 s waking up. While they show, any touch anywhere is a `tap` (zone `screen` off the pet) — the app wakes the robot with it |
 
 Events (`plugin.sendEvent(name, json)`): `hello` (listening: the plugin sends what waited), `ready`
 (warmed up), `touch {kind, zone}` (kind: tap / double / stroke / scratch / hold / drag; zone: forehead,

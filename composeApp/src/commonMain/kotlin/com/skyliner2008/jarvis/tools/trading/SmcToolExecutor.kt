@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.tools.trading
 
+import com.skyliner2008.jarvis.avatar.AvatarToolData
 import io.ktor.client.*
 
 /**
@@ -46,6 +47,7 @@ class SmcToolExecutor(private val client: HttpClient) {
 
         val priceStr = formatPrice(result.currentPrice)
         val atrStr   = formatPrice(result.atr)
+        publishSmc("trading_smc_analysis", result, interval)
 
         val dirEmoji = when (result.structureDirection) {
             "BULLISH" -> "🟢"
@@ -358,6 +360,7 @@ class SmcToolExecutor(private val client: HttpClient) {
 
         val result = api.getSmcAnalysis(symbol, interval, strictTvSource = strictTv)
             ?: return "❌ ดึงข้อมูล Structure ไม่ได้สำหรับ ${symbol.uppercase()}"
+        publishSmc("trading_smc_structure", result, interval)
 
         val dirEmoji = when (result.structureDirection) {
             "BULLISH" -> "🟢"
@@ -430,6 +433,27 @@ class SmcToolExecutor(private val client: HttpClient) {
     }
 
     // ─── Utilities ────────────────────────────────────────────────────────────
+
+    /**
+     * Structure, where the price sits in its range (0 % = the low, 100 % = the high; premium from 75 %,
+     * discount up to 25 %), order blocks, FVGs and the nearest liquidity, for Avatar mode's robot
+     * (pet_godot smc_report).
+     */
+    private suspend fun publishSmc(tool: String, r: SmcAnalysisResult, interval: String) {
+        val range = r.structureHigh - r.structureLow
+        val recentFvgs = r.fvgs.takeLast(5)
+        AvatarToolData.publish(tool, mapOf(
+            "symbol" to r.symbol, "interval" to interval, "price" to r.currentPrice,
+            "smc_trend" to r.structureDirection, "smc_zone" to r.priceZone, "smc_event" to r.lastStructureEvent,
+            "range_high" to r.structureHigh, "range_low" to r.structureLow,
+            "range_pos" to if (range > 0) (r.currentPrice - r.structureLow) / range * 100 else 50.0,
+            "premium_from" to r.premiumBot, "equilibrium" to r.equilibrium, "discount_to" to r.discountTop,
+            "bull_ob" to r.bullishOBs.size, "bear_ob" to r.bearishOBs.size,
+            "bull_fvg" to recentFvgs.count { it.isBullish }, "bear_fvg" to recentFvgs.count { !it.isBullish },
+            "eqh" to r.liquidityZones.filter { it.isHigh && it.price > r.currentPrice }.minOfOrNull { it.price },
+            "eql" to r.liquidityZones.filter { !it.isHigh && it.price < r.currentPrice }.maxOfOrNull { it.price }
+        ))
+    }
 
     private fun tfOrder(tf: String): Int = when (tf) {
         "M1" -> 0; "M5" -> 1; "M15" -> 2; "M30" -> 3; "H1" -> 4; "H4" -> 5; else -> 99

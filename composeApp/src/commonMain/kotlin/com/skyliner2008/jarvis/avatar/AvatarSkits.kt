@@ -79,7 +79,33 @@ object AvatarSkits {
         listOf("มึนหัว", "เวียนหัว", "มึน", "dizzy"),
         cues(0L to WHOOSH, 1700L to CONFUSED, 4250L to POP, 4300L to SURPRISE, 7200L to HAPPY, 7300L to GIGGLE))
 
-    val ALL = listOf(IDLE_PLAY, BORED, ANGRY, LOVE, THINKING, CURIOUS, SLEEPY, SAD, LOW_BATTERY, PARTY, HERO, DIZZY)
+    // ─── the robot's own care (PetSelfCare), also the old care scenes (eating, bath, games) and device_pet_care ───
+    /** a snack bite by bite; data `{item}`: donut / burger / pizza / cake / ice_cream / popcorn (RobotFaceState.sceneItem) */
+    val EAT = AvatarSkit("eat", "กินของว่าง", AvatarEmotion.HAPPY, 10_000,
+        listOf("กินข้าว", "กินขนม", "กินของว่าง", "snack"),
+        cues(300L to CONFUSED, 1500L to POP, 1600L to SPARKLE, 2500L to CRUNCH_EAT, 3500L to CRUNCH_EAT,
+            4500L to CRUNCH_EAT, 5000L to PURR, 7200L to HAPPY))
+    val BATH = AvatarSkit("bath", "อาบน้ำ", AvatarEmotion.HAPPY, 10_000,
+        listOf("อาบน้ำ", "bath", "shower"),
+        cues(300L to RAIN, 1000L to BUBBLE_POP, 2000L to BUBBLE_POP, 3000L to BUBBLE_POP, 4200L to BUBBLE_POP,
+            6000L to WHOOSH, 7200L to SPARKLE, 8400L to HAPPY))
+    val PLAY_BALL = AvatarSkit("play_ball", "เล่นบอล", AvatarEmotion.EXCITED, 10_000,
+        listOf("เล่นบอล", "โหม่งบอล", "เตะบอล", "play ball"),
+        cues(1000L to WHOOSH, 1600L to POP, 2450L to POP, 3300L to POP, 4150L to BELL_TOY, 4650L to SURPRISE,
+            6000L to GIGGLE, 8000L to HAPPY))
+    // ─── the quiet (PetSelfCare): 60 s drowsy, 120 s asleep (the screen's eyelids shut), woken: gets up ───
+    /** nods off: the head drops, the eyes close, it jerks awake and droops again; loops until it sleeps or wakes */
+    val DROWSY = AvatarSkit("drowsy", "ง่วง สัปหงก", AvatarEmotion.SLEEPING, 7_000, emptyList(),
+        cues(300L to YAWN))
+    /** lies down, eyes shut, Zzz; loops until something wakes the robot (PetModeController.fallAsleep) */
+    val SLEEP = AvatarSkit("sleep", "นอนหลับ", AvatarEmotion.SLEEPING, 9_000, emptyList(),
+        cues(0L to YAWN, 3000L to SNORE))
+    /** gets up from where it lay ([SLEEP]), opens its eyes, stretches: good morning */
+    val WAKE = AvatarSkit("wake_up", "ตื่นนอน", AvatarEmotion.HAPPY, 5_000, emptyList(),
+        cues(0L to YAWN, 1500L to POWER_UP, 2800L to RobotSound.WAKE_UP, 3600L to HAPPY))
+
+    val ALL = listOf(IDLE_PLAY, BORED, ANGRY, LOVE, THINKING, CURIOUS, SLEEPY, SAD, LOW_BATTERY, PARTY, HERO, DIZZY,
+        EAT, BATH, PLAY_BALL, DROWSY, SLEEP, WAKE)
 
     fun forId(id: String): AvatarSkit? = ALL.firstOrNull { it.id.equals(id.trim(), ignoreCase = true) }
 
@@ -108,6 +134,9 @@ object AvatarSkits {
             "celebration", "meme_thug_life" -> PARTY
             "comedy_soul_out" -> LOW_BATTERY
             "comedy_thunder" -> DIZZY
+            "eating" -> EAT
+            "bath_clean" -> BATH
+            "play_gaming" -> PLAY_BALL
             else -> null
         }
     }

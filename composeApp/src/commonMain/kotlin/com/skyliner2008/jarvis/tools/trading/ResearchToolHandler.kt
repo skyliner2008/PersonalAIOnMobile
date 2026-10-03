@@ -1,6 +1,7 @@
 package com.skyliner2008.jarvis.tools.trading
 
 import com.skyliner2008.jarvis.automation.SignalAlertProvider
+import com.skyliner2008.jarvis.avatar.AvatarToolData
 import com.skyliner2008.jarvis.automation.StrategySignalProvider
 import com.skyliner2008.jarvis.db.JarvisDatabaseHolder
 import com.skyliner2008.jarvis.db.SignalAlertRecord
@@ -455,6 +456,19 @@ internal class ResearchToolHandler(
         if (result == null) {
             return "⚠️ Deep analysis ไม่สำเร็จทั้ง bridge และ local engine ($reason)"
         }
+        // the five dimensions for Avatar mode's robot (pet_godot deep_analysis_report)
+        AvatarToolData.publish("trading_deep_analysis_suite", mapOf(
+            "symbol" to result.symbol, "interval" to result.interval, "price" to result.currentPrice,
+            "deep_score" to result.summaryScore,
+            "lsd_state" to result.lsdTrend.state, "lsd_tf" to result.lsdTrend.confluenceTF,
+            "flow_label" to result.orderflow.deltaLabel, "flow_delta" to result.orderflow.lastDelta,
+            "flow_cum" to result.orderflow.cumulativeDelta, "poc" to result.orderflow.poc,
+            "momentum" to result.momentum.signal, "momentum_up" to (result.momentum.aoDirection > 0),
+            "squeeze" to result.momentum.isSqueeze,
+            "fibo" to result.fiboStrength.map {
+                mapOf("label" to it.label, "level" to it.level, "score" to it.score, "hot" to it.isHot)
+            }
+        ))
         return buildString {
             appendLine("═══ Deep Analysis Suite (Local Engine): ${result.symbol} ${result.interval} ═══")
             appendLine("💵 ราคาปัจจุบัน: ${result.currentPrice}")

@@ -155,11 +155,17 @@ beat `panel` / `panel_close` / `present` (ยกแขนชี้การ์�
 | trading_fundamental_analysis | stock_balance |
 | trading_price | price_report — ราคาใหญ่นับขึ้น ▲▼ เขียว/แดง ปิดก่อนหน้า แถบช่วง 52 สัปดาห์ |
 | trading_technical_analysis | technical_report — หน้าปัดสัญญาณรวม → หน้าปัด RSI 30/70 → ช่อง MACD/ADX/ATR/RSI/BB/ราคาปิด |
-| trading_top_gainers / losers | market_movers — แท่ง 3D 5 เหรียญ (คู่ USDT, ไม่ซ้ำเหรียญ) |
+| trading_deep_analysis_suite | deep_analysis_report — หน้าปัดคะแนนรวม 0–100 (สีตามทิศ LSD) → 4 มิติ (LSD/Orderflow/Momentum/Fibo) → แท่งความแรง Fibonacci (ทอง = Hot) (2026-10-02) |
+| trading_multi_timeframe | mtf_report — แท่งสัญญาณรายไทม์เฟรม → ช่องสัญญาณ + RSI |
+| trading_sentiment | sentiment_report — หน้าปัด 0–100 → แท่ง 4 เสาหลัก → สัดส่วน Long รายย่อย/รายใหญ่ + Taker |
+| trading_smc_analysis / structure | smc_report — ตำแหน่งราคาในกรอบ (Discount/Premium) → เทรนด์/BOS/ระดับ/FVG/OB → สภาพคล่องใกล้ราคา |
+| trading_market_snapshot | market_snapshot_report — ช่องดัชนีหลัก → แท่ง % วันนี้ |
+| trading_top_gainers / losers + สแกน overbought/oversold/volume/bollinger | market_movers — แท่ง 3D 5 เหรียญ (คู่ USDT, ไม่ซ้ำเหรียญ; สแกน RSI ใช้ค่า RSI) ท่าทางตามรายการ (`react`) |
 | trading_fear_greed | fear_greed_report — หน้าปัด 0-100 ห้าโซน + แท่ง 7 วัน |
 | trading_crypto_overview | crypto_overview — ช่องตัวเลข → โดนัท dominance |
 | device_battery_status | battery_report — หน้าปัดแบต + แบตลอยเหนือหัว (แอปต้องเพิ่ม `level`, `charging` เพราะตอนนี้คืนแค่ข้อความ) |
-| ข้อความ (news, search, summarize, …) / อื่นๆ | answer_card |
+| ข้อความ (news, ปฏิทิน, สัญญาณกลยุทธ์, SMC Flow, search, …) / อื่นๆ | answer_card — การ์ดยาวโตขึ้นด้านบน ไม่บังหัวหุ่น · ผลเป็นข้อความ (สแกนว่าง/error) ไปการ์ดเสมอ |
+| (ระหว่างคำตอบ) | `listening` / `pondering` / `working` — ฉากวน (`"loop"`) จนแอปสั่งหยุด ดู [[Avatar_Mode]] |
 
 - panel ใหม่: `gauge` (หน้าปัดครึ่งวง 3D เข็มสปริง), `price` · `holo_panel.num()` อ่านตัวเลขจากข้อความแบบที่ tool เทรดของแอปคืน ("83806.8000", "0.17%", "N/A")
   → รูปแบบ `{price:price}` `{close:group}` `{change_pct:pct+}` (ต่ำกว่า 1% แสดง 2 ตำแหน่ง ให้ตรงกับการ์ด) · key ที่มีจุด (`MACD.macd`) ใช้ตรงๆ ได้

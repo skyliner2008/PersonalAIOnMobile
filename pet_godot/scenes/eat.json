@@ -1,0 +1,29 @@
+{
+  "id": "eat",
+  "title": "กินของว่าง",
+  "mood": "happy",
+  "tags": ["eat", "hungry", "snack", "self_care"],
+  "description": "ท้องร้องจ๊อก หิวจัง ของว่างเด้งมาตรงหน้า (โดนัท เบอร์เกอร์ พิซซ่า เค้ก ไอศกรีม ป๊อปคอร์น) งับสามคำ เศษกระเด็น ปากเคี้ยวหงับๆ หมดแล้วหัวใจลอย อร่อยมาก! อิ่มแล้ว~",
+  "duration": 10.0,
+  "data": {"item": "donut"},
+  "beats": [
+    {"t": 0.0, "do": "caption", "text": "เวลาของว่าง!", "dur": 2.4},
+    {"t": 0.0, "do": "emotion", "name": "normal"},
+    {"t": 0.2, "do": "say", "text": "หิวจัง…", "dur": 1.2},
+    {"t": 0.3, "do": "vibrate", "amount": 0.03, "dur": 0.5},
+    {"t": 0.3, "do": "emote", "kind": "sweat", "count": 1, "dur": 1.0},
+    {"t": 1.4, "do": "emotion", "name": "happy"},
+    {"t": 1.5, "do": "effect", "name": "snack", "kind": "{item}"},
+    {"t": 1.6, "do": "emote", "kind": "sparkle", "count": 3, "dur": 1.0},
+    {"t": 2.6, "do": "squash", "amount": -0.08},
+    {"t": 3.6, "do": "squash", "amount": -0.08},
+    {"t": 4.6, "do": "squash", "amount": -0.08},
+    {"t": 5.0, "do": "emotion", "name": "love"},
+    {"t": 5.0, "do": "emote", "kind": "heart", "count": 3, "dur": 1.4},
+    {"t": 5.2, "do": "say", "text": "อร่อยมากก!", "dur": 1.6},
+    {"t": 6.6, "do": "fidget", "name": "wiggle"},
+    {"t": 7.2, "do": "hop", "height": 0.2},
+    {"t": 7.8, "do": "emotion", "name": "happy"},
+    {"t": 8.0, "do": "say", "text": "อิ่มแล้ว~", "dur": 1.4}
+  ]
+}

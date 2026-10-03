@@ -217,6 +217,28 @@ class ToolSceneSyncTest {
         assertEquals(listOf("XAUUSD=X"), shows)
     }
 
+    /**
+     * A quick job answered in its own turn (LiveToolBridge QUICK_ANSWER_MS), its answer cut 1.3 s in: the queue takes
+     * the result while its card is up — the card comes back with the report (simulation 2026-10-03: told with no card).
+     */
+    @Test
+    fun `an answer cut early gets its card back with its report`() {
+        result("trading_price", 0, "symbol" to "XAUUSD=X", subject = gold)
+        says("ราคาทองคำตอนนี้", startMs = 2_000, nowMs = 2_050)
+        sync.onSpeaking(true, 2_100)
+        ticks(2_100, 3_300)
+        assertEquals(listOf("XAUUSD=X"), shows)
+        sync.onSpeaking(false, 3_400)                                                // the user cut in
+        sync.onDeferred("trading_price", gold)                                      // heard 1.3 s: the queue takes it
+        ticks(3_400, 4_400)
+        assertEquals(1, releases)
+        sync.onReport("trading_price", gold, 20_000)
+        says("ส่วนเรื่องราคาทองคำ", startMs = 22_000, nowMs = 22_050)
+        sync.onSpeaking(true, 22_100)
+        ticks(22_100, 22_200)
+        assertEquals(listOf("XAUUSD=X", "XAUUSD=X"), shows)
+    }
+
     @Test
     fun `the only new result goes up when the AI talks a while without naming it`() {
         val rows = JsonObject(mapOf("rows" to JsonPrimitive("NVDA +8.1%")))

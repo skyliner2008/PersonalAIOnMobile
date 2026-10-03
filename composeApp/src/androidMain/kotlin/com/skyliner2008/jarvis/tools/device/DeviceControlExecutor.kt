@@ -833,9 +833,11 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
             "wake" -> "ปลุกแล้ว"
             else -> "ค่าสถานะปัจจุบัน"
         }
+        // what it did for itself lately (it eats, bathes, plays and sleeps on its own: PetSelfCare)
+        val lately = pet.selfCareNote().takeIf { it.isNotBlank() }?.let { " · ล่าสุด: $it" }.orEmpty()
         return "🐾 $done — อิ่ม ${pct(n.satiety)} · พลังงาน ${pct(n.energy)} · สะอาด ${pct(n.hygiene)} · " +
             "สุข ${pct(n.happiness)} · เครียด ${pct(n.stress)} · โกรธสะสม ${pct(n.rage)} · " +
-            "อารมณ์รวม ${n.moodSummary.label} ${n.moodSummary.emoji} · ความสนิท Lv.${n.affectionLevel} (${n.affectionLevelName()})"
+            "อารมณ์รวม ${n.moodSummary.label} ${n.moodSummary.emoji} · ความสนิท Lv.${n.affectionLevel} (${n.affectionLevelName()})$lately"
     }
 
     private fun broadcastEmotionIntent(cmd: String) {

@@ -1,0 +1,24 @@
+{
+  "id": "working",
+  "title": "กำลังทำงาน",
+  "mood": "focused",
+  "needs": "task",
+  "tags": ["working", "tool", "live", "activity", "loading"],
+  "description": "AI เรียกใช้ tool อยู่: หุ่นถอยไปมุมล่างซ้าย ยกมือฉายการ์ดโฮโลแกรม \"กำลังวิเคราะห์ 5 มิติ… BTCUSDT · 1h\" มีวงหมุนกับแถบสแกน ลูกแสงหมุนรอบหัว วนจนฉากผลของ tool มาแทน หรือ AI เริ่มพูด (data: tool + args, หรือ task + detail)",
+  "duration": 4.2,
+  "loop": 1.4,
+  "data": {"tool": "trading_deep_analysis_suite", "args": {"symbol": "BTCUSDT", "interval": "1h"}},
+  "beats": [
+    {"t": 0.0, "do": "emotion", "name": "normal"},
+    {"t": 0.0, "do": "eyes", "name": "squint"},
+    {"t": 0.1, "do": "move", "to": [-0.6, -1.1, -1.0], "dur": 0.7, "ease": "back"},
+    {"t": 0.5, "do": "present", "side": "R"},
+    {"t": 0.8, "do": "panel", "id": "task", "type": "progress", "at": "top", "beam": "R"},
+    {"t": 1.1, "do": "effect", "name": "think"},
+    {"t": 1.2, "do": "look", "x": 0.25, "y": 0.8},
+
+    {"t": 1.4, "do": "tilt_head", "deg": 8, "dur": 0.5},
+    {"t": 2.8, "do": "tilt_head", "deg": -4, "dur": 0.5},
+    {"t": 3.6, "do": "look", "x": 0.1, "y": 0.6}
+  ]
+}

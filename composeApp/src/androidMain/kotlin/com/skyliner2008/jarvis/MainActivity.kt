@@ -253,6 +253,14 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         com.skyliner2008.jarvis.automation.AndroidContextHolder.appContext = applicationContext
+        // Avatar mode's sleeping robot dims this window only (never the system setting); null = the system's own
+        com.skyliner2008.jarvis.avatar.ScreenDimmer.handler = { level ->
+            runOnUiThread {
+                val lp = window.attributes
+                lp.screenBrightness = level ?: android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                window.attributes = lp
+            }
+        }
 
         // Clear any leftover screen flags so normal mode never shows over lockscreen
         clearScreenFlags()
@@ -532,6 +540,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        if (instance == this) com.skyliner2008.jarvis.avatar.ScreenDimmer.handler = null
         testEmotionReceiver?.let {
             try {
                 unregisterReceiver(it)
