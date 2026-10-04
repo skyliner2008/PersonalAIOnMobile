@@ -126,6 +126,7 @@ class JarvisOrchestrator(
         val normalized = keys.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         geminiService.apiKeysOverride = normalized
         liveService.updateLiveApiKeys(normalized)
+        com.skyliner2008.jarvis.data.LiveWorker.configure(client, normalized)
         com.skyliner2008.jarvis.logDebug("Orchestrator", "Gemini API keys for rotation: ${normalized.size} key(s) — Live pool synchronized")
     }
 
@@ -727,6 +728,11 @@ class JarvisOrchestrator(
      * (Gemini จะใช้ Google Search grounding ถ้าเปิดอยู่)
      */
     suspend fun searchWithGrounding(query: String): String {
+        liveWorkerText(
+            "ค้นหาข้อมูลล่าสุดเกี่ยวกับ: $query\nให้สรุปผลลัพธ์อย่างกระชับ ตอบเป็นภาษาไทย",
+            "คุณต้องค้นหาข้อมูลให้ครบถ้วนและตอบอย่างถูกต้อง อ้างอิงแหล่งข้อมูลถ้ามี",
+            com.skyliner2008.jarvis.data.LiveWorker.Kind.SEARCH
+        )?.let { return it }
         return geminiService.generateResponse(
             prompt = "ค้นหาข้อมูลล่าสุดเกี่ยวกับ: $query\nให้สรุปผลลัพธ์อย่างกระชับ ตอบเป็นภาษาไทย",
             intentAddon = "คุณต้องค้นหาข้อมูลให้ครบถ้วนและตอบอย่างถูกต้อง อ้างอิงแหล่งข้อมูลถ้ามี"
@@ -735,6 +741,11 @@ class JarvisOrchestrator(
 
     /** แปลข้อความผ่าน LLM */
     suspend fun translateText(text: String, targetLang: String): String {
+        liveWorkerText(
+            "แปลข้อความต่อไปนี้เป็นภาษา $targetLang:\n\n$text",
+            "ให้แปลอย่างธรรมชาติ ไม่ต้องอธิบายเพิ่มเติม ตอบเฉพาะคำแปลเท่านั้น",
+            workerKindFor(text)
+        )?.let { return it }
         return geminiService.generateResponse(
             prompt = "แปลข้อความต่อไปนี้เป็นภาษา $targetLang:\n\n$text",
             intentAddon = "ให้แปลอย่างธรรมชาติ ไม่ต้องอธิบายเพิ่มเติม ตอบเฉพาะคำแปลเท่านั้น"
@@ -748,11 +759,21 @@ class JarvisOrchestrator(
             "detailed" -> "สรุปอย่างละเอียดพร้อมจุดสำคัญ"
             else       -> "สรุปให้กระชับ 3-5 ประโยค"
         }
+        liveWorkerText("$lengthPrompt:\n\n$text", "ให้สรุปเนื้อหาอย่างครบถ้วน ไม่ต้องใส่คำนำ ตอบเฉพาะสรุปเท่านั้น", workerKindFor(text))
+            ?.let { return it }
         return geminiService.generateResponse(
             prompt = "$lengthPrompt:\n\n$text",
             intentAddon = "ให้สรุปเนื้อหาอย่างครบถ้วน ไม่ต้องใส่คำนำ ตอบเฉพาะสรุปเท่านั้น"
         )
     }
+
+    /** a Live worker's answer (no daily limit), or null — the chat model takes the job then */
+    private suspend fun liveWorkerText(prompt: String, system: String, kind: com.skyliner2008.jarvis.data.LiveWorker.Kind): String? =
+        com.skyliner2008.jarvis.data.LiveWorker.askDefault(prompt, system, kind, 15_000)?.text?.takeIf { it.isNotBlank() }
+
+    /** long text → the 1M TPM / 128K-context worker */
+    private fun workerKindFor(text: String) =
+        if (text.length > 12_000) com.skyliner2008.jarvis.data.LiveWorker.Kind.HEAVY else com.skyliner2008.jarvis.data.LiveWorker.Kind.GENERAL
 
     // ─── SideEffectDelegate Implementation ──────────────────────────────────────
 

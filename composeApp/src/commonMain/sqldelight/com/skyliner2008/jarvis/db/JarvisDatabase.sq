@@ -1238,6 +1238,10 @@ WHERE signal_id = ?;
 getRecentAiViews:
 SELECT * FROM AiWakeView WHERE symbol = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?;
 
+-- ผลการคาดการณ์ล่วงหน้าทุกสินทรัพย์ (trading_signal_anticipation action=summary — WakeVerdictSummary)
+getAiViewsSince:
+SELECT * FROM AiWakeView WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?;
+
 -- สรุปผลมุมมองที่ปิดแล้ว แยกตามการตัดสิน/ทิศ/ผล
 getAiViewStats:
 SELECT decision, bias, status,

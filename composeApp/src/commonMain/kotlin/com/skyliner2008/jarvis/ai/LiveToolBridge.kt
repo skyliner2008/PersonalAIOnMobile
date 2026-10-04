@@ -996,6 +996,14 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
         logDebug("LiveBridge", "✅ Path B done: $toolNameFromModel → ${finalResultText.take(80)}")
     }
 
+    /**
+     * A second Live model does Live's searching, translating and summarising (LiveWorker: no daily limit). They went
+     * to the chat model before, 500 a day. null = no worker answered — the chat model does it.
+     */
+    private suspend fun workerText(prompt: String, system: String, kind: com.skyliner2008.jarvis.data.LiveWorker.Kind): String? =
+        // the user is waiting: 15 s, then the chat model
+        com.skyliner2008.jarvis.data.LiveWorker.askDefault(prompt, system, kind, 15_000)?.text?.takeIf { it.isNotBlank() }
+
     private suspend fun processInterceptedRequest(resultData: String): String {
         return when {
             resultData.startsWith("NEARBY_SEARCH_REQUEST::") -> {
@@ -1003,7 +1011,11 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                 val loc = resultData.substringAfter("::location=").substringBefore("::lat=")
                 val summary = resultData.substringAfter("::summary=")
                 logDebug("LiveBridge", "Intercept nearby search: $query in $loc")
-                geminiService.generateResponse(
+                workerText(
+                    "ผู้ใช้กำลังอยู่ที่พิกัด/ย่าน: $loc ($summary)\nต้องการค้นหาหรือแนะนำ: $query ในบริเวณใกล้เคียงนี้\nโปรดแนะนำร้านอาหารหรือสถานที่จริงที่เป็นที่นิยมและเปิดบริการอยู่ในย่านนี้ 3-4 แห่ง พร้อมบอกเมนูเด็ดหรือจุดเด่นสั้นๆ เป็นภาษาไทย",
+                    "หาข้อมูลสถานที่จริงในย่านนี้ สรุปให้กระชับ ชัดเจน พร้อมจุดเด่นและชื่อร้าน",
+                    com.skyliner2008.jarvis.data.LiveWorker.Kind.SEARCH
+                ) ?: geminiService.generateResponse(
                     prompt = "ผู้ใช้กำลังอยู่ที่พิกัด/ย่าน: $loc ($summary)\nต้องการค้นหาหรือแนะนำ: $query ในบริเวณใกล้เคียงนี้\nโปรดแนะนำร้านอาหารหรือสถานที่จริงที่เป็นที่นิยมและเปิดบริการอยู่ในย่านนี้ 3-4 แห่ง พร้อมบอกเมนูเด็ดหรือจุดเด่นสั้นๆ เป็นภาษาไทย",
                     intentAddon = "หาข้อมูลสถานที่จริงในย่านนี้ สรุปให้กระชับ ชัดเจน พร้อมจุดเด่นและชื่อร้าน",
                     enableGrounding = true
@@ -1012,7 +1024,11 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
             resultData.startsWith("WEB_SEARCH_REQUEST::query=") -> {
                 val query = resultData.substringAfter("query=")
                 logDebug("LiveBridge", "Intercept search: $query")
-                geminiService.generateResponse(
+                workerText(
+                    "ค้นหาข้อมูลล่าสุดเกี่ยวกับ: $query",
+                    "หาคำตอบที่เจาะจง สรุปสั้นๆ และเน้นข้อมูลตัวเลขหรือข้อเท็จจริงล่าสุด",
+                    com.skyliner2008.jarvis.data.LiveWorker.Kind.SEARCH
+                ) ?: geminiService.generateResponse(
                     prompt = "ค้นหาข้อมูลล่าสุดเกี่ยวกับ: $query",
                     intentAddon = "หาคำตอบที่เจาะจง สรุปสั้นๆ และเน้นข้อมูลตัวเลขหรือข้อเท็จจริงล่าสุด",
                     enableGrounding = true
@@ -1022,7 +1038,11 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                 val text = resultData.substringAfter("text=").substringBefore("::to=")
                 val to = resultData.substringAfter("::to=")
                 logDebug("LiveBridge", "Intercept translate: to $to")
-                geminiService.generateResponse(
+                workerText(
+                    "แปลข้อความต่อไปนี้เป็นภาษา $to:\n\n$text",
+                    "ให้แปลอย่างธรรมชาติ ไม่ต้องอธิบายเพิ่มเติม ตอบเฉพาะคำแปลเท่านั้น",
+                    if (text.length > 12_000) com.skyliner2008.jarvis.data.LiveWorker.Kind.HEAVY else com.skyliner2008.jarvis.data.LiveWorker.Kind.GENERAL
+                ) ?: geminiService.generateResponse(
                     prompt = "แปลข้อความต่อไปนี้เป็นภาษา $to:\n\n$text",
                     intentAddon = "ให้แปลอย่างธรรมชาติ ไม่ต้องอธิบายเพิ่มเติม ตอบเฉพาะคำแปลเท่านั้น"
                 )
@@ -1036,7 +1056,11 @@ If no tool is needed, respond: {"tool": "none", "args": {}}
                     "detailed" -> "สรุปอย่างละเอียดพร้อมจุดสำคัญ"
                     else       -> "สรุปให้กระชับ 3-5 ประโยค"
                 }
-                geminiService.generateResponse(
+                workerText(
+                    "$lengthPrompt:\n\n$text",
+                    "สรุปอย่างเดียว ห้ามอธิบายการกระทำของคุณ",
+                    if (text.length > 12_000) com.skyliner2008.jarvis.data.LiveWorker.Kind.HEAVY else com.skyliner2008.jarvis.data.LiveWorker.Kind.GENERAL
+                ) ?: geminiService.generateResponse(
                     prompt = "$lengthPrompt:\n\n$text",
                     intentAddon = "สรุปอย่างเดียว ห้ามอธิบายการกระทำของคุณ"
                 )

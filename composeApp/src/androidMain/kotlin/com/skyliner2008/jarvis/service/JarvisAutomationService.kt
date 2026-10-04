@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.skyliner2008.jarvis.MainActivity
@@ -47,6 +48,9 @@ class JarvisAutomationService : Service() {
     private val alertAiMutex = Mutex()
 
     companion object {
+        /** the CPU wake lock outlives a cycle's wait by this much, so a slow cycle never lets the phone sleep */
+        private const val CPU_LOCK_SLACK_MS = 5 * 60_000L
+
         const val ACTION_ALERT_STOP = "com.skyliner2008.jarvis.action.ALERT_STOP"
         const val ACTION_ALERT_REPEAT = "com.skyliner2008.jarvis.action.ALERT_REPEAT"
         const val EXTRA_JOB_ID = "job_id"
@@ -147,11 +151,45 @@ class JarvisAutomationService : Service() {
         return if (v.isBlank()) default else (v == "true" || v == "1")
     }
 
+    /**
+     * Keeps the CPU awake while there are alert jobs to watch. Without it the loop stopped once the screen was off and
+     * the phone off the charger: on 2026-10-04 the charger came out at 07:30, scans stopped at 07:36 and ran only in
+     * fits until it went back in at 08:30. The app is on the battery-optimisation allow-list, so a held lock is honoured
+     * in Doze. Renewed after every cycle for that cycle's wait plus [CPU_LOCK_SLACK_MS], so a loop that dies lets it go.
+     */
+    private var cpuLock: PowerManager.WakeLock? = null
+
+    /** set by [runOneCycle]: alert jobs to watch this cycle */
+    @Volatile private var watching = false
+
+    private fun holdCpu(timeoutMs: Long) {
+        val lock = cpuLock ?: runCatching {
+            (getSystemService(POWER_SERVICE) as PowerManager)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "jarvis:market_watch")
+                .apply { setReferenceCounted(false) }
+        }.onFailure { logError("AutomationService", "🔋 CPU wake lock unavailable: ${it.message}", it) }
+            .getOrNull()
+            ?.also {
+                cpuLock = it
+                logDebug("AutomationService", "🔋 CPU wake lock on — alert jobs keep running with the screen off")
+            } ?: return
+        // non-counted: acquiring again moves the timeout instead of stacking holds
+        runCatching { lock.acquire(timeoutMs) }
+    }
+
+    private fun releaseCpu() {
+        val lock = cpuLock ?: return
+        cpuLock = null
+        runCatching { if (lock.isHeld) lock.release() }
+        logDebug("AutomationService", "🔋 CPU wake lock off — no alert jobs to watch")
+    }
+
     private fun startLoop() {
         scope.launch {
             while (isActive) {
                 try {
                     val delayMs = runOneCycle()
+                    if (watching) holdCpu(delayMs + CPU_LOCK_SLACK_MS) else releaseCpu()
                     delay(delayMs)
                 } catch (e: CancellationException) {
                     break
@@ -166,6 +204,7 @@ class JarvisAutomationService : Service() {
     private suspend fun runOneCycle(): Long {
         val jobs = database.jarvisDatabaseQueries.getRunnableJobs().executeAsList()
         val tasks = database.jarvisDatabaseQueries.getAllActiveScheduledTasks().executeAsList()
+        watching = jobs.isNotEmpty()
         evaluator.clearCycleCache()
 
         if (jobs.isEmpty() && tasks.isEmpty()) {
@@ -243,7 +282,8 @@ class JarvisAutomationService : Service() {
     }
 
     private suspend fun fireScheduledTask(task: ScheduledTask) {
-        val aiText = evaluator.generateAiText(task.prompt)
+        // a scheduled task usually wants today's facts ("สรุปข่าวทองทุกเช้า") — the worker searches first
+        val aiText = evaluator.generateAiText(task.prompt, kind = com.skyliner2008.jarvis.data.LiveWorker.Kind.SEARCH)
         val body = aiText ?: "ถึงเวลาแล้ว: ${task.prompt}"
         sendNotification("⏰ Jarvis: ${task.name}", body, (task.id + 100_000).toInt())
         pushToChat("⏰ **${task.name}**\n\n$body", """{"type":"scheduled_task","task_id":${task.id}}""")
@@ -556,6 +596,7 @@ class JarvisAutomationService : Service() {
                     }
                 }
             if (verdict != null) {
+                com.skyliner2008.jarvis.automation.wake.WakeAiFallback.onAiAnswered()
                 if (signalId.isNotBlank()) {
                     com.skyliner2008.jarvis.automation.wake.WakeLearningStore
                         .setAiDecision(signalId, verdict.decision, verdict.bias, verdict.confidence, verdict.reasonTh)
@@ -571,8 +612,26 @@ class JarvisAutomationService : Service() {
                     return
                 }
             } else {
-                // AI ไม่ตอบ/รูปแบบผิด → แจ้งแบบ direct แทน (ไม่ทิ้งเหตุการณ์เงียบๆ)
-                logDebug("AutomationService", "⏰ Wake analysis ไม่มีคำตอบ → แจ้งแบบรายการเหตุการณ์")
+                // AI ไม่ตอบ/รูปแบบผิด (ทั้ง Live worker และโมเดลแชท) → รายการเหตุการณ์แบบเงียบ ไม่เกิน 1 ครั้ง/30 นาที/สินทรัพย์
+                // (เดิมแจ้งเต็ม — notification + การ์ด + เสียง — ทุกการปลุก ทั้งที่ปกติ AI ตอบ SKIP เกือบหมด; ผู้ใช้อนุมัติ 2026-10-03)
+                val fallback = com.skyliner2008.jarvis.automation.wake.WakeAiFallback
+                val d = fallback.onAiFailed(job.symbol.substringBefore("@"), System.currentTimeMillis())
+                if (!d.send) {
+                    logDebug("AutomationService",
+                        "⏰ AI วิเคราะห์ไม่ได้ — ไม่แจ้ง ${job.symbol} (แจ้งแบบเงียบไปแล้วเมื่อ ${(d.sinceLastMs ?: 0L) / 60_000L} นาทีก่อน)")
+                    return
+                }
+                logDebug("AutomationService",
+                    "⏰ AI วิเคราะห์ไม่ได้ → แจ้งรายการเหตุการณ์แบบเงียบ ${job.symbol}${if (d.sayAiDown) " + บอกว่า AI ใช้ไม่ได้" else ""}")
+                val notice = if (d.sayAiDown) fallback.NOTICE_TH else null
+                sendJobAlertNotification(
+                    job, AlertPresentationFormatter.buildWakeNotification(job, data, null) + (notice?.let { "\n$it" } ?: ""), silent = true
+                )
+                pushToChat(
+                    AlertPresentationFormatter.buildWakeChatCard(job, data, null) + (notice?.let { "\n\n$it" } ?: ""),
+                    AlertPresentationFormatter.wakeChatMeta(job, data, null, null, "wake_direct", null)
+                )
+                return
             }
         }
         val body = AlertPresentationFormatter.buildWakeNotification(job, data, verdict)
@@ -582,7 +641,10 @@ class JarvisAutomationService : Service() {
             cardBody = AlertPresentationFormatter.buildWakeChatCard(job, data, verdict),
             metaFor = { v, s -> AlertPresentationFormatter.wakeChatMeta(job, data, verdict, s, type, v) },
             shortSpeech = AlertPresentationFormatter.buildWakeSpeech(job, data, verdict),
-            fullSpeech = (verdict?.summaryTh?.ifBlank { null } ?: body) +
+            // the asset's name first: the voice session filled it in from the talk before — a BTC wake was read out
+            // as gold after the user had asked about gold (logcat 2026-10-04 00:16:47)
+            fullSpeech = "${AlertPresentationFormatter.assetNameTh(job.symbol)}: " +
+                (verdict?.summaryTh?.ifBlank { null } ?: body) +
                 (AlertPresentationFormatter.wakeRrWarningTh(data, verdict)?.let { " $it" } ?: ""),
             liveSummary = false,
             timeframeMin = evaluator.symbolTimeframeMin(job.symbol))
@@ -595,7 +657,8 @@ class JarvisAutomationService : Service() {
      * (Android ไม่อนุญาตให้ background service เปิด dialog ลอยได้จริง
      *  ปุ่มบน notification คือทางที่ถูกต้องตาม platform)
      */
-    private fun sendJobAlertNotification(job: AlertJob, body: String) {
+    /** @param silent no sound or vibration (the quiet event list when the AI cannot analyse a wake) */
+    private fun sendJobAlertNotification(job: AlertJob, body: String, silent: Boolean = false) {
         val notificationId = job.id.toInt()
 
         fun actionIntent(action: String): PendingIntent {
@@ -617,7 +680,8 @@ class JarvisAutomationService : Service() {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (silent) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setSilent(silent)
             .setAutoCancel(true)
             .setContentIntent(createPendingIntent())
             .addAction(android.R.drawable.ic_menu_delete, "🗑 ลบแจ้งเตือน", actionIntent(ACTION_ALERT_STOP))
@@ -744,6 +808,7 @@ class JarvisAutomationService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        releaseCpu()
         voiceEngine.destroy()
         evaluator.destroy()
         scope.cancel()

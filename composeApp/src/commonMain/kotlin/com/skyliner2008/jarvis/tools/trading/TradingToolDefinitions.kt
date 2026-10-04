@@ -314,7 +314,7 @@ object TradingToolDefinitions {
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "symbols" to ParameterProperty("STRING", "รายชื่อ symbol คั่นด้วย comma เช่น BTC-USD,GC=F,^GSPC,EURUSD=X"),
+                    "symbols" to ParameterProperty("STRING", "รายชื่อ symbol คั่นด้วย comma เช่น BTCUSDT,XAUUSD,SPX,EURUSD (แบบ Yahoo BTC-USD,GC=F,^GSPC,EURUSD=X ก็ได้)"),
                     "days"    to ParameterProperty("NUMBER", "จำนวนวันย้อนหลัง (Default 30)")
                 ),
                 required = emptyList()
@@ -412,6 +412,7 @@ object TradingToolDefinitions {
                 |ปัจจัยเป็นแค่ "นาฬิกาปลุก" ไม่ใช่ข้อสรุป — เมื่อเกิดเหตุการณ์ AI จะถูกปลุกให้ดู snapshot 5TF (ค่าจริงที่ระบบคำนวณ) แล้วตัดสินเองว่าควรแจ้งผู้ใช้ไหม
                 |ทุกปัจจัยถูกบันทึกผลพร้อมสภาพแวดล้อม (MTF/ADX/ความผันผวน/session) → ระบบเรียนรู้และลดชั้นปัจจัยที่ไม่มีประโยชน์เอง
                 |ใช้เมื่อผู้ใช้สั่ง: "ตั้งคาดการณ์ล่วงหน้า [symbol]", "เตือนก่อนเกิดสัญญาณ", "สแกนตอนนี้", "ดูผลการเรียนรู้", "ปัจจัยปลุกมีอะไรบ้าง", "ปิดปัจจัย X", "ปรับงบการปลุก"
+                |และเมื่อผู้ใช้ถามผลของคาดการณ์ล่วงหน้า: "แจ้งเตือนไปกี่ครั้งแล้ว", "skip กี่ครั้ง / ทำไมไม่แจ้ง", "คาดการณ์ buy/sell กี่ครั้ง เพราะอะไร", "แจ้งไปถูกไหม ชน TP หรือ SL" → action='summary'
                 |
                 |Action:
                 |- 'create': สร้าง alert เฝ้าระวัง (default TF 15m, 'all' = 5m/15m/1h/4h)
@@ -421,17 +422,21 @@ object TradingToolDefinitions {
                 |- 'learning' / 'performance': รายงานการเรียนรู้ — ปัจจัยไหนมีประโยชน์ ในสภาพแวดล้อมใด และ AI ตัดสินถูกแค่ไหน
                 |- 'inspect' / 'history': ประวัติเหตุการณ์ล่าสุดของ symbol พร้อมผลที่วัดได้ (R ต่อ ATR)
                 |- 'recommend': ปัจจัยที่สถิติดี/แย่ ที่ควรพิจารณา
-                |- 'status' / 'budget': งบการปลุกที่ใช้ไปและการตั้งค่า""".trimMargin(),
+                |- 'status' / 'budget': งบการปลุกที่ใช้ไปและการตั้งค่า
+                |- 'summary': สรุปผลการคาดการณ์ — ปลุกกี่ครั้ง, แจ้งเตือน (NOTIFY) กี่ครั้ง แยก BUY/SELL พร้อมเหตุผลและผลจริง (ชน TP/SL),
+                |  ไม่แจ้ง (SKIP) กี่ครั้งเพราะอะไร (หมวดเหตุผล + ประโยคที่ AI ใช้บ่อย) — ช่วงเวลาด้วย period (today / 24h / 7d / 30d / all, ค่าเริ่มต้น 24h)
+                |  ไม่ระบุ symbol = ทุกสินทรัพย์""".trimMargin(),
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
-                    "action" to ParameterProperty("STRING", "การกระทำ: scan, analyze, create, inspect, history, records, learning, performance, config, list_factors, recommend, status", enum = listOf("scan", "analyze", "create", "inspect", "history", "records", "learning", "performance", "config", "list_factors", "recommend", "status")),
-                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT"),
+                    "action" to ParameterProperty("STRING", "การกระทำ: scan, analyze, create, inspect, history, records, learning, performance, config, list_factors, recommend, status, summary", enum = listOf("scan", "analyze", "create", "inspect", "history", "records", "learning", "performance", "config", "list_factors", "recommend", "status", "summary")),
+                    "symbol" to ParameterProperty("STRING", "Symbol เช่น XAUUSD, BTCUSDT (action=summary: ไม่ระบุ = ทุกสินทรัพย์)"),
+                    "period" to ParameterProperty("STRING", "ช่วงเวลาของ action=summary: today, 24h (ค่าเริ่มต้น), 7d, 30d หรือ all", enum = listOf("today", "24h", "7d", "30d", "all")),
                     "timeframe" to ParameterProperty("STRING", "Timeframe เช่น 5m, 15m, 30m, 1h, 4h, all หรือระบุหลาย TF เช่น '15m,1h' (default 15m)"),
                     "limit" to ParameterProperty("NUMBER", "จำนวนรายการประวัติที่ต้องการดึงมาตรวจสอบ (เฉพาะ action=inspect/history/records, default 10)"),
                     "factors" to ParameterProperty("STRING", "รายการปัจจัยที่ต้องการเปิดใช้ (คั่นด้วยจุลภาค) — ตัวที่ไม่อยู่ในรายการจะถูกปิด"),
-                    "hourly_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อชั่วโมงต่อสินทรัพย์ (default 6)"),
-                    "daily_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อวัน รวมทุกสินทรัพย์ (default 900)"),
+                    "hourly_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อชั่วโมงต่อสินทรัพย์ (default 40)"),
+                    "daily_budget" to ParameterProperty("NUMBER", "จำนวนครั้งที่ปลุก AI ได้ต่อวัน รวมทุกสินทรัพย์ (default 3000)"),
                     "cooldown_bars" to ParameterProperty("NUMBER", "จำนวนแท่งที่ปัจจัยเดิม/ทิศเดิมจะไม่ปลุกซ้ำ (default 3)"),
                     "add_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเพิ่มเข้าไป"),
                     "remove_factors" to ParameterProperty("STRING", "ปัจจัยที่ต้องการเอาออก"),

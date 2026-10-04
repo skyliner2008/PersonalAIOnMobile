@@ -459,7 +459,8 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
 
                 when (weatherCode) {
                     0 -> { weatherDesc = "ท้องฟ้าแจ่มใส แดดออก"; emoji = "☀️"; isRain = false; isThunder = false; isSunny = true }
-                    1, 2, 3 -> { weatherDesc = if (weatherCode == 1) "ท้องฟ้าโปร่ง มีเมฆเล็กน้อย" else "มีเมฆเป็นส่วนมาก"; emoji = "⛅"; isRain = false; isThunder = false; isSunny = false }
+                    // WMO: 1 = mainly clear, 2 = partly cloudy, 3 = overcast (2 used to say "mostly cloudy")
+                    1, 2, 3 -> { weatherDesc = when (weatherCode) { 1 -> "ท้องฟ้าโปร่ง มีเมฆเล็กน้อย"; 2 -> "มีเมฆบางส่วน"; else -> "มีเมฆมาก ฟ้าครึ้ม" }; emoji = "⛅"; isRain = false; isThunder = false; isSunny = false }
                     45, 48 -> { weatherDesc = "มีหมอกลง ทัศนวิสัยลดลง"; emoji = "🌫️"; isRain = false; isThunder = false; isSunny = false }
                     51, 53, 55 -> { weatherDesc = "มีฝนละออง/ฝนปรอยๆ"; emoji = "🌦️"; isRain = true; isThunder = false; isSunny = false }
                     61, 63, 65 -> { weatherDesc = if (weatherCode == 65) "มีฝนตกหนัก" else "มีฝนตก"; emoji = "🌧️"; isRain = true; isThunder = false; isSunny = false }
@@ -492,7 +493,8 @@ class DeviceControlExecutor(private val context: Context) : DeviceControlHandler
                     appendLine("☁️ ลักษณะอากาศ: $weatherDesc")
                     appendLine("💧 ความชื้นสัมพัทธ์: $humidity%")
                     if (rainProb > 0 || precipitation > 0.0) {
-                        appendLine("☔ โอกาสฝนตก: $rainProb% (ปริมาณน้ำฝน: ${precipitation} มม.)")
+                        // the chance is today's highest, the amount is falling now — "100% (0.0 mm)" read as a contradiction
+                        appendLine("☔ โอกาสฝนตกวันนี้ (สูงสุด): $rainProb% · ฝนที่ตกอยู่ตอนนี้: ${precipitation} มม.")
                     }
                     appendLine("📈 สูงสุด/ต่ำสุดวันนี้: ${maxTemp.toInt()}°C / ${minTemp.toInt()}°C")
                     appendLine("💨 ความเร็วลม: ${windSpeed.toInt()} กม./ชม.")

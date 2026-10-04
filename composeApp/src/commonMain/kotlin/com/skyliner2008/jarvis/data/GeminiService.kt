@@ -1043,7 +1043,9 @@ class GeminiService(
 
     private suspend fun boundedEnrichment(prompt: String, intentAddon: String, overallTimeoutMs: Long): String =
         kotlinx.coroutines.withTimeoutOrNull(overallTimeoutMs) {
-        generateResponse(prompt = prompt, intentAddon = intentAddon, timeoutMs = overallTimeoutMs, retryLongerOnTimeout = false)
+        // a Live worker first (no daily limit), with part of the time — the chat model gets the rest
+        LiveWorker.askDefault(prompt, intentAddon, LiveWorker.Kind.GENERAL, overallTimeoutMs * 6 / 10)?.text?.takeIf { it.isNotBlank() }
+            ?: generateResponse(prompt = prompt, intentAddon = intentAddon, timeoutMs = overallTimeoutMs, retryLongerOnTimeout = false)
     } ?: run {
         logDebug("GeminiService", "⏱️ tool enrichment เกิน ${overallTimeoutMs}ms — ข้ามการวิเคราะห์เสริม")
         throw ToolEnrichmentTimeoutException(overallTimeoutMs)
@@ -1057,7 +1059,9 @@ class GeminiService(
         enableGrounding: Boolean = false,
         timeoutMs: Long = 20_000,
         attempt: Int = 0,
-        retryLongerOnTimeout: Boolean = true
+        retryLongerOnTimeout: Boolean = true,
+        /** false = on a per-minute 429 move to the next key/model at once (alerts: no waiting up to a minute, 3 times) */
+        waitOn429: Boolean = true
     ): String {
         if (apiKey.isBlank()) return "⚠️ กรุณาตั้งค่า API Key ใน Settings ก่อนใช้งาน"
 
@@ -1142,7 +1146,7 @@ class GeminiService(
                             logDebug("GeminiService", "429 hard quota (daily/project-model) — rotate key/model immediately; no timed retry")
                         }
                         val hint = parseRetryAfterMs(errBody)
-                        if (!dailyQuota && hint != null && hint <= 60_000 && waited429 < 3) {
+                        if (waitOn429 && !dailyQuota && hint != null && hint <= 60_000 && waited429 < 3) {
                             waited429++
                             logDebug("GeminiService", "429 per-minute — รอ ${hint}ms ตาม hint ของ API แล้วลองใหม่ (key/โมเดลเดิม, ครั้งที่ $waited429)")
                             kotlinx.coroutines.delay(hint + 500)

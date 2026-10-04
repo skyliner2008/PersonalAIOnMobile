@@ -134,6 +134,9 @@ object AiViewTracker {
         if (open.isEmpty()) return 0
         val tfMs = TaIndicators.timeframeMillis(interval)
         var closed = 0
+        // the alerts by name and outcome: the line used to give only a count, so an alert's TP/SL could not be
+        // checked from the log (2026-10-04)
+        val alerts = mutableListOf<String>()
         runCatching {
             db.transaction {
                 for (row in open) {
@@ -142,10 +145,18 @@ object AiViewTracker {
                         o.status, o.resultR, o.moveAtr, o.mfeAtr, o.maeAtr, o.bars.toLong(), kotlinx.datetime.Clock.System.now().toEpochMilliseconds(), row.signal_id
                     )
                     closed++
+                    if (row.decision == "NOTIFY") {
+                        alerts += "${row.bias}@${fmt(row.price)} → ${o.status}" + (o.resultR?.let { " ${"%+.2f".format(it)}R" } ?: "") + " (${o.bars} แท่ง)"
+                    }
                 }
             }
         }.onFailure { logDebug("AiViewTracker", "resolve failed: ${it.message}") }
-        if (closed > 0) logDebug("AiViewTracker", "$symbol/$interval ปิดผลมุมมอง AI $closed รายการ")
+        if (closed > 0) {
+            logDebug(
+                "AiViewTracker",
+                "$symbol/$interval ปิดผลมุมมอง AI $closed รายการ" + if (alerts.isNotEmpty()) " — แจ้งเตือน: ${alerts.joinToString(" · ")}" else ""
+            )
+        }
         return closed
     }
 
@@ -222,6 +233,14 @@ object AiViewTracker {
             recent.forEach { appendLine(describe(it, price, nowMs)) }
             trackRecord(history)?.let { appendLine(it + " (30 วัน)") }
         }.trim().ifBlank { null }
+    }
+
+    /** มุมมองทุกสินทรัพย์ตั้งแต่ [sinceMs] ใหม่สุดก่อน — สรุปผลให้ผู้ใช้ ([WakeVerdictSummary]); null = เข้าถึงฐานข้อมูลไม่ได้ */
+    fun viewsSince(sinceMs: Long, limit: Long): List<View>? {
+        val db = JarvisDatabaseHolder.database ?: return null
+        return runCatching { db.jarvisDatabaseQueries.getAiViewsSince(sinceMs, limit).executeAsList().map { it.toView() } }
+            .onFailure { logDebug("AiViewTracker", "viewsSince failed: ${it.message}") }
+            .getOrNull()
     }
 
     // ─── ย้อนเติมมุมมองเก่า (ครั้งเดียว) ───────────────────────────────────────

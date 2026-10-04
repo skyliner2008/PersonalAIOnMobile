@@ -39,7 +39,30 @@ class AnticipationToolActions(
             "inspect", "history", "records" -> inspect(symbol, args["limit"]?.toLongOrNull() ?: 15L)
             "recommend" -> recommend()
             "status", "budget" -> status(args)
-            else -> "❌ ไม่รองรับ action '$action' — ใช้ create, scan, list_factors, config, learning, inspect, recommend หรือ status"
+            "summary", "report", "results", "stats", "verdicts" -> summary(args)
+            else -> "❌ ไม่รองรับ action '$action' — ใช้ create, scan, list_factors, config, learning, inspect, recommend, status หรือ summary"
+        }
+    }
+
+    /**
+     * ผลการคาดการณ์ล่วงหน้า: แจ้งเตือนกี่ครั้ง · ไม่แจ้งกี่ครั้งเพราะอะไร · คาดการณ์ BUY/SELL กี่ครั้งเพราะอะไร · ผลจริง
+     * ไม่ระบุ symbol = ทุกสินทรัพย์ ([execute] ตั้ง XAUUSD เป็นค่าเริ่มต้นให้ action อื่น จึงอ่าน args เอง)
+     */
+    private fun summary(args: Map<String, String>): String {
+        val now = Clock.System.now().toEpochMilliseconds()
+        val tz = kotlinx.datetime.TimeZone.currentSystemDefault()
+        val period = WakeVerdictSummary.period(args["period"], now, tz)
+        val asked = args["symbol"]?.trim()?.takeIf { it.isNotBlank() && !it.equals("all", ignoreCase = true) }
+        val all = AiViewTracker.viewsSince(period.startMs, WakeVerdictSummary.MAX_ROWS)
+            ?: return "❌ ยังเข้าถึงฐานข้อมูลไม่ได้"
+        val views = if (asked == null) all else all.filter { WakeVerdictSummary.matchesSymbol(it.symbol, asked) }
+        return WakeVerdictSummary.build(
+            views, asked?.uppercase()?.substringBefore("@"), period, now, tz,
+            capped = all.size >= WakeVerdictSummary.MAX_ROWS
+        ).also { out ->
+            // the whole answer, a line per log line (logcat cuts long lines), to check what the voice says against it —
+            // the Live tool-response log shows only the first 200 characters
+            out.lines().forEach { com.skyliner2008.jarvis.logDebug("WakeSummary", it) }
         }
     }
 
@@ -68,6 +91,10 @@ class AnticipationToolActions(
             appendLine("• ปัจจัยที่เฝ้าอยู่: $enabled จาก ${WakeTriggerRegistry.ALL.size} ตัว ใน ${WakeTriggerRegistry.BY_GROUP.size} หมวด")
             appendLine("• งบการปลุก: ${WakeSettings.hourlyBudget} ครั้ง/ชม./สินทรัพย์ · ${WakeSettings.dailyBudget} ครั้ง/วัน")
             appendLine("• ปัจจัยเป็นแค่ตัวปลุก — AI จะดูภาพ 5TF แล้วตัดสินเองว่าควรแจ้งคุณหรือไม่")
+            // tell the user now: a job set at the weekend showed "รอเช็คครั้งแรก" with no word on why (2026-10-04)
+            com.skyliner2008.jarvis.ui.screen.marketClosedNote(symbol, kotlinx.datetime.Clock.System.now().toEpochMilliseconds())?.let {
+                appendLine("• $it (เวลาไทย) — ระบบเช็คทุกนาทีและจะเริ่มสแกนเองเมื่อตลาดเปิด ระหว่างนี้ไม่มีแจ้งเตือน")
+            }
             appendLine()
             results.forEach { appendLine("• $it") }
         }.trim()

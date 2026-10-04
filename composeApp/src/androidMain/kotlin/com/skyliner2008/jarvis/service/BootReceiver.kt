@@ -8,15 +8,16 @@ import com.skyliner2008.jarvis.logDebug
 import com.skyliner2008.jarvis.logError
 
 /**
- * ตื่น JarvisAutomationService อีกครั้งหลังผู้ใช้รีบูทเครื่อง
+ * ตื่น JarvisAutomationService อีกครั้งหลังผู้ใช้รีบูทเครื่อง และหลังแอปถูกอัปเดต (MY_PACKAGE_REPLACED — การติดตั้งทับฆ่า
+ * service ทุกตัว เดิมงานแจ้งเตือน/ระบบปลุก AI หยุดเงียบจนกว่าผู้ใช้จะเปิดแอป; ทั้งสอง action ได้รับยกเว้นให้ start FGS จากเบื้องหลัง)
  * หมายเหตุ: Android 12+ อาจปฏิเสธการ start FGS จากเบื้องหลังในบางสถานการณ์ —
  * service มี guard กัน crash อยู่แล้ว (จะ stopSelf เงียบๆ) และจะกลับมาทำงาน
  * เมื่อผู้ใช้เปิดแอปครั้งถัดไป
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        logDebug("BootReceiver", "BOOT_COMPLETED — restarting JarvisAutomationService")
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        logDebug("BootReceiver", "${intent.action?.substringAfterLast('.')} — restarting JarvisAutomationService")
         try {
             val svc = Intent(context, JarvisAutomationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

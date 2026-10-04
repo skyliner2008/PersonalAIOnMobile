@@ -255,11 +255,15 @@ class SettingsController(
         // Persist ค่า key/โมเดลที่ fallback สลับแล้วใช้งานได้จริงกลับลง settings
         // — รอบถัดไป/เปิดแอปใหม่จะเริ่มจากตัวที่ใช้ได้ ไม่วนกลับไปตัวที่ติดลิมิต
         orchestrator.getGeminiService().onWorkingConfigChanged = { workingModel, workingKey ->
-            logDebug("JarvisVM", "Persist working fallback config: model=$workingModel key=${com.skyliner2008.jarvis.maskApiKey(workingKey)}")
-            _selectedModel.value = workingModel
+            // the key that worked is kept; the model only when it is one of the two 500-a-day chat models
+            // (ModelConfig.CHAT_MODELS) — a 20-a-day fallback used to become the user's chat model for good
+            val keepModel = workingModel in com.skyliner2008.jarvis.data.ModelConfig.CHAT_MODELS
+            logDebug("JarvisVM", "Persist working fallback config: model=$workingModel${if (keepModel) "" else " (not kept: not a 500/day chat model)"} key=${com.skyliner2008.jarvis.maskApiKey(workingKey)}")
+            if (keepModel) _selectedModel.value = workingModel
+            else orchestrator.getGeminiService().updateConfig(workingKey, _selectedModel.value)   // next request starts on the user's model again
             _apiKey.value = workingKey
             scope.launch(Dispatchers.IO) {
-                database.jarvisDatabaseQueries.insertSetting("model_name", workingModel)
+                if (keepModel) database.jarvisDatabaseQueries.insertSetting("model_name", workingModel)
                 database.jarvisDatabaseQueries.insertSetting("api_key", workingKey)
             }
         }

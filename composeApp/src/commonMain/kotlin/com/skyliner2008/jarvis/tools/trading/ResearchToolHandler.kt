@@ -262,21 +262,23 @@ internal class ResearchToolHandler(
         if (symbols.size < 2) return "❌ ต้องระบุอย่างน้อย 2 symbols (คั่นด้วย comma)"
         val days = (args["days"]?.toIntOrNull() ?: 30).coerceIn(7, 365)
 
-        val seriesMap = mutableMapOf<String, List<Double>>()
+        // closes by trading date — Yahoo symbols (BTCUSDT → BTC-USD, XAUUSD → GC=F …: the AI sends app symbols, and
+        // "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT" used to fail outright)
+        val seriesMap = mutableMapOf<String, Map<Long, Double>>()
         val failed = mutableListOf<String>()
         symbols.forEach { sym ->
-            val closes = fetchYahooDailyCloses(sym, days)
+            val closes = fetchYahooDailyCloses(YahooSeries.symbolFor(sym), days)
             if (closes != null && closes.size >= 5) seriesMap[sym] = closes else failed.add(sym)
         }
         if (seriesMap.size < 2) {
-            return "❌ ดึงข้อมูลย้อนหลังไม่สำเร็จสำหรับ: ${(failed + seriesMap.keys.filter { seriesMap[it]!!.size < 5 }).joinToString(", ")}"
+            return "❌ ดึงข้อมูลย้อนหลังไม่สำเร็จสำหรับ: ${failed.joinToString(", ")}"
         }
 
-        val returnsMap = seriesMap.mapValues { (_, closes) ->
-            closes.zipWithNext { a, b -> if (a != 0.0) (b - a) / a else 0.0 }
-        }
-        val minLen = returnsMap.values.minOf { it.size }
-        val aligned = returnsMap.mapValues { (_, r) -> r.takeLast(minLen) }
+        // returns on the days every symbol traded: crypto trades at weekends and stocks do not, so the last N
+        // closes of each covered different days and the old pairing compared different dates
+        val aligned = YahooSeries.alignedReturns(seriesMap)
+        val minLen = aligned.values.firstOrNull()?.size ?: 0
+        if (minLen < 3) return "❌ วันที่ซื้อขายตรงกันน้อยเกินไป ($minLen วัน) — ลองเพิ่ม days"
 
         val keys = aligned.keys.toList()
         return buildString {
@@ -297,7 +299,8 @@ internal class ResearchToolHandler(
         }
     }
 
-    internal suspend fun fetchYahooDailyCloses(symbol: String, days: Int): List<Double>? {
+    /** Daily closes by trading date (days since 1970 in the exchange's own time zone), or null. */
+    internal suspend fun fetchYahooDailyCloses(symbol: String, days: Int): Map<Long, Double>? {
         return try {
             val url = "https://query1.finance.yahoo.com/v8/finance/chart/$symbol"
             val response = client.get(url) {
@@ -313,7 +316,16 @@ internal class ResearchToolHandler(
                 ?: return null
             val closes = result["indicators"]?.jsonObject?.get("quote")?.jsonArray
                 ?.firstOrNull()?.jsonObject?.get("close")?.jsonArray ?: return null
-            closes.mapNotNull { it.jsonPrimitive.doubleOrNull }
+            val stamps = result["timestamp"]?.jsonArray ?: return null
+            // the bar's date where it trades (EURUSD=X stamps 23:00 UTC of the day before, US stocks 13:30 UTC)
+            val offset = result["meta"]?.jsonObject?.get("gmtoffset")?.jsonPrimitive?.longOrNull ?: 0L
+            buildMap {
+                stamps.forEachIndexed { i, t ->
+                    val ts = t.jsonPrimitive.longOrNull ?: return@forEachIndexed
+                    val close = closes.getOrNull(i)?.jsonPrimitive?.doubleOrNull ?: return@forEachIndexed
+                    put((ts + offset).floorDiv(86_400L), close)
+                }
+            }
         } catch (e: Exception) {
             logDebug("TradingExecutor", "fetchYahooDailyCloses($symbol) failed: ${e.message}")
             null
@@ -843,6 +855,43 @@ internal class ResearchToolHandler(
                 appendLine("📋 **รายละเอียด:**")
                 result.details.forEach { appendLine("- $it") }
             }
+        }
+    }
+}
+
+/** trading_correlation_matrix's Yahoo daily series: the symbol to ask for, and returns on common dates. */
+internal object YahooSeries {
+    private val FIAT = setOf("USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD")
+
+    /** Yahoo chart symbol for what the AI usually sends (BTCUSDT, XAUUSD, EURUSD, SPX …); Yahoo forms pass through. */
+    fun symbolFor(raw: String): String {
+        val s = raw.trim().uppercase().substringAfter(":").replace("/", "")
+        return when {
+            s.contains("=") || s.startsWith("^") || s.contains("-") || s.contains(".") -> s
+            s in setOf("XAUUSD", "XAU", "GOLD") -> "GC=F"          // Yahoo has no XAUUSD=X any more (404)
+            s in setOf("XAGUSD", "XAG", "SILVER") -> "SI=F"
+            s in setOf("SPX", "SP500", "US500") -> "^GSPC"
+            s in setOf("NDX", "NAS100", "US100") -> "^NDX"
+            s in setOf("DJI", "US30", "DOW") -> "^DJI"
+            s in setOf("DXY", "USDX") -> "DX-Y.NYB"
+            s in setOf("WTI", "USOIL", "OIL") -> "CL=F"
+            s.endsWith("USDT") && s.length > 4 -> s.removeSuffix("USDT") + "-USD"
+            s.length == 6 && s.take(3) in FIAT && s.drop(3) in FIAT -> "$s=X"
+            s.endsWith("USD") && s.length > 3 -> s.removeSuffix("USD") + "-USD"
+            else -> s
+        }
+    }
+
+    /**
+     * Daily returns of each series on the dates all of them have (date → close maps), oldest first; the return of
+     * a date is from the previous common date. Crypto trades at weekends and stocks do not: the last N closes of
+     * each cover different days.
+     */
+    fun alignedReturns(series: Map<String, Map<Long, Double>>): Map<String, List<Double>> {
+        if (series.isEmpty()) return emptyMap()
+        val common = series.values.map { it.keys }.reduce { a, b -> a intersect b }.sorted()
+        return series.mapValues { (_, byDay) ->
+            common.map { byDay.getValue(it) }.zipWithNext { a, b -> if (a != 0.0) (b - a) / a else 0.0 }
         }
     }
 }

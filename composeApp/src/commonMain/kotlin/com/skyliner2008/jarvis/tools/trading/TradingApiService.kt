@@ -135,7 +135,9 @@ class TradingApiService(private val client: HttpClient) {
 
         for (ex in exchanges.distinct()) {
             val tvSymbol = if (ex == "BINANCE") cryptoCanonical else canonical
-            val ta = getTechnicalAnalysis(tvSymbol, ex, "1m")
+            // daily columns: the latest price and the change since the previous daily close
+            // (was "1m": the change over the last minute — gold on a Saturday showed UP 0.01% after a Friday of −1%)
+            val ta = getTechnicalAnalysis(tvSymbol, ex, "1D")
             val close = ta["close"]?.toDoubleOrNull()
             if (close != null && close > 0.0) {
                 // [สำคัญ] column "change" ของ TradingView scanner เป็น **เปอร์เซ็นต์** ไม่ใช่ราคา
@@ -150,6 +152,7 @@ class TradingApiService(private val client: HttpClient) {
                 val changePct = ta["change"]?.toDoubleOrNull() ?: 0.0
                 val prevClose = if (changePct != -100.0) close / (1.0 + changePct / 100.0) else close
                 val changeAbs = close - prevClose
+                val market = MarketHours.status(canonical, kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
                 return mapOf(
                     "symbol" to symbol.uppercase(),
                     "canonical_symbol" to canonical,
@@ -160,7 +163,8 @@ class TradingApiService(private val client: HttpClient) {
                     "high_52w" to "N/A",
                     "low_52w" to "N/A",
                     "currency" to "USD",
-                    "market_state" to "LIVE | TV:$ex",
+                    // was always "LIVE", also when the market is shut (gold on a Saturday)
+                    "market_state" to "${if (market.open) "LIVE" else "CLOSED — ${market.reasonTh ?: "ตลาดปิด"}"} | TV:$ex",
                     "direction" to if (changePct >= 0.0) "UP" else "DOWN",
                     "source" to "TV:$ex"
                 )
@@ -435,7 +439,26 @@ class TradingApiService(private val client: HttpClient) {
 
     suspend fun getTopGainers(exchange: String, limit: Int = 25) = scanTradingView(exchange, sortBy = "change", sortOrder = "desc", limit = limit)
     suspend fun getTopLosers(exchange: String, limit: Int = 25) = scanTradingView(exchange, sortBy = "change", sortOrder = "asc", limit = limit)
-    suspend fun getBollingerSqueeze(exchange: String, limit: Int = 50) = scanTradingView(exchange, sortBy = "BB.width", sortOrder = "asc", extraFilters = listOf(buildJsonObject { put("left", "BB.width"); put("operation", "less"); put("right", 0.04) }), columns = defaultColumns + "BB.width", limit = limit)
+    /**
+     * The narrowest daily Bollinger Bands among the most traded symbols (crypto: the 150 USDT pairs with the most
+     * traded value; stocks: the 300 largest). TradingView has no BB.width column, so the old filter on it matched
+     * nothing and the tool always answered "No data" (checked 2026-10-03). Width = (upper − lower) / basis, in %.
+     */
+    suspend fun getBollingerSqueeze(exchange: String, limit: Int = 50): List<Map<String, String>> {
+        val crypto = exchangeToMarket(exchange) == "crypto"
+        val rows = scanTradingView(exchange, sortBy = if (crypto) "volume" else "market_cap_basic", sortOrder = "desc", limit = 600)
+        if (rows.any { it.containsKey("error") }) return rows
+        fun num(r: Map<String, String>, k: String) = r[k]?.toDoubleOrNull()
+        val liquid = if (crypto) rows.sortedByDescending { (num(it, "close") ?: 0.0) * (num(it, "volume") ?: 0.0) }.take(150)
+            else rows.take(300)
+        return liquid.mapNotNull { r ->
+            val width = TvScannerColumns.bbWidthPct(num(r, "BB.upper"), num(r, "BB.lower"), num(r, "BB.basis"))
+                ?: return@mapNotNull null
+            // a dollar peg is not a squeeze (UUSDT, XUSDUSDT topped the list at 0.1 %)
+            if (crypto && width < 1.0 && (num(r, "close") ?: 0.0) in 0.97..1.03) return@mapNotNull null
+            r + ("BB.width" to "%.2f".format(width))
+        }.sortedBy { it["BB.width"]!!.toDouble() }.take(limit)
+    }
     suspend fun getOversoldSymbols(exchange: String, limit: Int = 30) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "RSI"); put("operation", "less"); put("right", 30) }), sortBy = "RSI", sortOrder = "asc", limit = limit)
     suspend fun getOverboughtSymbols(exchange: String, limit: Int = 30) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "RSI"); put("operation", "greater"); put("right", 70) }), sortBy = "RSI", sortOrder = "desc", limit = limit)
     suspend fun getVolumeBreakout(exchange: String, limit: Int = 25) = scanTradingView(exchange, extraFilters = listOf(buildJsonObject { put("left", "change"); put("operation", "greater"); put("right", 3.0) }, buildJsonObject { put("left", "volume"); put("operation", "greater"); put("right", 100000) }), sortBy = "relative_volume_10d_calc", sortOrder = "desc", columns = defaultColumns + "relative_volume_10d_calc", limit = limit)
@@ -488,8 +511,20 @@ class TradingApiService(private val client: HttpClient) {
     suspend fun scanTradingView(
         exchange: String, sortBy: String = "market_cap_basic", sortOrder: String = "desc", extraFilters: List<JsonObject> = emptyList(), columns: List<String> = defaultColumns, limit: Int = 50): List<Map<String, String>> {
         val market = exchangeToMarket(exchange)
-        return scanTradingViewByMarket(market, exchange, sortBy, sortOrder, extraFilters, columns, limit)
+        // crypto: USDT spot pairs, no stablecoins or fiat — one coin used to fill a list five times
+        // (ZROUSDT, ZROUSDT.P, ZROUSDC, ZROFDUSD, ZROTRY) between TRY/IDR/JPY pairs and EURUSDT
+        val filters = if (market == "crypto") cryptoSpotUsdtFilters + extraFilters else extraFilters
+        return scanTradingViewByMarket(market, exchange, sortBy, sortOrder, filters, columns, limit)
     }
+
+    private val cryptoSpotUsdtFilters = listOf(
+        buildJsonObject { put("left", "currency"); put("operation", "equal"); put("right", "USDT") },
+        buildJsonObject { put("left", "type"); put("operation", "equal"); put("right", "spot") },
+        buildJsonObject {
+            put("left", "base_currency"); put("operation", "not_in_range")
+            put("right", buildJsonArray { TvScannerColumns.STABLE_OR_FIAT_BASES.forEach { add(it) } })
+        }
+    )
 
     private val fundamentalColumns = listOf(
         "name", "description", "close", "change", "change_abs", "currency", "sector", "industry", "country",
@@ -652,8 +687,10 @@ class TradingApiService(private val client: HttpClient) {
                         industry = industry,
                         country = country,
                         closePrice = close,
-                        changePrice = change,
-                        changePct = changeAbs,
+                        // TradingView: "change" = percent, "change_abs" = price move (were swapped: AAPL +3.37 USD
+                        // on +1.02% showed as "+1.02, +3.37%")
+                        changePrice = changeAbs,
+                        changePct = change,
                         high52w = high52,
                         low52w = low52,
                         beta1y = beta,
@@ -714,17 +751,10 @@ class TradingApiService(private val client: HttpClient) {
         return try {
             val fullSymbol = if (":" in symbol) symbol else "${exchange.uppercase()}:${symbol.uppercase()}"
             val normalized = TaIndicators.normalizeTimeframe(interval)
-            val tfSuffix = when (normalized) {
-                "1m" -> "|1"
-                "3m" -> "|3"
-                "5m" -> "|5"
-                "15m" -> "|15"
-                "30m" -> "|30"
-                "4h" -> "|240"
-                "1D" -> "|1D"
-                "1W" -> "|1W"
-                else -> "" // 1h is default / plain
-            }
+            // plain columns are the DAILY values (TvScannerColumns). A timeframe the scanner lacks: no rating, and the
+            // caller fills the indicators from its own candles (fillTaFromLocal)
+            val tfSuffix = TvScannerColumns.suffix(normalized)
+                ?: return taColumns.associateWith { "N/A" } + mapOf("symbol" to symbol.uppercase(), "signal" to "N/A", "recommend_score" to "N/A")
             val requestCols = taColumns.map { it + tfSuffix }
             val url = "https://scanner.tradingview.com/symbol"
             val resp = client.get(url) { parameter("symbol", fullSymbol); parameter("fields", requestCols.joinToString(",")); header("User-Agent", "Mozilla/5.0"); timeout { requestTimeoutMillis = 15_000 } }
@@ -739,9 +769,14 @@ class TradingApiService(private val client: HttpClient) {
                     else -> v.jsonPrimitive.doubleOrNull?.let { "%.4f".format(it).trimEnd('0').trimEnd('.') } ?: v.jsonPrimitive.content
                 }
             }
-            val rec = root["Recommend.All$tfSuffix"]?.jsonPrimitive?.doubleOrNull ?: 0.0
-            res["signal"] = when { rec >= 0.5 -> "STRONG BUY"; rec >= 0.1 -> "BUY"; rec >= -0.1 -> "HOLD"; rec >= -0.5 -> "SELL"; else -> "STRONG SELL" }
-            res["recommend_score"] = "%.3f".format(rec)
+            TvScannerColumns.bbWidthPct(res["BB.upper"]?.toDoubleOrNull(), res["BB.lower"]?.toDoubleOrNull(), res["BB.basis"]?.toDoubleOrNull())
+                ?.let { res["BB.width"] = "%.4f".format(it) }
+            // no rating = no data (was 0.0, i.e. "HOLD")
+            val rec = root["Recommend.All$tfSuffix"]?.jsonPrimitive?.doubleOrNull
+            res["signal"] = when {
+                rec == null -> "N/A"; rec >= 0.5 -> "STRONG BUY"; rec >= 0.1 -> "BUY"; rec >= -0.1 -> "HOLD"; rec >= -0.5 -> "SELL"; else -> "STRONG SELL"
+            }
+            res["recommend_score"] = rec?.let { "%.3f".format(it) } ?: "N/A"
             res
         } catch (e: Exception) { mapOf("error" to "TA error: ${e.message}") }
     }
@@ -750,7 +785,14 @@ class TradingApiService(private val client: HttpClient) {
         return listOf("1W", "1D", "4h", "1h", "15m").associateWith { try { getTechnicalAnalysis(symbol, exchange, it) } catch (_: Exception) { mapOf("error" to "N/A") } }
     }
 
-    private val taColumns = listOf("close", "change", "volume", "RSI", "MACD.macd", "MACD.signal", "BB.basis", "BB.width", "ATR", "ADX", "Recommend.All", "buy_signals", "sell_signals", "neutral_signals")
+    // everything trading_technical_analysis shows, from one request at one timeframe (the same bar). BB.width is
+    // worked out from the bands; buy/sell/neutral_signals were dropped: the scanner has no such columns (always N/A)
+    private val taColumns = listOf(
+        "close", "change", "volume", "RSI", "RSI[1]", "MACD.macd", "MACD.signal", "MACD.hist",
+        "Stoch.K", "Stoch.D", "CCI20", "AO", "EMA20", "EMA50", "EMA200",
+        "BB.upper", "BB.basis", "BB.lower", "ATR", "ADX", "ADX+DI", "ADX-DI",
+        "Recommend.All", "Recommend.MA", "Recommend.Other"
+    )
 
     suspend fun getBinanceFuturesPositioning(symbol: String): BinancePositioningSentiment? = coroutineScope {
         val raw = symbol.uppercase().trim()
@@ -930,19 +972,20 @@ class TradingApiService(private val client: HttpClient) {
         var bear = 0
         val topPosts = mutableListOf<String>()
 
-        newsItems.take(15).forEach { item ->
+        val scored = newsItems.take(15)
+        scored.forEach { item ->
             val title = item["title"].orEmpty()
-            val text = (title + " " + item["description"].orEmpty()).lowercase()
+            val text = title + " " + item["description"].orEmpty()
             topPosts.add(title)
-            val isBull = listOf("surge", "bull", "jump", "rally", "gain", "high", "positive", "boom", "buy", "upward", "breakout", "ath").any { text.contains(it) }
-            val isBear = listOf("fall", "drop", "bear", "crash", "loss", "low", "negative", "slump", "sell", "plunge", "risk", "warning", "caution", "dip").any { text.contains(it) }
+            val isBull = NewsTone.bullish(text)
+            val isBear = NewsTone.bearish(text)
             if (isBull && !isBear) bull++
             if (isBear && !isBull) bear++
             if (isBull && isBear) { bull++; bear++ }
         }
 
-        val total = newsItems.size
-        var score = if (bull + bear > 0) (bull - bear).toDouble() / (bull + bear) else 0.0
+        val newsScore = if (bull + bear > 0) (bull - bear).toDouble() / (bull + bear) else 0.0
+        var score = newsScore
 
         // ถ่วงน้ำหนักด้วย Positioning ของ Smart Money ถ้ามีข้อมูล
         if (binancePos != null) {
@@ -959,8 +1002,12 @@ class TradingApiService(private val client: HttpClient) {
         val out = mutableMapOf<String, Any>(
             "symbol" to query,
             "sentiment_score" to "%.2f".format(score),
+            // the headlines alone — sentiment_score also leans on the futures positioning (trading_sentiment counts
+            // that in its own pillar)
+            "news_score" to "%.2f".format(newsScore),
             "sentiment_label" to label,
-            "posts_analyzed" to (total.takeIf { it > 0 } ?: (bull + bear).coerceAtLeast(1)),
+            // the headlines that were read (was every item of the feed: "100 posts" for 15 read)
+            "posts_analyzed" to scored.size,
             "bullish_posts" to bull,
             "bearish_posts" to bear,
             "top_posts" to topPosts.take(5),
@@ -1038,8 +1085,10 @@ class TradingApiService(private val client: HttpClient) {
         val cnnJob = async { if (isUsStock || cleanSym in listOf("SPX", "NDX", "US30", "XAUUSD", "GOLD")) getCnnStockFearAndGreed() else null }
         val cryptoFngJob = async { if (isCrypto) getFearGreedIndex(3) else null }
         val taJob = async {
-            val ex = resolveExchange(s, null)
-            runCatching { getTechnicalAnalysis(s, ex, "1D") }.getOrDefault(emptyMap())
+            // a symbol the scanner knows: "BTC" → BINANCE:BTCUSDT (the pillar was always empty for "BTC")
+            val taSym = if (isCrypto) "${cleanSym}USDT" else s
+            val ex = if (isCrypto) "BINANCE" else resolveExchange(s, null)
+            runCatching { getTechnicalAnalysis(taSym, ex, "1D") }.getOrDefault(emptyMap())
         }
 
         val newsData = newsJob.await()
@@ -1048,7 +1097,9 @@ class TradingApiService(private val client: HttpClient) {
         val cryptoFng = cryptoFngJob.await()
         val taData = taJob.await()
 
-        val newsBias = newsData["sentiment_score"]?.toString()?.toDoubleOrNull() ?: 0.0
+        // the headlines alone: the blended sentiment_score also carries the futures positioning, which the
+        // positioning pillar counts again (BTC 2026-10-03: 4 good / 5 bad headlines showed as bias +0.31)
+        val newsBias = (newsData["news_score"] ?: newsData["sentiment_score"])?.toString()?.toDoubleOrNull() ?: 0.0
         val newsScore = ((newsBias + 1.0) * 50.0).coerceIn(0.0, 100.0)
 
         val marketFgScore = when {
@@ -1077,7 +1128,7 @@ class TradingApiService(private val client: HttpClient) {
             else -> Pair(50.0, "ไม่มีข้อมูลสัญญาอนุพันธ์เฉพาะตัว")
         }
 
-        val recAll = taData["recommend_score"]?.toDoubleOrNull() ?: 0.0
+        val recAll = taData["recommend_score"]?.toDoubleOrNull() ?: 0.0   // the daily rating (was always empty: "|1D")
         val taScore = ((recAll + 1.0) * 50.0).coerceIn(0.0, 100.0)
 
         val compositeScore = (newsScore * 0.30) + (marketFgScore * 0.25) + (posScore * 0.30) + (taScore * 0.15)
@@ -1088,7 +1139,9 @@ class TradingApiService(private val client: HttpClient) {
             SentimentPillar("ข่าวสาร & กระแสสังคม (News & Social)", newsScore, 30, "Bias: $newsBias (${newsData["bullish_posts"]} บวก / ${newsData["bearish_posts"]} ลบ)"),
             SentimentPillar("ดัชนีอารมณ์ตลาดรวม (Market F&G)", marketFgScore, 25, if (isCrypto) "Crypto F&G: ${"%.0f".format(marketFgScore)}/100" else "CNN Stock F&G: ${"%.1f".format(marketFgScore)}/100"),
             SentimentPillar("สถานะการถือครองสัญญา (Positioning)", posScore, 30, posDetail),
-            SentimentPillar("ความเห็นอินดิเคเตอร์เทคนิค (Technical)", taScore, 15, "สัญญาณ: ${taData["signal"] ?: "HOLD"} (Score ${taData["recommend_score"] ?: "0"})")
+            SentimentPillar("ความเห็นอินดิเคเตอร์เทคนิค (Technical)", taScore, 15,
+                if (taData["recommend_score"]?.toDoubleOrNull() != null) "สัญญาณรายวัน: ${taData["signal"]} (Score ${taData["recommend_score"]})"
+                else "ไม่มีข้อมูลเทคนิค — นับเป็นกลาง (50)")
         )
 
         @Suppress("UNCHECKED_CAST")

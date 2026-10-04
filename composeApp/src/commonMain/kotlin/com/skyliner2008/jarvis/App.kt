@@ -556,6 +556,7 @@ fun App(
                             onUpdateInterval = { id, interval -> viewModel.automationManager.updateInterval(id, interval) },
                             onUpdateCondition = { id, cond -> viewModel.automationManager.updateCondition(id, cond) },
                             onRename = { id, name -> viewModel.automationManager.renameJob(id, name) },
+                            onRefresh = { viewModel.automationManager.refreshJobs() },
                             alertTestRunning = alertTestRunning,
                             alertTestStatus = alertTestStatus,
                             alertTestResults = alertTestResults,

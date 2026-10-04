@@ -48,7 +48,9 @@ class CameraAnalysisService(
 
         // Rebuild Gemini provider if key changed
         if (geminiApiKey.isNotBlank()) {
-            val gs = GeminiService(client, geminiApiKey, "gemini-2.5-flash")
+            // flash-lite (500 a day), not gemini-2.5-flash (20 a day): snapshots used up the flash quota first
+            // (live camera frames go to the Live session, which has no daily limit)
+            val gs = GeminiService(client, geminiApiKey, com.skyliner2008.jarvis.data.ModelConfig.DEFAULT_MAIN_MODEL)
             geminiService = gs
             
             val gp = GeminiCameraProvider(gs)

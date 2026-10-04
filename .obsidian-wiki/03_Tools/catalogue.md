@@ -128,7 +128,19 @@
 
 ดู [[../07_Trading_Intelligence/66_WakeEngine_Live_Backup_V29]]
 - **`trading_signal_anticipation`** = ระบบปลุก AI (แยกจาก signal alert) — action: create / scan / list_factors / config
-  (factors, add_factors, remove_factors, hourly_budget, daily_budget, cooldown_bars) / learning / inspect / recommend / status
+  (factors, add_factors, remove_factors, hourly_budget, daily_budget, cooldown_bars) / learning / inspect / recommend / status / summary
+- **action `summary`** (2026-10-04, `automation/wake/WakeVerdictSummary`) = ผลการคาดการณ์จากตาราง `AiWakeView` (1 แถวต่อการปลุก):
+  ปลุกกี่ครั้ง · แจ้งเตือน (NOTIFY) กี่ครั้ง แยก BUY/SELL พร้อมเหตุผลและผลจริง (ชน TP / SL / หมดเวลา / ยังติดตาม, รวม R) · ไม่แจ้ง (SKIP)
+  กี่ครั้ง AI เอียงทิศไหน หมวดเหตุผล (TF ขัดแย้ง · ตลาดเงียบ/ไร้ทิศทาง · สภาพคล่อง · ผันผวน · RR · มุมมองเดิมยังเปิด · ระบบตัดเพราะสวน
+  เทรนด์) + ประโยคที่ AI ใช้บ่อย + SKIP ที่ราคาปิดห่างเกิน 3 ATR เมื่อครบ 12 แท่ง (ไม่ใช่จุดสุดโต่งระหว่างทาง — แกว่งเกิน 2 ATR ใน
+  12 แท่งเป็นเรื่องปกติ) · ชื่อสินทรัพย์มีชื่อไทยกำกับทุกที่ ("BTCUSDT (บิทคอยน์)") · `period` = today / 24h (ค่าเริ่มต้น) / 7d / 30d / all
+  (หรือ Nh / Nd) · ไม่ระบุ `symbol` = ทุกสินทรัพย์ ("ทอง" → XAUUSD, "BTC" → BTCUSDT) · ข้อความเป็นบรรทัด ไม่มีตาราง ให้ Live เล่าต่อ
+  · Live ทุกโหมด (CONTROL / DRIVE / PET) ได้ tool นี้ (`ToolRegistry.getLiveGeminiTool` ตัดเฉพาะ tool ควบคุมหน้าจอนอกโหมดขับรถ)
+  และไม่ถูกส่งไปทำเบื้องหลัง — ผลกลับในเทิร์นเดียวกัน · กฎใน `JarvisPersona` แชทข้อ 10 และ Live ข้อ 11
+  · log: ผลทั้งก้อนทีละบรรทัดใต้ tag `WakeSummary` (log ของ Live ตัดผล tool ที่ 200 ตัวอักษร) และ `AiViewTracker: … ปิดผลมุมมอง AI N
+  รายการ — แจ้งเตือน: BUY@84,844 → SL -1.00R (1 แท่ง)` บอกผลของการแจ้งเตือนแต่ละครั้ง
+  · ทดสอบจริง 2026-10-04 13:35 (Live โหมด CONTROL): "ผลคาดการณ์วันนี้มีอะไรบ้าง" → `summary(period=today)` ตอบใน 31 ms พูดภายใน 2 วิ
+  ตัวเลขตรง (ปลุก 239 · แจ้ง 3 · SKIP 236) แต่เรียก BTC ว่า "ทองคำ" → ใส่ชื่อไทยของสินทรัพย์ในผล + กฎ Live "เรียกสินทรัพย์ตามชื่อในผล"
 - alert job ของระบบนี้ใช้ `tool_name = trading_anticipation`, field `wake >= 1` (ไม่ใช่ `trading_signal_alert` / `signal_anticipation` อีกแล้ว)
 - `automation_manage_alerts` ที่ขอ anticipation ด้วยชื่อเก่าจะถูกแปลงเป็น `trading_anticipation`/`wake` อัตโนมัติ
 - สำรอง/กู้คืน (การเรียนรู้ + ฐานข้อมูล) อยู่ใน Settings — ไม่ใช่ tool ของ AI (กันการกู้คืนทับข้อมูลโดยไม่ตั้งใจ)
@@ -153,3 +165,40 @@
 
 **กติกาใหม่ของทุก tool result**: ค่าที่คำนวณไม่ได้เพราะแท่งเทียนไม่พอจะ **ไม่ถูกส่งออกมาเลย**
 ไม่ใช่ส่งค่า default ปลอม — ทุก payload ติด `source` / `timeframe` / `bars_used` ให้ AI ประเมินความน่าเชื่อถือเองได้
+
+## อัปเดต 2026-10-03 — ตรวจผลของ tool ด้วยข้อมูลจริง
+
+ผู้ใช้: "ตรวจสอบความถูกต้อง ของการเรียกใช้ tool ต่างๆ ว่าได้ผลลัพธ์จากข้อมูลจริง และถูกต้องหรือไม่"
+
+**วิธีตรวจ (รันซ้ำได้)**: `python tools/tool_accuracy_audit.py` — เรียก 32 tool จริงผ่าน `AvatarSceneDataLiveDump`
+แล้วเทียบกับแหล่งอิสระ: Binance (ราคา + แท่งเทียน → คำนวณอินดิเคเตอร์ใหม่แบบ TradingView), gold-api, Yahoo, alternative.me,
+CoinGecko, ForexFactory · `--skip-gradle` ใช้ผล tool เดิม · ผลหลังแก้: ผ่าน 56 · ไม่ผ่าน 0
+
+**กติกาสำคัญของ TradingView scanner** (`TvScannerColumns`): คอลัมน์ไม่มีต่อท้าย = **ค่ารายวัน**, `|60` = 1h, `|240` = 4h,
+`|15` `|5` `|1` `|30` `|120` `|1W` `|1M` — มีแค่นี้ (`|3` `|360` `|480` `|720` `|1D` ได้ null) · ไม่มีคอลัมน์ `BB.width`,
+`buy_signals`, `sell_signals`, `neutral_signals` · `change` = เปอร์เซ็นต์, `change_abs` = ราคา
+
+**บั๊กที่เจอและแก้**
+| tool | อาการ (ข้อมูลจริง 2026-10-03) | สาเหตุ |
+|---|---|---|
+| `trading_technical_analysis` (default 1h) | RSI 63.9 / MACD 1944 / ADX 41.7 / ATR 2199 / ค่ากลาง BB ต่ำกว่าเส้นล่าง / สัญญาณ STRONG BUY — ค่าจริง 1h: RSI 49.7, MACD −73, ADX 14, ATR 251, BUY | 1h ส่งคอลัมน์ไม่มีต่อท้าย = ค่ารายวัน ปนกับค่า 1h ที่คำนวณเอง |
+| `trading_multi_timeframe` | แถว 1h เป็นค่ารายวัน แถว 1D ว่าง (RSI N/A, HOLD) | เดียวกัน + `|1D` ไม่มีจริง |
+| `trading_sentiment` เสาเทคนิค | HOLD (Score 0) ทุกครั้ง | `|1D` + ส่ง "BTC" ให้ scanner (ต้อง BINANCE:BTCUSDT) |
+| `trading_sentiment` เสาข่าว | ข่าวบวก 4 ลบ 5 แต่ bias +0.31 | คะแนนข่าวผสม positioning ของ futures ซึ่งมีเสาของตัวเองอยู่แล้ว (นับซ้ำ) → `news_score` |
+| `trading_price` (ทอง/FX/คริปโตผ่าน TV) | วันเสาร์ทอง "UP 0.01% · Market LIVE" — ศุกร์ลง −0.88% และตลาดปิด | ขอ TF 1m (`change|1` = เปลี่ยนแปลงในนาทีล่าสุด) + `market_state` ตายตัว "LIVE" → ใช้คอลัมน์รายวัน + `MarketHours` |
+| `trading_fundamental_analysis` | AAPL "+1.02, +3.37%" (จริง +3.37 USD, +1.02%) | `change`/`change_abs` สลับกัน |
+| `trading_correlation_matrix` | BTCUSDT,ETHUSDT,… ล้มทุกครั้ง · คริปโตเทียบหุ้นจับคู่ผิดวัน | รับแค่สัญลักษณ์ Yahoo + จับคู่ด้วยลำดับ → `YahooSeries.symbolFor` + จับคู่ตามวันที่ (`gmtoffset`) |
+| `trading_bollinger_scan` | "No data" ทุกครั้ง | กรอง/เรียงด้วย `BB.width` ที่ไม่มีจริง → คำนวณจาก upper/lower/basis ใน 150 คู่ที่ซื้อขายมากสุด |
+| `trading_combined` | `MACD hist: null`, `EMA20: null` | คอลัมน์ไม่ได้ขอ (ตอนนี้ขอทั้งชุดใน request เดียว) |
+| สแกนคริปโต (gainers/losers/overbought/oversold/volume) | เหรียญเดียวซ้ำ 5 คู่ (USDT, .P, USDC, FDUSD, TRY), คู่ IDR/JPY, EURUSDT · % ไม่มีหน่วย | กรอง USDT spot ไม่รวม stablecoin/fiat (`STABLE_OR_FIAT_BASES`) + แสดง % |
+| `trading_macro_calendar` | ข่าวที่ประกาศแล้วมีแค่ค่าคาดการณ์ — เสี่ยง AI พูดเป็นผลจริง | ForexFactory ฟรีไม่มี actual (และไม่มีสัปดาห์หน้า) → บอกในผลชัดๆ ให้ค้นเว็บ |
+| `calculate` | `62.75000000000091` | ทศนิยมฐานสอง → `formatCalcResult` |
+| `device_weather` | "โอกาสฝน 100% (ปริมาณ 0.0 มม.)" | ค่าสูงสุดของวัน คู่กับฝนตอนนี้ → เขียนแยกให้ชัด · WMO 2 = เมฆบางส่วน |
+
+**ตรงแล้ว (ไม่ได้แก้)**: ราคา BTC/ทอง (≤ 0.05%), S&P/NASDAQ/DOW/VIX/น้ำมัน (ราคา + % ตรง Yahoo), Crypto F&G, CoinGecko
+(market cap, dominance), position sizing, เวลา, แปลงหน่วย, AAPL งบการเงิน/ราคาเป้าหมาย
+
+**ข้อจำกัดที่ยังอยู่**: tool SMC/Elliott เป็นโหมด TV-only — ถ้า TradingView ไม่ตอบและยังไม่มีแท่งในฐานข้อมูล
+จะตอบ `❌ Strict TV candle source violation …` (บน PC เจอบ่อยเพราะไม่มีฐานข้อมูลแท่ง; บนมือถือเจอเฉพาะซีรีส์ใหม่ตอน TV ล่ม) ·
+ข่าวจาก Google News มีหัวข้อที่ไม่ใช่ข่าวปนบ้าง (เช่น "Bitcoin Futures (CME Group)") ·
+EV ของ `trading_fundamental_analysis` เป็นค่า ณ สิ้นไตรมาส (`enterprise_value_fq`) จึงอาจต่ำกว่า market cap ปัจจุบัน

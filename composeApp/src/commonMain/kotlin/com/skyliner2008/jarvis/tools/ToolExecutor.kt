@@ -295,10 +295,18 @@ object ToolExecutor {
         if (expression.isBlank()) return "กรุณาระบุนิพจน์ที่ต้องการคำนวณ"
         return try {
             val result = evalMath(expression.trim())
-            "ผลลัพธ์: $expression = $result"
+            "ผลลัพธ์: $expression = ${formatCalcResult(result)}"
         } catch (e: Exception) {
             "ไม่สามารถคำนวณได้: ${e.message}"
         }
+    }
+
+    /** 62.75000000000091 → 62.75: binary floating-point noise is not part of the answer (10 decimals at most). */
+    internal fun formatCalcResult(x: Double): String {
+        if (x.isNaN() || x.isInfinite()) return x.toString()
+        if (x != 0.0 && kotlin.math.abs(x) < 1e-6) return x.toString()
+        val s = "%.10f".format(x).trimEnd('0').trimEnd('.')
+        return if (s == "-0") "0" else s
     }
 
     private suspend fun executeRememberFact(args: Map<String, String>): String {

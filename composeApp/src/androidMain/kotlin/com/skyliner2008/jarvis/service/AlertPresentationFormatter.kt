@@ -185,6 +185,16 @@ object AlertPresentationFormatter {
         }.trim()
     }
 
+    /** the asset's name as the voice says it (ทองคำ, บิทคอยน์ …) */
+    fun assetNameTh(symbol: String): String {
+        val sym = symbol.substringBefore("@")
+        return when (sym.uppercase()) {
+            "XAUUSD" -> "ทองคำ"; "XAGUSD" -> "เงินแท่ง"
+            "BTCUSDT", "BTCUSD" -> "บิทคอยน์"; "ETHUSDT", "ETHUSD" -> "อีเทอเรียม"
+            else -> sym
+        }
+    }
+
     /** เสียง: ใช้สรุปที่ AI เขียนแล้ว (สั้น) — ถ้าไม่มี AI พูดเหตุการณ์แรก */
     fun buildWakeSpeech(
         job: AlertJob, data: Map<String, String>,

@@ -201,24 +201,66 @@ internal class TradingAlertEvaluator(
      * @param systemPrompt แทน system prompt แชทของ JARVIS (งานเฉพาะทาง ประหยัดโทเคน)
      * @param timeoutMs เวลารอต่อโมเดล — สรุปเสียงต้องเร็ว (8 วิ) แต่งานวิเคราะห์รอได้นานกว่า
      */
-    suspend fun generateAiText(prompt: String, systemPrompt: String? = null, timeoutMs: Long = 8_000): String? {
+    /**
+     * A fallback model that answered when the user's model did not (model, until when). Alerts use it for an hour,
+     * then try the user's model again. It used to be written to "model_name" — the model the whole app chats with —
+     * so one 429 on an alert switched the user's chat model to a fallback for good.
+     */
+    @Volatile private var alertFallback: Pair<String, Long>? = null
+
+    suspend fun generateAiText(
+        prompt: String,
+        systemPrompt: String? = null,
+        timeoutMs: Long = 8_000,
+        /** the Live worker for this job (LiveWorker.Kind): THINKING for decisions, SEARCH for fresh facts */
+        kind: com.skyliner2008.jarvis.data.LiveWorker.Kind = com.skyliner2008.jarvis.data.LiveWorker.Kind.GENERAL,
+        /**
+         * whether a text answers this job (its format, after stripCodeFences) — a model that gives anything else does
+         * not answer, and the next model gets the job. A wake used to end on gemini-3.8-live-extended-thinking's
+         * "กำลังวิเคราะห์ข้อมูลกราฟครับ": no format, so the alert went out silent as "AI down" (phone 2026-10-04 02:10).
+         */
+        accept: (String) -> Boolean = { true }
+    ): String? {
         val apiKey = setting("api_key")
         if (apiKey.isBlank()) {
             logDebug("AutomationService", "🧠 AI summary skipped — no api_key in settings")
             return null
         }
-        val primary = setting("model_name").ifBlank { com.skyliner2008.jarvis.data.ModelConfig.getBestActiveModel() }
-        // Alert summaries are time-critical. Keep a bounded fallback chain so a provider outage
-        // cannot turn one notification into a minute-long cascade of sequential timeouts.
-        val models = com.skyliner2008.jarvis.data.ModelConfig.getFallbackChain(primary).take(4)
-        logDebug("AutomationService", "🧠 AI summary start — chain=${models.joinToString(" → ")}")
+        // every key the user gave (multi-key: Settings → Gemini API keys, the primary first) — background calls used
+        // the primary key alone
+        val keys = (listOf(apiKey) + setting("gemini_api_keys").lines()).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+
+        // a Live worker first: Live models have no daily limit — the chat models below have 500 a day per project
+        val style = "คุณคือ JARVIS ผู้ช่วยส่วนตัว พูดสั้น กระชับ สุภาพ เป็นมิตร ใช้ภาษาไทยเป็นหลัก " +
+            "ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้ markdown ห้ามใส่หัวข้อหรือตาราง ห้ามใส่ code block หรือ chart"
+        val workerTimeout = if (kind == com.skyliner2008.jarvis.data.LiveWorker.Kind.THINKING) maxOf(timeoutMs, 30_000L) else maxOf(timeoutMs, 15_000L)
+        com.skyliner2008.jarvis.data.LiveWorker.ask(
+            geminiClient, keys, prompt, listOfNotNull(systemPrompt, style).joinToString("\n\n"), kind, workerTimeout,
+            accept = { accept(AlertPresentationFormatter.stripCodeFences(it.trim())) }
+        )?.let { a ->
+            val text = AlertPresentationFormatter.stripCodeFences(a.text.trim()).takeIf { it.isNotBlank() && accept(it) }
+            if (text != null) {
+                logDebug("AutomationService", "🧠 AI summary OK via Live worker model=${a.model} (${a.ms}ms, ${text.length} chars${if (a.viaTool) "" else ", from its speech"})")
+                return text
+            }
+        }
+        val userModel = setting("model_name").ifBlank { com.skyliner2008.jarvis.data.ModelConfig.getBestActiveModel() }
+        // background work stays on the two 500-a-day chat models (ModelConfig.CHAT_MODELS), the user's own first when it
+        // is one of them. It used to reach the 20-a-day models: fallbackModelsOverride = emptyList() made
+        // generateResponse fall back to the whole chain inside each attempt.
+        val pair = com.skyliner2008.jarvis.data.ModelConfig.CHAT_MODELS
+        val home = userModel.takeIf { it in pair } ?: pair.first()
+        val head = alertFallback?.takeIf { it.second > System.currentTimeMillis() }?.first?.takeIf { it in pair } ?: home
+        val models = (listOf(head) + pair).distinct()
+        logDebug("AutomationService", "🧠 AI summary start — chain=${models.joinToString(" → ")} keys=${keys.size}")
         for (m in models) {
             val t0 = System.currentTimeMillis()
             val text = try {
-                // Alert AI is latency-sensitive: use one model per attempt, short timeout,
-                // and disable GeminiService's 45s long-retry. The outer chain owns fallback.
-                val service = GeminiService(geminiClient, apiKey, m).apply {
-                    fallbackModelsOverride = emptyList()
+                // Alert AI is latency-sensitive: one model per attempt (its keys in turn), short timeout, no 45 s
+                // long retry and no waiting on a per-minute 429. The outer loop owns the model fallback.
+                val service = GeminiService(geminiClient, keys.first(), m).apply {
+                    fallbackModelsOverride = listOf(m)
+                    apiKeysOverride = keys
                     systemPromptOverride = systemPrompt
                 }
                 service.generateResponse(
@@ -226,7 +268,8 @@ internal class TradingAlertEvaluator(
                     intentAddon = "คุณคือ JARVIS ผู้ช่วยส่วนตัว พูดสั้น กระชับ สุภาพ เป็นมิตร ใช้ภาษาไทยเป็นหลัก " +
                             "ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้ markdown ห้ามใส่หัวข้อหรือตาราง ห้ามใส่ code block หรือ chart",
                     timeoutMs = timeoutMs,
-                    retryLongerOnTimeout = false
+                    retryLongerOnTimeout = false,
+                    waitOn429 = false
                 ).trim().takeIf { it.isNotBlank() && !it.startsWith("⚠️") }
                     ?.let { AlertPresentationFormatter.stripCodeFences(it) }
                     ?.takeIf { it.isNotBlank() }
@@ -234,11 +277,18 @@ internal class TradingAlertEvaluator(
                 logError("AutomationService", "🧠 AI summary FAILED model=$m (${System.currentTimeMillis() - t0}ms): ${e.message}", e)
                 null
             }
+            if (text != null && !accept(text)) {
+                logDebug("AutomationService", "🧠 AI summary model $m answered outside the asked format (${text.take(80)}) → try next in fallback chain")
+                continue
+            }
             if (text != null) {
-                if (m != primary) {
-                    // persist โมเดลที่ใช้ได้จริงกลับลง settings — รอบถัดไปจะไม่ชน 404/429 ซ้ำตัวเดิม
-                    logDebug("AutomationService", "🧠 AI summary fallback model: $primary → $m (persist)")
-                    runCatching { database.jarvisDatabaseQueries.insertSetting("model_name", m) }
+                if (m == home) {
+                    alertFallback = null
+                } else if (m != head) {
+                    // a new fallback: alerts use it for an hour, then try the user's model again (the user's own
+                    // setting is left alone)
+                    logDebug("AutomationService", "🧠 AI summary fallback model: $head → $m (alerts only, 1 h)")
+                    alertFallback = m to (System.currentTimeMillis() + 3_600_000L)
                 }
                 logDebug("AutomationService", "🧠 AI summary OK model=$m (${System.currentTimeMillis() - t0}ms, ${text.length} chars)")
                 return text
@@ -263,6 +313,8 @@ internal class TradingAlertEvaluator(
         }
     }
 
+
+    private val supervisorDecision = Regex("DECISION:\\s*(\\w+)", RegexOption.IGNORE_CASE)
 
     suspend fun runStrategySupervisor(job: AlertJob, data: Map<String, String>): SupervisorResult? {
         val prompt = buildString {
@@ -294,12 +346,16 @@ internal class TradingAlertEvaluator(
         val raw = try {
             val waitedMs = System.currentTimeMillis() - waitStart
             if (waitedMs > 0L) logDebug("AutomationService", "🧑‍✈️ Supervisor queued — waited ${waitedMs}ms")
-            generateAiText(prompt)
+            generateAiText(
+                prompt,
+                kind = com.skyliner2008.jarvis.data.LiveWorker.Kind.THINKING,
+                accept = { supervisorDecision.containsMatchIn(it) }
+            )
         } finally {
             alertAiMutex.unlock()
         } ?: return null
         // generateAiText บีบ whitespace เป็นบรรทัดเดียว (stripCodeFences) → parse ด้วย regex ไม่ใช่แยกบรรทัด
-        val decisionRaw = Regex("DECISION:\\s*(\\w+)", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)?.uppercase() ?: return null
+        val decisionRaw = supervisorDecision.find(raw)?.groupValues?.get(1)?.uppercase() ?: return null
         val decision = when {
             decisionRaw.contains("VETO") -> "VETO"
             decisionRaw.contains("ADJUST") -> "ADJUST"
@@ -333,7 +389,9 @@ internal class TradingAlertEvaluator(
             generateAiText(
                 prompt,
                 systemPrompt = com.skyliner2008.jarvis.automation.wake.WakePrompt.SYSTEM_PROMPT,
-                timeoutMs = 20_000
+                timeoutMs = 20_000,
+                kind = com.skyliner2008.jarvis.data.LiveWorker.Kind.THINKING,
+                accept = { com.skyliner2008.jarvis.automation.wake.WakePrompt.parse(it) != null }
             )
         } finally {
             alertAiMutex.unlock()

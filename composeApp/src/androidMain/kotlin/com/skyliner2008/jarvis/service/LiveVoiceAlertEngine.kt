@@ -297,7 +297,8 @@ internal class LiveVoiceAlertEngine(
                     "โปรดพูดแจ้งผู้ใช้เป็นภาษาไทย 1-2 ประโยค ระบุ Signal/ทิศทาง และ Entry/SL/TP เท่าที่มีในข้อมูล " +
                     "ห้ามเดาหรือเพิ่มตัวเลข ห้ามใช้ markdown (การ์ดรายละเอียดลงแชทแล้ว)"
             } else {
-                "[SYSTEM][แจ้งเตือน] $full\nโปรดแจ้งผู้ใช้สั้นๆ 1-2 ประโยคอย่างเป็นธรรมชาติ ห้ามใช้ markdown"
+                "[SYSTEM][แจ้งเตือน] $full\nโปรดแจ้งผู้ใช้สั้นๆ 1-2 ประโยคอย่างเป็นธรรมชาติ ห้ามใช้ markdown " +
+                    "เรียกสินทรัพย์ตามชื่อในข้อความนี้เท่านั้น ห้ามเอาสินทรัพย์จากบทสนทนาก่อนหน้ามาใส่"
             }
             val delivered = com.skyliner2008.jarvis.ai.LiveSessionBridge.deliver(prompt)
             if (delivered) {

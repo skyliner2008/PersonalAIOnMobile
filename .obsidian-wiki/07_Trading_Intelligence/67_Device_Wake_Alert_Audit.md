@@ -46,6 +46,12 @@ python tools/wake_factor_replay.py BTCUSDT --bars 300
 ```
 `--step 1m` = เล่นซ้ำทุกนาทีเหมือนมือถือ (ส่วน 3b จำลองความถี่การปลุกตามกติกาจริง)
 
+**ไม่ต้องดึงฐานข้อมูลจากมือถือ** (คริปโต): สร้างไฟล์แท่งจาก Binance สาธารณะแล้วส่ง `--db`
+```bash
+python tools/binance_bars_db.py composeApp/build/wake_replay_bars.db BTCUSDT
+python tools/wake_factor_replay.py BTCUSDT --bars 200 --db composeApp/build/wake_replay_bars.db
+```
+
 ดึงแท่ง 1m/5m/15m/1h/4h จากมือถือ → รัน `WakeFactorReplayTest` (โค้ดจริงของแอป, ไฟล์ทำงานอยู่ `composeApp/build/wake_replay/`)
 ทีละแท่ง TF หลักด้วยแท่งที่ปิดแล้ว ณ เวลานั้น แล้วเทียบกับสูตรอิสระ: (1) อินดิเคเตอร์ทุก TF ทั้งของปัจจัยและภาพ 5TF
 (1b) trend/`ล่าสุด=` ในภาพ 5TF (2) ปัจจัยที่มีสูตรใน `trigger_checks` ทุกแท่ง ทั้งตอนเกิดและไม่เกิด (3) อัตราการเกิดทุกตัว + error
@@ -111,6 +117,11 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
 - `SIGNAL_EVENT ... field=wake ... action=FIRE` ตอนปลุก → `⏰ WAKE ...` → `🧠 AI summary OK` → `🔊 speakAlert` → `💬 pushToChat`
 - รอบถัดไป `action=RESET` (job กลับเป็น ACTIVE)
 - ถ้าเห็น `No active alert jobs ... Stopping service.` ทั้งที่มี job → job หลุดจากรอบสแกน (เคยเป็นบัค — แก้ใน `9a843c3`)
+- `AutomationService: 🔋 CPU wake lock on` หลัง service เริ่ม (มี job) และ `adb shell dumpsys power | grep market_watch` เห็น
+  `PARTIAL_WAKE_LOCK 'jarvis:market_watch'` — ถ้าไม่มี รอบสแกนจะหยุดเมื่อจอดับและไม่ได้เสียบสาย (ดูหัวข้อถัดไป)
+- **รอบสแกนห่าง/หายเป็นช่วงๆ ตอนไม่ได้เสียบสาย** (เช่น 07:36 → 08:00 → 08:11 → 08:18 → 08:21 → 08:28): CPU หลับ — ดู
+  `dumpsys battery` ว่าถอดสายเมื่อไหร่ (`usb:false`) · การยกเว้น Battery Optimization (`dumpsys deviceidle whitelist` มี
+  `com.skyliner2008.jarvis`) **ไม่พอ** — มันแค่ยอมให้ใช้เน็ต/wake lock ใน Doze ต้องมี wake lock ด้วย
 
 ## 4. ผลการตรวจครั้งแรก (2026-09-18 23:21 และ 23:56 ไทย)
 
@@ -141,3 +152,12 @@ ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
 - 2026-09-19 ตรวจทานรอบ 2: ตรวจ header SQLite แทนขนาดไฟล์ (run-as ส่ง error ทาง stdout + exit 0),
   กติกาขอบวันเทรดและการเลือกแหล่งแท่งเทียนให้ตรงกับแอป, จับคู่การ์ดด้วยรหัสปัจจัย (เดิมการปลุกที่ SKIP
   อาจไปหยิบการ์ดของการปลุกถัดไป), log ของ `TvHistoryBridge` + สรุป error, ลบค่าคงที่ที่ไม่ได้ใช้
+
+### ผลการตรวจ 2026-10-03 (แท่ง BTC จาก Binance 50 ชม. — ไม่ได้ดึงฐานข้อมูลมือถือ)
+
+- เล่นซ้ำ 200 จุด (10-01 12:30 → 10-03 14:15 UTC) · ปัจจัยในทะเบียน 115 ตัว · error ระหว่างประเมิน: ไม่มี · 14 ms/รอบ (p95 32 ms)
+- อินดิเคเตอร์พื้นฐานทุก TF (EMA20/50/200, RSI14, ATR14, MACD hist, ADX, BB%B) ทั้งชุดของปัจจัยและภาพ 5TF ตรงสูตรอิสระ — ไม่ตรง 0
+- trend/`ล่าสุด=` 6 TF ตรง 200/200 · รายละเอียดต่อ TF 12 ค่า ตรง 1200/1200 · PDH/PDL/PWH/PWL ตรง 113/113
+- ปัจจัย 30 ตัวที่มีสูตรอิสระ × 5 TF ตรงทุกแท่งทั้งตอนเกิดและไม่เกิด
+- ไม่เกิดเลย 18 ตัว (ต้องใช้ข้อมูลภายนอก/memory หรือรูปแบบหายาก — ตามคาด) · จำลองสแกนทุก M15: ปลุก 3.9 ครั้ง/ชม.
+- **บนมือถือตอนตรวจ**: `JarvisAutomationService` ไม่ได้รัน (หยุดเองเมื่อไม่มี alert job ที่เปิดอยู่ครบ 5 รอบ) → ไม่มีงานปลุก AI เฝ้าอยู่

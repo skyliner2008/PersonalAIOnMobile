@@ -111,7 +111,7 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getTopGainers(exchange, limit.coerceAtMost(50))
         AvatarToolData.publishRows("trading_top_gainers", results)
-        return formatScanResults("🚀 Top Gainers — $exchange", results)
+        return formatScanResults("🚀 Top Gainers — $exchange${scanScope(exchange)}", results)
     }
 
     internal suspend fun executeTopLosers(args: Map<String, String>): String {
@@ -119,7 +119,7 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getTopLosers(exchange, limit.coerceAtMost(50))
         AvatarToolData.publishRows("trading_top_losers", results)
-        return formatScanResults("📉 Top Losers — $exchange", results)
+        return formatScanResults("📉 Top Losers — $exchange${scanScope(exchange)}", results)
     }
 
     /** เติมค่าที่ scanner คืน null/N/A ด้วยค่าที่คำนวณเองจากแท่งเทียน (300 แท่ง) */
@@ -166,7 +166,7 @@ internal class MarketTechnicalToolHandler(
             appendLine("Technical Analysis - ${symbol.uppercase()} ($interval)")
             appendLine("Signal: $emoji $signal (score: $score)")
             appendLine("-".repeat(35))
-            appendLine("Price: ${data["close"]} | Change: ${data["change"]}%")
+            appendLine("Price: ${data["close"]} | Change (this $interval bar): ${data["change"]}%")
             appendLine("")
             appendLine("Momentum")
             appendLine("  RSI: ${data["RSI"]} (prev: ${data["RSI[1]"]})")
@@ -182,9 +182,11 @@ internal class MarketTechnicalToolHandler(
             appendLine("  BB Upper: ${data["BB.upper"]}")
             appendLine("  BB Basis: ${data["BB.basis"]}")
             appendLine("  BB Lower: ${data["BB.lower"]}")
-            appendLine("  BB Width: ${data["BB.width"]} | ATR: ${data["ATR"]}")
+            appendLine("  BB Width: ${data["BB.width"]?.takeIf { it != "N/A" }?.let { "$it%" } ?: "N/A"} | ATR: ${data["ATR"]}")
             appendLine("")
-            appendLine("Summary - Buy: ${data["buy_signals"]} | Sell: ${data["sell_signals"]} | Neutral: ${data["neutral_signals"]}")
+            // TradingView's rating, -1 (strong sell) … +1 (strong buy). (Was "Summary - Buy/Sell/Neutral": the scanner
+            // has no such columns, it always said N/A.)
+            appendLine("Rating -1…+1 (TradingView) - Moving averages: ${data["Recommend.MA"] ?: "N/A"} | Oscillators: ${data["Recommend.Other"] ?: "N/A"}")
         }
     }
 
@@ -232,7 +234,11 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 30
         val results = api.getBollingerSqueeze(exchange, limit)
         if (results.isNotEmpty()) AvatarToolData.publishRows("trading_bollinger_scan", results)
-        return formatScanResults("🔥 Bollinger Squeeze — $exchange (กำลัง Breakout)", results, extraKey = "BB.width")
+        return formatScanResults(
+            "🔥 Bollinger แคบที่สุด (แท่งวัน) — $exchange${scanScope(exchange)} · BB.width = กว้างกี่ % ของเส้นกลาง " +
+                "(ยิ่งน้อยยิ่งบีบตัว มักตามด้วยการเคลื่อนไหวแรง — ยังไม่ใช่ breakout)",
+            results, extraKey = "BB.width"
+        )
     }
 
     internal suspend fun executeOversoldScan(args: Map<String, String>): String {
@@ -240,7 +246,7 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getOversoldSymbols(exchange, limit)
         if (results.isNotEmpty()) AvatarToolData.publishRows("trading_oversold_scan", results)
-        return formatScanResults("🟢 Oversold Scan (RSI < 30) — $exchange", results, extraKey = "RSI")
+        return formatScanResults("🟢 Oversold Scan (RSI รายวัน < 30) — $exchange${scanScope(exchange)}", results, extraKey = "RSI")
     }
 
     internal suspend fun executeOverboughtScan(args: Map<String, String>): String {
@@ -248,7 +254,7 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getOverboughtSymbols(exchange, limit)
         if (results.isNotEmpty()) AvatarToolData.publishRows("trading_overbought_scan", results)
-        return formatScanResults("🔴 Overbought Scan (RSI > 70) — $exchange", results, extraKey = "RSI")
+        return formatScanResults("🔴 Overbought Scan (RSI รายวัน > 70) — $exchange${scanScope(exchange)}", results, extraKey = "RSI")
     }
 
     internal suspend fun executeVolumeBreakout(args: Map<String, String>): String {
@@ -256,7 +262,7 @@ internal class MarketTechnicalToolHandler(
         val limit = args["limit"]?.toIntOrNull() ?: 20
         val results = api.getVolumeBreakout(exchange, limit)
         if (results.isNotEmpty()) AvatarToolData.publishRows("trading_volume_breakout", results)
-        return formatScanResults("🌋 Volume Breakout — $exchange", results, extraKey = "volume")
+        return formatScanResults("🌋 Volume Breakout — $exchange${scanScope(exchange)}", results, extraKey = "volume")
     }
 
     internal suspend fun executeSentiment(args: Map<String, String>): String {
@@ -584,6 +590,14 @@ internal class MarketTechnicalToolHandler(
         return buildString {
             appendLine("📅 **Economic Calendar (ForexFactory — Real-time, เวลาไทย)**")
             appendLine("⏰ เวลาปัจจุบัน: **$nowFormatted (ไทย)**")
+            // ForexFactory's free feed has no actual figures — the AI must not read the forecast out as the result
+            if (events.any { it["status"] != "UPCOMING" }) {
+                appendLine("ℹ️ แหล่งนี้ไม่มีตัวเลขจริง (Actual) ของข่าวที่ประกาศแล้ว — ตัวเลขในรายการเป็นค่าคาดการณ์/ครั้งก่อนเท่านั้น " +
+                    "ห้ามบอกว่าเป็นผลจริง ถ้าผู้ใช้ถามผลจริงให้ค้นเว็บ (search_web)")
+            }
+            if (events.none { it["status"] == "UPCOMING" }) {
+                appendLine("ℹ️ ไม่มีข่าวที่รอประกาศในสัปดาห์นี้แล้ว และแหล่งนี้ยังไม่มีปฏิทินสัปดาห์หน้า")
+            }
             appendLine("-".repeat(45))
             events.forEach { e ->
                 val emoji = when(e["impact"]?.lowercase()) {
@@ -676,12 +690,18 @@ internal class MarketTechnicalToolHandler(
         }
         results.forEachIndexed { i, row ->
             val symbol = row["symbol"] ?: row["name"] ?: "?"
-            val change = row["change_pct"] ?: row["change"] ?: ""
+            // the scanner's "change" is a percent: it showed bare ("GLMRUSDT - 0.0123 42.2217") and read like a price
+            val change = row["change_pct"] ?: row["change"]?.let { c -> c.toDoubleOrNull()?.let { "%+.2f%%".format(it) } ?: c } ?: ""
             val price  = row["price"] ?: row["close"] ?: ""
             val extra  = if (extraKey != null) row[extraKey]?.let { " | $extraKey: $it" } ?: "" else ""
             appendLine("${i + 1}. $symbol - $price $change$extra")
         }
     }
+
+    /** What a scan covers: crypto = USDT spot pairs, the day from TradingView's daily bar (00:00 UTC = 07:00 Thai). */
+    internal fun scanScope(exchange: String): String =
+        if (exchange.uppercase() in setOf("NASDAQ", "NYSE", "SET", "MAI")) " (แท่งวัน)"
+        else " (คู่ USDT spot ไม่รวม stablecoin · แท่งวันเริ่ม 07:00 น. ไทย)"
 
     internal fun signalEmoji(signal: String) = when (signal) {
         "STRONG BUY"  -> "++"

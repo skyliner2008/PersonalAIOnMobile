@@ -80,10 +80,21 @@ fun AutomationScreen(
     alertTestResults: List<com.skyliner2008.jarvis.automation.AlertDataTester.TestResult> = emptyList(),
     onRunTest: () -> Unit = {},
     onCreateAlert: (String, String, String, String, String, String, Long, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
-    onCreateScheduledTask: (String, String, String, Long, String?) -> Unit = { _, _, _, _, _ -> }
+    onCreateScheduledTask: (String, String, String, Long, String?) -> Unit = { _, _, _, _, _ -> },
+    /** re-read the jobs from the database */
+    onRefresh: () -> Unit = {}
 ) {
     var showCreateAlert by remember { mutableStateOf(false) }
     var showCreateTask by remember { mutableStateOf(false) }
+
+    // the alert service writes each check straight to the database (last_run_at); the list here is a snapshot,
+    // so a wake job showed "รอเช็คครั้งแรก" for good — even after reopening the app, the process lives on
+    LaunchedEffect(Unit) {
+        while (true) {
+            onRefresh()
+            kotlinx.coroutines.delay(15_000)
+        }
+    }
 
     androidx.compose.foundation.lazy.LazyColumn(
         modifier = Modifier
@@ -398,6 +409,19 @@ private fun ScheduledTaskCard(
 }
 
 
+/** "⏸ ตลาดปิด … เริ่มสแกนเมื่อเปิด อา. 05:00 น." when [symbol]'s market is shut now, else null (Thai time) */
+internal fun marketClosedNote(symbol: String, nowMs: Long): String? {
+    val market = com.skyliner2008.jarvis.tools.trading.MarketHours.status(symbol, nowMs)
+    if (market.open) return null
+    val opens = market.nextOpenMs?.let { ms ->
+        val t = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(kotlinx.datetime.TimeZone.of("Asia/Bangkok"))
+        val day = listOf("จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา.")[t.dayOfWeek.ordinal]
+        " — เริ่มสแกนเมื่อเปิด $day ${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')} น."
+    } ?: ""
+    val why = if ((market.reasonTh ?: "").contains("สุดสัปดาห์")) "ตลาดปิดสุดสัปดาห์" else "ตลาดพัก"
+    return "⏸ $why$opens"
+}
+
 @Composable
 private fun CronJobCard(
     job: AlertJob,
@@ -419,7 +443,12 @@ private fun CronJobCard(
     }
     val nextCheckMs = job.last_run_at + job.interval_minutes * 60_000L
     val remainingSec = ((nextCheckMs - nowMs) / 1000L).coerceAtLeast(0L)
+    // a wake job skips its scan while its market is shut (gold/FX at the weekend, gold's daily break)
+    val closedNote = if (job.tool_name == com.skyliner2008.jarvis.automation.wake.AnticipationEngine.TOOL_NAME) {
+        marketClosedNote(job.symbol.substringBefore("@"), nowMs)
+    } else null
     val countdownText = when {
+        closedNote != null -> closedNote
         job.last_run_at <= 0L -> "⏳ รอเช็คครั้งแรก..."
         remainingSec <= 0L -> "🔍 เช็คเร็วๆ นี้..."
         remainingSec < 60L -> "⏱️ อีก ${remainingSec} วินาที"
