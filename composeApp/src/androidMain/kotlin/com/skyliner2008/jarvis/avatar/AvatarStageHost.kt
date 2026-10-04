@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -59,6 +60,25 @@ class AvatarStageHost(private val activity: FragmentActivity) {
         AvatarLink.onEngineGone = { handler.post { onEngineGone() } }
         AvatarStage.platformAvailable = { isSupported() }
         AvatarStage.platformShow = { show -> activity.runOnUiThread { if (show) show() else hide() } }
+        AvatarStage.platformReady = { ready ->
+            handler.post {
+                if (ready && engineUp) {
+                    container.visibility = View.VISIBLE
+                    container.alpha = 0f
+                    container.animate().alpha(1f).setDuration(350L).withEndAction {
+                        findSurfaceView(container)?.setZOrderOnTop(true)
+                    }.start()
+                } else if (!ready) {
+                    container.animate().cancel()
+                    container.alpha = 0f
+                    container.visibility = View.INVISIBLE
+                    findSurfaceView(container)?.let {
+                        it.setZOrderOnTop(false)
+                        it.setZOrderMediaOverlay(false)
+                    }
+                }
+            }
+        }
     }
 
     /** MainActivity.onStart */
@@ -111,7 +131,8 @@ class AvatarStageHost(private val activity: FragmentActivity) {
     private fun startEngine() {
         if (engineUp) return
         engineUp = true
-        container.visibility = View.VISIBLE
+        container.alpha = 0f
+        container.visibility = View.INVISIBLE
         val fm = activity.supportFragmentManager
         val fragment = RemoteGodotFragment()
         fm.beginTransaction().replace(container.id, fragment, FRAGMENT_TAG).commitNowAllowingStateLoss()
@@ -121,6 +142,12 @@ class AvatarStageHost(private val activity: FragmentActivity) {
             if (!engineUp || !fragment.isAdded || fragment.isRemoving) return@post
             try {
                 fragment.startRemoteGame(emptyArray())
+                // Keep the SurfaceView behind window composition while booting, so Godot's
+                // boot splash and black flicker remain hidden underneath Compose until ready.
+                findSurfaceView(container)?.let { surface ->
+                    surface.setZOrderOnTop(false)
+                    surface.setZOrderMediaOverlay(false)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "cannot start the robot engine", e)
             }
@@ -130,6 +157,12 @@ class AvatarStageHost(private val activity: FragmentActivity) {
     private fun stopEngine() {
         if (!engineUp) return
         engineUp = false
+        container.animate().cancel()
+        container.alpha = 0f
+        findSurfaceView(container)?.let {
+            it.setZOrderOnTop(false)
+            it.setZOrderMediaOverlay(false)
+        }
         AvatarStage.onEngineStopped()
         val fm = activity.supportFragmentManager
         (fm.findFragmentByTag(FRAGMENT_TAG) as? RemoteGodotFragment)?.let { fragment ->
@@ -142,6 +175,18 @@ class AvatarStageHost(private val activity: FragmentActivity) {
             else fm.beginTransaction().remove(fragment).commitAllowingStateLoss()
         }
         container.visibility = View.GONE
+    }
+
+    private fun findSurfaceView(view: View?): SurfaceView? {
+        if (view == null) return null
+        if (view is SurfaceView) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val found = findSurfaceView(view.getChildAt(i))
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     /**

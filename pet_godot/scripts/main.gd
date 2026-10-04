@@ -196,10 +196,14 @@ func _warm_up() -> void:
 		holder.add_child(panel)
 		panel.setup(kind, HOLO.derive(samples[kind]))
 		panel.open(0.2)
-	await get_tree().create_timer(1.5).timeout
-	holder.queue_free()
+	# Pre-warm shaders for 0.3s so pipeline compilation completes quickly without freezing UI
+	await get_tree().create_timer(0.3).timeout
 	if app:
 		app.warmed_up()
+	# Keep holder briefly in background to let any remaining particle pipelines finish
+	await get_tree().create_timer(0.7).timeout
+	if is_instance_valid(holder):
+		holder.queue_free()
 
 
 func _parse_args() -> void:

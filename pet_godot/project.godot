@@ -18,8 +18,8 @@ config/icon="res://icon.png"
 run/max_fps.mobile=60
 config/quit_on_go_back=false
 boot_splash/bg_color=Color(0, 0, 0, 1)
-boot_splash/image="res://assets/boot_splash.png"
-boot_splash/stretch_mode=0
+boot_splash/show_image=false
+boot_splash/image=""
 
 [input_devices]
 

@@ -41,6 +41,9 @@ object AvatarStage {
     /** Platform: can this device run the stage (Android 11+ with the robot packed into the app). */
     var platformAvailable: () -> Boolean = { false }
 
+    /** Platform: engine ready status changed (e.g. for crossfading stage container). */
+    var platformReady: ((Boolean) -> Unit)? = null
+
     private val _events = MutableSharedFlow<AvatarEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<AvatarEvent> = _events.asSharedFlow()
 
@@ -61,6 +64,7 @@ object AvatarStage {
     fun hide() {
         logDebug(TAG, "hide")
         _ready.value = false
+        platformReady?.invoke(false)
         lastState = null
         platformShow?.invoke(false)
     }
@@ -158,6 +162,7 @@ object AvatarStage {
     /** Platform: the engine stopped (the app went to the background, or it is being restarted). */
     fun onEngineStopped() {
         _ready.value = false
+        platformReady?.invoke(false)
     }
 
     private val _failed = MutableStateFlow(false)
@@ -169,6 +174,7 @@ object AvatarStage {
         logDebug(TAG, "engine failed for good")
         _ready.value = false
         _failed.value = true
+        platformReady?.invoke(false)
     }
 
     /** Platform: a new engine attached to the link — it gets the current look first (and shut eyelids stay shut). */
@@ -186,7 +192,10 @@ object AvatarStage {
         } catch (_: Exception) {
             JsonObject(emptyMap())
         }
-        if (name == "ready") _ready.value = true
+        if (name == "ready") {
+            _ready.value = true
+            platformReady?.invoke(true)
+        }
         logDebug(TAG, "event $name $data")
         _events.tryEmit(AvatarEvent(name, data))
     }

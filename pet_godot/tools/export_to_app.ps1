@@ -44,21 +44,23 @@ if (-not $SkipSprites) {
 }
 
 # 3. the exported project
-$apk = Join-Path $lab "build\PetLab.apk"
-New-Item -ItemType Directory -Force (Split-Path $apk) | Out-Null
-& $Godot --headless --path $lab --export-debug Android $apk 2>&1 | Out-Null
-if (-not (Test-Path $apk)) { throw "export failed: $apk" }
+$packZip = (Join-Path $lab "build\PetAssets.zip")
+$packZipAbs = [System.IO.Path]::GetFullPath($packZip)
+New-Item -ItemType Directory -Force (Split-Path $packZipAbs) | Out-Null
+if (Test-Path $packZipAbs) { Remove-Item -Force $packZipAbs }
+& $Godot --headless --path $lab --export-pack Android $packZipAbs
+if (-not (Test-Path $packZipAbs)) { throw "export failed: $packZipAbs" }
 $assets = Join-Path $app "src\androidMain\godot-assets"
 if (Test-Path $assets) { Remove-Item -Recurse -Force $assets }
 New-Item -ItemType Directory -Force $assets | Out-Null
-$zip = [System.IO.Compression.ZipFile]::OpenRead($apk)
+$zip = [System.IO.Compression.ZipFile]::OpenRead($packZipAbs)
 $count = 0
 try {
     foreach ($e in $zip.Entries) {
-        if (-not $e.FullName.StartsWith("assets/") -or $e.FullName.EndsWith("/")) { continue }
-        $rel = $e.FullName.Substring(7)
-        if ($rel -eq "_cl_") { continue }                   # the lab APK's command line, not the app's
-        $out = Join-Path $assets ($rel -replace '/', '\')
+        if ($e.FullName.EndsWith("/")) { continue }
+        $rel = if ($e.FullName.StartsWith("assets/")) { $e.FullName.Substring(7) } else { $e.FullName }
+        if ($rel -eq "_cl_") { continue }                   # the lab command line, not the app's
+        $out = Join-Path $assets ($e.FullName -replace '/', '\')
         New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
         [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
         $count++

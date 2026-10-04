@@ -1,3 +1,163 @@
+## 2026-10-05 — Avatar Mode: แก้ปัญหาจอดำ 3 วิ และกู้คืน 2D Motion Loading ทันที พร้อมลดเวลา Warm-up
+- **User Request**: "จาก log สิ่งที่แสดง เมื่อสั้งเปิด Avatar หน้าแรก จะเป็น สีดำ ประมาณ 3 วิ แล้วจึงแสดง Avatar ที่เคลื่อนใหว พร้อมเสียงพูดทักทาย 2D ไม่แสดง มี 3D อย่างเดียว"
+- **วิเคราะห์หาสาเหตุเชิงลึก (Android Window & Graphic Pipeline + Godot Warm-up)**:
+  1. **สาเหตุของจอดำ 3 วิ และ 2D ไม่แสดง**: ใน Android `SurfaceView` ไม่ปฏิบัติตาม `alpha` ของ View หรือ Parent (เพราะแยก Layer ใน SurfaceFlinger) เมื่อ `startEngine()` สั่ง `container.visibility = View.VISIBLE` ตัว `RemoteGodotFragment` จะสร้าง `SurfaceView` และสั่ง `setZOrderOnTop(true)` ทันที ทำให้ SurfaceView ของ Godot ขึ้นมาทับ Window และบัง `ComposeView` (ที่กำลังวาด 2D RobotSprite) จนมิด และเนื่องจาก Godot เพิ่งเริ่มบูต หน้าจอ SurfaceView จึงเป็นสีดำสนิท ผู้ใช้จึงเห็นจอดำ 3 วินาทีแทนที่จะเห็น 2D Robot
+  2. **สาเหตุของความล่าช้า 3 วินาที**: ใน `pet_godot/scripts/main.gd` ฟังก์ชัน `_warm_up()` มีคำสั่งหน่วงเวลาแบบฮาร์ดโค้ด `await get_tree().create_timer(1.5).timeout` ก่อนที่จะเรียก `app.warmed_up()` รวมกับเวลา spawn process ของ Godot (~1.2 วิ) จึงทำให้เกิด delay นานถึง 2.7–3 วินาที
+- **การแก้ไข**:
+  1. `AvatarStageHost.kt`:
+     - ใน `startEngine()` ตั้งค่า `container.visibility = View.INVISIBLE` (ไม่ใช้ `VISIBLE`) ขณะที่ Godot กำลังบูต เพื่อให้ Window Manager ทำการ measure/layout และผูก IPC Service ในพื้นหลัง แต่ **ไม่วาด SurfaceView และไม่เจาะรู Canvas ใน Window**
+     - ส่งผลให้ `ComposeView` (2D Motion Loading) แสดงผลบนหน้าจอทันทีตั้งแต่ millisecond แรกแบบ 100% ไม่มีจอดำมาบัง และหาก AI เริ่มพูดทักทาย หุ่น 2D จะขยับปากพูดแบบ Realtime ทันที
+     - เมื่อได้รับ event `"ready"` จาก Godot (ผ่าน `platformReady`) จึงค่อยปรับ `container.visibility = View.VISIBLE` และสั่ง Fade-in เข้ามาด้วย duration 350ms พร้อม `setZOrderOnTop(true)` เพื่อรับ touch events ได้อย่างสมบูรณ์
+  2. `pet_godot/scripts/main.gd`:
+     - ปรับลดเวลา warm-up ใน `_warm_up()` จาก 1.5 วินาที เหลือเพียง **0.3 วินาที** ก่อนเรียก `app.warmed_up()` เพื่อให้ GPU compile shader pipelines อย่างรวดเร็วแล้วปล่อยสัญญาณ ready ทันที ส่วน particle nodes เบื้องหลังยังคงปล่อยให้รันต่ออีก 0.7 วิ ก่อน queue_free
+  3. `pet_godot/tools/export_to_app.ps1`:
+     - ปรับการ export เป็น `--export-pack Android` สู่ zip และ unpack ตรงเข้า `composeApp/src/androidMain/godot-assets/` เพื่อให้ export asset ทั้งหมด (รวม GDScript compiled `.gdc`) ได้อย่างสมบูรณ์โดยไม่ต้องพึ่งพา Android build template ซ้ำซ้อน
+  4. `AvatarModeScreen.kt`:
+     - ปรับปรุง UI หน้าโหลด 2D ให้มี Sci-Fi Radial Cyan Glow ด้านหลัง `RobotSprite` ให้ดูสวยงาม กลมกลืนกับเวที 3D และทำ crossfade จาก 2D สู่ 3D อย่างแนบเนียน
+- **Verify**:
+  - Export godot-assets สำเร็จ (155 ไฟล์)
+  - รัน `:composeApp:testDebugUnitTest --tests com.skyliner2008.jarvis.AvatarStageTest` ผ่านฉลุย (BUILD SUCCESSFUL)
+  - รัน `:composeApp:compileDebugKotlinAndroid` ผ่านฉลุย 0 errors
+- **เอกสาร**: [[README.md]], [[catalogue]]
+
+## 2026-10-05 — Avatar Mode: กำจัดอาการจอกระพริบและภาพหุ่นเล็กค้าง (Boot Splash Glitch)
+- **User Request**: "เร็วขึ้น แต่มันยังดูกระตุก เมื่อเปิดโหมด Avatar จะแสดง Avatar ตัวขนาดกลาง พร้อมข้อความ กำลังปลุกน้อง 3D ดังรูปที่ 1 หลังจากนั้น หน้าจอจะกระพริบมืด 1 ครั้ง แล้วจะ กลายเป็น Avatar ตัวเล็กค้าง 1-2 วิ แป๊ปนึง ดังรูปที่ 2 หลังจากนั้น ก็จะเป็น Avatar ตัวปรกติ ที่ขยับได้ แล้วมีเสียงพูด"
+- **วิเคราะห์หาสาเหตุจากรูปและ bytecode**:
+  1. ภาพหุ่นตัวเล็ก (รูปที่ 2) คือ **Godot Native Boot Splash** (`res://assets/boot_splash.png` ขนาด 760px ไม่มี scaling บนหน้าจอ 1440px)
+  2. `RemoteGodotFragment.startRemoteGame` ของ Godot มีโค้ด hardcoded สั่ง `remoteSurface.setZOrderOnTop(true)` ทำให้ SurfaceView หลุดออกจาก Window hierarchy ขึ้นมาทับทุก View ในหน้าจอทันทีที่สตาร์ต
+  3. ส่งผลให้เกิดอาการกระพริบมืด 1 ครั้ง และ Boot Splash ขนาดเล็กของ Godot โผล่ขึ้นมาทับ 2D Robot ค้างอยู่นาน 1–2 วินาที จนกว่า `_warm_up()` ของ Godot จะเสร็จ
+- **การแก้ไข**:
+  1. `AvatarStageHost.kt`: ควบคุม SurfaceView ด้วย `setZOrderOnTop(false)` และ `setZOrderMediaOverlay(false)` ทันทีหลังสตาร์ต engine เพื่อกักให้ SurfaceView อยู่หลัง Window ทำให้ Boot Splash ไม่สามารถโผล่ขึ้นมาบังหน้าจอ Compose ได้
+  2. `AvatarStageHost.kt`: เมื่อ engine ส่ง event `"ready"` จึงค่อยทำ animation fade-in และเรียก `setZOrderOnTop(true)` เพื่อรับ touch events
+  3. `godot-assets/assets/boot_splash.png` & `pet_godot/assets/boot_splash.png`: แทนที่ภาพหุ่นขนาดเล็กด้วย 1x1 transparent PNG และปิด `boot_splash/show_image` ใน `project.godot` เพื่อป้องกันไม่ให้มีรูปหุ่นเล็กโผล่ขึ้นมาซ้ำซ้อน
+  4. `AvatarModeScreen.kt`: ปรับขนาด `RobotSprite` เป็น 260dp เพื่อให้ขนาดและตำแหน่งของหุ่น 2D ตรงกับโมเดล 3D แบบ 1:1 เมื่อเกิด crossfade
+- **Verify**: คอมไพล์ผ่าน `:composeApp:compileDebugKotlinAndroid` สำเร็จ (0 error)
+- เอกสาร: [[README.md]], [[catalogue]]
+
+## 2026-10-04 — Avatar Mode: แก้ไข Cold Start Lag ด้วย Motion Loading + Crossfade 2D→3D
+- **User Request**: "ในตอนเปิด Avatar Mode มันจะมีตอนโหลด ครั้งแรกที่มันหน่วงๆ 2-5วิ แต่เสียงพูดทักทายของ ai จะมาก่อน กว่าที่ Avatar จะพร้อมใช้งาน เพราะใช้ หน่วยความจำเยอะ มันเลยดูไม่ลื่นไหล แต่หลังจากนั้นก็จะลื่นปรกติ มีวิธีแก้ไข หรือทำเป็นโมชั่น loading.. เพื่อรอ Avatar พร้อมได้หรือไม่"
+- **พบปัญหา**: Godot 3D engine ทำงานใน process `:avatar` แยกต่างหาก ต้องใช้เวลา 2–5 วินาทีในการ initialize, โหลดโมเดล 3D และ compile shaders ในขณะที่ AI Live Voice ตอบกลับเสียงทักทายมาภายใน ~0.5–1.5 วินาที ส่งผลให้เสียงพูดเล่นก่อนที่หุ่น 3D จะพร้อม ทำให้หน้าจอค้างหรือเห็น spinner นิ่งๆ โดยปากหุ่นไม่ขยับ
+- **แนวทางแก้ไข**:
+  1. `AvatarModeScreen.kt`: แทนที่ CircularProgressIndicator ด้วย **Animated Motion Loading Screen** ใช้ `RobotSprite` (2D) ขนาด 240dp ซึ่งมี floating animation, การกะพริบตา และรองรับการขยับปากตามเสียง AI (`isSpeaking`, `audioLevel`) ได้ทันทีตั้งแต่วินาทีแรก แม้หุ่น 3D ยังไม่พร้อม
+  2. `AvatarStage.kt`: เพิ่ม callback `platformReady: ((Boolean) -> Unit)?` เพื่อแจ้งเตือน platform เมื่อ engine ส่ง event `"ready"`
+  3. `AvatarStageHost.kt`: ควบคุม container ของ `RemoteGodotFragment` ให้เริ่มที่ `alpha = 0f` ในขณะที่ engine กำลังบูต เพื่อให้หน้าจอ 2D แสดงผลได้อย่างสมบูรณ์ และเมื่อ `platformReady` ส่งสัญญาณ true ให้ทำ smooth fade-in 400ms
+  4. ทำ Crossfade แบบ 400ms ร่วมกันระหว่าง 2D RobotSprite (`loadingAlpha` 1f → 0f) และ 3D Container (`alpha` 0f → 1f) ทำให้การสลับจาก 2D ไป 3D ไร้รอยต่อ นุ่มนวล ไม่กระตุก
+- **Verify**: คอมไพล์ผ่าน `:composeApp:compileDebugKotlinAndroid` สำเร็จ (0 error)
+- เอกสาร: [[README.md]], [[catalogue]]
+
+## 2026-10-04 — ตรวจ log การถามผลคาดการณ์ผ่าน Live (branch `feat/rive-eye-morph`)
+- **User Request**: "ดึง log ล่าสุดมาตรวจสอบให้ฉันหน่อย" (log 10:11–13:37)
+- **พบ**: 13:35 Live โหมด CONTROL "ผลคาดการณ์วันนี้มีอะไรบ้าง" → `trading_signal_anticipation(summary, period=today)` ผลใน 31 ms พูดภายใน 2 วิ
+  ตัวเลขตรง (ปลุก 239 · แจ้ง 3 BUY · SKIP 236) แต่พูดว่า "สัญญาณ BUY **ทองคำ**" — การปลุกทั้งหมดเป็น BTCUSDT (ทองปิดวันอาทิตย์) ·
+  BUY 11:04 ถูกพูดออกเสียงสำเร็จ และปิดผลตอน 11:10 (นอกรอบแท่ง 15 นาที = ชนระดับ) หลังราคาลงแค่ 36 จาก 84,844 แล้ววิ่งขึ้น +214 —
+  SL น่าจะแคบเกิน (ATR 15m ~43–60) · log 10:11–13:37: ปลุก 73 ครั้ง (SKIP 72, NOTIFY 1) สแกนต่อเนื่อง 192 รอบ แต่เครื่องเสียบ USB ตลอด
+  (ยังไม่ได้ทดสอบ wake lock ตอนถอดสาย)
+- **แก้**: ผลสรุปใส่ชื่อไทยของสินทรัพย์ทุกที่ + กฎ Live เรียกสินทรัพย์ตามชื่อในผล · เกณฑ์ "อาจพลาดโอกาส" = ราคาปิดห่างเกิน 3 ATR
+  เมื่อครบ 12 แท่ง (เดิมจุดสุดโต่ง ≥ 2 ATR ซึ่งเกิดเกือบทุกครั้ง) · log ผลสรุปทั้งก้อน (`WakeSummary`) + ผลของแต่ละการแจ้งเตือนตอนปิดผล
+- **Verify**: 635 เทสต์ผ่าน (ข้าม 16) · ติดตั้ง 13:47 — รอผู้ใช้ถามซ้ำเพื่อเทียบคำพูดกับผลใน log
+- เอกสาร: [[catalogue]]
+
+## 2026-10-04 — ถามผลการคาดการณ์ล่วงหน้าด้วยเสียง: action `summary` (branch `feat/rive-eye-morph`)
+- **User Request**: "ตรวจสอบเพิ่มเติม โหมด live ทุกโหมด สามารถสั่งให้ตรวจสอบผลของคาดการณ์ล่วงหน้าได้หรือไม่ เช่น มีแจ้งเตือนกี่ครั้งแล้ว,
+  skip กี่ครั้ง, skip เพราะอะไร, คาดการณ์ buy / sell กี่ครั้ง, เพราะเหตุผลอะไร"
+- **ตรวจ**: Live 3 โหมด (CONTROL / DRIVE / PET) + Live ในแชทได้ tool ชุดเดียวกัน (`getLiveGeminiTool` ตัดแค่ tool ควบคุมหน้าจอนอกโหมด
+  ขับรถ) — `trading_signal_anticipation` ไม่โดน profile guard และไม่ถูกส่งไปทำเบื้องหลัง แต่ action ที่มี (`status` / `learning` /
+  `inspect`) ไม่ตอบคำถามนี้ และ prompt ของ Live ไม่มีกฎบอกว่าใช้ tool ไหน
+- **ทำ**: `WakeVerdictSummary` + action `summary` (`period`, `symbol` ไม่บังคับ) อ่าน `AiWakeView` ผ่าน query ใหม่ `getAiViewsSince` ·
+  คำอธิบาย tool + enum + param `period` · กฎแชทข้อ 10 และ Live ข้อ 11 · ค่าเริ่มต้นงบใน tool definition เป็นของจริง
+- **Verify**: 635 เทสต์ผ่าน (ข้าม 16) รวม `WakeVerdictSummaryTest` 5 · ติดตั้งบนเครื่อง 09:43 — รอผู้ใช้ลองถามผ่าน Live
+- เอกสาร: [[catalogue]], [[66_WakeEngine_Live_Backup_V29]]
+
+## 2026-10-04 — "ยังไม่มีการแจ้งเตือนอะไรใหม่": ตลาดนิ่ง + ถอดสายชาร์จแล้วระบบปลุกหยุด → wake lock (branch `feat/rive-eye-morph`)
+- **User Request**: "ยังไม่มีการแจ้งเตือนอะไรใหม่" (log 04:34–08:32) → เลือก "ถือ wake lock ไว้" · "ฉันเปิดการตั้งค่า Battery Optimization
+  แล้ว เพื่อให้ระบบทำงานเบื้องหลังได้"
+- **ตรวจ**: ปลุก 61 ครั้ง วิเคราะห์ด้วย `gemini-3.8-live` ทุกครั้ง (2.3–5 วิ ผ่าน tool) ตอบ SKIP ทั้งหมด — BTC 04:30–08:45 กรอบ 0.21%
+  (Binance) ตรงกับเหตุผลของ AI · แต่ถอดสาย 07:30 แล้วรอบสแกนหยุด 07:36 จนเสียบสายกลับ 08:30 — การยกเว้น Battery Optimization มีผลอยู่
+  (deviceidle whitelist + bucket EXEMPTED) แต่ไม่ได้ปลุก CPU; service ไม่ถือ wake lock
+- **แก้**: `JarvisAutomationService` ถือ `PARTIAL_WAKE_LOCK "jarvis:market_watch"` ขณะมี alert job ต่ออายุทุกรอบ (เวลารอ + 5 นาที)
+  คืนเมื่อไม่มี job / onDestroy
+- **Verify**: 630 เทสต์ผ่าน (ข้าม 16) · ติดตั้ง 09:01:56 → `🔋 CPU wake lock on` 09:01:58 และ `dumpsys power` เห็น
+  `PARTIAL_WAKE_LOCK 'jarvis:market_watch'` ของแอป · ยังไม่ได้ทดสอบตอนถอดสายจริง (adb ต่อผ่าน USB)
+- เอกสาร: [[66_WakeEngine_Live_Backup_V29]], [[67_Device_Wake_Alert_Audit]] ข้อ 3
+
+## 2026-10-04 — การปลุกไม่มีเสียง: คำพูดถ่วงเวลาของ AI ถูกนับเป็นคำตอบ + แอปอัปเดตแล้วระบบปลุกกลับมาเอง (branch `feat/rive-eye-morph`)
+- **User Request**: "มีการปลุก แต่ไม่มีเสียง" (log 02:08–02:10)
+- **สาเหตุ**: Live worker `gemini-3.8-live-extended-thinking` พูด "กำลังวิเคราะห์ข้อมูลกราฟครับ" แล้วจบเทิร์น → worker เอาเป็นคำตอบ →
+  `WakePrompt.parse` ไม่ได้ → ทางแจ้งเงียบ "AI ใช้ไม่ได้" โดยไม่ลองโมเดลอื่น (02:20 ซ้ำ: "วิเคราะห์ข้อมูลกราฟทั้งหมดก่อนนะคะ" และไม่แจ้งเลย
+  เพราะเพิ่งแจ้งเงียบไป)
+- **แก้**: (1) คำตอบต้องตรงรูปแบบของงาน (`accept`: ระบบปลุก = `WakePrompt.parse`, Supervisor = `DECISION:`) ทั้ง worker และโมเดลแชท —
+  ไม่ตรง = โมเดลถัดไป (2) worker ฟังต่อหลังจบเทิร์นสำหรับโมเดลที่พูดขณะคิด — ผลจริง 02:21: ตัวนี้แจ้ง "ขออภัย เกิดข้อผิดพลาดขึ้นในระบบ…"
+  แล้วเงียบ (3) `THINKING` เริ่มที่ `gemini-3.8-live` (ตอบผ่าน tool ทุกการปลุก 3–7 วิ), extended-thinking เป็นทางสุดท้าย
+  (4) `BootReceiver` รับ `MY_PACKAGE_REPLACED` — การติดตั้งทับเคยหยุดระบบปลุกจนกว่าจะเปิดแอป (5) worker: งานที่ไม่ได้คำตอบติดกัน 2 ครั้ง →
+  พักโมเดล 30 นาที, เหตุผลที่ล้มเหลวบอกว่า session มีอะไร, เทิร์นเปล่าของโมเดลอื่นได้ส่งซ้ำเป็น `realtimeInput.text` 1 ครั้ง
+- **Verify**: แอป 630 เทสต์ผ่าน (ข้าม 16) รวม `LiveWorkerTest` 11 · มือถือ 02:21: การปลุก BTCUSDT@15m → extended-thinking ล้มเหลว →
+  3.8-live ตอบ SKIP ผ่าน tool (เดิมจะจบที่ "AI ใช้ไม่ได้") รวม 28 วิ · 02:30 บน build ที่ 3.8-live นำ: คำตอบผ่าน tool ใน 2.9 วิ (SKIP)
+  · ติดตั้งแล้ว log `BootReceiver: MY_PACKAGE_REPLACED` + `▶ BTCUSDT@15m ตลาดเปิด` ภายใน 30–60 วิ
+- เอกสาร: [[Model_Policy_Free_Tier]] "Live workers" รอบสอง–สี่, [[66_WakeEngine_Live_Backup_V29]]
+
+## 2026-10-04 — ระบบปลุก AI ค้าง "รอเช็คครั้งแรก" (ตลาดปิด) + Live worker รอบแรกกับ API จริง (branch `feat/rive-eye-morph`)
+- **User Request**: "ตั้งค่าแจ้งเตือนคาดการณ์ล่วงหน้าทองคำ แต่ผ่านมาหลายนาที มันยังขึ้นว่า รอเช็คครั้งแรก … ลองปิดเปิด app ใหม่ก็ยังเหมือนเดิม"
+  → "จริงด้วย ฉันลืมไปว่าตลาดปิด … เปลี่ยนเป็น BTC แล้ว มันทำงานแล้ว"
+- **สาเหตุ**: คืนวันเสาร์ตลาดทองปิด — engine เช็คทุกนาทีแต่ข้ามการสแกน (log `⏸ XAUUSD@15m ตลาดปิดสุดสัปดาห์`) · หน้า Automation ใช้รายการงาน
+  ที่โหลดครั้งเดียว ไม่เห็น `last_run_at` ที่ service เขียน → ค้าง "รอเช็คครั้งแรก" แม้ปิดเปิดหน้า (process ยังอยู่)
+- **แก้**: หน้า Automation อ่านใหม่ทุก 15 วิ · การ์ดงานปลุกบอกตลาดปิด + เวลาเริ่มสแกน (`marketClosedNote`) · คำตอบตอนสร้างงานบอกเหมือนกัน
+- **Live worker รอบแรกกับ API จริง** (BTCUSDT@15m 00:15–00:16): 2 การปลุกวิเคราะห์ผ่าน `gemini-3.8-live` (SKIP / NOTIFY BUY) · แก้: ระดับ
+  การคิดของ 3.8-live-extended-thinking (1007), ย้ำให้ส่งคำตอบผ่าน `submit_answer` (3.8-live พูดคำตอบ 20 วิ), ชื่อสินทรัพย์ในเสียงแจ้งเตือน
+  (BTC ถูกอ่านว่าทองคำ)
+- **Verify**: แอป 626 เทสต์ผ่าน (ข้าม 16) รวม `MarketClosedNoteTest` 3 + `LiveWorkerTest` 7
+- เอกสาร: [[Model_Policy_Free_Tier]] "Live workers", [[66_WakeEngine_Live_Backup_V29]] ข้อ 9
+
+## 2026-10-03 — ระบบปลุก AI: AI วิเคราะห์ไม่ได้ → แจ้งแบบเงียบ ไม่เกิน 1 ครั้ง/30 นาที/สินทรัพย์ (branch `feat/rive-eye-morph`)
+- **User Request**: "ข้อ ก. ดำเนินการตามนั้นได้" — ตอน AI วิเคราะห์การปลุกไม่ได้ ไม่ให้แจ้งพร้อมเสียงทุกครั้ง
+- **ทำ**: `automation/wake/WakeAiFallback` + `JarvisAutomationService.handleWakeAlert`: ทั้ง Live worker และโมเดลแชทไม่ตอบ → รายการเหตุการณ์
+  ไม่มีเสียง (การ์ดแชท + notification `setSilent`) ไม่เกิน 1 ครั้ง/30 นาที/สินทรัพย์ ครั้งแรกบอกว่า AI ใช้ไม่ได้ (ครั้งเดียวจน AI ตอบได้อีก)
+- **Verify**: แอป 622 เทสต์ผ่าน (ข้าม 16) รวม `WakeAiFallbackTest` 2
+- เอกสาร: [[66_WakeEngine_Live_Backup_V29]] ข้อ 9
+
+## 2026-10-03 — Live workers: แบ่งงาน AI ให้โมเดล Live ตัวอื่น (ไม่จำกัด RPM/RPD) (branch `feat/rive-eye-morph`)
+- **User Request**: "โมเดล live ทั้งหมด ใช้ได้ไม่จำกัด RPM กับ RPD ฉันเลยอยากใช้ประโยชน์จากตรงนี้ให้ได้มากที่สุด … 3.1 live โต้ตอบด้วยเสียงดีกว่า
+  … เลือกให้เป็นโมเดลหลักในการใช้เสียง แต่เราก็ยังแบ่งหน้าที่ไปให้โมเดล live ตัวอื่นทำงานแทนได้" · free tier 7 บัญชีแยก project (ช่วงพัฒนา key เดียว)
+- **ทำ**: `data/LiveWorker` — งานละ session บน 3.8-live / 3.8-live-extended-thinking / 2.5-native-audio, คำตอบผ่าน function
+  `submit_answer` (โมเดล Live ตอบเป็นเสียงอย่างเดียว), ทีละงาน, หมุน key, พักโมเดลที่ล้ม, ถอยไปโมเดลแชทเมื่อไม่มีคำตอบ
+- **ต่อเข้า**: แจ้งเตือน (สรุป), ระบบปลุก AI + Supervisor (`THINKING`), งานตั้งเวลา (`SEARCH`), search/ค้นหาใกล้ฉัน/แปล/สรุปที่ Live เรียก,
+  search/แปล/สรุปตอนพิมพ์แชท, บทวิเคราะห์เสริมของ tool ตอนพิมพ์แชท
+- **Verify**: แอป 620 เทสต์ผ่าน (ข้าม 16) รวม `LiveWorkerTest` 6 (server จำลอง: คำตอบจาก function ตรงตัว, ไม่มี function ใช้เสียง,
+  setup ถูกปฏิเสธ, quota → key ถัดไป, setup มี googleSearch เฉพาะงานค้น, ไม่ใช้โมเดลของเสียง) · **ยังไม่ได้ลองกับ API จริง**
+- เอกสาร: [[Model_Policy_Free_Tier]] "Live workers"
+
+## 2026-10-03 — ตรวจเส้นทางการใช้ AI: Live เป็นหลัก แชท flash-lite 500/วัน, multi-key (branch `feat/rive-eye-morph`)
+- **User Request**: "ตรวจสอบเส้นทางการใช้ ai เพราะจาก flow ที่วางไว้ จะใช้โมเดล live เป็นหลัก ที่ใช้ได้ไม่จำกัด และจะใช้โมเดล chat
+  Gemini 3.1 Flash Lite /500RPD, Gemini 3.5 Flash Lite /500RPD และ Gemini อื่นๆ 20RPD ซึ่งฉันมีระบบ multi api key เผื่อไว้แล้ว"
+- **แผนที่เส้นทาง**: [[Model_Policy_Free_Tier]] "เส้นทางการใช้ AI ทั้งแอป" — Live: ผู้ช่วยเสียงทุกโหมด, tool ที่ Live เรียก (ไม่เรียกแชทเสริม),
+  พูดแจ้งเตือน, ประชุม/แปล · แชท: พิมพ์แชท, บทวิเคราะห์เสริมตอนพิมพ์, search/translate/summarize/ไฟล์ที่ Live เรียก, แจ้งเตือน + ระบบปลุก AI +
+  งานตั้งเวลา, ภาพนิ่งกล้อง, sleep cycle
+- **แก้**: แจ้งเตือน/ระบบปลุก/งานตั้งเวลา หมุนทุก key และใช้เฉพาะ 2 โมเดล 500/วัน (เดิม key เดียว และไหลไปโมเดล 20/วันได้เพราะ
+  `fallbackModelsOverride = emptyList()` ไม่ได้ปิด fallback) · ไม่รอ 429 รายนาทีในงานเบื้องหลัง (`waitOn429`) · แชทหลักไม่บันทึกโมเดล
+  20/วันเป็นโมเดลของผู้ใช้ · ภาพนิ่งกล้อง `gemini-2.5-flash` → flash-lite
+- **ข้อสังเกต**: log วันนี้ "Gemini API keys for rotation: 1 key(s)" — ในเครื่องตั้งไว้ key เดียว · key ใน project เดียวกันใช้โควตาร่วมกัน
+- **รอตัดสิน**: Google Search ในตัวของ Live (แทนการค้นผ่านโมเดลแชท), ให้ Live แปล/สรุปข้อความสั้นเอง, งบระบบปลุกตามจำนวน key,
+  นโยบายตอน AI วิเคราะห์ไม่ได้
+- **Verify**: แอป 614 เทสต์ผ่าน (ข้าม 16)
+- เอกสาร: [[Model_Policy_Free_Tier]]
+
+## 2026-10-03 — ตรวจ tool ด้วยข้อมูลจริง + ตรวจ flow ระบบปลุก AI (คาดการณ์ล่วงหน้า) (branch `feat/rive-eye-morph`)
+- **User Request**: "จบเรื่องการปรับปรุง Avatar mode ไว้ก่อน ตรวจสอบความถูกต้อง ของการเรียกใช้ tool ต่างๆ ว่าได้ผลลัพย์จากข้อมูลจริง
+  และถูกต้องหรือไม่ และตรวจสอบเชิงลึก การใช้ tool คาดการณ์ล่วงหน้า flow การทำงาน"
+- **วิธี**: เรียก 32 tool จริง (`AvatarSceneDataLiveDump`) แล้วเทียบ Binance/gold-api/Yahoo/alternative.me/CoinGecko/ForexFactory +
+  คำนวณอินดิเคเตอร์ใหม่จากแท่ง Binance · ยืนยันกติกา TradingView scanner ด้วยการเรียกตรง → สคริปต์ `tools/tool_accuracy_audit.py`
+- **บั๊กใหญ่สุด**: TF ของ TradingView scanner กลับด้าน (1h → ค่ารายวัน, 1D → ว่าง) กระทบ `trading_technical_analysis` (default 1h),
+  `trading_multi_timeframe`, เสาเทคนิคของ `trading_sentiment`, `trading_combined`, alert แบบ technical และ `trading_price`
+  (ใช้ 1m → % เปลี่ยนแปลงของนาทีล่าสุด) → `TvScannerColumns`
+- **แก้อื่นๆ**: ราคา + สถานะตลาด (`MarketHours`), AAPL เปลี่ยนแปลงสลับกัน, correlation (สัญลักษณ์แอป + จับคู่วันที่), Bollinger squeeze
+  (เดิม No data เสมอ), สแกนคริปโตเฉพาะ USDT spot, ข่าวนับคำทั้งคำ + ไม่นับ positioning ซ้ำ, ปฏิทินบอกว่าไม่มี actual,
+  calculate, ข้อความฝนของ `device_weather` · รายละเอียดใน [[catalogue]] "อัปเดต 2026-10-03"
+- **ระบบปลุก AI**: เล่นซ้ำ 115 ปัจจัย × 5 TF บนแท่ง BTC จริง 50 ชม. (ไม่ดึงฐานข้อมูลมือถือ — `tools/binance_bars_db.py`) ตรงสูตรอิสระ
+  ทั้งหมด ไม่มี error · มือถือตอนนี้ไม่มี alert job เปิดอยู่ (service หยุดเอง) · แก้: alert เขียนทับโมเดลแชทของผู้ใช้ ·
+  ความเสี่ยงที่รอตัดสิน: AI ล้ม → แจ้งทุกการปลุก, งบตั้งไว้สำหรับ 7 key (ตอนนี้ 1) — [[66_WakeEngine_Live_Backup_V29]] ข้อ 9
+- **Verify**: `tool_accuracy_audit.py` ผ่าน 56 ไม่ผ่าน 0 (หมายเหตุ 4: SMC/Elliott — TradingView ไม่ตอบบน PC ในโหมด strict) ·
+  แอป 614 เทสต์ผ่าน (ข้าม 16) รวม `ToolDataAccuracyTest` 6 · เครื่องจำลอง Live ไม่ได้แตะ
+- เอกสาร: [[catalogue]], [[67_Device_Wake_Alert_Audit]], [[66_WakeEngine_Live_Backup_V29]]
+
 ## 2026-10-03 — Live: พูดแล้ว AI ไม่ได้ยิน → ตัวจับ session ที่ไม่ได้ยินเสียง เปิด session ใหม่เอง (branch `feat/rive-eye-morph`)
 - **User Request**: "จาก log เหมือน AI ไม่ได้ยินเสียง ที่พูด พูดไปแล้วไม่ทำงาน" (logcat 08:36–08:43)
 - **หลักฐาน**: 08:39–08:41 เครื่องได้ยินผู้ใช้ 6 ครั้ง (`activity NONE → LISTENING`, Mic 15/18/6/3/3/21%) → `PONDERING` → ว่างที่ 3.5 วิ
@@ -4397,3 +4557,10 @@ IndicatorFieldContractTest, TradingToolReachabilityTest)
 - ปรับ Live Voice ให้แยก queue / setup / first-output / session timeout ชัดเจน และ log latency ของ request→output พร้อม cause classification
 - เพิ่ม RESULT log: AUDIO_SUCCESS, TRANSCRIPT_ONLY, API_ERROR, FIRST_AUDIO_TIMEOUT_* และสถานะ fallback
 - Queue acquisition log แสดงแม้รอ 0ms เพื่อยืนยันว่า queue ไม่ใช่คอขวด
+
+## 2026-10-04 — วิเคราะห์ Avatar Mode (pet_godot) + ประเมิน godot-mcp
+- วิเคราะห์โครงสร้าง Avatar Mode ทั้งระบบ: Godot 4.7 project `pet_godot` (12 GDScript ~4,647 lines, 9 shaders ~539 lines, 30+ JSON scenes) + Kotlin integration (AvatarGodotPlugin, AvatarStage, AvatarActivity, etc.)
+- **คุณภาพโค้ด: ⭐⭐⭐⭐⭐** — procedural VFX ไม่ใช้ texture หนัก, data-driven JSON scenes, mobile-optimized shaders (Dave Hoskins hash), defensive parsing, Thai typography support
+- **godot-mcp (Coding-Solo/godot-mcp): ไม่จำเป็นต้องติดตั้ง** — เป็น MCP Server สำหรับ AI ควบคุม Godot Editor ซึ่งไม่ตรงกับ use case นี้ (embedded runtime avatar); ทุกไฟล์เป็น text-based (.gd, .gdshader, .json) แก้ไขตรงได้
+- Architecture: Android Kotlin → Messenger IPC → AvatarGodotPlugin → GDScript app_bridge.gd → pet_character.gd + scene_player.gd + holo_panel.gd
+- สร้าง analysis artifact พร้อมแนวทางปรับปรุง 7 ด้าน

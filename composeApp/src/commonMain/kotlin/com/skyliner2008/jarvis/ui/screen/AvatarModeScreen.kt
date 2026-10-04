@@ -4,11 +4,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -85,6 +90,11 @@ internal fun AvatarModeContent(
     }
     val ready by AvatarStage.ready.collectAsState()
     val failed by AvatarStage.failed.collectAsState()
+    val loadingAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (ready) 0f else 1f,
+        animationSpec = androidx.compose.animation.core.tween(400),
+        label = "avatar_loading_alpha"
+    )
     val stateRef = rememberUpdatedState(activeAvatarState)
     val sessionRef = rememberUpdatedState(voiceSession)
     val endLive = rememberUpdatedState(onEndLive)
@@ -329,11 +339,46 @@ internal fun AvatarModeContent(
                     color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, textAlign = TextAlign.Center
                 )
             }
-        } else if (!ready) {
-            // under the 3D stage until its first frames cover it
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                CircularProgressIndicator(color = Color(0xFF7EF7FF), strokeWidth = 3.dp, modifier = Modifier.size(40.dp))
-                Text("กำลังปลุกน้อง...", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+        } else if (loadingAlpha > 0f) {
+            // Animated motion loading while 3D engine is booting:
+            // The 2D RobotSprite floats, blinks, and syncs mouth immediately if AI greeting voice speaks!
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.alpha(loadingAlpha)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(240.dp)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(Color(0xFF00E5FF).copy(alpha = 0.15f), Color.Transparent)
+                                ),
+                                CircleShape
+                            )
+                    )
+                    RobotSprite(state = activeAvatarState, modifier = Modifier.size(260.dp))
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF0F172A).copy(alpha = 0.85f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF7EF7FF),
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (activeAvatarState.isSpeaking) "กำลังพูดคุย (เตรียมเวที 3D)..." else "กำลังปลุกน้อง 3D...",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp
+                    )
+                }
             }
         }
 
