@@ -197,6 +197,37 @@ object PetMemoryStore {
     }
 
     /**
+     * โหลดรายการโปรไฟล์ใบหน้า (Face Profiles 5 สล็อต) จาก SQLite
+     */
+    fun loadFaceProfiles(): List<PetFaceProfile> {
+        try {
+            val db = JarvisDatabaseHolder.database ?: return PetFaceProfile.createDefaultSlots()
+            val stored = db.jarvisDatabaseQueries.getSetting("pet.face_profiles").executeAsOneOrNull()
+            if (!stored.isNullOrBlank()) {
+                val list = json.decodeFromString<List<PetFaceProfile>>(stored)
+                if (list.size == 5) return list
+            }
+        } catch (e: Exception) {
+            logDebug(TAG, "⚠️ Failed to load face profiles: ${e.message}")
+        }
+        return PetFaceProfile.createDefaultSlots()
+    }
+
+    /**
+     * บันทึกรายการโปรไฟล์ใบหน้า (Face Profiles 5 สล็อต) ลง SQLite
+     */
+    fun saveFaceProfiles(profiles: List<PetFaceProfile>) {
+        try {
+            val db = JarvisDatabaseHolder.database ?: return
+            val jsonStr = json.encodeToString(profiles)
+            db.jarvisDatabaseQueries.insertSetting("pet.face_profiles", jsonStr)
+            logDebug(TAG, "💾 Saved ${profiles.count { it.isEnrolled }} enrolled face profiles to SQLite")
+        } catch (e: Exception) {
+            logDebug(TAG, "⚠️ Failed to save face profiles: ${e.message}")
+        }
+    }
+
+    /**
      * รีเซ็ต PetMemory ทั้งหมด (สำหรับ New Game)
      */
     fun reset() {

@@ -289,6 +289,12 @@ class MainActivity : FragmentActivity() {
         val deviceControlExecutor = com.skyliner2008.jarvis.tools.device.DeviceControlExecutor(applicationContext)
         com.skyliner2008.jarvis.tools.ToolExecutor.initDeviceExecutor(deviceControlExecutor)
         com.skyliner2008.jarvis.pet.PetVisionDetector.installBridge()
+        // face profiles by embedding (SFace in assets/models) — loads off the main thread, ratios until then
+        com.skyliner2008.jarvis.pet.FaceEmbedder.init(applicationContext)
+        // hands and gestures (MediaPipe gesture_recognizer.task in assets/models) — loads off the main thread
+        com.skyliner2008.jarvis.pet.HandTracker.init(applicationContext)
+        // things in view (EfficientDet-Lite0 in assets/models) — loads off the main thread
+        com.skyliner2008.jarvis.pet.ObjectSpotter.init(applicationContext)
         alwaysLiveManager = com.skyliner2008.jarvis.service.AlwaysLiveManager.getInstance(applicationContext)
 
         lifecycleScope.launch {

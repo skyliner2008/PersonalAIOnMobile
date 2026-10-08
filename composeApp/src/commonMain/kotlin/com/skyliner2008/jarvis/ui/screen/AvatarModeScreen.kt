@@ -1,19 +1,33 @@
 package com.skyliner2008.jarvis.ui.screen
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.skyliner2008.jarvis.camera.DetectedObject
+import com.skyliner2008.jarvis.pet.FaceEnrollmentScanner
+import com.skyliner2008.jarvis.pet.PetSettingsDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.skyliner2008.jarvis.avatar.AvatarActivity
@@ -75,6 +90,9 @@ internal fun AvatarModeContent(
     petVisionProcessor: PetVisionProcessor?,
     isAiVisionOn: Boolean,
     isFrontCam: Boolean,
+    onSwitchCamera: () -> Unit = {},
+    detectedObjects: List<DetectedObject> = emptyList(),
+    lastFaceCoords: Pair<Float, Float>? = null,
     lastLiveFrameSendTime: Long,
     onUpdateLastLiveFrameSendTime: (Long) -> Unit,
     onLiveVideoFrame: ((String) -> Unit)?,
@@ -99,6 +117,19 @@ internal fun AvatarModeContent(
     val sessionRef = rememberUpdatedState(voiceSession)
     val endLive = rememberUpdatedState(onEndLive)
     val barrageDone = rememberUpdatedState(onMissileBarrageFinished)
+
+    // ─── Settings, Debug HUD & Face Profiles State ───
+    var isPetSettingsOpen by remember { mutableStateOf(false) }
+    var enrollingSlot by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var showDebugHud by remember { mutableStateOf(false) }
+    val petFaceProfiles by petController.faceProfiles.collectAsState()
+    val currentRecognizedPerson by petController.currentRecognizedPerson.collectAsState()
+    val recognizedSlot by petController.currentRecognizedSlot.collectAsState()
+    val currentLandmarks by petController.currentFaceLandmarks.collectAsState()
+    val petBiometrics by petController.currentBiometrics.collectAsState()
+    val isSentryActive by petController.isSentryActive.collectAsState()
+    var lastTouchAction by remember { mutableStateOf<String?>(null) }
+    var lastTouchTime by remember { mutableStateOf(0L) }
 
     // ─── the look: emotion, eyes, gear, stage, lasting emote ───
     val look = remember(activeAvatarState.emotion, activeAvatarState.faceState, activeAvatarState.isDizzy) {
@@ -248,10 +279,12 @@ internal fun AvatarModeContent(
         AvatarLiveFeed.heardAtMs.collect { if (it > 0L) activity.onHeard(it) }
     }
     // the jobs the user still waits to hear about (handed to the assistant, waiting to be told, being told)
+    var taskCount by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) {
         kotlinx.coroutines.flow.combine(AvatarLiveFeed.jobs, AvatarLiveFeed.reports) { jobs, reports -> AvatarTasks.board(jobs, reports) }
             .collect { board ->
                 logDebug("AvatarStage", "tasks ${board.joinToString { "${it.tool ?: "ask"}:${it.state.word}" }.ifEmpty { "-" }}")
+                taskCount = board.size
                 AvatarStage.tasks(AvatarTasks.json(board))
             }
     }
@@ -323,13 +356,24 @@ internal fun AvatarModeContent(
     LaunchedEffect(petController) {
         AvatarStage.events.collect { e ->
             when (e.name) {
-                "touch" -> petController.onAvatarTouch(e.text("kind"), e.text("zone"))
+                "touch" -> {
+                    val kind = e.text("kind")
+                    val zone = e.text("zone")
+                    lastTouchAction = "$kind ($zone)"
+                    lastTouchTime = Clock.System.now().toEpochMilliseconds()
+                    petController.onAvatarTouch(kind, zone)
+                }
                 "back" -> scope.launch { endLive.value() }
             }
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    // the screen's size: the detection lines sit above the robot's task pills, which are sized in the stage's units
+    var stageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black).onSizeChanged { stageSize = it },
+        contentAlignment = Alignment.Center
+    ) {
         if (!available || failed) {
             // no 3D stage (Android 10 or older, robot not packed, or its engine kept crashing): the robot's face
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -384,8 +428,9 @@ internal fun AvatarModeContent(
 
         // the camera without a preview: face tracking for the gaze (not while asleep), and frames for the
         // live session while the AI's eyes are open
+        val isEnrolling = enrollingSlot != null
         val trackFaces = petVisionProcessor != null && activeAvatarState.emotion != AvatarEmotion.SLEEPING
-        if (trackFaces || isAiVisionOn) {
+        if (!isEnrolling && (trackFaces || isAiVisionOn)) {
             CameraPreviewView(
                 modifier = Modifier.size(1.dp).alpha(0.001f).align(Alignment.TopStart).padding(0.dp),
                 isFrontCamera = isFrontCam,
@@ -400,6 +445,292 @@ internal fun AvatarModeContent(
                         }
                     }
                 }
+            )
+        }
+
+        // ─── Floating Translucent Controls (Top-Right: Settings ⚙️ and Exit ✕) ───
+        Popup(
+            alignment = Alignment.TopEnd,
+            properties = PopupProperties(
+                focusable = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+            FloatingAvatarControlBar(
+                onOpenSettings = { isPetSettingsOpen = true },
+                onCloseLive = { scope.launch { endLive.value() } }
+            )
+        }
+
+        // ─── Debug HUD (Top-Left: Face Tracked & Detections) ───
+        if (showDebugHud) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            val isTouchActive = now - lastTouchTime < 1500L
+            val isFaceActive = lastFaceCoords != null || detectedObjects.isNotEmpty()
+            val touchText = if (isTouchActive) (lastTouchAction ?: "แตะหุ่นยนต์") else "สัมผัส: รอแตะ"
+            val faceText = when {
+                detectedObjects.isNotEmpty() -> detectedObjects.take(2).joinToString(" • ") { it.label }
+                lastFaceCoords != null -> "Face (%.2f, %.2f)".format(lastFaceCoords.first, lastFaceCoords.second)
+                else -> "สแกนภาพ..."
+            }
+            val audioText = when {
+                sessionRef.value.isSpeaking -> "[AI พูด] ตอบกลับ..."
+                sessionRef.value.audioLevel > 0.05f -> "[LISTENING] ฟังเสียง ${(sessionRef.value.audioLevel * 100).toInt()}%"
+                else -> "[LISTENING] พร้อมฟัง"
+            }
+
+            Popup(
+                alignment = Alignment.TopStart,
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 42.dp, start = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    PetDetectionBadge(
+                        icon = "🐾",
+                        label = touchText,
+                        isActive = isTouchActive,
+                        activeColor = Color(0xFF00E676)
+                    )
+                    PetDetectionBadge(
+                        icon = "🎭",
+                        label = audioText,
+                        isActive = sessionRef.value.isSpeaking || sessionRef.value.audioLevel > 0.05f,
+                        activeColor = if (sessionRef.value.isSpeaking) Color(0xFFD500F9) else Color(0xFFFFD600)
+                    )
+                    PetDetectionBadge(
+                        icon = when {
+                            detectedObjects.any { it.label.contains("Hand") || it.label.contains("Finger") } -> "🖐️"
+                            detectedObjects.any { it.label.startsWith(com.skyliner2008.jarvis.pet.Things.PREFIX) } -> "📦"
+                            else -> "👀"
+                        },
+                        label = faceText,
+                        isActive = isFaceActive,
+                        activeColor = when {
+                            detectedObjects.any { it.label.contains("Smile") } -> Color(0xFFFF4081)
+                            detectedObjects.any { it.label.contains("Hand") || it.label.contains("Finger") } -> Color(0xFFFF9100)
+                            else -> Color(0xFF00F0FF)
+                        }
+                    )
+                }
+            }
+        }
+
+        // ─── Detection lines (bottom): the face bottom-left, hands and things bottom-right ───
+        // Popups like the controls (the 3D stage's surface covers ordinary content once it is up), above the robot's
+        // task pills when it has any — they stack up from the bottom-right, up to two thirds of the screen wide
+        val labels = detectedObjects.map { it.label }
+        val faceLine = heldDetection(
+            com.skyliner2008.jarvis.pet.FaceBanner.face(
+                recognizedSlot = recognizedSlot,
+                recognizedPerson = currentRecognizedPerson,
+                faceVisible = currentLandmarks?.isNotEmpty() == true,
+                labels = labels
+            )?.let { it to (recognizedSlot >= 0) }
+        )
+        val sightLine = heldDetection(com.skyliner2008.jarvis.pet.FaceBanner.sight(labels))
+        if (!isPetSettingsOpen && enrollingSlot == null && (faceLine != null || sightLine != null)) {
+            val stageUnitDp = with(androidx.compose.ui.platform.LocalDensity.current) {
+                minOf(stageSize.width.toDp().value / 720f, stageSize.height.toDp().value / 1280f)
+            }
+            val bottom = if (taskCount > 0) {
+                (com.skyliner2008.jarvis.pet.FaceBanner.taskListHeightUnits(taskCount) * stageUnitDp + 8f).dp
+            } else 24.dp
+            faceLine?.let { (text, known) ->
+                DetectionLine(text, Alignment.BottomStart, bottom, if (known) Color(0xFF00E676) else Color(0xFF00F0FF))
+            }
+            sightLine?.let { DetectionLine(it, Alignment.BottomEnd, bottom, Color(0xFFFF9100)) }
+        }
+
+        // ─── Pet Settings Modal Dialog ───
+        if (isPetSettingsOpen) {
+            PetSettingsDialog(
+                onDismissRequest = { isPetSettingsOpen = false },
+                showDebugHud = showDebugHud,
+                onToggleDebugHud = { showDebugHud = it },
+                faceProfiles = petFaceProfiles,
+                currentRecognizedPerson = currentRecognizedPerson,
+                hasDetectedFace = currentLandmarks != null && currentLandmarks!!.isNotEmpty(),
+                onStartEnrollment = { slotIndex, name ->
+                    isPetSettingsOpen = false
+                    enrollingSlot = slotIndex to name
+                },
+                onDeleteFace = { slotIndex -> petController.deleteFaceProfile(slotIndex) },
+                onRenameFace = { slotIndex, newName -> petController.renameFaceProfile(slotIndex, newName) },
+                isSentryActive = isSentryActive,
+                onToggleSentry = { petController.toggleSentry() },
+                isFrontCam = isFrontCam,
+                onToggleCamera = onSwitchCamera,
+                recognizedSlot = recognizedSlot,
+                embeddingAvailable = com.skyliner2008.jarvis.pet.PetVisionBridge.faceEmbeddingAvailable()
+            )
+        }
+
+        // ─── High-End Biometric Face Enrollment Scanner ───
+        enrollingSlot?.let { (slotIndex, slotName) ->
+            FaceEnrollmentScanner(
+                slotIndex = slotIndex,
+                slotName = slotName,
+                biometrics = petBiometrics,
+                onCompleteEnrollment = { idx, name, averagedLandmarks, embedding ->
+                    petController.enrollFaceWithLandmarks(idx, name, averagedLandmarks, embedding)
+                },
+                onCancel = {
+                    enrollingSlot = null
+                },
+                onSwitchCamera = onSwitchCamera,
+                cameraContent = {
+                    CameraPreviewView(
+                        modifier = Modifier.fillMaxSize(),
+                        isFrontCamera = isFrontCam,
+                        isActive = true,
+                        onFrameCapture = { jpegBase64, rawBytes ->
+                            petVisionProcessor?.processFrame(rawBytes, isFrontCamera = isFrontCam)
+                            if (isAiVisionOn) {
+                                val now = Clock.System.now().toEpochMilliseconds()
+                                if (now - lastLiveFrameSendTime >= 900L) {
+                                    onUpdateLastLiveFrameSendTime(now)
+                                    onLiveVideoFrame?.invoke(jpegBase64)
+                                }
+                            }
+                        }
+                    )
+                }
+            )
+        }
+    }
+}
+
+/**
+ * Floating Translucent Control Bar (Settings ⚙️ & Close ✕)
+ */
+@Composable
+private fun FloatingAvatarControlBar(
+    onOpenSettings: () -> Unit,
+    onCloseLive: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.padding(top = 42.dp, end = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Settings Button ⚙️
+        Surface(
+            onClick = onOpenSettings,
+            shape = CircleShape,
+            color = Color(0xFF0F172A).copy(alpha = 0.60f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            modifier = Modifier.size(42.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text("⚙️", fontSize = 18.sp)
+            }
+        }
+
+        // Close / Exit Avatar & Live Button ✕
+        Surface(
+            onClick = onCloseLive,
+            shape = CircleShape,
+            color = Color(0xFF1E1B2E).copy(alpha = 0.60f),
+            border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.45f)),
+            modifier = Modifier.size(42.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Exit Avatar & End Live",
+                    tint = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Sleek Translucent HUD Badge for sensor & detection feedback
+ */
+@Composable
+private fun PetDetectionBadge(
+    icon: String,
+    label: String,
+    isActive: Boolean,
+    activeColor: Color
+) {
+    Surface(
+        color = if (isActive) activeColor.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(
+            1.dp,
+            if (isActive) activeColor.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.18f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(icon, fontSize = 12.sp)
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = label,
+                color = if (isActive) Color.White else Color.White.copy(alpha = 0.65f),
+                fontSize = 11.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+/** [now], or for [holdMs] after it went away the last one: detections come and go between frames */
+@Composable
+private fun <T : Any> heldDetection(now: T?, holdMs: Long = 1_500L): T? {
+    var held by remember { mutableStateOf<T?>(null) }
+    LaunchedEffect(now) {
+        if (now != null) {
+            held = now
+        } else {
+            delay(holdMs)
+            held = null
+        }
+    }
+    return now ?: held
+}
+
+/** One detection line at the bottom of Avatar mode ([com.skyliner2008.jarvis.pet.FaceBanner]) */
+@Composable
+private fun DetectionLine(text: String, alignment: Alignment, bottom: androidx.compose.ui.unit.Dp, accent: Color) {
+    Popup(
+        alignment = alignment,
+        properties = PopupProperties(
+            focusable = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Surface(
+            // two lines side by side fit a phone's width
+            modifier = Modifier
+                .padding(start = 12.dp, end = 12.dp, bottom = bottom)
+                .widthIn(max = 185.dp),
+            color = Color(0xFF0F172A).copy(alpha = 0.72f),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, accent.copy(alpha = 0.75f))
+        ) {
+            Text(
+                text = text,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
     }

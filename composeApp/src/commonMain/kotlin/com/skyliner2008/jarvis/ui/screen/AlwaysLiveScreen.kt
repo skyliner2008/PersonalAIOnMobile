@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.skyliner2008.jarvis.avatar.AvatarStage
+import com.skyliner2008.jarvis.camera.DetectedObject
 import com.skyliner2008.jarvis.data.ConnectionState
 import com.skyliner2008.jarvis.pet.AlwaysLiveProfile
 import com.skyliner2008.jarvis.pet.PetModeController
@@ -93,7 +94,9 @@ fun AlwaysLiveScreen(
 
     // AI vision (the live session sees through the camera) state
     var isCameraPipOpen by remember { mutableStateOf(false) }
-    val isFrontCam = true
+    var isFrontCam by remember { mutableStateOf(true) }
+    var detectedObjects by remember { mutableStateOf<List<DetectedObject>>(emptyList()) }
+    var lastFaceCoords by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     var lastLiveFrameSendTime by remember { mutableStateOf(0L) }
     var isMissileBarrageActive by remember { mutableStateOf(false) }
 
@@ -144,7 +147,10 @@ fun AlwaysLiveScreen(
     val petVisionProcessor = remember(currentProfile) {
         if (currentProfile == AlwaysLiveProfile.PET) {
             PetVisionBridge.createProcessor(
-                onGazeDetected = { x, y -> petController.onGazeTouch(x, y) },
+                onGazeDetected = { x, y ->
+                    lastFaceCoords = Pair(x, y)
+                    petController.onGazeTouch(x, y)
+                },
                 onIntruderDetected = { petController.triggerIntruderAlert() },
                 onCopycatSuccess = { petController.onUserMimicSuccess() },
                 getCopycatTarget = { petController.copycatTarget.value },
@@ -162,9 +168,13 @@ fun AlwaysLiveScreen(
         PetVisionBridge.onFaceAbsenceTimeout = { emotion ->
             petController.onFaceAbsenceTimeout(emotion)
         }
+        PetVisionBridge.onObjectsDetected = { objects ->
+            detectedObjects = objects
+        }
         onDispose {
             PetVisionBridge.onFaceDistanceDetected = null
             PetVisionBridge.onFaceAbsenceTimeout = null
+            PetVisionBridge.onObjectsDetected = null
             petVisionProcessor?.release()
         }
     }
@@ -667,6 +677,9 @@ fun AlwaysLiveScreen(
                 petVisionProcessor = petVisionProcessor,
                 isAiVisionOn = isCameraPipOpen,
                 isFrontCam = isFrontCam,
+                onSwitchCamera = { isFrontCam = !isFrontCam },
+                detectedObjects = detectedObjects,
+                lastFaceCoords = lastFaceCoords,
                 lastLiveFrameSendTime = lastLiveFrameSendTime,
                 onUpdateLastLiveFrameSendTime = { lastLiveFrameSendTime = it },
                 onLiveVideoFrame = onLiveVideoFrame,

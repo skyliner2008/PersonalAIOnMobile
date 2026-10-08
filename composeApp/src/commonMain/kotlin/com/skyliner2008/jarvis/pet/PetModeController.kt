@@ -124,10 +124,25 @@ class PetModeController(
     private val _faceProfiles = MutableStateFlow(PetFaceProfile.createDefaultSlots())
     val faceProfiles: StateFlow<List<PetFaceProfile>> = _faceProfiles.asStateFlow()
 
-    private val _currentRecognizedPerson = MutableStateFlow<String?>("บอส")
+    private val _currentFaceLandmarks = MutableStateFlow<List<Float>?>(null)
+    val currentFaceLandmarks: StateFlow<List<Float>?> = _currentFaceLandmarks.asStateFlow()
+    val lastDetectedLandmarks: List<Float>? get() = _currentFaceLandmarks.value
+
+    private val _currentBiometrics = MutableStateFlow(FaceBiometricDetails())
+    val currentBiometrics: StateFlow<FaceBiometricDetails> = _currentBiometrics.asStateFlow()
+
+    private val _currentRecognizedPerson = MutableStateFlow<String?>(null)
     val currentRecognizedPerson: StateFlow<String?> = _currentRecognizedPerson.asStateFlow()
 
-    var lastDetectedLandmarks: List<Float>? = null
+    /**
+     * the slot of the face in front of the camera, -1 = no enrolled match (someone else, not enrolled, no face).
+     * The name above is display text ("บอส (85%)", "บุคคลอื่น / …"): whether someone is recognized, and whose slot a
+     * rename or delete touches, goes by this — matching on that text showed "not enrolled yet" as recognized and let
+     * deleting "บอส" clear "บอสใหญ่" (2026-10-08 review)
+     */
+    private val _currentRecognizedSlot = MutableStateFlow(-1)
+    val currentRecognizedSlot: StateFlow<Int> = _currentRecognizedSlot.asStateFlow()
+
     var onTriggerMissileBarrage: (() -> Unit)? = null
 
     // ─── Screensaver Idle Tricks Settings ──────────────────────────────────────
@@ -162,11 +177,20 @@ class PetModeController(
             logDebug(TAG, "📦 Restored NeedsState (elapsed ${elapsed / 60000}min)")
         }
 
+        // Restore Face Profiles from SQLite
+        _faceProfiles.value = PetMemoryStore.loadFaceProfiles()
+
         // Hook up PetVisionBridge callbacks
         PetVisionBridge.registeredProfilesProvider = { _faceProfiles.value }
-        PetVisionBridge.onCurrentFaceLandmarks = { landmarks -> lastDetectedLandmarks = landmarks }
-        PetVisionBridge.onFaceProfileMatched = { name, _ -> _currentRecognizedPerson.value = name }
+        PetVisionBridge.onCurrentFaceLandmarks = { landmarks ->
+            _currentFaceLandmarks.value = landmarks.takeIf { it.isNotEmpty() }
+        }
+        PetVisionBridge.onFaceProfileMatched = { name, slot ->
+            _currentRecognizedPerson.value = name
+            _currentRecognizedSlot.value = slot
+        }
         PetVisionBridge.onHandGestureDetected = { gesture -> onHandGesture(gesture) }
+        PetVisionBridge.onFaceBiometrics = { biometrics -> _currentBiometrics.value = biometrics }
 
         startIdleLoop()
         startAutoSave()
@@ -185,11 +209,14 @@ class PetModeController(
 
         // Save memory before stopping
         PetMemoryStore.saveNeedsState(_needsState.value)
+        PetMemoryStore.saveFaceProfiles(_faceProfiles.value)
         PetMemoryStore.save()
 
         // Clear PetVisionBridge callbacks
         PetVisionBridge.registeredProfilesProvider = null
         PetVisionBridge.onCurrentFaceLandmarks = null
+        PetVisionBridge.onFaceBiometrics = null
+        _currentBiometrics.value = FaceBiometricDetails()
         PetVisionBridge.onFaceProfileMatched = null
         PetVisionBridge.onHandGestureDetected = null
     }
@@ -208,7 +235,13 @@ class PetModeController(
 
     // ─── Face Recognition Manager (5 Slots) ────────────────────────────────────
     fun enrollCurrentFace(slotIndex: Int, name: String): Boolean {
-        val landmarks = lastDetectedLandmarks ?: return false
+        val landmarks = _currentFaceLandmarks.value ?: return false
+        return enrollFaceWithLandmarks(slotIndex, name, landmarks, _currentBiometrics.value.embedding)
+    }
+
+    /** @param embedding the scan's mean SFace embedding ([FaceRecognition.meanEmbedding]); empty without the model */
+    fun enrollFaceWithLandmarks(slotIndex: Int, name: String, landmarks: List<Float>, embedding: List<Float> = emptyList()): Boolean {
+        if (landmarks.isEmpty() && embedding.isEmpty()) return false
         val currentList = _faceProfiles.value.toMutableList()
         if (slotIndex !in currentList.indices) return false
         currentList[slotIndex] = PetFaceProfile(
@@ -216,10 +249,15 @@ class PetModeController(
             name = name.ifBlank { "สล็อต ${slotIndex + 1}" },
             isEnrolled = true,
             landmarkRatios = landmarks,
-            enrolledAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            enrolledAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+            embedding = if (embedding.size == FaceRecognition.EMBEDDING_SIZE) FaceRecognition.normalize(embedding) else emptyList()
         )
         _faceProfiles.value = currentList
+        PetMemoryStore.saveFaceProfiles(currentList)
         _currentRecognizedPerson.value = currentList[slotIndex].name
+        _currentRecognizedSlot.value = slotIndex
+        logDebug(TAG, "🪪 Enrolled slot ${slotIndex + 1} '${currentList[slotIndex].name}' by " +
+            if (currentList[slotIndex].usesEmbedding) "SFace embedding" else "landmark ratios")
         RobotSoundPlayer.playSparkle()
         return true
     }
@@ -230,17 +268,29 @@ class PetModeController(
             currentList[slotIndex] = PetFaceProfile(
                 slotIndex = slotIndex,
                 name = "สล็อต ${slotIndex + 1}",
-                isEnrolled = false
+                isEnrolled = false,
+                landmarkRatios = emptyList()
             )
             _faceProfiles.value = currentList
+            PetMemoryStore.saveFaceProfiles(currentList)
+            if (_currentRecognizedSlot.value == slotIndex) {
+                _currentRecognizedPerson.value = null
+                _currentRecognizedSlot.value = -1
+            }
         }
     }
 
     fun renameFaceProfile(slotIndex: Int, newName: String) {
         val currentList = _faceProfiles.value.toMutableList()
         if (slotIndex in currentList.indices) {
-            currentList[slotIndex] = currentList[slotIndex].copy(name = newName.ifBlank { "สล็อต ${slotIndex + 1}" })
+            val cleanName = newName.ifBlank { "สล็อต ${slotIndex + 1}" }
+            val updated = currentList[slotIndex].copy(name = cleanName)
+            currentList[slotIndex] = updated
             _faceProfiles.value = currentList
+            PetMemoryStore.saveFaceProfiles(currentList)
+            if (_currentRecognizedSlot.value == slotIndex) {
+                _currentRecognizedPerson.value = cleanName
+            }
         }
     }
 

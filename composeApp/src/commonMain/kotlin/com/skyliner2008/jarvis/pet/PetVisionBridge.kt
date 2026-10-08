@@ -38,14 +38,22 @@ object PetVisionBridge {
     var onHandGestureDetected: ((HandGesture) -> Unit)? = null
 
     /**
-     * Callback เมื่อจับคู่ใบหน้าที่เห็นกับสล็อตโปรไฟล์ใบหน้าได้สำเร็จ
+     * Callback เมื่อจับคู่ใบหน้าที่เห็นกับสล็อตโปรไฟล์ใบหน้าได้สำเร็จ (หรือ null เมื่อไม่พบใบหน้า)
      */
-    var onFaceProfileMatched: ((name: String, slotIndex: Int) -> Unit)? = null
+    var onFaceProfileMatched: ((name: String?, slotIndex: Int) -> Unit)? = null
 
     /**
      * Callback ส่ง Normalized Face Landmark Ratios ปัจจุบัน (สำหรับใช้ลงทะเบียนสล็อตใบหน้า)
      */
     var onCurrentFaceLandmarks: ((List<Float>) -> Unit)? = null
+
+    /**
+     * Callback ส่งรายละเอียดไบโอเมตริกซ์ของใบหน้าแบบสด (สำหรับสแกนเนอร์ลงทะเบียนใบหน้าระดับสูง)
+     */
+    var onFaceBiometrics: ((FaceBiometricDetails) -> Unit)? = null
+
+    /** whether the phone can recognize faces by embedding ([FaceRecognition]) — false = landmark-ratio matching */
+    var faceEmbeddingAvailable: () -> Boolean = { false }
 
     /**
      * Provider ดึงรายชื่อ 5 Face Profiles ที่ลงทะเบียนไว้ เพื่อให้ Vision Engine ใช้เปรียบเทียบ
@@ -109,3 +117,21 @@ object PetVisionBridge {
         )
     }
 }
+
+/**
+ * รายละเอียดไบโอเมตริกซ์ของใบหน้าแบบเรียลไทม์ (สำหรับสแกนเนอร์ลงทะเบียนและตรวจสอบจุดต่างของใบหน้า)
+ */
+data class FaceBiometricDetails(
+    val isFaceDetected: Boolean = false,
+    val isCentered: Boolean = false,
+    val hasEyesDetected: Boolean = false,
+    val hasNoseDetected: Boolean = false,
+    val hasMouthDetected: Boolean = false,
+    val landmarkRatios: List<Float> = emptyList(),
+    val yawAngle: Float = 0f,
+    val rollAngle: Float = 0f,
+    val faceBounds: com.skyliner2008.jarvis.camera.BoundingBox? = null,
+    /** the face's latest SFace embedding (normalized) and when it was taken — empty without the model */
+    val embedding: List<Float> = emptyList(),
+    val embeddingAtMs: Long = 0L
+)

@@ -15,6 +15,8 @@ import kotlin.math.sqrt
  *   [2] = eyeToNoseDistance / noseToMouthDistance
  *   [3] = faceWidth / faceHeight
  * @param enrolledAt เวลาที่บันทึก (มิลลิวินาที)
+ * @param embedding SFace embedding 128 ค่า (normalized, ค่าเฉลี่ยจากการสแกน) — ว่าง = บันทึกด้วยระบบสัดส่วนเดิม ต้องสแกนใหม่
+ *   เพื่อจดจำด้วย [FaceRecognition]
  */
 @Serializable
 data class PetFaceProfile(
@@ -22,11 +24,15 @@ data class PetFaceProfile(
     val name: String,
     val isEnrolled: Boolean = false,
     val landmarkRatios: List<Float> = emptyList(),
-    val enrolledAt: Long = 0L
+    val enrolledAt: Long = 0L,
+    val embedding: List<Float> = emptyList()
 ) {
+    /** enrolled with an SFace embedding (matched by [FaceRecognition]) */
+    val usesEmbedding: Boolean get() = embedding.size == FaceRecognition.EMBEDDING_SIZE
+
     companion object {
-        /** ค่า Threshold สูงสุดของ Euclidean Distance ที่ถือว่าเป็นคนเดียวกัน */
-        const val MATCH_THRESHOLD = 0.22f
+        /** ค่า Threshold สูงสุดของ Euclidean Distance ที่ถือว่าเป็นคนเดียวกัน (0.15f ป้องกันการ Match คนอื่นที่โครงหน้าต่างกัน) */
+        const val MATCH_THRESHOLD = 0.15f
 
         fun createDefaultSlots(): List<PetFaceProfile> {
             return listOf(

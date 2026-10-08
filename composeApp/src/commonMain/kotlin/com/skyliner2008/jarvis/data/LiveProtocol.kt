@@ -246,6 +246,26 @@ object LiveProtocol {
      *   เห็นคำถามค้างแล้วตอบเองทันทีหลังทักทาย เรียก tool ด้วย ทั้งที่หัวข้อบอกว่าตอบไปแล้ว (logcat 2026-10-01 16:51:
      *   กด live ปุ๊บดึง BTC กับอากาศของ session 16:24 มาพูด 2 รอบ) · reconnect กลางบทสนทนาไม่ตัด (คำถามล่าสุดอาจกำลังรอคำตอบ)
      */
+    /**
+     * The two session openers the app sends when Live becomes ready ("สวัสดีจาวิส พร้อมคุยไหม" / "สวัสดีฮับ พร้อมเล่นแล้ว"),
+     * as opposed to the other texts sent the same way: a question asked by voice in a meeting, the new-voice check.
+     */
+    fun isSessionOpener(text: String): Boolean {
+        val compact = text.filterNot { it.isWhitespace() }
+        return compact.contains("พร้อมคุยไหม") || compact.contains("พร้อมเล่นแล้ว")
+    }
+
+    /**
+     * The session opener as sent: the user's hello for the model to answer aloud. The opener is said from the user's
+     * side ("สวัสดีจาวิส พร้อมคุยไหม"); wrapped as an example of what the model should say, the model opened with
+     * "ยินดีด้วยค่ะ บอส เรียกจาวิส…" (phone 2026-10-09 00:18). Other texts go as they are — wrapping a meeting question
+     * as a greeting example made it a greeting.
+     */
+    fun sessionOpenerPrompt(text: String): String =
+        if (!isSessionOpener(text) || text.contains("[VOICE")) text
+        else "[VOICE RULE] ผู้ใช้เพิ่งเปิดเซสชันแล้วทักว่า \"$text\" — ทักทายกลับสั้นๆ 1-2 ประโยคด้วยเสียงพูดอย่างสดใสและเป็นธรรมชาติ " +
+            "ห้ามตอบเป็นตัวหนังสือล้วน ห้ามใช้ markdown"
+
     fun buildSessionHistory(
         turns: List<Pair<String, String>>,
         maxTurns: Int = 8,
@@ -253,8 +273,7 @@ object LiveProtocol {
         dropUnanswered: Boolean = true
     ): String = turns
         .mapNotNull { (role, text) ->
-            val compact = text.filterNot { it.isWhitespace() }
-            if (role == "user" && (compact.contains("พร้อมคุยไหม") || compact.contains("พร้อมเล่นแล้ว"))) return@mapNotNull null
+            if (role == "user" && isSessionOpener(text)) return@mapNotNull null
             val clean = if (role == "user") text.trim() else stripSessionGreeting(text)
             if (clean.isBlank()) null else role to clean
         }

@@ -251,11 +251,24 @@ To allow users to rapidly verify and interact with all 50 robot moodsets from bo
   - Computes normalized biometric landmark ratios (eye separation, nose-to-mouth ratio, mouth aspect ratio, jaw contour) on device via ML Kit.
   - Compares with enrolled templates using Euclidean distance ($D < 0.12$ match threshold) with zero cloud biometric transmission.
   - Rule 12 in `JarvisPersona.kt` guides Gemini Live to warmly greet registered users by their custom nicknames.
+  - **Since 2026-10-09** the profiles are matched by the SFace face model (cosine ≥ 0.363), not the landmark ratios — see [[Avatar_Mode]] and log 2026-10-09.
 - **7 Hand Gesture Detections**:
-  - Computer vision heuristic classifiers outside face bounds detecting: `HIGH_FIVE`, `OK`, `BYE`, `NO`, `V_SIGN`, `THUMBS_UP`, `THUMBS_DOWN`.
+  - **Since 2026-10-09: MediaPipe Gesture Recognizer** (`HandTracker.kt`, `assets/models/gesture_recognizer.task`, Apache-2.0, 8.4 MB,
+    arm64 only) → 21 points per hand + the model's gesture → `HandPose` / `HandGestureReader` (commonMain, tested in `HandPoseTest`):
+    Victory → `V_SIGN`, Thumb_Up/Down → `THUMBS_UP/DOWN`, Open_Palm held 0.4 s → `HIGH_FIVE`, Open_Palm swinging (2 turns ≥ 0.6 palm) → `BYE`,
+    Pointing_Up swinging (2 turns ≥ 0.3 palm) → `NO`, thumb + index tips touching with 3 fingers up → `OK`.
+    It replaced counting skin-coloured pixels outside the face box (arms, the desk and a hand in front of the face counted as hands; the
+    gesture was guessed from the blob's width and height).
+  - A hand over the face (≥ 4 of its points inside the face box): no wink, no face embedding (the covered eye read as a wink).
+  - **Things (since 2026-10-09)**: `ObjectSpotter.kt` — MediaPipe Object Detector + EfficientDet-Lite0 int8 (`assets/models/efficientdet_lite0.tflite`,
+    COCO 80, score ≥ 0.5, every 400 ms) → `Things.kt` Thai names, label `Thing ☕ แก้ว`; people and room furniture left out. Replaced ML Kit
+    object detection (5 broad classes, unnamed `Object #N` with a hard-coded 75%).
+  - Avatar mode shows two lines at the bottom (`FaceBanner`): the face bottom-left, hands and things bottom-right.
+  - Labels start with `Hand` (and a plain face says `Face`) so `PetVisionTargetTracker` sorts them right; the label shows a gesture only
+    once confirmed.
   - Triggers matching procedural robot SFX, facial expressions, and Tamagotchi affection boosts.
   - **Spam Prevention & Multi-Frame Edge Latch Engine**:
-    - Non-gesture skin clusters (such as holding the device or resting hands) are strictly classified as `HandGesture.NONE`.
+    - A hand with no gesture (fist, pointing, resting) is `HandGesture.NONE`.
     - Requires candidate gesture confirmation across $\ge 3$ consecutive frames (~240ms) to filter transient visual noise.
     - Operates as an edge-triggered latch: emits exactly ONE trigger event when entered, ignoring continuous holds until hand lowers (NONE for $>800\text{ms}$).
     - Double-layered cooldown (3.5s in detector, 3.0s/5.0s in controller) preventing repeated sounds or animation flapping.

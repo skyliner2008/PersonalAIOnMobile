@@ -183,7 +183,12 @@ class JarvisViewModel(
     private val _alwaysLiveProfile = MutableStateFlow(AlwaysLiveProfile.CONTROL)
     val alwaysLiveProfile: StateFlow<AlwaysLiveProfile> = _alwaysLiveProfile.asStateFlow()
 
-    fun setAlwaysLiveProfile(profile: AlwaysLiveProfile) {
+    /**
+     * @param startLiveIfIdle open Live when switching to Avatar mode while it is off — only where the user enters
+     *   Avatar mode (App: the profile picker, the Always-Live manager); the face demos switch to PET just to show the
+     *   robot and must not open the microphone (2026-10-08 review)
+     */
+    fun setAlwaysLiveProfile(profile: AlwaysLiveProfile, startLiveIfIdle: Boolean = false) {
         val prev = _alwaysLiveProfile.value
         _alwaysLiveProfile.value = profile
         val isPet = profile == AlwaysLiveProfile.PET
@@ -202,20 +207,30 @@ class JarvisViewModel(
             }
             orchestrator.setLiveGreetingOnReady(greeting)
 
+            personaRestartJob?.cancel()
+            personaRestartJob = null
             if (voice.isListening.value) {
                 // ต้อง restart session จริง — system prompt (JARVIS vs Pet), ชุด tool และ voice config
                 // ถูกส่งตอน setup เท่านั้น การส่ง realtime prompt แบบเดิมเปลี่ยนแค่ "คำพูด" แต่ persona จริงยังเป็นของเก่า
-                viewModelScope.launch {
+                personaRestartJob = viewModelScope.launch {
                     // ปิด Always Live จะเรียก setAlwaysLiveProfile(CONTROL) แล้วตามด้วย stopVoiceInput() ทันที
                     // — เช็คอีกครั้งก่อน restart ไม่ให้ session ที่ผู้ใช้เพิ่งปิดถูกเปิดขึ้นมาใหม่
                     if (!voice.isListening.value || _alwaysLiveProfile.value != profile) return@launch
                     com.skyliner2008.jarvis.logDebug("JarvisVM", "Restarting Live session for persona switch -> $profile")
                     voice.restartVoiceSession()
                 }
+            } else if (isPet && startLiveIfIdle) {
+                // หากเปิดเข้าสู่ Avatar Mode (PET) ในขณะที่ Live ยังไม่ได้เริ่ม ให้เริ่มต้น Live Voice ทันที
+                personaRestartJob = viewModelScope.launch {
+                    if (_alwaysLiveProfile.value != profile) return@launch
+                    com.skyliner2008.jarvis.logDebug("JarvisVM", "Starting Live session for Avatar Mode (PET)")
+                    voice.startVoiceInput()
+                }
             }
         }
     }
 
+    private var personaRestartJob: Job? = null
     private var faceAutoDecayJob: Job? = null
 
     fun resetToIdleFace() {
@@ -1184,7 +1199,11 @@ class JarvisViewModel(
 
     // ─── Voice function forwarders → VoiceController ───
     fun startVoiceInput() = voice.startVoiceInput()
-    fun stopVoiceInput() = voice.stopVoiceInput()
+    fun stopVoiceInput() {
+        personaRestartJob?.cancel()
+        personaRestartJob = null
+        voice.stopVoiceInput()
+    }
     fun clearVoiceError() = voice.clearVoiceError()
     fun announceNotification(appName: String, sender: String, content: String) =
         voice.announceNotification(appName, sender, content)

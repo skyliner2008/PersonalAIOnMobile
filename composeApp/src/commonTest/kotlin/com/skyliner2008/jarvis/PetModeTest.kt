@@ -1713,6 +1713,128 @@ class PetModeTest {
 
         com.skyliner2008.jarvis.pet.PetVisionBridge.onResetAbsence = null
     }
+
+    @Test
+    fun `Face profile enrollment and deletion works correctly in PetModeController`() = runBlocking {
+        var currentState = AvatarState()
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+        controller.start()
+
+        try {
+            // When no face detected yet, enrolling should return false
+            assertFalse(controller.enrollCurrentFace(0, "Boss"))
+
+            // Simulate camera landmark stream
+            val testLandmarks = listOf(0.42f, 1.10f, 0.95f, 0.85f)
+            com.skyliner2008.jarvis.pet.PetVisionBridge.onCurrentFaceLandmarks?.invoke(testLandmarks)
+            assertEquals(testLandmarks, controller.currentFaceLandmarks.value)
+
+            // Enroll slot 0
+            val enrolled = controller.enrollCurrentFace(0, "Boss Commander")
+            assertTrue(enrolled)
+            val profiles = controller.faceProfiles.value
+            assertEquals("Boss Commander", profiles[0].name)
+            assertTrue(profiles[0].isEnrolled)
+            assertEquals(testLandmarks, profiles[0].landmarkRatios)
+            assertEquals("Boss Commander", controller.currentRecognizedPerson.value)
+
+            // Rename slot 0
+            controller.renameFaceProfile(0, "Chief Boss")
+            assertEquals("Chief Boss", controller.faceProfiles.value[0].name)
+
+            // Delete slot 0
+            controller.deleteFaceProfile(0)
+            assertFalse(controller.faceProfiles.value[0].isEnrolled)
+            assertEquals("สล็อต 1", controller.faceProfiles.value[0].name)
+            assertTrue(controller.faceProfiles.value[0].landmarkRatios.isEmpty())
+            assertNull(controller.currentRecognizedPerson.value)
+        } finally {
+            controller.stop()
+        }
+    }
+
+    @Test
+    fun `Face differentiation best match selects closest profile and separates distinct people`() {
+        val personA = com.skyliner2008.jarvis.pet.PetFaceProfile(
+            slotIndex = 0,
+            name = "Person A (Boss)",
+            isEnrolled = true,
+            landmarkRatios = listOf(0.42f, 1.10f, 0.95f, 0.85f)
+        )
+        val personB = com.skyliner2008.jarvis.pet.PetFaceProfile(
+            slotIndex = 1,
+            name = "Person B (Friend)",
+            isEnrolled = true,
+            landmarkRatios = listOf(0.35f, 0.80f, 1.20f, 0.70f)
+        )
+        val enrolledProfiles = listOf(personA, personB)
+
+        // Frame from Person A (with slight lighting/angle variation)
+        val incomingA = listOf(0.43f, 1.08f, 0.94f, 0.86f)
+        val distAtoA = personA.calculateDistance(incomingA)
+        val distBtoA = personB.calculateDistance(incomingA)
+        assertTrue(distAtoA < distBtoA, "Person A should be closer to incoming A than Person B")
+        assertTrue(distAtoA <= com.skyliner2008.jarvis.pet.PetFaceProfile.MATCH_THRESHOLD)
+        assertTrue(personA.isMatch(incomingA))
+        assertFalse(personB.isMatch(incomingA))
+
+        // Best match selection
+        val bestMatchA = enrolledProfiles
+            .map { it to it.calculateDistance(incomingA) }
+            .filter { it.second <= com.skyliner2008.jarvis.pet.PetFaceProfile.MATCH_THRESHOLD }
+            .minByOrNull { it.second }
+        assertEquals(personA, bestMatchA?.first)
+
+        // Frame from Person B
+        val incomingB = listOf(0.34f, 0.82f, 1.18f, 0.71f)
+        val distBtoB = personB.calculateDistance(incomingB)
+        val distAtoB = personA.calculateDistance(incomingB)
+        assertTrue(distBtoB < distAtoB, "Person B should be closer to incoming B than Person A")
+        assertTrue(distBtoB <= com.skyliner2008.jarvis.pet.PetFaceProfile.MATCH_THRESHOLD)
+        assertTrue(personB.isMatch(incomingB))
+        assertFalse(personA.isMatch(incomingB))
+
+        // Frame from Unknown Stranger (significantly different geometry)
+        val incomingStranger = listOf(0.55f, 1.60f, 0.50f, 1.30f)
+        val matchStranger = enrolledProfiles
+            .map { it to it.calculateDistance(incomingStranger) }
+            .filter { it.second <= com.skyliner2008.jarvis.pet.PetFaceProfile.MATCH_THRESHOLD }
+            .minByOrNull { it.second }
+        assertNull(matchStranger, "Unknown stranger must not match any registered profile")
+    }
+
+    @Test
+    fun `PetModeController enrollFaceWithLandmarks and deleteFaceProfile updates state accurately`() = runBlocking {
+        var currentState = AvatarState()
+        val scope = CoroutineScope(SupervisorJob())
+        val controller = PetModeController(
+            scope = scope,
+            avatarStateProvider = { currentState },
+            onUpdateAvatarState = { currentState = it }
+        )
+
+        val landmarks = listOf(0.42f, 1.25f, 0.95f, 0.80f)
+        val enrollSuccess = controller.enrollFaceWithLandmarks(0, "บอส", landmarks)
+        assertTrue(enrollSuccess)
+
+        val profile0 = controller.faceProfiles.value[0]
+        assertTrue(profile0.isEnrolled)
+        assertEquals("บอส", profile0.name)
+        assertEquals(landmarks, profile0.landmarkRatios)
+        assertEquals("บอส", controller.currentRecognizedPerson.value)
+
+        // Delete slot 0
+        controller.deleteFaceProfile(0)
+        val deletedProfile0 = controller.faceProfiles.value[0]
+        assertFalse(deletedProfile0.isEnrolled)
+        assertTrue(deletedProfile0.landmarkRatios.isEmpty())
+        assertNull(controller.currentRecognizedPerson.value)
+    }
 }
 
 

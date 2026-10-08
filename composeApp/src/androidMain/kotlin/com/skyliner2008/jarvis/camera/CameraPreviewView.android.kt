@@ -45,6 +45,8 @@ import kotlinx.coroutines.withContext
 // Adaptive FPS จัดการที่ CameraAnalysisService แทน
 // ═══════════════════════════════════════════════════════════════════
 
+private val globalCameraBindingMutex = Mutex()
+
 @Composable
 actual fun CameraPreviewView(
     modifier: Modifier,
@@ -53,12 +55,14 @@ actual fun CameraPreviewView(
     isActive: Boolean
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleOwner = remember(context) {
+        generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
+            .filterIsInstance<androidx.lifecycle.LifecycleOwner>()
+            .firstOrNull()
+    } ?: LocalLifecycleOwner.current
 
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-    // Mutex ensures bind and unbind NEVER run concurrently — root fix for "Device 0 Conflicts"
-    val cameraMutex = remember { Mutex() }
 
     // Stable use cases - remember them to avoid re-creation
     // Both Preview and ImageAnalysis MUST use the same aspect ratio
@@ -100,7 +104,7 @@ actual fun CameraPreviewView(
         // Debounce: let rapid Compose recompositions settle before touching hardware
         delay(80)
 
-        cameraMutex.withLock {
+        globalCameraBindingMutex.withLock {
             withContext(Dispatchers.Main) {
                 try {
                     provider.unbindAll()
@@ -138,11 +142,13 @@ actual fun CameraPreviewView(
         }
     }
 
-    // Clean up on exit — guarded by same mutex
+    // Clean up on exit
     DisposableEffect(Unit) {
         onDispose {
             cameraExecutor.shutdown()
-            cameraProvider?.unbindAll()
+            try {
+                cameraProvider?.unbindAll()
+            } catch (_: Exception) {}
         }
     }
 
@@ -152,6 +158,7 @@ actual fun CameraPreviewView(
         modifier = modifier,
         factory = { ctx ->
             PreviewView(ctx).apply {
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 scaleType = PreviewView.ScaleType.FIT_CENTER
                 // Link the stable preview use-case to this view's surface
                 previewUseCase.surfaceProvider = this.surfaceProvider

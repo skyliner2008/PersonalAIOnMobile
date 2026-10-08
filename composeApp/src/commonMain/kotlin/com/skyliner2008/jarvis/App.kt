@@ -265,7 +265,7 @@ fun App(
             viewModel.stopVoiceInput()
         }
         registerProfileChange?.invoke { profile ->
-            viewModel.setAlwaysLiveProfile(profile)
+            viewModel.setAlwaysLiveProfile(profile, startLiveIfIdle = true)
         }
         registerTestEmotion?.invoke { emotionCmd ->
             val trimmed = emotionCmd.trim()
@@ -804,14 +804,14 @@ fun App(
             },
             onEndLive = {
                 showAlwaysLive = false
+                viewModel.stopVoiceInput()
                 onStopAlwaysLive()
                 onSetAlwaysLiveProfile?.invoke(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
                 viewModel.setAlwaysLiveProfile(com.skyliner2008.jarvis.pet.AlwaysLiveProfile.CONTROL)
-                viewModel.stopVoiceInput()
             },
             currentProfile = alwaysLiveProfile,
             onSelectProfile = { profile ->
-                viewModel.setAlwaysLiveProfile(profile)
+                viewModel.setAlwaysLiveProfile(profile, startLiveIfIdle = true)
                 onSetAlwaysLiveProfile?.invoke(profile)
             },
             onLiveVideoFrame = { jpeg -> viewModel.sendLiveCameraFrame(jpeg) },

@@ -52,10 +52,12 @@ kotlin {
             implementation(libs.camerax.lifecycle)
             implementation(libs.camerax.view)
 
-            // ML Kit Face & Object Detection (Gaze tracking, Desk Sentry, Copycat, Object & Hand detection)
+            // ML Kit Face Detection (Gaze tracking, Desk Sentry, Copycat, face profiles)
             implementation("com.google.android.gms:play-services-mlkit-face-detection:17.1.0")
-            implementation("com.google.mlkit:object-detection:17.0.2")
-            
+            // MediaPipe: hands and gestures (assets/models/gesture_recognizer.task) and things in view
+            // (assets/models/efficientdet_lite0.tflite) — the latter replaced ML Kit object detection's five classes
+            implementation("com.google.mediapipe:tasks-vision:0.10.35")
+
             // ONNX Runtime for Local Embeddings (Android only)
             // Upgraded from 1.19.2 → 1.23.0 for 16 KB page size alignment (Google Play requirement Nov 2025)
             implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.0")
@@ -126,7 +128,12 @@ android {
             excludes += listOf(
                 "lib/armeabi-v7a/libgodot_android.so",
                 "lib/x86/libgodot_android.so",
-                "lib/x86_64/libgodot_android.so"
+                "lib/x86_64/libgodot_android.so",
+                // MediaPipe's hands (~10 MB per ABI) serve Avatar mode only — arm64 like the engine
+                // (HandTracker logs "Hand model unavailable" elsewhere, and no hands are detected)
+                "lib/armeabi-v7a/libmediapipe_tasks_jni.so",
+                "lib/x86/libmediapipe_tasks_jni.so",
+                "lib/x86_64/libmediapipe_tasks_jni.so"
             )
         }
     }

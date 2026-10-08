@@ -2,7 +2,6 @@ package com.skyliner2008.jarvis.pet
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color as AndroidColor
 import androidx.camera.core.ImageProxy
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
@@ -11,10 +10,6 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.google.mlkit.vision.face.FaceLandmark
-import com.google.mlkit.vision.objects.DetectedObject as MlKitDetectedObject
-import com.google.mlkit.vision.objects.ObjectDetection
-import com.google.mlkit.vision.objects.ObjectDetector
-import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import com.skyliner2008.jarvis.camera.BoundingBox
 import com.skyliner2008.jarvis.camera.DetectedObject
 import com.skyliner2008.jarvis.logDebug
@@ -29,8 +24,8 @@ import kotlin.math.hypot
  * สำหรับโหมดสัตว์เลี้ยง (Virtual Desk Pet):
  *
  * 1. Face & Expression Detection: ตรวจจับใบหน้า รอยยิ้ม และการขยิบตา
- * 2. Multi-Object Detection: ตรวจจับสิ่งของรอบตัวด้วย ML Kit Object Detection (Stream mode)
- * 3. Hand & Finger Detection: ตรวจจับมือ นิ้ว และท่าทาง (Palm, Finger Point, Peace Sign)
+ * 2. Things: สิ่งของรอบตัว 80 ชนิดจาก EfficientDet-Lite0 ([ObjectSpotter] → [Things])
+ * 3. Hands & Gestures: มือและท่ามือจาก MediaPipe Gesture Recognizer ([HandTracker] → [HandGestureReader])
  * 4. Gaze Tracking: ส่งพิกัดใบหน้าให้ตาสัตว์เลี้ยงมองตาม
  * 5. Desk Sentry: แจ้งเตือนเมื่อมีคนแปลกหน้าเข้าใกล้โต๊ะ
  * 6. Copycat Game: ตรวจสอบความถูกต้องของการเลียนแบบหน้า
@@ -48,15 +43,33 @@ class PetVisionDetector(
         private const val TAG = "PetVisionDetector"
         private const val SMILE_THRESHOLD = 0.65f
         private const val WINK_DIFF_THRESHOLD = 0.50f
+        /** a wink holds this many frames in a row (one frame of uneven eyes is a blink caught half way) */
+        private const val WINK_FRAMES = 2
+        /** a gesture holds this many frames in a row before it counts */
+        private const val CONFIRM_FRAMES = 3
+        private val GESTURE_COLORS = mapOf(
+            HandGesture.BYE to "#00E5FF",
+            HandGesture.HIGH_FIVE to "#00E676",
+            HandGesture.V_SIGN to "#FFD700",
+            HandGesture.NO to "#FF9100",
+            HandGesture.THUMBS_UP to "#76FF03",
+            HandGesture.THUMBS_DOWN to "#FF5252",
+            HandGesture.OK to "#E040FB"
+        )
+        /** at most one SFace embedding per this — the model runs ~20–60 ms on its own thread */
+        private const val EMBED_INTERVAL_MS = 330L
+        /** an embedding older than this no longer describes the face in front of the camera */
+        private const val EMBED_FRESH_MS = 1_500L
 
         /**
          * เรียกครั้งเดียวตอนเริ่มต้นแอปเพื่อลงทะเบียน processorFactory กับ PetVisionBridge
          */
         fun installBridge() {
+            PetVisionBridge.faceEmbeddingAvailable = { FaceEmbedder.isAvailable }
             PetVisionBridge.processorFactory = { onGaze, onIntruder, onCopycat, getTarget, isSentry ->
                 PetVisionDetector(onGaze, onIntruder, onCopycat, getTarget, isSentry)
             }
-            logDebug(TAG, "PetVisionBridge installed with ML Kit Face & Object Detection")
+            logDebug(TAG, "PetVisionBridge installed: ML Kit faces, MediaPipe hands and things")
         }
     }
 
@@ -69,14 +82,9 @@ class PetVisionDetector(
 
     private val faceDetector: FaceDetector = FaceDetection.getClient(faceOptions)
 
-    private val objectOptions = ObjectDetectorOptions.Builder()
-        .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
-        .enableMultipleObjects()
-        .enableClassification()
-        .build()
-
-    private val objectDetector: ObjectDetector = ObjectDetection.getClient(objectOptions)
     private val targetTracker = PetVisionTargetTracker()
+    private val handReader = HandGestureReader()
+    private var winkFrames = 0
     private val gazeStabilizer = GazeStabilizer()
     private val gazeNeutral = com.skyliner2008.jarvis.ui.component.avatar.GazeNeutral()
 
@@ -88,6 +96,15 @@ class PetVisionDetector(
     private var hasLoggedFirstFrame = false
     private var lastFaceSeenTime = 0L
     private var isGazeActive = false
+
+    private var smoothedMatchScore = 0f
+    private var lastMatchedSlot = -1
+    private var lastProfileEmitTime = 0L
+
+    // the primary face's latest SFace embedding ([FaceEmbedder]), refreshed every EMBED_INTERVAL_MS on its own thread
+    @Volatile private var latestEmbedding: List<Float>? = null
+    @Volatile private var latestEmbeddingAt = 0L
+    private var lastEmbedRequestAt = 0L
 
     init {
         PetVisionBridge.onResetAbsence = {
@@ -134,17 +151,15 @@ class PetVisionDetector(
         val inputImage = InputImage.fromMediaImage(mediaImage, rotationDegrees)
 
         val faceTask = faceDetector.process(inputImage)
-        val objectTask = objectDetector.process(inputImage)
 
-        Tasks.whenAllComplete(faceTask, objectTask)
+        Tasks.whenAllComplete(faceTask)
             .addOnSuccessListener {
                 try {
                     val faces = if (faceTask.isSuccessful) faceTask.result ?: emptyList() else emptyList()
-                    val mlKitObjects = if (objectTask.isSuccessful) objectTask.result ?: emptyList() else emptyList()
                     handleDetections(
                         faces = faces,
-                        mlKitObjects = mlKitObjects,
-                        handObjects = emptyList(),
+                        things = null,
+                        hands = null,
                         imageWidth = inputImage.width,
                         imageHeight = inputImage.height,
                         isFrontCamera = isFrontCamera,
@@ -167,24 +182,25 @@ class PetVisionDetector(
         isProcessing = true
         lastProcessTime = System.currentTimeMillis()
 
+        // hands and things first, on this (camera) thread: the frame is recycled as soon as ML Kit is done with it
+        val hands = HandTracker.detect(bitmap)
+        val things = ObjectSpotter.detect(bitmap)
         val inputImage = InputImage.fromBitmap(bitmap, 0)
         val faceTask = faceDetector.process(inputImage)
-        val objectTask = objectDetector.process(inputImage)
 
-        Tasks.whenAllComplete(faceTask, objectTask)
+        Tasks.whenAllComplete(faceTask)
             .addOnSuccessListener {
                 try {
                     val faces = if (faceTask.isSuccessful) faceTask.result ?: emptyList() else emptyList()
-                    val mlKitObjects = if (objectTask.isSuccessful) objectTask.result ?: emptyList() else emptyList()
-                    val handObjects = detectHandRegions(bitmap, faces, bitmap.width, bitmap.height, isFrontCamera, isAlreadyMirrored)
                     handleDetections(
                         faces = faces,
-                        mlKitObjects = mlKitObjects,
-                        handObjects = handObjects,
+                        things = things,
+                        hands = hands,
                         imageWidth = bitmap.width,
                         imageHeight = bitmap.height,
                         isFrontCamera = isFrontCamera,
-                        isAlreadyMirrored = isAlreadyMirrored
+                        isAlreadyMirrored = isAlreadyMirrored,
+                        bitmap = bitmap
                     )
                 } catch (e: Exception) {
                     logError(TAG, "Error handling detections: ${e.message}", e)
@@ -202,244 +218,85 @@ class PetVisionDetector(
     }
 
     /**
-     * ตรวจจับมือและนิ้วโดยวิเคราะห์กลุ่มพิกเซลสีผิว (Skin-tone clustering) นอกกรอบใบหน้า
+     * The main hand as a detection — "Hand " + its confirmed gesture, or what it is doing ([HandPose.poseLabel]) — and
+     * the gesture's confirmation ([handleGestureFrame]). A gesture shows only once confirmed, the moment the pet
+     * reacts: a single frame's guess used to show and then give way to another (👍 in the log, ✌️ triggered).
      */
-    private fun detectHandRegions(
-        bitmap: Bitmap,
-        faces: List<Face>,
+    private fun handObjects(
+        hands: List<HandSighting>?,
         width: Int,
         height: Int,
         isFrontCamera: Boolean,
-        isAlreadyMirrored: Boolean
+        isAlreadyMirrored: Boolean,
+        faceCovered: Boolean
     ): List<DetectedObject> {
-        if (bitmap.isRecycled) return emptyList()
-
-        val stepX = (width / 55).coerceAtLeast(3)
-        val stepY = (height / 55).coerceAtLeast(3)
-
-        // Expanded face rects to exclude face / hair AND neck / upper chest below chin
-        val faceBounds = faces.map { face ->
-            val b = face.boundingBox
-            val padX = (b.width() * 0.25f).toInt()
-            val padTop = (b.height() * 0.35f).toInt()
-            val padBottom = (b.height() * 0.85f).toInt() // Covers neck down to collar
-            android.graphics.Rect(
-                (b.left - padX).coerceAtLeast(0),
-                (b.top - padTop).coerceAtLeast(0),
-                (b.right + padX).coerceAtMost(width),
-                (b.bottom + padBottom).coerceAtMost(height)
-            )
-        }
-
-        var minX = width
-        var maxX = 0
-        var minY = height
-        var maxY = 0
-        var skinCount = 0
-
-        val hsv = FloatArray(3)
-
-        // Sample grid across image
-        for (y in 0 until height step stepY) {
-            for (x in 0 until width step stepX) {
-                // Skip pixels inside face and neck areas
-                if (faceBounds.any { it.contains(x, y) }) continue
-
-                val pixel = try {
-                    bitmap.getPixel(x, y)
-                } catch (_: Exception) {
-                    continue
-                }
-
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-
-                // Fast skin tone classification in RGB + HSV
-                if (r > 65 && g > 40 && b > 20 && (r - g) > 10 && (r - b) > 12 && r > g && g >= b) {
-                    AndroidColor.RGBToHSV(r, g, b, hsv)
-                    val h = hsv[0]
-                    val s = hsv[1]
-                    val v = hsv[2]
-
-                    val isSkinHue = (h in 0f..45f || h in 340f..360f) && (s in 0.15f..0.78f) && (v in 0.20f..0.95f)
-                    if (isSkinHue) {
-                        skinCount++
-                        if (x < minX) minX = x
-                        if (x > maxX) maxX = x
-                        if (y < minY) minY = y
-                        if (y > maxY) maxY = y
-                    }
-                }
-            }
-        }
-
-        // Need at least ~25 skin sampled points to form a valid hand cluster
-        if (skinCount < 25 || maxX <= minX || maxY <= minY) {
-            handleGestureFrame(HandGesture.NONE, now = System.currentTimeMillis())
-            return emptyList()
-        }
-
-        val clusterWidth = maxX - minX
-        val clusterHeight = maxY - minY
-
-        // Hand should have reasonable dimensions (at least ~8% of frame, max 80% to avoid wall false positives)
-        if (clusterWidth < width * 0.08f || clusterHeight < height * 0.08f ||
-            clusterWidth > width * 0.80f || clusterHeight > height * 0.80f
-        ) {
-            handleGestureFrame(HandGesture.NONE, now = System.currentTimeMillis())
-            return emptyList()
-        }
-
-        // Check if hand is simply holding the phone at the bottom edge
-        val isHoldingPhone = (minY > height * 0.65f) || (maxY >= height - (stepY * 2) && clusterHeight < height * 0.30f)
-
-        // Check top 35% of hand cluster to classify gesture / fingers
-        val topYCutoff = minY + (clusterHeight * 0.35f).toInt()
-        var topSkinCount = 0
-        var topMinX = width
-        var topMaxX = 0
-
-        for (y in minY until topYCutoff step stepY) {
-            for (x in minX..maxX step stepX) {
-                if (faceBounds.any { it.contains(x, y) }) continue
-                val pixel = try { bitmap.getPixel(x, y) } catch (_: Exception) { continue }
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-                if (r > 65 && g > 40 && b > 20 && (r - g) > 10 && (r - b) > 12) {
-                    topSkinCount++
-                    if (x < topMinX) topMinX = x
-                    if (x > topMaxX) topMaxX = x
-                }
-            }
-        }
-
-        val topSpread = if (topMaxX > topMinX) (topMaxX - topMinX).toFloat() / clusterWidth.toFloat() else 0f
-        val topRatio = if (skinCount > 0) topSkinCount.toFloat() / skinCount.toFloat() else 0f
-
-        // Check bottom 25% of hand cluster to detect downward thumb
-        val bottomYCutoff = maxY - (clusterHeight * 0.25f).toInt()
-        var bottomSkinCount = 0
-        var bottomMinX = width
-        var bottomMaxX = 0
-        for (y in bottomYCutoff..maxY step stepY) {
-            for (x in minX..maxX step stepX) {
-                if (faceBounds.any { it.contains(x, y) }) continue
-                val pixel = try { bitmap.getPixel(x, y) } catch (_: Exception) { continue }
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-                if (r > 65 && g > 40 && b > 20 && (r - g) > 10 && (r - b) > 12) {
-                    bottomSkinCount++
-                    if (x < bottomMinX) bottomMinX = x
-                    if (x > bottomMaxX) bottomMaxX = x
-                }
-            }
-        }
-        val bottomSpread = if (bottomMaxX > bottomMinX) (bottomMaxX - bottomMinX).toFloat() / clusterWidth.toFloat() else 0f
-        val bottomRatio = if (skinCount > 0) bottomSkinCount.toFloat() / skinCount.toFloat() else 0f
-
         val now = System.currentTimeMillis()
-        val currentCentroidX = (minX + maxX) / 2f
-        val handDeltaX = if (lastHandCentroidTime > 0L && (now - lastHandCentroidTime < 700L)) {
-            abs(currentCentroidX - lastHandCentroidX)
-        } else 0f
-        lastHandCentroidX = currentCentroidX
-        lastHandCentroidTime = now
+        val reading = handReader.read(hands.orEmpty(), now)
+        handleGestureFrame(reading?.gesture ?: HandGesture.NONE, now)
+        logHands(hands.orEmpty(), reading, faceCovered, now)
+        if (reading == null) return emptyList()
 
-        val isWaving = handDeltaX > (width * 0.10f)
-
-        var detectedGesture = HandGesture.NONE
-        var label = "Hand ✋"
-        var color = "#FF9100"
-
-        // Only evaluate gestures if hand is intentionally raised (not resting / holding phone)
-        if (!isHoldingPhone && minY < height * 0.60f && skinCount >= 28) {
-            when {
-                // 1. BYE — โบกมือไปมา (waving hand with horizontal movement)
-                isWaving && topSpread > 0.55f && clusterHeight >= clusterWidth * 0.75f -> {
-                    detectedGesture = HandGesture.BYE
-                    label = "${HandGesture.BYE.icon} ${HandGesture.BYE.displayNameTh}"
-                    color = "#00E5FF"
-                }
-                // 2. HIGH-FIVE — ฝ่ามือเปิดกว้างเต็มที่ ชูนิ้วทั้ง 5 (upright open palm)
-                topSpread > 0.75f && topRatio in 0.22f..0.45f &&
-                clusterHeight.toFloat() in (clusterWidth * 0.85f)..(clusterWidth * 1.85f) &&
-                skinCount >= 35 && minY < height * 0.55f -> {
-                    detectedGesture = HandGesture.HIGH_FIVE
-                    label = "${HandGesture.HIGH_FIVE.icon} ${HandGesture.HIGH_FIVE.displayNameTh}"
-                    color = "#00E676" // Bright Green
-                }
-                // 3. V SIGN — ชู 2 นิ้วแยกจากกัน (Peace / Victory)
-                topSpread in 0.35f..0.62f && topRatio in 0.14f..0.32f &&
-                clusterHeight > clusterWidth * 1.15f -> {
-                    detectedGesture = HandGesture.V_SIGN
-                    label = "${HandGesture.V_SIGN.icon} ${HandGesture.V_SIGN.displayNameTh}"
-                    color = "#FFD700" // Gold
-                }
-                // 4. NO — ส่ายหรือชูนิ้วเดียวแคบๆ (Narrow single index finger)
-                topSpread in 0.05f..0.24f && topRatio in 0.08f..0.24f &&
-                clusterHeight > clusterWidth * 1.55f && clusterWidth < width * 0.25f -> {
-                    detectedGesture = HandGesture.NO
-                    label = "${HandGesture.NO.icon} ${HandGesture.NO.displayNameTh}"
-                    color = "#FF9100"
-                }
-                // 5. THUMBS UP — นิ้วโป้งยกชี้ขึ้นข้างเดียว (ด้านบนแคบปูดขึ้น ด้านล่างกว้าง)
-                topSpread in 0.16f..0.38f && clusterHeight > clusterWidth * 1.15f &&
-                topRatio < 0.20f && bottomSpread > 0.60f -> {
-                    detectedGesture = HandGesture.THUMBS_UP
-                    label = "${HandGesture.THUMBS_UP.icon} ${HandGesture.THUMBS_UP.displayNameTh}"
-                    color = "#76FF03"
-                }
-                // 6. THUMBS DOWN — นิ้วโป้งคว่ำลงล่าง
-                bottomSpread in 0.16f..0.38f && clusterHeight > clusterWidth * 1.15f &&
-                bottomRatio < 0.20f && topSpread > 0.60f -> {
-                    detectedGesture = HandGesture.THUMBS_DOWN
-                    label = "${HandGesture.THUMBS_DOWN.icon} ${HandGesture.THUMBS_DOWN.displayNameTh}"
-                    color = "#FF5252"
-                }
-                // 7. OK — นิ้วโป้งชนนิ้วชี้เป็นวงกลม
-                topSpread in 0.40f..0.62f && topRatio in 0.18f..0.32f &&
-                clusterWidth.toFloat() in (clusterHeight * 0.80f)..(clusterHeight * 1.25f) &&
-                skinCount in 25..120 -> {
-                    detectedGesture = HandGesture.OK
-                    label = "${HandGesture.OK.icon} ${HandGesture.OK.displayNameTh}"
-                    color = "#E040FB"
-                }
-                else -> {
-                    detectedGesture = HandGesture.NONE
-                    label = "Hand ✋"
-                    color = "#FF9100"
-                }
-            }
-        }
-
-        // Process gesture confirmation debounce & edge latch
-        handleGestureFrame(detectedGesture, now)
-
-        // Normalize bounding box coordinates
-        val nLeft = if (isFrontCamera && !isAlreadyMirrored) {
-            (1f - (maxX.toFloat() / width.toFloat())).coerceIn(0f, 1f)
-        } else {
-            (minX.toFloat() / width.toFloat()).coerceIn(0f, 1f)
-        }
-        val nTop = (minY.toFloat() / height.toFloat()).coerceIn(0f, 1f)
-        val nW = (clusterWidth.toFloat() / width.toFloat()).coerceIn(0.01f, 1f)
-        val nH = (clusterHeight.toFloat() / height.toFloat()).coerceIn(0.01f, 1f)
-
+        val hand = reading.hand
+        val confirmed = confirmedGesture()
+        val label = if (confirmed != HandGesture.NONE) "Hand ${confirmed.icon} ${confirmed.displayNameTh}" else "Hand ${HandPose.poseLabel(hand)}"
+        val confidence = if (confirmed != HandGesture.NONE && confirmed != HandGesture.OK) hand.gestureScore else hand.handScore
+        val (l, t, r, b) = hand.bounds()
+        val nLeft = if (isFrontCamera && !isAlreadyMirrored) (1f - r / width) else l / width
         return listOf(
             DetectedObject(
                 label = label,
-                confidence = 0.90f,
-                boundingBox = BoundingBox(x = nLeft, y = nTop, width = nW, height = nH),
-                color = color
+                confidence = confidence.coerceIn(0f, 1f),
+                boundingBox = BoundingBox(
+                    x = nLeft.coerceIn(0f, 1f),
+                    y = (t / height).coerceIn(0f, 1f),
+                    width = ((r - l) / width).coerceIn(0.01f, 1f),
+                    height = ((b - t) / height).coerceIn(0.01f, 1f)
+                ),
+                color = GESTURE_COLORS[confirmed] ?: "#FF9100"
             )
         )
     }
 
-    private var lastHandCentroidX: Float = 0f
-    private var lastHandCentroidTime: Long = 0L
+    private var lastHandLogAt = 0L
+    private var lastHandLogKey = ""
+
+    /** what the hand model sees, for tuning from logcat: on a change, else every 3 s while hands are in view */
+    private fun logHands(hands: List<HandSighting>, reading: HandGestureReader.Reading?, faceCovered: Boolean, now: Long) {
+        if (hands.isEmpty()) {
+            lastHandLogKey = ""
+            return
+        }
+        val key = hands.joinToString { it.modelGesture } + "|${reading?.gesture}|$faceCovered"
+        if (key == lastHandLogKey && now - lastHandLogAt < 3_000L) return
+        lastHandLogKey = key
+        lastHandLogAt = now
+        logDebug(
+            TAG,
+            "✋ Hands: " + hands.joinToString { "${it.side} ${it.modelGesture} ${"%.2f".format(it.gestureScore)} (palm ${it.palm.toInt()}px)" } +
+                " → ${reading?.gesture ?: HandGesture.NONE}" + if (faceCovered) " · มือบังหน้า: ไม่นับขยิบตา ไม่เทียบหน้า" else ""
+        )
+    }
+
+    private var lastThingLogAt = 0L
+    private var lastThingLogKey = ""
+
+    /** what the object model sees, for tuning from logcat: on a change, else every 5 s while things are in view */
+    private fun logThings(things: List<ThingSighting>, now: Long) {
+        if (things.isEmpty()) {
+            lastThingLogKey = ""
+            return
+        }
+        val key = things.map { it.name }.sorted().joinToString()
+        if (key == lastThingLogKey && now - lastThingLogAt < 5_000L) return
+        lastThingLogKey = key
+        lastThingLogAt = now
+        logDebug(TAG, "📦 Things: " + things.joinToString { "${it.name} ${"%.2f".format(it.score)}" })
+    }
+
+    /** the gesture held for [CONFIRM_FRAMES] frames in a row, else NONE */
+    private fun confirmedGesture(): HandGesture =
+        if (candidateStreak >= CONFIRM_FRAMES) candidateGesture else HandGesture.NONE
+
     private var lastGestureTriggerTime: Long = 0L
     private var candidateGesture: HandGesture = HandGesture.NONE
     private var candidateStreak: Int = 0
@@ -463,7 +320,7 @@ class PetVisionDetector(
                 candidateStreak = 1
             }
 
-            if (candidateStreak >= 3) {
+            if (candidateStreak >= CONFIRM_FRAMES) {
                 val confirmed = candidateGesture
                 val isNewGesture = (confirmed != activeLatchedGesture)
                 val isCooldownPassed = (now - lastGestureTriggerTime > 3500L)
@@ -491,16 +348,99 @@ class PetVisionDetector(
         }
     }
 
+    /** ask for the primary face's embedding when one is due (5 ML Kit landmarks → SFace on its own thread) */
+    private fun requestEmbedding(face: Face, bitmap: Bitmap) {
+        if (!FaceEmbedder.isAvailable) return
+        val now = System.currentTimeMillis()
+        if (now - lastEmbedRequestAt < EMBED_INTERVAL_MS) return
+        fun point(type: Int) = face.getLandmark(type)?.position?.let { floatArrayOf(it.x, it.y) }
+        val eyeA = point(FaceLandmark.LEFT_EYE) ?: return
+        val eyeB = point(FaceLandmark.RIGHT_EYE) ?: return
+        val nose = point(FaceLandmark.NOSE_BASE) ?: return
+        val mouthA = point(FaceLandmark.MOUTH_LEFT) ?: return
+        val mouthB = point(FaceLandmark.MOUTH_RIGHT) ?: return
+        val points = FaceRecognition.templateOrder(eyeA, eyeB, nose, mouthA, mouthB)
+        val started = FaceEmbedder.embedAsync(bitmap, points) { embedding ->
+            if (embedding != null) {
+                latestEmbedding = embedding
+                latestEmbeddingAt = System.currentTimeMillis()
+            }
+        }
+        if (started) lastEmbedRequestAt = now
+    }
+
+    private var lastScoreLogAt = 0L
+    private var lastScoreLogSlot = -2
+
+    /** every profile's cosine to the face in front, for checking recognition from logcat: on a new answer, else every 3 s */
+    private fun logScore(profiles: List<PetFaceProfile>, embedding: List<Float>, matched: PetFaceProfile?, now: Long) {
+        val slot = matched?.slotIndex ?: -1
+        if (slot == lastScoreLogSlot && now - lastScoreLogAt < 3_000L) return
+        lastScoreLogSlot = slot
+        lastScoreLogAt = now
+        val scores = profiles.map { it.name to FaceRecognition.cosine(it.embedding, embedding) }.sortedByDescending { it.second }
+        logDebug(
+            TAG,
+            "🪪 SFace: " + (if (scores.isEmpty()) "ไม่มีโปรไฟล์ที่บันทึกด้วยโมเดล" else scores.joinToString { "${it.first} cos=${"%.2f".format(it.second)}" }) +
+                " → ${matched?.name ?: "ไม่ตรงสล็อตใด"} (เกณฑ์ ${FaceRecognition.SAME_PERSON_COSINE})"
+        )
+    }
+
+    private fun freshEmbedding(now: Long): List<Float>? =
+        latestEmbedding?.takeIf { now - latestEmbeddingAt <= EMBED_FRESH_MS }
+
+    /** report the match to the bridge: a new person at once, the same person's score smoothed every 0.8 s */
+    private fun emitMatch(profile: PetFaceProfile?, rawPct: Int, noMatchLabel: String, nowTime: Long) {
+        if (profile != null) {
+            if (lastMatchedSlot != profile.slotIndex) {
+                lastMatchedSlot = profile.slotIndex
+                smoothedMatchScore = rawPct.toFloat()
+                lastProfileEmitTime = nowTime
+                PetVisionBridge.onFaceProfileMatched?.invoke("${profile.name} ($rawPct%)", profile.slotIndex)
+            } else {
+                smoothedMatchScore = (smoothedMatchScore * 0.82f) + (rawPct * 0.18f)
+                if (nowTime - lastProfileEmitTime > 800L) {
+                    lastProfileEmitTime = nowTime
+                    val stableScore = (smoothedMatchScore.toInt() / 5) * 5
+                    PetVisionBridge.onFaceProfileMatched?.invoke("${profile.name} ($stableScore%)", profile.slotIndex)
+                }
+            }
+        } else {
+            lastMatchedSlot = -1
+            smoothedMatchScore = 0f
+            if (nowTime - lastProfileEmitTime > 800L) {
+                lastProfileEmitTime = nowTime
+                PetVisionBridge.onFaceProfileMatched?.invoke(noMatchLabel, -1)
+            }
+        }
+    }
+
     private fun handleDetections(
         faces: List<Face>,
-        mlKitObjects: List<MlKitDetectedObject>,
-        handObjects: List<DetectedObject>,
+        /** the object model's things ([ObjectSpotter]); null on the ImageProxy path or without the model */
+        things: List<ThingSighting>?,
+        /** the hand model's hands ([HandTracker]); null on the ImageProxy path or without the model */
+        hands: List<HandSighting>?,
         imageWidth: Int,
         imageHeight: Int,
         isFrontCamera: Boolean,
-        isAlreadyMirrored: Boolean
+        isAlreadyMirrored: Boolean,
+        /** the frame (bitmap path) — for the face embedding; recycled once detection completes */
+        bitmap: Bitmap? = null
     ) {
         val detectedList = mutableListOf<DetectedObject>()
+
+        // the face the pet answers to: the biggest — only it is matched against the profiles (with several faces in
+        // view each used to report its own match, and the last one won)
+        val primary = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+        // a hand over a face: ML Kit reads the eye behind it as closed (a wink), and the embedding is half hand
+        val handList = hands.orEmpty()
+        fun coveredByHand(face: Face): Boolean {
+            val fb = face.boundingBox
+            return handList.any { HandPose.covers(it, fb.left.toFloat(), fb.top.toFloat(), fb.right.toFloat(), fb.bottom.toFloat()) }
+        }
+        val primaryCovered = primary != null && coveredByHand(primary)
+        if (primary != null && bitmap != null && !primaryCovered) requestEmbedding(primary, bitmap)
 
         // ─── 1. Face Recognition & Expression Bounding Boxes ───────────────
         faces.forEach { face ->
@@ -508,12 +448,16 @@ class PetVisionDetector(
             val leftEyeOpen = face.leftEyeOpenProbability ?: -1f
             val rightEyeOpen = face.rightEyeOpenProbability ?: -1f
 
-            val isWinking = if (leftEyeOpen >= 0f && rightEyeOpen >= 0f) {
+            val eyesDiffer = if (leftEyeOpen >= 0f && rightEyeOpen >= 0f) {
                 val diff = abs(leftEyeOpen - rightEyeOpen)
                 (diff >= WINK_DIFF_THRESHOLD) ||
                 (leftEyeOpen > 0.60f && rightEyeOpen < 0.30f) ||
                 (rightEyeOpen > 0.60f && leftEyeOpen < 0.30f)
             } else false
+            // a wink is uneven eyes on an uncovered face, held WINK_FRAMES frames (the primary face's frames are counted)
+            val covered = if (face === primary) primaryCovered else coveredByHand(face)
+            if (face === primary) winkFrames = if (eyesDiffer && !covered) winkFrames + 1 else 0
+            val isWinking = if (face === primary) winkFrames >= WINK_FRAMES else eyesDiffer && !covered
 
             val isSmiling = smileProb >= SMILE_THRESHOLD
 
@@ -542,16 +486,83 @@ class PetVisionDetector(
             )
 
             // Notify bridge of current landmark ratios for enrollment
-            PetVisionBridge.onCurrentFaceLandmarks?.invoke(landmarkRatios)
+            if (face === primary) PetVisionBridge.onCurrentFaceLandmarks?.invoke(landmarkRatios)
 
-            // Match against registered face profiles
+            // Emit detailed FaceBiometrics for interactive stepped enrollment
+            val hasEyes = leftEye != null && rightEye != null
+            val hasNose = nose != null
+            val hasMouth = mouth != null
+
+            val faceCenterX = face.boundingBox.centerX().toFloat() / imageWidth.toFloat()
+            val faceCenterY = face.boundingBox.centerY().toFloat() / imageHeight.toFloat()
+            val isCentered = abs(faceCenterX - 0.5f) < 0.20f && abs(faceCenterY - 0.5f) < 0.25f
+            val isLookingStraight = abs(face.headEulerAngleY) < 18f && abs(face.headEulerAngleZ) < 18f
+
+            val biometrics = FaceBiometricDetails(
+                isFaceDetected = true,
+                isCentered = isCentered && isLookingStraight,
+                hasEyesDetected = hasEyes,
+                hasNoseDetected = hasNose,
+                hasMouthDetected = hasMouth,
+                landmarkRatios = landmarkRatios,
+                yawAngle = face.headEulerAngleY,
+                rollAngle = face.headEulerAngleZ,
+                faceBounds = BoundingBox(
+                    x = (face.boundingBox.left.toFloat() / imageWidth).coerceIn(0f, 1f),
+                    y = (face.boundingBox.top.toFloat() / imageHeight).coerceIn(0f, 1f),
+                    width = (face.boundingBox.width().toFloat() / imageWidth).coerceIn(0.01f, 1f),
+                    height = (face.boundingBox.height().toFloat() / imageHeight).coerceIn(0.01f, 1f)
+                ),
+                embedding = if (face === primary) freshEmbedding(System.currentTimeMillis()).orEmpty() else emptyList(),
+                embeddingAtMs = if (face === primary) latestEmbeddingAt else 0L
+            )
+            if (face === primary) PetVisionBridge.onFaceBiometrics?.invoke(biometrics)
+
+            // Match against registered face profiles — the primary face only
             val profiles = PetVisionBridge.registeredProfilesProvider?.invoke() ?: emptyList()
-            val matchedProfile = profiles.firstOrNull { it.isEnrolled && it.isMatch(landmarkRatios) }
-            if (matchedProfile != null) {
-                PetVisionBridge.onFaceProfileMatched?.invoke(matchedProfile.name, matchedProfile.slotIndex)
+            val enrolledProfiles = profiles.filter { it.isEnrolled }
+            val nowTime = System.currentTimeMillis()
+            var matchedProfile: PetFaceProfile? = null
+            if (face === primary) {
+                if (FaceEmbedder.isAvailable) {
+                    // SFace: the same person when the embeddings' cosine reaches FaceRecognition.SAME_PERSON_COSINE
+                    val withEmbedding = enrolledProfiles.filter { it.usesEmbedding }
+                    val embedding = freshEmbedding(nowTime)
+                    if (embedding != null) {
+                        val best = FaceRecognition.bestMatch(withEmbedding, embedding)
+                        matchedProfile = best?.first
+                        logScore(withEmbedding, embedding, matchedProfile, nowTime)
+                        emitMatch(
+                            matchedProfile,
+                            best?.let { (it.second * 100).toInt().coerceIn(0, 100) } ?: 0,
+                            when {
+                                enrolledProfiles.isEmpty() -> "ตรวจพบใบหน้า (ยังไม่ลงทะเบียน)"
+                                withEmbedding.isEmpty() -> "ใบหน้าที่บันทึกไว้ต้องสแกนใหม่ (ระบบจดจำใหม่)"
+                                else -> "บุคคลอื่น / ไม่ตรงกับสล็อตใด"
+                            },
+                            nowTime
+                        )
+                    } else {
+                        // the first embedding is ~0.3 s away: keep the last answer rather than flash "someone else"
+                        matchedProfile = enrolledProfiles.firstOrNull { it.slotIndex == lastMatchedSlot }
+                    }
+                } else {
+                    // no model: the landmark ratios, closest profile within MATCH_THRESHOLD
+                    val best = enrolledProfiles
+                        .map { it to it.calculateDistance(landmarkRatios) }
+                        .filter { it.second <= PetFaceProfile.MATCH_THRESHOLD }
+                        .minByOrNull { it.second }
+                    matchedProfile = best?.first
+                    emitMatch(
+                        matchedProfile,
+                        best?.let { ((1f - it.second / PetFaceProfile.MATCH_THRESHOLD).coerceIn(0f, 1f) * 100).toInt() } ?: 0,
+                        if (enrolledProfiles.isNotEmpty()) "บุคคลอื่น / ไม่ตรงกับสล็อตใด" else "ตรวจพบใบหน้า (ยังไม่ลงทะเบียน)",
+                        nowTime
+                    )
+                }
             }
 
-            val faceDisplayName = matchedProfile?.name ?: "Boss"
+            val faceDisplayName = matchedProfile?.name ?: if (enrolledProfiles.isEmpty()) "Boss" else "Guest"
 
             val label: String
             val color: String
@@ -571,7 +582,7 @@ class PetVisionDetector(
                 }
                 else -> {
                     val idStr = face.trackingId?.let { " #$it" } ?: ""
-                    label = "$faceDisplayName$idStr"
+                    label = "$faceDisplayName Face$idStr"
                     color = if (matchedProfile != null) "#76FF03" else "#00F0FF" // Neon green if recognized
                     conf = 0.90f
                 }
@@ -597,59 +608,38 @@ class PetVisionDetector(
             )
         }
 
-        // ─── 2. Hand / Finger Detections ──────────────────────────────────
-        detectedList.addAll(handObjects)
+        // ─── 2. Hands & Gestures ───────────────────────────────────────────
+        detectedList.addAll(handObjects(hands, imageWidth, imageHeight, isFrontCamera, isAlreadyMirrored, primaryCovered))
 
-        // ─── 3. ML Kit Multi-Object Detections ─────────────────────────────
-        mlKitObjects.forEach { obj ->
-            val b = obj.boundingBox
-            // Filter out objects that heavily overlap with face detections
+        // ─── 3. Things (EfficientDet-Lite0, [ObjectSpotter]) ────────────────
+        // held things stay: a phone or a cup in the hand overlaps the hand by nature
+        val thingList = things.orEmpty()
+        thingList.forEach { thing ->
+            val (l, t, r, bt) = thing.box
+            // a thing mostly on a face belongs to the face
             val isFaceOverlap = faces.any { face ->
                 val fb = face.boundingBox
-                val interLeft = maxOf(b.left, fb.left)
-                val interTop = maxOf(b.top, fb.top)
-                val interRight = minOf(b.right, fb.right)
-                val interBottom = minOf(b.bottom, fb.bottom)
-                if (interRight > interLeft && interBottom > interTop) {
-                    val interArea = (interRight - interLeft) * (interBottom - interTop)
-                    val objArea = b.width() * b.height()
-                    interArea > (objArea * 0.45f)
-                } else false
+                val iw = minOf(r, fb.right.toFloat()) - maxOf(l, fb.left.toFloat())
+                val ih = minOf(bt, fb.bottom.toFloat()) - maxOf(t, fb.top.toFloat())
+                iw > 0f && ih > 0f && iw * ih > (r - l) * (bt - t) * 0.45f
             }
             if (isFaceOverlap) return@forEach
-
-            val primaryLabel = obj.labels.maxByOrNull { it.confidence }
-            val (labelName, color) = when (primaryLabel?.text) {
-                "Food" -> "Food / Drink ☕" to "#4CAF50"
-                "Home good" -> "Object / Item 📱" to "#00E5FF"
-                "Fashion good" -> "Accessory / Item 👓" to "#E040FB"
-                "Plant" -> "Plant 🌱" to "#76FF03"
-                "Place" -> "Place / Scenery 🏢" to "#40C4FF"
-                else -> {
-                    val idStr = obj.trackingId?.let { " #$it" } ?: ""
-                    "Object$idStr 📦" to "#B388FF"
-                }
-            }
-            val conf = primaryLabel?.confidence ?: 0.75f
-
-            val nLeft = if (isFrontCamera && !isAlreadyMirrored) {
-                (1f - (b.right.toFloat() / imageWidth.toFloat())).coerceIn(0f, 1f)
-            } else {
-                (b.left.toFloat() / imageWidth.toFloat()).coerceIn(0f, 1f)
-            }
-            val nTop = (b.top.toFloat() / imageHeight.toFloat()).coerceIn(0f, 1f)
-            val nW = (b.width().toFloat() / imageWidth.toFloat()).coerceIn(0.01f, 1f)
-            val nH = (b.height().toFloat() / imageHeight.toFloat()).coerceIn(0.01f, 1f)
-
+            val nLeft = if (isFrontCamera && !isAlreadyMirrored) 1f - r / imageWidth else l / imageWidth
             detectedList.add(
                 DetectedObject(
-                    label = labelName,
-                    confidence = conf,
-                    boundingBox = BoundingBox(x = nLeft, y = nTop, width = nW, height = nH),
-                    color = color
+                    label = Things.label(thing.name),
+                    confidence = thing.score,
+                    boundingBox = BoundingBox(
+                        x = nLeft.coerceIn(0f, 1f),
+                        y = (t / imageHeight).coerceIn(0f, 1f),
+                        width = ((r - l) / imageWidth).coerceIn(0.01f, 1f),
+                        height = ((bt - t) / imageHeight).coerceIn(0.01f, 1f)
+                    ),
+                    color = "#B388FF"
                 )
             )
         }
+        logThings(thingList, System.currentTimeMillis())
 
         // ─── Stabilized Target Tracking & Noise Suppression ───
         val faceBoxes = faces.map { f ->
@@ -684,6 +674,13 @@ class PetVisionDetector(
 
         val now = System.currentTimeMillis()
         if (faces.isEmpty()) {
+            lastMatchedSlot = -1
+            smoothedMatchScore = 0f
+            latestEmbedding = null
+            winkFrames = 0
+            PetVisionBridge.onCurrentFaceLandmarks?.invoke(emptyList())
+            PetVisionBridge.onFaceBiometrics?.invoke(FaceBiometricDetails())
+            PetVisionBridge.onFaceProfileMatched?.invoke(null, -1)
             val absenceEmotion = gazeStabilizer.onNoFace(now)
             if (isGazeActive && (now - lastFaceSeenTime > 1000L)) {
                 isGazeActive = false
@@ -766,7 +763,7 @@ class PetVisionDetector(
                     }
                 }
                 AvatarEmotion.WINK -> {
-                    if (leftEyeOpen >= 0f && rightEyeOpen >= 0f) {
+                    if (!primaryCovered && leftEyeOpen >= 0f && rightEyeOpen >= 0f) {
                         val diff = abs(leftEyeOpen - rightEyeOpen)
                         val oneOpenOneClosed = (leftEyeOpen > 0.60f && rightEyeOpen < 0.30f) ||
                                                (rightEyeOpen > 0.60f && leftEyeOpen < 0.30f)
@@ -787,14 +784,19 @@ class PetVisionDetector(
             candidateStreak = 0
             activeLatchedGesture = HandGesture.NONE
             lastNoneGestureTime = 0L
+            handReader.clear()
+            winkFrames = 0
             lastFaceSeenTime = 0L
             isGazeActive = false
             targetTracker.clear()
+            latestEmbedding = null
+            PetVisionBridge.onCurrentFaceLandmarks?.invoke(emptyList())
+            PetVisionBridge.onFaceBiometrics?.invoke(FaceBiometricDetails())
+            PetVisionBridge.onFaceProfileMatched?.invoke(null, -1)
             onObjectsDetected?.invoke(emptyList())
             PetVisionBridge.onObjectsDetected?.invoke(emptyList())
             PetVisionBridge.onResetAbsence = null
             faceDetector.close()
-            objectDetector.close()
             logDebug(TAG, "PetVisionDetector closed")
         } catch (e: Exception) {
             logError(TAG, "Error closing detector: ${e.message}")

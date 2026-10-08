@@ -427,7 +427,15 @@ class VoiceController(
         // ผลของคำสั่งอ่านถูกทิ้งเงียบๆ (ไม่มีใครรับผล) และคำสั่งตอบกลับซ้ำซ้อนกับ tool ที่ model เรียกเอง
     }
 
+    @kotlin.concurrent.Volatile
+    private var isRestartingSession = false
+
     fun stopVoiceInput() {
+        isRestartingSession = false
+        stopVoiceInputInternal()
+    }
+
+    private fun stopVoiceInputInternal() {
         logDebug("JARVIS_VM", "Stopping Live Voice Input")
         _isListening.value = false
         _isMuted.value = false
@@ -450,9 +458,18 @@ class VoiceController(
     /** รีสตาร์ท Live Voice Session เพื่อเชื่อมต่อ WebSocket ใหม่ด้วย Setup Parameters ของ Persona ใหม่ */
     suspend fun restartVoiceSession() {
         if (!_isListening.value) return // ผู้ใช้ปิด Live ไปแล้ว — ห้ามปลุก session ขึ้นมาใหม่
-        stopVoiceInput()
-        disconnectJob?.join()
-        startVoiceInput()
+        isRestartingSession = true
+        try {
+            stopVoiceInputInternal()
+            disconnectJob?.join()
+            if (!isRestartingSession) {
+                logDebug("JARVIS_VM", "Live session restart cancelled because user stopped voice input")
+                return // ผู้ใช้สั่งปิด Live ชัดเจนระหว่างรอ — ห้ามเปิดขึ้นมาใหม่
+            }
+            startVoiceInput()
+        } finally {
+            isRestartingSession = false
+        }
     }
 
     fun clearVoiceError() {

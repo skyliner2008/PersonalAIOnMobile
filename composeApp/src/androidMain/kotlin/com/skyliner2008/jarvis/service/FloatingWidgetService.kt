@@ -3,6 +3,7 @@ package com.skyliner2008.jarvis.service
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
@@ -71,6 +72,10 @@ class FloatingWidgetService : Service() {
         const val ACTION_UPDATE_AVATAR = "com.skyliner2008.jarvis.UPDATE_AVATAR"
         const val EXTRA_LISTENING = "isListening"
 
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
         fun startWidget(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
                 Log.w(TAG, "Cannot start FloatingWidgetService: SYSTEM_ALERT_WINDOW not granted")
@@ -89,6 +94,7 @@ class FloatingWidgetService : Service() {
         }
 
         fun stopWidget(context: Context) {
+            if (!isRunning) return
             try {
                 context.stopService(Intent(context, FloatingWidgetService::class.java))
             } catch (e: Exception) {
@@ -97,13 +103,17 @@ class FloatingWidgetService : Service() {
         }
 
         fun setListeningState(context: Context, listening: Boolean) {
+            if (!isRunning) return
             try {
-                context.startService(
-                    Intent(context, FloatingWidgetService::class.java).apply {
-                        action = ACTION_SET_LISTENING
-                        putExtra(EXTRA_LISTENING, listening)
-                    }
-                )
+                val intent = Intent(context, FloatingWidgetService::class.java).apply {
+                    action = ACTION_SET_LISTENING
+                    putExtra(EXTRA_LISTENING, listening)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to set listening state on widget", e)
             }
@@ -133,15 +143,32 @@ class FloatingWidgetService : Service() {
     // Use ComposeView or fallback to classic View?
     private var useComposeView = true
 
+    private fun startForegroundSafely() {
+        createNotificationChannel()
+        try {
+            val notification = buildNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    2,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(2, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to startForeground safely", e)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
-
-        createNotificationChannel()
-        startForeground(2, buildNotification())
+        isRunning = true
+        startForegroundSafely()
 
         // ตรวจสอบ permission ก่อนเริ่ม
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Log.e(TAG, "Cannot start FloatingWidgetService: Permission denied for SYSTEM_ALERT_WINDOW")
+            Log.w(TAG, "Cannot start FloatingWidgetService: Permission denied for SYSTEM_ALERT_WINDOW")
             stopSelf()
             return
         }
@@ -153,6 +180,7 @@ class FloatingWidgetService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundSafely()
         when (intent?.action) {
             ACTION_SET_LISTENING -> {
                 val listening = intent.getBooleanExtra(EXTRA_LISTENING, false)
@@ -465,17 +493,23 @@ class FloatingWidgetService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
 
         lifecycleOwner.onPause()
         lifecycleOwner.onStop()
         lifecycleOwner.onDestroy()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping foreground", e)
         }
+
         try {
             floatingView?.let { windowManager?.removeView(it) }
         } catch (e: Exception) {

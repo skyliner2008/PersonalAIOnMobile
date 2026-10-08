@@ -479,6 +479,7 @@ class LiveGeminiService(
     @kotlin.jvm.Volatile
     var inGreetingTurn: Boolean = false
         private set
+    private var inGreetingStartedAtMs: Long = 0L
 
     /**
      * Live API ส่ง transcription มาเป็น "ชิ้น" (เช่น "ราคา", " ทอง", " ตอนนี้") ไม่ใช่ประโยคสะสม —
@@ -1117,6 +1118,7 @@ class LiveGeminiService(
         // "[ANSWER FOR] <คำถามเก่า>" แล้วโมเดลตอบคำถามเก่าซ้ำ
         lastUserText = ""
         inGreetingTurn = false
+        inGreetingStartedAtMs = 0L
         modelTurnOpen = false
         reportAwaitingDelivery = null
         reportWaitedSinceMs = 0L
@@ -1563,7 +1565,8 @@ class LiveGeminiService(
                             pendingGreetingOnReady = null
                             logDebug("LiveGemini", "🗣️ LIVE_READY — sending one-time session greeting")
                             inGreetingTurn = true
-                            sendRealtimeText(greeting)
+                            inGreetingStartedAtMs = System.currentTimeMillis()
+                            sendRealtimeText(LiveProtocol.sessionOpenerPrompt(greeting))
                         }
                     }
                 }
@@ -1610,6 +1613,7 @@ class LiveGeminiService(
                 // VAD / user barge-in: server ยกเลิก generation กลางทาง
                 // ต้อง flush คิวเสียงที่ค้างเล่นทันที ไม่งั้นเสียงเก่าเล่นต่อทับ turn ใหม่ (ตาม Live API guide)
                 if (content.interrupted == true) {
+                    inGreetingTurn = false
                     audioEpoch++
                     logDebug("LiveGemini", "⚡ Interrupted (VAD/user) — flushing playback queue (audioEpoch=$audioEpoch)")
                     turnWasInterrupted = true
@@ -1889,6 +1893,18 @@ class LiveGeminiService(
         if (!isSetupComplete || !isSessionActive || System.currentTimeMillis() < realtimeInputReadyAtMs) {
             if (!isSetupComplete) droppedPreReadyChunks++
             return
+        }
+
+        // ขณะอยู่ในช่วง greeting ของ session — ห้ามส่ง mic chunks ขึ้นไปชนกับการพูดทักทายของ AI
+        // มิฉะนั้นเสียงไมค์ (ambient noise/ลมหายใจ) จะทำให้ VAD ของ server คิดว่าผู้ใช้กำลังพูดแทรก
+        // ส่งผลให้ model ตัดเสียงพูดทิ้งและส่งกลับมาแค่ text token หรือตัด turn ทิ้ง
+        if (inGreetingTurn) {
+            if (System.currentTimeMillis() - inGreetingStartedAtMs > 8_000L) {
+                logDebug("LiveGemini", "⏱️ Greeting turn timeout (8s) — resuming mic streaming")
+                inGreetingTurn = false
+            } else {
+                return
+            }
         }
         sentAudioChunks++
         if (sentAudioChunks % 250L == 0L) {

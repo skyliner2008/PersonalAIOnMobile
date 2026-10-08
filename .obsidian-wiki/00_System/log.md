@@ -1,3 +1,211 @@
+## 2026-10-09 — Avatar Mode: มือและท่ามือด้วยโมเดล MediaPipe แทนการนับพิกเซลสีผิว
+- **User Request**: "log ใบหน้า การยิ้ม ทำงานได้ดี แต่มันยังมีความสับสน ระหว่างใบหน้า มือ การแสดงท่าทางของมือ" (log 00:32–00:34)
+  → เลือก "ใช้ MediaPipe" (อนุญาตดาวน์โหลดไลบรารี + โมเดล)
+- **สาเหตุ** (`detectHandRegions` เดิม): ไม่มีโมเดลมือ — นับพิกเซลสีผิวทั้งเฟรมนอกกรอบหน้า+คอ แล้วตีกรอบเดียวครอบทุกจุด (แขน ไหล่
+  โต๊ะไม้ รวมเป็น "มือ") · ความมั่นใจ 90% ตายตัว · ท่ามือเดาจากสัดส่วนกว้าง×สูงของกรอบ · พิกเซลในกรอบหน้าถูกข้าม → มือบังหน้าไม่ถูกเห็น
+  หลักฐาน: `Hand ✋ 90%` ค้าง 12 วิ, log ขึ้น 👍 แล้ว 0.7 วิต่อมาสั่ง `V_SIGN`, ขยิบตา+มือพร้อมกัน (มือบังตาข้างหนึ่ง), ส่ายนิ้ว+cos 0.54
+  · และ label ท่ามือ (เช่น "✌️ ชูสองนิ้ว (V Sign)") ไม่มีคำว่า Hand, หน้าปกติไม่มีคำว่า Face → `PetVisionTargetTracker` จัดเป็น "วัตถุ"
+  (หน้าถูกทิ้งเพราะทับโซนหน้า, ท่ามือแพ้วัตถุที่ใหญ่กว่า)
+- **แก้**:
+  - `HandTracker.kt` (androidMain): MediaPipe Gesture Recognizer `com.google.mediapipe:tasks-vision:0.10.35` + `assets/models/gesture_recognizer.task`
+    (8,373,440 B, sha256 `97952348…2b0482`, Apache-2.0) · โหมด VIDEO (ตามมือข้ามเฟรม) บนเธรดกล้องก่อน ML Kit · มือสูงสุด 2 ·
+    โหลดบนเธรดตัวเองตอน `MainActivity.onCreate` (`✅ Hand model loaded (8177 KB) in 348ms`) · `.so` เฉพาะ arm64 (APK +22 MB)
+  - `HandPose.kt` (commonMain): `HandSighting` (21 จุด), `HandPose.gesture` — Victory→V_SIGN, Thumb_Up/Down, Open_Palm นิ่ง 0.4 วิ→HIGH_FIVE,
+    Open_Palm แกว่ง 2 รอบ ≥0.6 ฝ่ามือ→BYE, Pointing_Up แกว่ง 2 รอบ ≥0.3 ฝ่ามือ→NO, ปลายโป้งแตะปลายชี้+อีก 3 นิ้วเหยียด→OK · `SideToSide`
+    นับการกลับทิศ · `HandGestureReader` แยกการเคลื่อนไหวตามข้างมือ, เลือกมือที่ทำท่า · `HandPose.covers` (≥4 จุดของมือในกรอบหน้า)
+  - `PetVisionDetector`: มือบังหน้า → ไม่นับขยิบตา (รวม copycat) และไม่คำนวณ embedding · ขยิบตาต้องค้าง 2 เฟรม · label มือขึ้นต้น `Hand`
+    และแสดงท่าเฉพาะเมื่อยืนยันแล้ว (3 เฟรม — จังหวะเดียวกับที่น้องตอบสนอง) · หน้าปกติ `"<ชื่อ> Face #id"` · วัตถุ ML Kit ที่ทับมือ ≥35% ถูกตัด ·
+    log `✋ Hands: Right Victory 0.87 (palm 54px) → V_SIGN [· มือบังหน้า…]` เมื่อเปลี่ยน/ทุก 3 วิ
+  - `FaceBanner`: "Hand ✊ กำมือ" / "☝️ ชี้นิ้ว" / "🤟 ไอเลิฟยู" / "✋ แบมือ" แสดงตามนั้น
+- **Verify**: 667 เทสต์ผ่าน (ข้าม 16) รวม `HandPoseTest` 9 · ติดตั้ง 00:58 โหลดโมเดลมือ + SFace สำเร็จ ไม่มี crash
+- **ทดสอบจริง 01:02** (ผู้ใช้: "แยกแยะมือ ใบหน้าได้ดีขึ้น ถูกต้องเกือบหมด"): สั่งงานถูก V_SIGN ×2, HIGH_FIVE ×2, THUMBS_UP, THUMBS_DOWN ·
+  🤟 ILoveYou ขึ้นเป็นท่าทาง · OK และ BYE เห็นเฟรมเดียว ไม่ถึงยืนยัน · ไม่มีขยิบตาหลอก · SFace cos 0.64–0.82 ตลอด
+- **ย้ายป้าย** (ผู้ใช้: "ตรวจจับใบหน้า อยู่ด้านล่างสุดชิดซ้าย, ตรวจจับมือ วัตถุ ให้อยู่ด้านล่างชิดขวา"): ป้ายเดียวกลางบน → 2 ป้ายล่าง
+  - `FaceBanner.face` (ล่างซ้าย): ชื่อ/สถานะ + ยิ้ม/ขยิบตา · ขอบเขียวเมื่อจำได้ · `FaceBanner.sight` (ล่างขวา, ขอบส้ม): ท่ามือ/ท่าทาง
+    ก่อน แล้ววัตถุ (ตอนนี้แสดงวัตถุด้วย: 📦 วัตถุ, 📱 ของใช้, 👓 เครื่องแต่งกาย, ☕ อาหาร/เครื่องดื่ม, 🌱 ต้นไม้) · สูงสุด 2 อย่างต่อป้าย
+  - ล่าง 24dp · มีรายการงานของหุ่น (task pills ล่างขวา, `task_hud.gd`) → ยกทั้ง 2 ป้ายขึ้นเหนือ: `FaceBanner.taskListHeightUnits`
+    (28 + 60/pill สูงสุด 3 + 39 ถ้ามี "+N งาน", หน่วย stage 720×1280) × min(กว้าง dp/720, สูง dp/1280) + 8dp
+  - แต่ละป้ายค้าง 1.5 วิแยกกัน (`heldDetection`), กว้างไม่เกิน 185dp, 2 บรรทัด · 668 เทสต์ผ่าน · ติดตั้ง 01:17
+- **วัตถุด้วย EfficientDet-Lite0** (ผู้ใช้: "log การตรวจจับวัตถุมันยังดูมั่วๆ" 01:24 → อนุญาตดาวน์โหลดโมเดล):
+  - สาเหตุ: ML Kit object detection แบบมาตรฐานรู้จักแค่ 5 หมวด (Fashion good, Food, Home good, Place, Plant) — นอกนั้นเป็น
+    `Object #N` ไม่มีชื่อ, ความมั่นใจ 75% มาจาก `?: 0.75f` ในโค้ด · log: #0 → #64 ใน ~100 วิ (ตีกรอบผนัง/เสื้อ), `Accessory / Item 👓`
+    = หมวดเสื้อผ้า, `Object #64` ค้าง 20 วิหลังผู้ใช้ออกจากเฟรม
+  - `ObjectSpotter.kt` (androidMain): MediaPipe Object Detector + `assets/models/efficientdet_lite0.tflite` (int8, 4,602,795 B, sha256
+    `0720bf24…c723bb`, Apache-2.0, COCO 80 ชนิด) · โหมด IMAGE ทุก 400 ms บนเธรดกล้อง (เฟรมระหว่างนั้นใช้ผลล่าสุด) · คะแนน ≥ 0.5 ·
+    ไม่เกิน 5 ชิ้น · log `📦 Things: cup 0.71, cell phone 0.55` เมื่อเปลี่ยน/ทุก 5 วิ · โหลด 1023ms
+  - `Things.kt` (commonMain): ชื่อไทย+emoji ครบทุกชนิด (☕ แก้ว, 📱 มือถือ, 💻 แล็ปท็อป, 📖 หนังสือ …) · ไม่แสดง: คน (มีป้ายหน้า/มือแล้ว)
+    และเฟอร์นิเจอร์/สิ่งติดตั้งในห้อง (เก้าอี้ โซฟา เตียง โต๊ะ ตู้เย็น เตา ไมโครเวฟ อ่างล้าง ชักโครก ม้านั่ง …) · label `Thing ☕ แก้ว`
+  - `PetVisionDetector`: เลิกใช้ ML Kit objects (ลบ dependency `com.google.mlkit:object-detection` → APK −23 MB) · ไม่ตัดของที่ทับมือ
+    อีกแล้ว (ของในมือทับมือเป็นธรรมดา) · ยังตัดของที่ทับหน้า ≥45%
+  - `FaceBanner.things` อ่าน `Thing …` · 671 เทสต์ผ่าน (+ `ThingsTest` 3) · ติดตั้ง 01:36 โหลดครบ 3 โมเดล ไม่มี crash
+
+## 2026-10-09 — Avatar Mode: ตรวจงาน avatar + จดจำใบหน้าด้วยโมเดล SFace, สแกนไม่ปนคน, สถานะตามสล็อต, ไมค์ไม่เปิดเองตอนเดโม
+- **User Request**: "ตรวจสอบงาน avatar และอื่นๆ ที่ฉันได้ปรับแก้ไข" → "ปรับแก้ได้ทั้งหมด" → อนุญาตดาวน์โหลดโมเดล "ใส่ในแอปเลย"
+- **ตรวจ** (commit `a9cb68b` + งานที่ยังไม่ commit): ถูกต้อง — ซ่อน SurfaceView จน `ready` แล้ว fade-in, warm-up effect ย่อ 1% ไม่โผล่,
+  `restartVoiceSession` แยก `stopVoiceInputInternal`, `App.kt` หยุดไมค์ก่อนสลับโปรไฟล์, ระงับไมค์ระหว่างทักทาย (≤ 8 วิ),
+  `FloatingWidgetService` เรียก `startForeground(SPECIAL_USE)` ทุกครั้ง + manifest ครบ, กล้องหน้าสแกน/หน้าอวตารไม่ชนกัน
+- **แก้ 4 จุดที่พบ**:
+  1. **จดจำตัวตนจริง** — เดิมเทียบอัตราส่วนเรขาคณิต 4 ค่า (2 ค่าใช้ระยะจมูก–ปาก ซึ่งเปลี่ยนเมื่อยิ้ม/พูด → เจ้าของกลายเป็น "บุคคลอื่น",
+     คนหน้าคล้ายจับคู่ผิด) → โมเดล **SFace** (`assets/models/face_recognition_sface_2021dec_int8.onnx`, OpenCV Zoo, Apache-2.0,
+     9.9 MB, sha256 `2b0e941e…d78a`) บน ONNX runtime ที่แอปมีอยู่: จัดหน้าตรงด้วย 5 จุด ML Kit (ตา 2, NOSE_BASE, มุมปาก 2 — เรียงตาม
+     ตำแหน่งในภาพ) → similarity transform ไปแม่แบบ ArcFace 112×112 → input `data` RGB 0..255 (กราฟลบ 127.5 คูณ 1/128 เอง) → `fc1`
+     128 ค่า → cosine ≥ 0.363 (เกณฑ์ OpenCV) · รันบนเธรดของตัวเองไม่เกิน ~3 ครั้ง/วิ เฉพาะใบหน้าใหญ่สุด (ตัดภาพ 112×112 บนเธรด
+     ผู้เรียก เพราะ detector recycle bitmap ทันทีหลังตรวจ) · โหลดไม่ได้ → ใช้อัตราส่วนแบบเดิม · โปรไฟล์ที่บันทึกด้วยระบบเก่าขึ้น
+     "⚠️ บันทึกด้วยระบบเก่า — กดสแกนทับ" · ไฟล์: `pet/FaceRecognition.kt` (common: แม่แบบ, transform, cosine, bestMatch,
+     `EnrollmentSampler`), `pet/FaceEmbedder.kt` (android), `PetFaceProfile.embedding`, `FaceBiometricDetails.embedding`
+  2. **สแกนไม่ปนคน** (`EnrollmentSampler`): ใบหน้าหายเกิน 1 วิ → เริ่มเก็บใหม่ · เฟรมแปลกเฟรมเดียวทิ้ง · คนอื่น 3 เฟรมติด → เริ่มใหม่ ·
+     ใช้ embedding 8 ตัวอย่าง (~3 วิ) หรืออัตราส่วน 25 เฟรมถ้าไม่มีโมเดล · ข้อความ "🔄 ใบหน้าหลุดกรอบหรือเปลี่ยนคน — เริ่มเก็บใหม่"
+  3. **สถานะตามสล็อต** — `PetModeController.currentRecognizedSlot`: การ์ดสถานะในหน้าตั้งค่าใช้สล็อต (เดิม "ยังไม่ลงทะเบียน" ขึ้นสีเขียว
+     ข้อความซ้ำ) · ลบ/เปลี่ยนชื่อเทียบสล็อต (เดิม `startsWith(ชื่อ)` ลบ "บอส" ล้าง "บอสใหญ่")
+  4. **ไมค์ไม่เปิดเองตอนเดโม** — `setAlwaysLiveProfile(profile, startLiveIfIdle)`: เปิด Live อัตโนมัติเฉพาะตัวเลือกโปรไฟล์และ Always-Live
+     manager ไม่ใช่ฟังก์ชันโชว์หน้าตา (`showMoodsetPage`, `playAllMoodsets`, เดโม)
+- **Verify**: 651 เทสต์ผ่าน (ข้าม 16) รวม `FaceRecognitionTest` 8 · ติดตั้งบนเครื่อง: `FaceEmbedder: ✅ SFace loaded (9664 KB) in 329ms` (รันทดสอบ
+  ได้ 128 ค่า)
+- **ทดสอบจริง 00:18** (ผู้ใช้ส่ง log): เข้าโหมดอวตาร → รีสตาร์ท Live สำเร็จ, เสียงทักทายมีเสียงทั้ง 2 ครั้ง, สแกนสล็อต 1 เสร็จใน ~3 วิ,
+  ยิ้มแล้วยังขึ้น "สล็อต 1" ทั้ง 5 ครั้งที่เจอหน้า · พบ 2 จุด → แก้:
+  1. **ตัวห่อ `[VOICE RULE]` ของคำทักทาย** ห่อทุกข้อความที่ส่งตอน session พร้อม — คำถามด้วยเสียงในโหมดประชุม
+     (`startAssistantWithPrompt`) และข้อความเปลี่ยนเสียงใช้ช่องเดียวกัน จึงกลายเป็น "โปรดพูดทักทาย (เช่น '<คำถาม>')" · และคำทักทาย
+     "สวัสดีจาวิส พร้อมคุยไหม" เป็นมุมผู้ใช้ แต่ถูกห่อเป็นสิ่งที่ AI ต้องพูด → AI เปิดด้วย "ยินดีด้วยค่ะ บอส เรียกจาวิส…" →
+     `LiveProtocol.sessionOpenerPrompt`: ห่อเฉพาะคำทักทายเปิดเซสชัน (`isSessionOpener` เกณฑ์เดียวกับตัวกรองประวัติ) เป็น
+     "ผู้ใช้เพิ่งเปิดเซสชันแล้วทักว่า "…" — ทักทายกลับ…" ข้อความอื่นส่งตามเดิม
+  2. **log ไม่มีคะแนนความคล้าย** → `PetVisionDetector: 🪪 SFace: <ชื่อ> cos=0.xx … → <ผล> (เกณฑ์ 0.363)` (เมื่อผลเปลี่ยน หรือทุก 3 วิ),
+     `PetModeController: 🪪 Enrolled slot N '<ชื่อ>' by SFace embedding|landmark ratios`, `FaceScan: 🪪 slot N: 8 samples, restarts R,
+     min cos to mean 0.xx`
+  · 654 เทสต์ผ่าน (+ `LiveOpenerPromptTest` 3) · ติดตั้ง 00:25
+- **ป้ายใบหน้าด้านบนหน้าอวตาร** (ผู้ใช้: "ให้แสดง ชื่อ หรือ event ใบหน้าที่ตรวจจับได้ ด้านบนของหน้า avatar"): `pet/FaceBanner` สร้างข้อความ
+  "👤 <ชื่อ (คะแนน)> · 😊 ยิ้ม · 👋 บ๊ายบาย" (ชื่อจาก `currentRecognizedSlot`/`currentRecognizedPerson`; คนอื่น → "บุคคลอื่น", ยังไม่ลงทะเบียน,
+  ต้องสแกนใหม่; event = ยิ้ม / ขยิบตา / ท่ามือ ไม่เกิน 2 ไม่รวมวัตถุ) · `AvatarModeScreen` แสดงเป็น Popup กลางด้านบน (ใต้แถว ⚙️/✕, ใต้ HUD
+  ถ้าเปิด) ขอบเขียวเมื่อจำได้ ค้าง 1.5 วิหลังหายกันกะพริบ ซ่อนระหว่างตั้งค่า/สแกน · 658 เทสต์ผ่าน (+ `FaceBannerTest` 4) · ติดตั้ง 00:32
+
+## 2026-10-08 — ระบบปลุก AI: SL ต้องห่างราคาอย่างน้อย 1 ATR (branch `feat/rive-eye-morph`)
+- **User Request**: "ปรับปรุงได้" — ตอบข้อเสนอให้ SL ห่างจากราคาเข้าอย่างน้อย 1 ATR หลังพบ BUY BTCUSDT 2026-10-04 11:04 ชน SL
+  หลังราคาลงแค่ 36 (ATR M15 ~50) แล้ววิ่งขึ้น +214
+- **ทำ**: prompt บอกกติกา + ค่า ATR14 · `WakePrompt.enforceStopDistance` ขยาย SL ที่แคบกว่า 1 ATR แล้วตรวจ RR กับ TP เดิม (≥ 1:1
+  แจ้งต่อด้วย SL ใหม่และบอกในสรุปที่เสียงอ่าน / < 1:1 ไม่แจ้ง) · ต่อใน `JarvisAutomationService` หลัง sanitize ก่อน enforceTrend ·
+  `WakeVerdictSummary` แยกหมวด SKIP นี้
+- **Verify**: 643 เทสต์ผ่าน (ข้าม 16) รวม `WakeStopDistanceTest` 5 (เคส 11:04: SL 84,815 → 84,794, RR 2.12 แจ้งต่อ) · ติดตั้ง 17:20 —
+  ตอนนี้ไม่มีงานเฝ้าตลาดในเครื่อง (`refreshJobs: emitted 0 jobs`) กติกาจะทำงานเมื่อตั้งงานใหม่
+- เอกสาร: [[66_WakeEngine_Live_Backup_V29]]
+
+## 2026-10-06 — Avatar Mode: แก้ไขปัญหาคำทักทายแรกสลับไปใช้ Android TTS Fallback แทนเสียง Live Model (Aoede/Robot)
+- **User Request & Log Analysis**:
+  - ผู้ใช้แจ้ง: "กลับมาใช้ได้แล้ว แต่บ่อยครั้ง ที่ การทักทาย ของ ai จะเป็น ใช้ TTS fallback แต่หลังจาก ฉันสั่ง ก็จะเป้น โมเดล live ปรกติ"
+  - จาก Log ที่เวลา `23:48:53.727` ถึง `23:48:55.403`:
+    - `LiveGemini D: ⬆ Sent realtime text: สวัสดีฮับ พร้อมเล่นแล้ว`
+    - `LiveGemini D: 🤖 JARVIS +"สวัสดีฮับบอส ทางนี้ก็พร้อมเล่นมากๆ เยยฮับ!"`
+    - `LiveGemini D: 🔇 Turn Complete with NO AUDIO (42 chars text-only) — ใช้ TTS fallback`
+    - แต่หลังจากนั้น เมื่อผู้ใช้สั่งงานด้วยเสียง ("สภาพอากาศวันนี้") โมเดลตอบกลับด้วย Live audio เต็มรูปแบบ (387,390 bytes)
+- **สาเหตุเชิงลึก (Root Cause)**:
+  1. **การชนกันของ Mic Audio Stream กับ Greeting Turn (Concurrency & VAD Collision)**:
+     - ใน `LiveGeminiService.kt` มีตัวแปร `@Volatile var inGreetingTurn: Boolean` อยู่แล้ว แต่ในฟังก์ชัน `sendAudioChunk()` ไม่มีการตรวจสอบตัวแปรนี้
+     - เมื่อ Live Session พร้อม (`setupComplete`) ที่เวลา `realtimeInputReadyAtMs` (+250ms) ตัวคิวส่ง `sendRealtimeText(greeting)` จะถูกยิงเข้า WebSocket พร้อมๆ กับที่ไมโครโฟนเริ่มส่ง PCM chunks (`realtimeInput: { audio: ... }`) เข้าสู่สตรีมในมิลลิวินาทีเดียวกัน
+     - VAD (Voice Activity Detection) ฝั่ง Server ของ Google Gemini ได้รับสัญญาณเสียงจากไมค์ (ambient noise/ลมหายใจ) ขนานไปกับข้อความ greeting ทำให้ระบบ VAD ตีความว่าผู้ใช้กำลังพูดแทรก หรือสตรีมไมค์กำลังแอคทีฟ จึงระงับ (suppress) การสังเคราะห์และส่งข้อมูลเสียง (Audio Vocoder PCM chunks) ของโมเดล และส่งกลับมาเฉพาะข้อความ text token ใน `outputTranscription` แล้วปิดเทิร์นด้วย `turnComplete: true` ทันทีในเวลาเพียง 8ms
+     - เมื่อ `audioBytesThisTurn == 0` แอปจึงต้องตกหลุมพราง fallback ไปใช้ Android System TTS (`VoiceManager.speak()`) ซึ่งมีน้ำเสียงแข็งทื่อแบบหุ่นยนต์ระบบ ไม่ใช่เสียง Live Model (Aoede/Robot Pitch DSP)
+  2. **คำสั่ง Greeting ขาดการระบุ Voice Directive**:
+     - ข้อความ greeting เดิมส่งเป็นประโยคธรรมดา (`"สวัสดีฮับ พร้อมเล่นแล้ว"`) โดยไม่มีคำสั่งกำกับเสียง ทำให้โมเดลมองเป็นข้อความแชทและมีโอกาสสลับ Modality ไปตอบเป็นตัวหนังสือล้วนตามหลัก Multimodal LLM Modality Mirroring
+- **การแก้ไข**:
+  1. **ป้องกัน Mic Stream แทรกแซงขณะอยู่ใน Greeting Turn (`LiveGeminiService.kt`)**:
+     - ใน `sendAudioChunk()` เพิ่มการดัก `if (inGreetingTurn)` ให้ Drop / ไม่ส่ง Mic PCM chunks ขึ้นไปกวน Server VAD ขณะที่ AI กำลังเริ่มพูดทักทายเปิดเซสชัน
+     - เพิ่ม `inGreetingStartedAtMs` พร้อม Safety Timeout 8 วินาที หาก Server เกิดเหตุขัดข้องไม่ส่ง `turnComplete` ไมค์จะกลับมาทำงานต่อได้เองโดยอัตโนมัติ
+     - รีเซ็ต `inGreetingTurn = false` ทันทีเมื่อเทิร์นจบ (`turnComplete == true`), เมื่อผู้ใช้พูดแทรกจริง (`interrupted == true`), หรือเมื่อเชื่อมต่อใหม่ (`resetSessionState()`)
+  2. **บังคับตอบด้วยเสียงพูดจริงผ่าน `[VOICE RULE]` Directive (`LiveGeminiService.kt`)**:
+     - ปรับฟังก์ชันส่งข้อความทักทายเปิดเซสชัน ให้ห่อหุ้มคำสั่งด้วย `[VOICE RULE]` เช่น:
+       `"[VOICE RULE] โปรดพูดทักทายสั้นๆ 1-2 ประโยคด้วยเสียงพูดอย่างสดใสและเป็นธรรมชาติ (เช่น '$greeting') ห้ามตอบเป็นตัวหนังสือล้วน ห้ามใช้ markdown"`
+     - บังคับให้ Gemini Live Acoustic Model สังเคราะห์เสียงพูด PCM 24kHz ออกมาเป็นก้อนไบต์เสียงลง `_audioOutputFlow` เพื่อนำไปเล่นผ่าน `PcmAudioEngine` ที่ผ่าน Robot Voice Pitch Shift ได้อย่างเสถียร 100%
+- **Verify**:
+  - รัน `:composeApp:compileDebugKotlinAndroid` สำเร็จ (BUILD SUCCESSFUL)
+  - รัน `:composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.LiveGreetingHistoryTest" --tests "com.skyliner2008.jarvis.PetModeTest"` ผ่านฉลุย 100%
+- **เอกสาร**: [[README.md]], [[catalogue]]
+
+## 2026-10-06 — Avatar Mode: แก้ไขปัญหาโหมด Avatar ไม่ตอบสนองคำสั่งเสียง (Live Session Restart Self-Cancellation Bug)
+- **User Request & Log Analysis**:
+  - ผู้ใช้แจ้ง: "โหมด Avatar ไม่ตอบสนอง คำสั่งเสียง" พร้อมแนบ Log จากอุปกรณ์
+  - จาก Log ที่เวลา `23:30:52.317`:
+    - เมื่อผู้ใช้เข้าสู่โหมด Avatar (`AlwaysLiveProfile switched: CONTROL -> PET`)
+    - ระบบส่งคำสั่ง `JarvisVM: Restarting Live session for persona switch -> PET`
+    - มีการสั่ง `Stopping Live Voice Input` และปิดการเชื่อมต่อ LiveGemini WebSocket เดิม
+    - แต่หลังจากนั้น **ไม่มีการเปิด Live Voice Input หรือเริ่มไมค์ใหม่เลย (`startVoiceInput()` ไม่ถูกเรียก)**
+    - ส่งผลให้ในโหมด Avatar ไมโครโฟนถูกตัดและไม่มี Live AI คอยรับฟังคำสั่งเสียง
+- **สาเหตุเชิงลึก (Root Cause)**:
+  - ใน [`VoiceController.kt`](file:///composeApp/src/commonMain/kotlin/com/skyliner2008/jarvis/controller/VoiceController.kt) ฟังก์ชัน `restartVoiceSession()` มีการเซ็ตตัวแปรแฟล็ก `isRestartingSession = true` แล้วเรียก `stopVoiceInput()`
+  - แต่ภายใน `stopVoiceInput()` มีการสั่ง `isRestartingSession = false` ซ้ำ
+  - เมื่อรอ `disconnectJob?.join()` เสร็จ บรรทัดถัดไปตรวจสอบ `if (!isRestartingSession) return` ซึ่งกลายเป็น `true` เสมอ ทำให้หลุดออกจากฟังก์ชันก่อนที่จะได้เรียก `startVoiceInput()` เซสชันจึงถูกตัดค้างและไมค์ดับสนิท
+- **การแก้ไข**:
+  1. **แยก Internal Disconnect ออกจาก Public Cancel API (`VoiceController.kt`)**:
+     - สร้าง `stopVoiceInputInternal()` สำหรับปิดไมค์และ disconnect WebSocket ของเซสชันเดิมโดยไม่แตะต้องตัวแปรแฟล็ก `isRestartingSession`
+     - ให้ `stopVoiceInput()` (Public API) คงการตั้งค่า `isRestartingSession = false` ไว้เพื่อเป็นตัวตรวจจับกรณีที่ผู้ใช้สั่งกดยกเลิก/ออกจากโหมดจริงๆ เท่านั้น
+     - ปรับให้ `restartVoiceSession()` เรียก `stopVoiceInputInternal()` ทำให้แฟล็กไม่โดนรีเซ็ตตัวเอง และสามารถดำเนินการต่อจนถึง `startVoiceInput()` ได้สำเร็จ 100%
+  2. **Auto-Start Live Session เมื่อเข้าสู่ Avatar Mode (`JarvisViewModel.kt`)**:
+     - ใน `setAlwaysLiveProfile()` เพิ่มเงื่อนไข `else if (isPet)` ให้ทำการเรียก `voice.startVoiceInput()` อัตโนมัติหากผู้ใช้เปิดโหมด Avatar ในขณะที่ Live ยังไม่ได้ถูกเปิดอยู่
+- **Verify**:
+  - รัน `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% (BUILD SUCCESSFUL)
+  - รัน `:composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.PetModeTest"` ผ่าน 100% (BUILD SUCCESSFUL)
+- **เอกสาร**: [[README.md]], [[catalogue]]
+
+## 2026-10-06 — Avatar Mode: หน้าต่างสแกนใบหน้าแบบมีขั้นตอนระดับสูง (Biometric Stepped Scanner), ปิด Live สะอาด 100% และแก้ FGS Crash ใน FloatingWidgetService
+- **User Request & Log Analysis**:
+  1. บันทึกใบหน้าระดับสูง: กดแล้วเปิดกล้องพรีวิว ให้ผู้ใช้จัดตำแหน่งใบหน้าให้ตรง มีตรวจจับจุดต่างๆ ของใบหน้า และหลอดความคืบหน้า 0% -> 100% สำเร็จชัดเจน
+  2. ปุ่ม ✕ บน Avatar Mode เมื่อกดแล้วต้องปิด Live session ปกติด้วย ไม่ให้รันต่อเบื้องหลัง
+  3. ตรวจสอบ log อุปกรณ์ล่าสุด พบว่า:
+     - การบันทึกใบหน้าสล็อต 1 สำเร็จลง SQLite (`PetMemoryStore: Saved 1 enrolled face profiles to SQLite`) และระบบแยกแยะใบหน้าจริงได้แม่นยำ (`🎯 Detections: สล็อต 1 Wink 😉 (95%)`)
+     - ปุ่ม ✕ ปิดไมค์และ Live AI Session ครบถ้วน ไม่มีการสตาร์ทซ้ำในพื้นหลัง
+     - พบปัญหา `ForegroundServiceDidNotStartInTimeException` ใน `FloatingWidgetService` เมื่อระบบเปลี่ยนสถานะเป็น `MINI_FLOATING`
+- **การเปลี่ยนแปลงและสถาปัตยกรรม**:
+  1. **หน้าต่างสแกนใบหน้าชีวมิติระดับสูง (`FaceEnrollmentScanner.kt`)**:
+     - แสดงใน `Dialog(usePlatformDefaultWidth = false)` แยก Layer จาก Activity Window ทำให้อยู่เหนือ `SurfaceView` ของ Godot Engine โดยไม่โดนบดบัง
+     - แสดง Live Camera Preview ทรงแคปซูลมน (`RoundedCornerShape(26.dp)`) พร้อมเส้นเรดาร์สแกนและขอบไฟนีออน Sci-Fi
+     - **Multi-frame Landmark Averaging**: เก็บตัวอย่างตำแหน่งแลนด์มาร์ก 25 เฟรม (~2 วินาที ที่จังหวะ 80ms) เพื่อตัดสัญญาณรบกวน (Jitter) และคำนวณเวกเตอร์ใบหน้าที่เสถียรที่สุด
+     - **Biometric Landmark Badges**: แสดงสถานะการตรวจจับจุดชีวมิติ 4 จุดแบบไดนามิก (ดวงตา 👁️, สันจมูก 👃, ริมฝีปาก 👄, ตรงกลาง 📐)
+     - หลอดเปอร์เซ็นต์ Smooth Progress 0% -> 100% พร้อมเอฟเฟกต์เสียงสำเร็จ `SPARKLE` และบันทึกลงสล็อตอัตโนมัติ
+  2. **CameraPreviewView Over Godot (`CameraPreviewView.android.kt`)**:
+     - สลับไปใช้ `PreviewView.ImplementationMode.COMPATIBLE` (TextureView ภายใน) สำหรับกรณีเปิดกล้องบน Dialog เพื่อให้รองรับ Shape Clipping และซ้อนทับบน 3D Engine ได้อย่างสมบูรณ์
+     - เพิ่ม `globalCameraBindingMutex` ป้องกันกรณี CameraX Unbind/Rebind ชนกันระหว่าง PetVision และ Scanner Preview
+  3. **Exit Flow สะอาดหมดจด (`AvatarModeScreen.kt` & `JarvisViewModel.kt`)**:
+     - ปุ่ม ✕ เรียก `onEndLive()` ซึ่งสั่ง `stopLiveInput()` บน `VoiceController` และ `disable()` บน `AlwaysLiveManager`
+     - สลับโปรไฟล์กลับสู่ `CONTROL` และปิดไมโครโฟนทันที ไม่มีการดีดกลับมาเปิดโหมด Live ในพื้นหลัง
+  4. **แก้ปัญหา FGS Crash ใน `FloatingWidgetService.kt`**:
+     - Android 14+ กำหนดให้ Service ที่ประกาศ `foregroundServiceType="specialUse"` ต้องส่ง `ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE` ใน `startForeground()`
+     - ย้าย/เพิ่มการเรียก `startForegroundSafely()` ไว้ที่จุดเริ่มต้นของทั้ง `onCreate()` และ `onStartCommand()` เพื่อให้ตอบสนองต่อ `context.startForegroundService()` ทุกครั้งทันทีภายใน 5 วินาที แม้ Service จะถูกสร้างค้างไว้อยู่แล้ว
+     - เพิ่มตัวแปร `isRunning` เพื่อป้องกันการสั่ง `startForegroundService` โดยไม่จำเป็นจาก `setListeningState()` และ `stopWidget()`
+- **Verify**:
+  - รัน `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% (BUILD SUCCESSFUL)
+  - รัน `:composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.PetModeTest"` ผ่านฉลุย 100% (77/77 tests passed)
+- **เอกสาร**: [[README.md]], [[catalogue]]
+
+## 2026-10-05 — Avatar Mode: เพิ่มปุ่มลอยตั้งค่า/ออก, ระบบโปรไฟล์ใบหน้า 5 สล็อต และการแยกแยะใบหน้าจริง (Face Differentiation)
+- **User Request**:
+  1. เพิ่มปุ่มลอยโปร่งแสง ตั้งค่า (`⚙️`) กับ ปุ่ม `✕` (ออกจากโหมด avatar และ ปิด live)
+  2. ในตั้งค่ามี: โปรไฟล์ใบหน้า (ตรวจสอบด้วยว่า เพิ่ม ลบ ใบหน้า และแยกแยะใบหน้าได้จริง)
+  3. ตรวจสอบระบบตรวจจับ `PetVisionDetector` และการแสดงผล `🎯 Detections:` / `👀 Face tracked`
+- **การเปลี่ยนแปลงและสถาปัตยกรรม**:
+  1. **Floating Translucent Control Bar (`FloatingAvatarControlBar`)**:
+     - เพิ่มปุ่มโปร่งแสงมุมบนขวาใน `AvatarModeScreen.kt` ไม่บดบังโมเดล 3D
+     - ปุ่ม `⚙️`: เปิด Modal Settings Dialog
+     - ปุ่ม `✕`: ออกจาก Avatar Mode และปิด Live AI Session ทันที (`onEndLive()`)
+  2. **หน้าต่างการตั้งค่า `PetSettingsDialog.kt`**:
+     - แท็บ **👤 โปรไฟล์ใบหน้า (Face Profiles)**:
+       - สถานะ Real-time จากกล้อง: ตรวจพบใบหน้า (🟢), ใบหน้าใหม่/ยังไม่ลงทะเบียน (🟡), ไม่พบใบหน้า (⚪)
+       - การ์ด 5 สล็อต พร้อมแสดงสัดส่วนโครงหน้า, เวลาลงทะเบียน, ปุ่มสแกนบันทึก/สแกนทับ (เปิดเมื่อเห็นหน้า), ปุ่มลบ, ปุ่มแก้ไขชื่อ
+     - แท็บ **🖥️ แสดงผล & ตรวจจับ (Display & Vision)**:
+       - สวิตช์เปิด/ปิด Debug HUD
+       - สวิตช์เปิด/ปิด Desk Sentry (เฝ้าโต๊ะ)
+       - ปุ่มสลับกล้องหน้า/กล้องหลัง (`onSwitchCamera`)
+  3. **ระบบจดจำและแยกแยะใบหน้า (Face Differentiation Algorithm)**:
+     - ใช้ 4-dimensional Normalized Facial Landmark Ratios (`eyeDist/faceW`, `eyeDist/noseToMouth`, `eyeToNose/noseToMouth`, `faceW/faceH`) ซึ่งเป็น Scale-Invariant (ไม่ขึ้นกับระยะห่างจากกล้อง)
+     - ปรับปรุงการจับคู่จากเดิม (firstOrNull) เป็น **Best-Match Selection** ค้นหาโปรไฟล์ที่มีระยะ Euclidean Distance ต่ำที่สุด
+     - ปรับจูน `MATCH_THRESHOLD = 0.15f` (จาก 0.22f) เพื่อป้องกันไม่ให้คนอื่นที่มีโครงหน้าต่างกันมาตรงกับสล็อต
+     - คำนวณความแม่นยำเป็นเปอร์เซ็นต์ (`matchScorePct`) ส่งตรงเข้า UI
+     - แยกแยะคนแปลกหน้า: หากไม่ตรงกับสล็อตที่ลงทะเบียนไว้ จะระบุเป็น `"บุคคลอื่น / ไม่ตรงกับสล็อตใด"` ทันที
+  4. **การบันทึกข้อมูลถาวร (Persistence)**:
+     - บันทึกโปรไฟล์ใบหน้าทั้ง 5 สล็อตลง SQLite ผ่าน `PetMemoryStore.saveFaceProfiles()` / `loadFaceProfiles()` (Table: `AppSetting`, Key: `pet.face_profiles`) ไม่สูญหายเมื่อปิดแอป
+  5. **การคืนค่า Debug Vision Badge (`PetDetectionBadge`)**:
+     - แสดงสถานะมุมบนซ้าย: `👀 Face tracked (ชื่อ + %)`, `🎯 Detections: (วัตถุ ML Kit)`, `🐾 Touch`, `🎭 Audio Level`
+- **Verify**:
+  - รัน `:composeApp:testDebugUnitTest --tests "com.skyliner2008.jarvis.PetModeTest"` ผ่านฉลุย 100% (77/77 tests passed)
+  - ครอบคลุมเทสต์: การบันทึกสล็อต, การลบสล็อต, การเปลี่ยนชื่อ, การแยกแยะบุคคลสองคนที่มีโครงหน้าต่างกัน และการปฏิเสธคนแปลกหน้า
+  - รัน `:composeApp:compileDebugKotlinAndroid` ผ่าน 100% ไม่มี error
+- **เอกสาร**: [[README.md]], [[catalogue]]
+
 ## 2026-10-05 — Avatar Mode: แก้ปัญหาจอดำ 3 วิ และกู้คืน 2D Motion Loading ทันที พร้อมลดเวลา Warm-up
 - **User Request**: "จาก log สิ่งที่แสดง เมื่อสั้งเปิด Avatar หน้าแรก จะเป็น สีดำ ประมาณ 3 วิ แล้วจึงแสดง Avatar ที่เคลื่อนใหว พร้อมเสียงพูดทักทาย 2D ไม่แสดง มี 3D อย่างเดียว"
 - **วิเคราะห์หาสาเหตุเชิงลึก (Android Window & Graphic Pipeline + Godot Warm-up)**:
@@ -113,6 +321,27 @@
   ไม่มีเสียง (การ์ดแชท + notification `setSilent`) ไม่เกิน 1 ครั้ง/30 นาที/สินทรัพย์ ครั้งแรกบอกว่า AI ใช้ไม่ได้ (ครั้งเดียวจน AI ตอบได้อีก)
 - **Verify**: แอป 622 เทสต์ผ่าน (ข้าม 16) รวม `WakeAiFallbackTest` 2
 - เอกสาร: [[66_WakeEngine_Live_Backup_V29]] ข้อ 9
+
+## 2026-10-05 — Avatar Mode: ปรับปรุงปุ่ม ✕ ออกจากโหมดและตัด Live ทันที + ระบบลงทะเบียนสแกนใบหน้าชีวมิติระดับสูงเปิดกล้องจริง (branch feat/rive-eye-morph)
+- **User Request**: 
+  1. ปุ่มบันทึก เมื่อกดแล้ว ควรเปิดกล้อง เพื่อได้ทราบว่า หน้าอยู่ตรงกับกล้อง จริงๆ
+  2. ควรมี ตรวจจับ จุดต่าง ของใบหน้า และควรมี % บอกว่า 100% สำเร็จ เสร็จสิ้น แล้วหรือยัง (เดิม % วิ่งสวิงขึ้นลง และไม่มีสถานะว่าสำเร็จ)
+  3. ปุ่ม X ในปัจจุบัน เมื่อกด จะปิดแต่ Avatar Mode และเข้าสู่โหมด live ปกติ ต้องการให้เมื่อกดแล้ว ปิด live ปกติด้วย
+- **แก้ปัญหา**:
+  1. **ปุ่ม ✕ ออกจาก Avatar และปิด Live ทันที**:
+     - สาเหตุเดิม: เมื่อกด ✕ ฟังก์ชัน onEndLive() สั่งปิดโหมดและเปลี่ยน profile เป็น CONTROL แต่ตัวแปร isListening ใน VoiceController ยังคงค้างอยู่ ทำให้ triggered restartVoiceSession() เด้งกลับมาเชื่อมต่อ Live ใหม่
+     - แก้ไข: ใน VoiceController.stopVoiceInput() สั่งรีเซ็ต isRestartingSession = false, ใน JarvisViewModel.kt ยกเลิก personaRestartJob?.cancel(), และใน App.kt สั่ง viewModel.stopVoiceInput() ทันทีเป็นลำดับแรกก่อนสลับ Profile ทำให้ตัดการเชื่อมต่อ Live อย่างเด็ดขาด
+  2. **ระบบสแกนใบหน้าชีวมิติระดับสูง (FaceEnrollmentScanner)**:
+     - ห่อหุ้ม UI สแกนใบหน้าทั้งหมดลงใน Dialog window (usePlatformDefaultWidth = false) เพื่อให้อยู่เหนือเลเยอร์ SurfaceView ของ Godot เสมอ (แก้ปัญหาเดิมที่ FaceEnrollmentScanner เป็นเพียง Composable ธรรมดา จึงถูก Godot ที่มี setZOrderOnTop บังไว้ ทำให้เมื่อกดบันทึกแล้วดูเหมือนเด้งกลับหน้าอวตาร)
+     - ปรับโหมด PreviewView เป็น COMPATIBLE (TextureView) ภายใน Dialog เพื่อให้การตัดมุมโค้งมน (clip RoundedCornerShape) และการเรนเดอร์ใน Dialog ทำงานร่วมกับ GPU ได้อย่างไร้รอยต่อ
+     - เพิ่ม globalCameraBindingMutex ป้องกันการชนกันของการ bind/unbind ProcessCameraProvider ระหว่าง transition
+     - ควบคุมจังหวะการเก็บตัวอย่าง Landmark ทุก 80ms (target 25 เฟรม รวม ~2.0 วินาที) ทำให้ Progress วิ่ง 0% -> 100% ต่อเนื่องเป็นจังหวะที่มองเห็นได้ชัดเจน ไม่กระโดดข้าม
+     - ตรวจสอบจุดต่าง 4 มิติสำคัญ: ดวงตา (Eyes), สันจมูก (Nose), ริมฝีปาก (Mouth) และตำแหน่งตรงกลางภาพ (Center Alignment) ผ่าน Checkpoint Badges
+     - เมื่อครบ 100% แสดงกล่องข้อความความสำเร็จ 100% สแกนเสร็จสิ้น! บันทึกโปรไฟล์เรียบร้อย พร้อมเสียง Sparkle และ auto-dismiss หรือกดปุ่มเสร็จสิ้น
+  3. **Floating Controls & Settings ใน Avatar Mode**:
+     - เพิ่มปุ่มควบคุมโปร่งแสง Top-Right: ปุ่มตั้งค่า (จัดการ 5 สล็อตโปรไฟล์ใบหน้า, เปิด/ปิด Desk Sentry, สลับกล้อง) และปุ่ม ✕ ออกจากระบบ
+     - เพิ่มฟังก์ชัน onSwitchCamera บนส่วนหัวของ Scanner ให้สลับกล้องได้สะดวกรวดเร็ว
+- **Verify**: คอมไพล์ Kotlin Android (compileDebugKotlinAndroid) ผ่านสำเร็จ 100%, รัน Unit Tests (PetModeTest) ผ่านทุกเทสต์ รวมถึง enrollFaceWithLandmarks และ deleteFaceProfile
 
 ## 2026-10-03 — Live workers: แบ่งงาน AI ให้โมเดล Live ตัวอื่น (ไม่จำกัด RPM/RPD) (branch `feat/rive-eye-morph`)
 - **User Request**: "โมเดล live ทั้งหมด ใช้ได้ไม่จำกัด RPM กับ RPD ฉันเลยอยากใช้ประโยชน์จากตรงนี้ให้ได้มากที่สุด … 3.1 live โต้ตอบด้วยเสียงดีกว่า
