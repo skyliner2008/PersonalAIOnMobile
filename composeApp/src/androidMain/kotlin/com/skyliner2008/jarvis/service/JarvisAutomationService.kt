@@ -591,6 +591,15 @@ class JarvisAutomationService : Service() {
                 .getOrNull()
                 ?.let { com.skyliner2008.jarvis.automation.wake.WakePrompt.sanitize(it, price) }
                 ?.let { v ->
+                    com.skyliner2008.jarvis.automation.wake.WakePrompt.enforceStopDistance(v, price, data[E.K_ATR]?.toDoubleOrNull()).also {
+                        if (it !== v) logDebug(
+                            "AutomationService",
+                            "⏰ SL ${v.bias} ${job.symbol} ${v.levelSl} ห่างไม่ถึง 1 ATR (${data[E.K_ATR]}) → " +
+                                if (it.notify) "ขยายเป็น ${it.levelSl}" else "ไม่แจ้ง (RR ไม่ถึง 1:1 หลังขยาย)"
+                        )
+                    }
+                }
+                ?.let { v ->
                     com.skyliner2008.jarvis.automation.wake.WakePrompt.enforceTrend(v, data[E.K_HTF_ALIGN]).also {
                         if (it !== v) logDebug("AutomationService", "⏰ บล็อก NOTIFY ${v.bias} สวนเทรนด์ ${data[E.K_HTF_ALIGN]} ${job.symbol}")
                     }

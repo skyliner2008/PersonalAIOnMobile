@@ -39,6 +39,12 @@ object WakePrompt {
     const val MIN_RR = 1.0
 
     /**
+     * SL ต้องห่างราคาปัจจุบันอย่างน้อยกี่ ATR (ATR14 ของ TF หลัก) — แคบกว่านี้โดนความผันผวนปกติกวาดก่อนราคาไปถึงเป้า
+     * (ผู้ใช้อนุมัติ 2026-10-04: "ปรับปรุงได้")
+     */
+    const val MIN_SL_ATR = 1.0
+
+    /**
      * system prompt เฉพาะงานนี้ — แทน system prompt แชทของ JARVIS (ยาวหลายหมื่นตัวอักษร
      * มีกฎ tool/กราฟ/อุปกรณ์ที่ไม่เกี่ยว และขัดกับรูปแบบคำตอบ 7 บรรทัด)
      */
@@ -78,6 +84,40 @@ object WakePrompt {
             reasonTh = "ระบบไม่แจ้ง: AI เสนอ ${v.bias} สวนเทรนด์ H4/H1/M15 ที่เรียงเป็น$trend — ${v.reasonTh}".take(1000)
         )
     }
+
+    /**
+     * ตาข่ายของกติกา "SL ห่างราคาอย่างน้อย [MIN_SL_ATR] ATR": SL ที่ AI วางชิดกว่านั้นถูกขยายออกไปเป็น 1 ATR แล้วคิด RR
+     * ใหม่กับ TP เดิม — ยังได้ ≥ [MIN_RR] แจ้งต่อด้วย SL ใหม่ (บอกในเหตุผลและสรุป) / ไม่ถึง → SKIP
+     * phone 2026-10-04 11:04: BUY BTCUSDT @84,844 ชน SL ใน 6 นาทีหลังราคาลงแค่ 36 (ATR M15 ~50) แล้ววิ่งขึ้น +214
+     * ต่างจาก [sanitize] ที่ไม่แก้ระดับแทน AI: ระยะ SL ขั้นต่ำเป็นกติกาความเสี่ยงของระบบ เหมือน [MIN_RR] ไม่ใช่การเดาตลาด
+     * @param atr ATR14 ของ TF หลัก ([AnticipationEngine.K_ATR])
+     */
+    fun enforceStopDistance(v: Verdict, price: Double?, atr: Double?): Verdict {
+        if (!v.notify || price == null || price <= 0 || atr == null || atr <= 0) return v
+        val dir = when (v.bias) { "BUY" -> 1; "SELL" -> -1; else -> return v }
+        val sl = v.levelSl ?: return v
+        val minDist = MIN_SL_ATR * atr
+        val dist = kotlin.math.abs(price - sl)
+        if (dist >= minDist) return v
+        val widened = price - dir * minDist
+        val was = "SL ${formatPrice(sl)} ห่างราคาแค่ ${"%.1f".format(dist / atr)} ATR"
+        val rr = v.levelTp?.let { kotlin.math.abs(it - price) / minDist }
+        if (rr != null && rr < MIN_RR) {
+            return v.copy(
+                decision = "SKIP",
+                reasonTh = ("ระบบไม่แจ้ง: $was — ขยายเป็น ${MIN_SL_ATR.formatAtr()} ATR (${formatPrice(widened)}) แล้ว RR เหลือ " +
+                    "1:${"%.2f".format(rr)} ต่ำกว่า 1:1 — ${v.reasonTh}").take(1000)
+            )
+        }
+        val note = "ระบบปรับจุดผิดทางจาก ${formatPrice(sl)} เป็น ${formatPrice(widened)} ให้ห่างราคาอย่างน้อย ${MIN_SL_ATR.formatAtr()} ATR"
+        return v.copy(
+            levelSl = widened,
+            reasonTh = "${v.reasonTh} ($was — ขยายเป็น ${MIN_SL_ATR.formatAtr()} ATR)".take(1000),
+            summaryTh = "${v.summaryTh.trimEnd()} $note".trim()
+        )
+    }
+
+    private fun Double.formatAtr(): String = if (this % 1.0 == 0.0) toInt().toString() else "%.1f".format(this)
 
     fun build(symbol: String, data: Map<String, String>): String = buildString {
         val tf = data[AnticipationEngine.K_TIMEFRAME] ?: "-"
@@ -127,6 +167,11 @@ object WakePrompt {
         appendLine("- ถ้าน่าสนใจ กำหนดระดับราคาเองจากแนวรับ/แนวต้าน/swing/OB ที่ให้มาเท่านั้น")
         appendLine("- ถ้า BIAS เป็น BUY/SELL ต้องมี LEVEL_SL และ LEVEL_TP ที่ให้ Risk:Reward อย่างน้อย 1:1 จากราคาปัจจุบัน " +
             "(ระยะถึง TP ≥ ระยะถึง SL) — ถ้าหาระดับที่ให้ RR ถึง 1:1 ไม่ได้จากข้อมูลที่มี ให้ตอบ SKIP")
+        val atr = data[AnticipationEngine.K_ATR]?.toDoubleOrNull()?.takeIf { it > 0 }
+        appendLine("- LEVEL_SL ต้องห่างราคาปัจจุบันอย่างน้อย ${MIN_SL_ATR.formatAtr()} ATR ของ ${tf.uppercase()}" +
+            (atr?.let { " (ATR14 = ${formatPrice(it)} → ห่างอย่างน้อย ${formatPrice(it * MIN_SL_ATR)})" } ?: "") +
+            " — ถ้าแนวรับ/แนวต้านที่ใช้วาง SL อยู่ใกล้กว่านั้น ให้วาง SL เลยระดับนั้นออกไปจนห่างครบ แล้วคิด RR ใหม่ " +
+            "(SL ที่ชิดกว่านี้โดนความผันผวนปกติกวาดง่าย ระบบจะขยายให้เป็น ${MIN_SL_ATR.formatAtr()} ATR และไม่แจ้งถ้า RR ไม่ถึง 1:1)")
         appendLine("- ใช้เฉพาะข้อมูลข้างบน ห้ามสมมติข่าว ราคา หรืออินดิเคเตอร์อื่น ห้ามรับประกันผลกำไร")
         appendLine()
         appendLine("ตอบตามรูปแบบนี้เท่านั้น 7 บรรทัด:")

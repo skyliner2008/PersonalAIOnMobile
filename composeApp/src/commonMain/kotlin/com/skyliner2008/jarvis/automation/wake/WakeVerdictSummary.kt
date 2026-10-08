@@ -220,12 +220,17 @@ object WakeVerdictSummary {
     )
     private const val ENFORCED_PREFIX = "ระบบไม่แจ้ง"
     private const val ENFORCED_LABEL = "ระบบตัดเพราะ AI เสนอสวนเทรนด์ใหญ่ (H4/H1/M15 เรียงทิศเดียวกัน)"
+    private const val STOP_LABEL = "ระบบตัดเพราะ SL แคบกว่า 1 ATR และขยายแล้ว RR ไม่ถึง 1:1"
 
     internal fun skipCategories(reasons: List<String>): List<Pair<String, Int>> {
         val counts = linkedMapOf<String, Int>()
         fun add(label: String) { counts[label] = (counts[label] ?: 0) + 1 }
         reasons.forEach { r ->
-            if (r.startsWith(ENFORCED_PREFIX)) { add(ENFORCED_LABEL); return@forEach }
+            if (r.startsWith(ENFORCED_PREFIX)) {
+                // the system's own SKIPs: what it says before the AI's reason ([WakePrompt.enforceTrend] / [WakePrompt.enforceStopDistance])
+                add(if ("SL" in r.removePrefix(ENFORCED_PREFIX).substringBefore(" — ")) STOP_LABEL else ENFORCED_LABEL)
+                return@forEach
+            }
             val hits = CATEGORIES.filter { (_, re) -> re.containsMatchIn(r) }
             if (hits.isEmpty()) add("อื่นๆ") else hits.forEach { add(it.first) }
         }
