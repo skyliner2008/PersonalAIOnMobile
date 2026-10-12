@@ -85,9 +85,11 @@ class PetVisionTargetTracker(
                 }
                 else -> {
                     // กรองทิ้ง: วัตถุที่ทับกับโซนใบหน้า/ลำคอ (ป้องกัน Accessory/Item ครอบปากหรือแว่นตาผิดตำแหน่ง)
+                    // ยกเว้นสิ่งของจาก EfficientDet ([Things]): แก้วหรือมือถือที่ถือไว้ระดับคางเป็นของจริง
+                    // (ตัวตรวจจับตัดของที่ทับใบหน้าเกิน 45% ไว้แล้ว)
                     val centerX = box.x + box.width / 2f
                     val centerY = box.y + box.height / 2f
-                    val isInsideFaceZone = faceExclusionZones.any { zone ->
+                    val isInsideFaceZone = !label.startsWith(Things.PREFIX) && faceExclusionZones.any { zone ->
                         centerX in zone.x..(zone.x + zone.width) &&
                         centerY in zone.y..(zone.y + zone.height)
                     }

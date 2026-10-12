@@ -36,12 +36,13 @@ class HandPoseTest {
         gesture: String = "None",
         score: Float = 0.9f,
         dx: Float = 0f,
-        side: String = "Right"
+        side: String = "Right",
+        handScore: Float = 0.95f
     ) = HandSighting(
         points = FloatArray(points.size * 2) { i -> if (i % 2 == 0) points[i / 2].first + dx else points[i / 2].second },
         modelGesture = gesture,
         gestureScore = score,
-        handScore = 0.95f,
+        handScore = handScore,
         side = side
     )
 
@@ -80,6 +81,8 @@ class HandPoseTest {
         // a fist pinching: the middle finger folded down
         val pinchFist = okHand.toMutableList().apply { this[10] = 100f to 160f; this[11] = 100f to 175f; this[12] = 100f to 190f }
         assertFalse(HandPose.isOk(hand(pinchFist)))
+        // a hand the model is unsure of (edge-on): the touching tips are not trusted
+        assertFalse(HandPose.isOk(hand(okHand, handScore = 0.4f)))
     }
 
     @Test
@@ -129,6 +132,32 @@ class HandPoseTest {
         val reading = reader.read(listOf(hand(gesture = "None", side = "Left"), hand(gesture = "Victory", side = "Right", dx = 300f)), 0L)
         assertEquals(HandGesture.V_SIGN, reading!!.gesture)
         assertEquals("Right", reading.hand.side)
+    }
+
+    @Test
+    fun `a hand round a cup is not OK`() {
+        // phone 2026-10-10 00:57: holding a cup put the thumb and index tips together and the pet answered 👌
+        val cup = floatArrayOf(30f, 190f, 90f, 260f)          // around the touching tips (55,210) and (50,205)
+        assertTrue(HandPose.holds(hand(okHand), cup))
+        assertEquals(HandGesture.NONE, HandPose.gesture(hand(okHand, score = 0f), swinging = false, still = true, holding = true))
+        assertEquals(HandGesture.NONE, HandGestureReader().read(listOf(hand(okHand, score = 0f)), 0L, listOf(cup))!!.gesture)
+        // a thing somewhere else: still 👌
+        val elsewhere = floatArrayOf(400f, 400f, 450f, 450f)
+        assertEquals(HandGesture.OK, HandGestureReader().read(listOf(hand(okHand, score = 0f)), 0L, listOf(elsewhere))!!.gesture)
+    }
+
+    @Test
+    fun `two still hands both named Right are not a wave`() {
+        // the model sometimes names both hands "Right" and lists them in either order: keyed by side, their x mixed
+        // into one track (100, 400, 100, 400 ...) and made a wave nobody made
+        val reader = HandGestureReader()
+        val gestures = (0..8).map { i ->
+            val a = hand(gesture = "Open_Palm", side = "Right")
+            val b = hand(gesture = "Open_Palm", side = "Right", dx = 300f)
+            reader.read(if (i % 2 == 0) listOf(a, b) else listOf(b, a), i * 100L)!!.gesture
+        }
+        assertFalse(HandGesture.BYE in gestures, "$gestures")
+        assertEquals(HandGesture.HIGH_FIVE, gestures.last())
     }
 
     @Test

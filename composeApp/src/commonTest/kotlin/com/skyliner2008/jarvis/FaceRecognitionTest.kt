@@ -2,18 +2,22 @@ package com.skyliner2008.jarvis
 
 import com.skyliner2008.jarvis.ui.component.avatar.AvatarState
 import com.skyliner2008.jarvis.pet.EnrollmentSampler
+import com.skyliner2008.jarvis.pet.FaceIdentity
 import com.skyliner2008.jarvis.pet.FaceRecognition
 import com.skyliner2008.jarvis.pet.PetFaceProfile
 import com.skyliner2008.jarvis.pet.PetModeController
 import com.skyliner2008.jarvis.pet.PetVisionBridge
+import com.skyliner2008.jarvis.pet.TurnedHeadSampler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -86,6 +90,110 @@ class FaceRecognitionTest {
         assertEquals(0f, FaceRecognition.cosine(listOf(1f), listOf(1f, 2f)))
         val mean = FaceRecognition.meanEmbedding(listOf(listOf(1f, 0f), listOf(0f, 1f)))
         assertTrue(close(mean[0], 0.7071f) && close(mean[1], 0.7071f))
+    }
+
+    // a unit vector at cosine c to the first axis, the rest of it along axis [other]
+    private fun atCos(c: Float, other: Int = 2): List<Float> =
+        List(FaceRecognition.EMBEDDING_SIZE) { i -> when (i) { 0 -> c; other -> sqrt(1f - c * c); else -> 0f } }
+
+    @Test
+    fun `a named face keeps its name through one poor embedding and lets go after two`() {
+        val boss = profile(0, "บอส", unit(1f))
+        val friend = profile(1, "เพื่อน", unit(0f, 1f))
+        val profiles = listOf(boss, friend)
+        val id = FaceIdentity(window = 1)
+
+        assertEquals("บอส", id.offer(profiles, unit(1f, 0.1f), faceKey = 7).profile?.name)
+        // 0.33: under the 0.363 needed to take a name, over the 0.30 that keeps it
+        assertEquals("บอส", id.offer(profiles, atCos(0.33f), faceKey = 7).profile?.name)
+        // far off once: still the boss (one miss); twice: nobody
+        assertEquals("บอส", id.offer(profiles, atCos(0.1f), faceKey = 7).profile?.name)
+        assertNull(id.offer(profiles, atCos(0.1f), faceKey = 7).profile)
+        assertEquals(-1, id.currentSlot)
+        // and 0.33 does not take the name back
+        assertNull(id.offer(profiles, atCos(0.33f), faceKey = 7).profile)
+    }
+
+    @Test
+    fun `another profile takes over only by a margin, and a new face starts over`() {
+        val boss = profile(0, "บอส", unit(1f))
+        val friend = profile(1, "เพื่อน", unit(0f, 1f))
+        val profiles = listOf(boss, friend)
+        val id = FaceIdentity(window = 1)
+        fun mix(b: Float, f: Float) = List(FaceRecognition.EMBEDDING_SIZE) { i ->
+            when (i) { 0 -> b; 1 -> f; 2 -> sqrt((1f - b * b - f * f).coerceAtLeast(0f)); else -> 0f }
+        }
+
+        assertEquals("บอส", id.offer(profiles, unit(1f), faceKey = 1).profile?.name)
+        assertEquals("บอส", id.offer(profiles, mix(0.40f, 0.43f), faceKey = 1).profile?.name, "0.43 does not beat 0.40 by 0.05")
+        assertEquals("เพื่อน", id.offer(profiles, mix(0.40f, 0.50f), faceKey = 1).profile?.name)
+
+        // the face in front changed (another tracking id): its name is not inherited
+        assertNull(id.offer(profiles, atCos(0.33f), faceKey = 2).profile)
+    }
+
+    @Test
+    fun `the last embeddings are averaged before matching`() {
+        val boss = profile(0, "บอส", unit(1f))
+        val id = FaceIdentity(window = 3)
+        id.offer(listOf(boss), unit(1f), faceKey = 1)
+        id.offer(listOf(boss), unit(1f), faceKey = 1)
+        // one embedding almost nothing like the boss, averaged with two good ones, still reads as the boss
+        val answer = id.offer(listOf(boss), atCos(0.05f), faceKey = 1)
+        assertEquals("บอส", answer.profile?.name)
+        assertTrue(answer.cosine > 0.8f, "cos ${answer.cosine}")
+    }
+
+    @Test
+    fun `a turned-head template matches a turned head`() {
+        val turned = atCos(0f, other = 3)
+        val boss = profile(0, "บอส", unit(1f)).copy(poseEmbeddings = listOf(turned))
+        assertTrue(close(FaceRecognition.profileCosine(boss, turned), 1f))
+        assertEquals("บอส", FaceRecognition.bestMatch(listOf(boss), turned)?.first?.name)
+        assertNull(FaceRecognition.bestMatch(listOf(profile(0, "บอส", unit(1f))), turned), "frontal only: no match")
+    }
+
+    @Test
+    fun `only a face the model can read is embedded`() {
+        assertTrue(FaceRecognition.readable(yaw = 10f, pitch = 5f, eyeDistancePx = 40f))
+        assertTrue(FaceRecognition.readable(yaw = -28f, pitch = 0f, eyeDistancePx = 40f))
+        assertFalse(FaceRecognition.readable(yaw = 35f, pitch = 0f, eyeDistancePx = 40f), "turned away")
+        assertFalse(FaceRecognition.readable(yaw = 0f, pitch = -30f, eyeDistancePx = 40f), "looking down")
+        assertFalse(FaceRecognition.readable(yaw = 0f, pitch = 0f, eyeDistancePx = 20f), "too small")
+    }
+
+    @Test
+    fun `the turned-head step keeps each side of the same person`() {
+        val front = unit(1f)
+        val step = TurnedHeadSampler(front, perSide = 2, minIntervalMs = 100L)
+        val turnedBoss = atCos(0.7f)
+        assertFalse(step.offer(turnedBoss, yaw = 5f, nowMs = 1_000), "still looking straight")
+        assertTrue(step.offer(turnedBoss, yaw = 20f, nowMs = 1_000))
+        assertFalse(step.offer(turnedBoss, yaw = 22f, nowMs = 1_050), "too soon")
+        assertFalse(step.offer(atCos(0.1f), yaw = 20f, nowMs = 1_200), "someone else")
+        assertTrue(step.offer(turnedBoss, yaw = 25f, nowMs = 1_300))
+        assertFalse(step.offer(turnedBoss, yaw = 25f, nowMs = 1_500), "this side is full")
+        assertTrue(step.offer(turnedBoss, yaw = -20f, nowMs = 1_600))
+        assertFalse(step.done)
+        assertTrue(step.offer(turnedBoss, yaw = -15f, nowMs = 1_800))
+        assertTrue(step.done)
+        assertEquals(4, step.samples().size)
+    }
+
+    @Test
+    fun `turned-head templates are saved with the profile`() = runBlocking {
+        var state = AvatarState()
+        val controller = PetModeController(CoroutineScope(SupervisorJob()), { state }, { state = it })
+        controller.start()
+        try {
+            controller.enrollFaceWithLandmarks(0, "บอส", listOf(0.4f, 1.2f, 0.9f, 0.8f), unit(1f), listOf(atCos(0.7f), listOf(1f)))
+            val saved = controller.faceProfiles.value[0]
+            assertEquals(1, saved.poseEmbeddings.size, "a wrong-sized template is dropped")
+            assertTrue(close(FaceRecognition.cosine(saved.poseEmbeddings[0], atCos(0.7f)), 1f))
+        } finally {
+            controller.deleteFaceProfile(0)
+            controller.stop()
+        }
     }
 
     private fun sampler() = EnrollmentSampler(target = 4, minIntervalMs = 100L, sameFace = { mean, s ->

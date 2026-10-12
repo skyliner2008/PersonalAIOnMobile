@@ -1,3 +1,62 @@
+## 2026-10-10 — Avatar Mode: หน้าทดสอบการมองเห็น (Bounding Box สด) · 👌 ตอนถือของ · cooldown ท่าใหม่
+- **User Request**: "ทำงานได้ดีขึ้น" (log 00:56–00:58: สิ่งของเหลือแค่ ☕ แก้ว 0.55–0.58 และ 🎛️ รีโมต 0.69 ครั้งเดียว) → "ปรับปรุงได้ และ…อยากได้ตัว test
+  ภาพจากกล้องแบบเรียลไทม์ที่มี Bounding Box แสดง Face Detection, Hand Detection, Object Detection ซึ่งระบบ Bounding Box มีอยู่แล้วในโปรเจค"
+- **👌 ตอนถือแก้ว** (log 00:57:36–38 `→ OK` สลับ NONE และน้องตอบ OK): มือกำแก้วทำให้ปลายโป้งกับปลายชี้ชิดกัน → `HandPose.holds`
+  (ปลายโป้งหรือปลายชี้อยู่บนกรอบสิ่งของ ขยาย 15%) · `HandGestureReader.read(…, thingBoxes)` ใช้ทั้งผู้สมัครของโมเดล
+  (`ObjectSpotter.candidates()`) และของที่แสดง · `HandPoseTest` +1
+- **Cooldown**: ท่าเดิมซ้ำ 3.5 วิ, ท่าใหม่ 1.5 วิ (`SAME_/NEW_GESTURE_COOLDOWN_MS`) — ✌️ หลัง 👌 และ 👎 หลัง 👍 ขึ้นป้ายแต่น้องไม่ตอบ
+- **หน้าทดสอบ** `VisionTestScreen.kt` (commonMain) — ตั้งค่า ⚙️ → แท็บแสดงผล & ตรวจจับ → "🧪 ทดสอบการมองเห็น (Bounding Box)":
+  - กล้องสดเต็มจอ (สัดส่วนตามเฟรมวิเคราะห์ กรอบจึงตรงภาพ) รัน `PetVisionDetector` ตัวจริงของน้อง (น้องยังตอบสนอง) · กล้องซ่อนของ Avatar
+    และป้ายล่างปิดระหว่างเปิด · Live ยังได้เฟรมเมื่อเปิดตา
+  - ใช้ `BoundingBoxOverlay` + `ObjectLabelTags` เดิม (`AROverlayEngine.kt`) · มุมมอง **ทั้งหมด**: ทุกหน้า (ชื่อ cos yaw ยิ้ม; เขียว = จำได้),
+    ทุกมือ (ข้าง ท่าของโมเดล คะแนน) + โครงมือ 21 จุด, ทุกผู้สมัครสิ่งของ (ม่วง ✓ = แสดง, เทา ✗ = ยังไม่ผ่าน `ThingStabilizer`) ·
+    มุมมอง **ที่น้องใช้**: รายการหลัง `PetVisionTargetTracker`
+  - แผงล่าง 4 บรรทัด: หน้า (cos, yaw/pitch, อ่านได้ไหม), มือ (→ ท่าที่ยืนยัน / กำลังยืนยัน ×n), วัตถุ (โมเดล → แสดง), เฟรม/วิ + สถานะ 3 โมเดล
+  - `PetVisionBridge.onVisionDebug` + `VisionDebugFrame` — ตัวตรวจจับสร้างเฟรมดีบักเฉพาะตอนหน้าทดสอบเปิด
+- **Verify**: 685 เทสต์ผ่าน (ข้าม 16) · ติดตั้ง 03:01 (ยังไม่ได้เปิดดูบนเครื่อง — มือถือหลับอยู่)
+
+## 2026-10-09 — Avatar Mode: รีวิว vision (face embedding · Gesture Recognizer · EfficientDet-Lite0) — ความถูกต้อง & ความลื่น
+- **User Request**: "review ตรวจสอบ ระบบ avatar ความถูกต้อง ความลื่นไหล — face embedding, MediaPipe Gesture Recognizer, EfficientDet-Lite0"
+  → รีวิวพบ 15 ข้อ → "ดำเนินการได้ทั้งหมด"
+- **ความลื่น**:
+  - `CameraPreviewView.android.kt`: เดิมทุกเฟรม (~30 fps) แปลง → JPEG q70 → Base64 แล้ว PetVision ถอด JPEG กลับเป็น Bitmap อีกรอบ ทั้งที่
+    vision รับแค่ ~12 fps และ Live ~1 fps → ตอนนี้ทำเฉพาะที่มีคนรับ: พารามิเตอร์ใหม่ `visionProcessor` (Android ส่ง Bitmap ตั้งตรงให้
+    `PetVisionDetector.processBitmap` ตรงๆ เมื่อ `wantsFrame()`) และ `jpegIntervalMs` (null = ไม่ทำ JPEG; Avatar ใช้ 900 ms เฉพาะตอน Live เปิดตา)
+    · analyzer อ่าน callback/processor/interval ล่าสุดผ่าน `rememberUpdatedState` (เดิมค้างค่าตอน bind — สลับ Live ไม่ถึงจนกว่าจะ rebind)
+  - `ObjectSpotter`: EfficientDet ย้ายจากเธรดกล้อง (หน่วงเฟรมละ 30–60 ms ทุก 0.4 วิ → สายตากระตุก) ไปเธรดของตัวเอง ทุก 300 ms บนสำเนาย่อ
+    ด้านยาว 320 (โมเดลดู 320×320 อยู่แล้ว) กรอบคูณกลับเป็นพิกเซลเฟรม · ผลเก่ากว่า 1.5 วิไม่ใช้
+  - `handleDetections` ยังอยู่บน main thread โดยตั้งใจ: callback ปลายทาง (`onGazeTouch` ฯลฯ) อ่าน-แก้-เขียน `activeAvatarState` บน main —
+    ย้ายเธรดจะทำให้อัปเดตทับกัน · เพิ่ม log `slow detections on the main thread Nms` เมื่อเกิน 8 ms · `isProcessing` เป็น `@Volatile`
+- **Face embedding** (`FaceRecognition.kt`, `PetVisionDetector`):
+  - ML Kit `.enableTracking()` → embedding ผูกกับ trackingId ของหน้าที่ถ่าย — หน้าหลักเปลี่ยนคนแล้วไม่รับชื่อคนเดิม (เดิมได้นานถึง 1.5 วิ)
+  - `FaceRecognition.readable`: สร้าง embedding เฉพาะหน้า |yaw| ≤ 30°, |pitch| ≤ 25°, ตาห่าง ≥ 28 px
+  - `FaceIdentity`: เฉลี่ย 3 embedding ล่าสุดของหน้าเดียวกัน · รับชื่อที่ cos ≥ 0.363 · คงชื่อถึง 0.30 · ปล่อยเมื่อต่ำกว่าติดกัน 2 ครั้ง ·
+    อีกโปรไฟล์ชิงได้เมื่อชนะ ≥ 0.05 · tracking id ใหม่เริ่มใหม่ (เดิม embedding ใบเดียวต่ำ → ชื่อหลุดเป็น "บุคคลอื่น" ทันที)
+  - สแกนลงทะเบียน 2 ขั้น (`FaceEnrollmentScanner` + `TurnedHeadSampler`): หน้าตรง 8 ตัวอย่าง (70%) → หันซ้าย/ขวา 12–30° ข้างละ 2
+    (ต้อง cos ≥ 0.30 กับหน้าตรง; จบเองใน 10 วิ หรือกด "ข้ามขั้นนี้") · `PetFaceProfile.poseEmbeddings` · จับคู่ด้วยค่าดีสุด `profileCosine`
+    · `FaceBiometricDetails.embeddingYaw` / `isPlaced` · log `🪪 slot N: … , K turned-head (cos …)`
+- **Sentry**: เตือนเฉพาะหน้าที่ไม่ตรงโปรไฟล์ใด ค้าง ≥ 1 วิ (เดิมเจ้าของนั่งโต๊ะก็เตือนทุก 5 วิ) · ไม่มีใครลงทะเบียน = ทุกหน้าเป็นคนแปลกหน้าเหมือนเดิม
+- **Copycat WINK**: ใช้การขยิบตาเดียวกับป้าย (ค้าง 2 เฟรม, มือไม่บังหน้า) — เดิมเฟรมเดียวของการกระพริบก็ชนะเกม
+- **Gesture Recognizer**:
+  - `HandGestureReader` แยกมือด้วยตำแหน่งข้อมือที่ใกล้สุดจากเฟรมก่อน (≤ 2.5 ฝ่ามือ) แทนชื่อข้าง — สองมือบางเฟรมถูกเรียก "Right" ทั้งคู่
+    ทำให้ x ปนกันเป็นการโบกมือปลอม (และ handedness กลับด้านกับกล้องหลัง)
+  - ท่ามือยอมให้เว้นได้ 1 เฟรม (`GESTURE_GAP_FRAMES`) — ภาพเบลอตอนโบกทำ streak รีเซ็ต
+  - 👌 ต้อง `handScore` ≥ 0.6 (`HandPose.MIN_HAND_SCORE`)
+- **EfficientDet-Lite0**: `Things.MIN_SCORE` 0.5 → 0.4 (ของชิ้นเล็กบนโต๊ะได้ 0.35–0.5) · ของจาก EfficientDet (`Thing …`) ไม่ถูกตัดด้วยโซนหน้า-คอ
+  ของ tracker แล้ว (แก้ว/มือถือระดับคางเป็นของจริง; ตัวตรวจจับยังตัดของที่ทับหน้าเกิน 45%)
+- **Release**: `released` flag — เฟรมและผล task ที่มาหลัง `release()` ถูกทิ้ง
+- **ทดสอบจริง 19:31–19:33** (ผู้ใช้: "การตรวจจับใบหน้า โอเค แต่การตรวจจับวัตถุ ยังมั่วมาก ไม่มีสิ่งของอะไร มีแค่ใบหน้า แต่เจอทั้ง ขวด แล็ปท็อป
+  กระเป๋าถือ หนังสือ สลับไปมา"):
+  - หน้า: สแกน 2 ขั้นได้ `+ 4 turned-head` · หลังสแกน cos 0.80–0.96 · HIGH_FIVE ×3, V_SIGN, BYE ขึ้นป้าย · main thread 9–13 ms
+  - วัตถุ: ทุกชิ้น 0.41–0.66 (tv, book, laptop, bottle, handbag, backpack, car, cell phone, cup) = ช่วงเดาผิดของโมเดล → การลด
+    `MIN_SCORE` เป็น 0.4 ทำให้แย่ลง
+  - แก้: `ThingStabilizer` (Things.kt) — ชนิดเดิมตำแหน่งเดิม (IoU ≥ 0.3) ใน 3 จาก 4 รอบล่าสุด (~1 วิ) ค่าเฉลี่ย ≥ 0.55 (`SHOW_SCORE`),
+    ของสวมใส่/ถือ handbag/backpack/tie/suitcase/umbrella ≥ 0.65 · แสดงแล้วอยู่ต่อเมื่อเห็น 2 จาก 4 · ช่องว่าง > 1.5 วิเริ่มใหม่ ·
+    log `📦 raw: tv 0.48 → shown: —` (ObjectSpotter) · `ThingsTest` +4 · ติดตั้ง 19:44
+- **Verify**: 680 เทสต์ผ่าน (ข้าม 16) · ใหม่: `FaceRecognitionTest` +7 (hysteresis, margin, averaging, pose template, readable, turned-head step,
+  บันทึกโปรไฟล์), `HandPoseTest` +1 (สองมือ "Right" ไม่เป็น BYE) + OK handScore, `ThingsTest` +1 (แก้วระดับคาง) · ติดตั้ง 11:48 โหลดครบ 3 โมเดล
+  (SFace 709 ms, Hand 804 ms, EfficientDet 483 ms) ไม่มี crash
+
 ## 2026-10-09 — Avatar Mode: มือและท่ามือด้วยโมเดล MediaPipe แทนการนับพิกเซลสีผิว
 - **User Request**: "log ใบหน้า การยิ้ม ทำงานได้ดี แต่มันยังมีความสับสน ระหว่างใบหน้า มือ การแสดงท่าทางของมือ" (log 00:32–00:34)
   → เลือก "ใช้ MediaPipe" (อนุญาตดาวน์โหลดไลบรารี + โมเดล)

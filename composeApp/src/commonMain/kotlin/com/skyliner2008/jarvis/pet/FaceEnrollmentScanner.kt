@@ -70,8 +70,17 @@ fun FaceEnrollmentScanner(
     slotIndex: Int,
     slotName: String,
     biometrics: FaceBiometricDetails,
-    /** averagedLandmarks: mean landmark ratios; embedding: mean SFace embedding (empty without the model) */
-    onCompleteEnrollment: (slotIndex: Int, slotName: String, averagedLandmarks: List<Float>, embedding: List<Float>) -> Unit,
+    /**
+     * averagedLandmarks: mean landmark ratios; embedding: mean SFace embedding (empty without the model);
+     * poseEmbeddings: the turned-head ones ([TurnedHeadSampler])
+     */
+    onCompleteEnrollment: (
+        slotIndex: Int,
+        slotName: String,
+        averagedLandmarks: List<Float>,
+        embedding: List<Float>,
+        poseEmbeddings: List<List<Float>>
+    ) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     onSwitchCamera: (() -> Unit)? = null,
@@ -98,11 +107,49 @@ fun FaceEnrollmentScanner(
     var sampleCount by remember { mutableStateOf(0) }
     var lastEmbeddingAt by remember { mutableStateOf(0L) }
     var restarted by remember { mutableStateOf(false) }
+    // step 2 (with the model): the head turned a little each way — null while the frontal step runs
+    var turned by remember { mutableStateOf<TurnedHeadSampler?>(null) }
+    var turnedCount by remember { mutableStateOf(0) }
+    var frontResult by remember { mutableStateOf<Pair<List<Float>, List<Float>>?>(null) }
 
     val targetFrames = sampler.target
 
+    fun finish(ratios: List<Float>, embedding: List<Float>, poses: List<List<Float>>) {
+        if (isCompleted) return
+        finalAveragedRatios = ratios
+        isCompleted = true
+        // how alike the scan's samples were — to check an enrollment from logcat
+        val minCos = if (embedding.isNotEmpty()) sampler.samples().minOf { FaceRecognition.cosine(embedding, it) } else null
+        val poseCos = poses.map { FaceRecognition.cosine(embedding, it) }
+        com.skyliner2008.jarvis.logDebug(
+            "FaceScan",
+            "🪪 slot ${slotIndex + 1}: ${sampler.count} samples, restarts ${sampler.restarts}" +
+                (minCos?.let { ", min cos to mean ${"%.2f".format(it)}" } ?: " (landmark ratios)") +
+                if (embedding.isNotEmpty()) ", ${poses.size} turned-head (cos ${poseCos.joinToString { "%.2f".format(it) }})" else ""
+        )
+        onCompleteEnrollment(slotIndex, slotName, ratios, embedding, poses)
+    }
+
+    // the turned-head step ends by itself: a user who does not turn still gets the frontal enrollment
+    LaunchedEffect(turned) {
+        val step = turned ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(TURN_STEP_MS)
+        frontResult?.let { (ratios, embedding) -> finish(ratios, embedding, step.samples()) }
+    }
+
     LaunchedEffect(biometrics) {
         if (isCompleted) return@LaunchedEffect
+
+        turned?.let { step ->
+            val (ratios, embedding) = frontResult ?: return@LaunchedEffect
+            if (!biometrics.isFaceDetected || !biometrics.isPlaced) return@LaunchedEffect
+            if (biometrics.embedding.isEmpty() || biometrics.embeddingAtMs == lastEmbeddingAt) return@LaunchedEffect
+            lastEmbeddingAt = biometrics.embeddingAtMs
+            val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+            if (step.offer(biometrics.embedding, biometrics.embeddingYaw, now)) turnedCount = step.count
+            if (step.done) finish(ratios, embedding, step.samples())
+            return@LaunchedEffect
+        }
 
         val isReadyForSampling = biometrics.isFaceDetected &&
                 biometrics.isCentered &&
@@ -126,17 +173,13 @@ fun FaceEnrollmentScanner(
             EnrollmentSampler.Result.ADDED -> if (sampler.count > 2) restarted = false
             EnrollmentSampler.Result.DONE -> {
                 val ratios = EnrollmentSampler.average(sampler.extras())
-                val embedding = if (useEmbedding) FaceRecognition.meanEmbedding(sampler.samples()) else emptyList()
-                finalAveragedRatios = ratios
-                isCompleted = true
-                // how alike the scan's samples were — to check an enrollment from logcat
-                val minCos = if (embedding.isNotEmpty()) sampler.samples().minOf { FaceRecognition.cosine(embedding, it) } else null
-                com.skyliner2008.jarvis.logDebug(
-                    "FaceScan",
-                    "🪪 slot ${slotIndex + 1}: ${sampler.count} samples, restarts ${sampler.restarts}" +
-                        (minCos?.let { ", min cos to mean ${"%.2f".format(it)}" } ?: " (landmark ratios)")
-                )
-                onCompleteEnrollment(slotIndex, slotName, ratios, embedding)
+                if (useEmbedding) {
+                    val embedding = FaceRecognition.meanEmbedding(sampler.samples())
+                    frontResult = ratios to embedding
+                    turned = TurnedHeadSampler(embedding)
+                } else {
+                    finish(ratios, emptyList(), emptyList())
+                }
             }
             else -> Unit
         }
@@ -150,8 +193,17 @@ fun FaceEnrollmentScanner(
         }
     }
 
-    val progress = if (isCompleted) 1f else (sampleCount.toFloat() / targetFrames).coerceIn(0f, 1f)
+    val turnStep = turned
+    // with the model the frontal step fills the bar to FRONT_SHARE, the turned head the rest
+    val progress = when {
+        isCompleted -> 1f
+        turnStep != null -> FRONT_SHARE + (1f - FRONT_SHARE) * turnedCount / turnStep.target
+        useEmbedding -> FRONT_SHARE * sampleCount / targetFrames
+        else -> sampleCount.toFloat() / targetFrames
+    }.coerceIn(0f, 1f)
     val progressPct = (progress * 100).toInt()
+    // in place: centered and straight for the frontal step, centered at any angle for the turned head
+    val inPlace = if (turnStep != null) biometrics.isPlaced else biometrics.isCentered
 
     val infiniteTransition = rememberInfiniteTransition(label = "biometric_laser")
     val laserY by infiniteTransition.animateFloat(
@@ -252,7 +304,7 @@ fun FaceEnrollmentScanner(
                         BorderStroke(
                             2.dp,
                             if (isCompleted) Color(0xFF00E676)
-                            else if (biometrics.isCentered) Color(0xFF00F0FF)
+                            else if (inPlace) Color(0xFF00F0FF)
                             else Color(0xFFFFB300).copy(alpha = 0.7f)
                         ),
                         RoundedCornerShape(26.dp)
@@ -277,7 +329,7 @@ fun FaceEnrollmentScanner(
 
                     val reticleColor = when {
                         isCompleted -> Color(0xFF00E676)
-                        biometrics.isCentered -> Color(0xFF00F0FF)
+                        inPlace -> Color(0xFF00F0FF)
                         biometrics.isFaceDetected -> Color(0xFFFFB300)
                         else -> Color.White.copy(alpha = 0.35f)
                     }
@@ -288,7 +340,7 @@ fun FaceEnrollmentScanner(
                         size = Size(ovalWidth, ovalHeight),
                         style = Stroke(
                             width = 2.5f,
-                            pathEffect = if (!biometrics.isCentered && !isCompleted) PathEffect.dashPathEffect(floatArrayOf(16f, 12f)) else null
+                            pathEffect = if (!inPlace && !isCompleted) PathEffect.dashPathEffect(floatArrayOf(16f, 12f)) else null
                         )
                     )
 
@@ -370,7 +422,7 @@ fun FaceEnrollmentScanner(
                 FeatureBadge(label = "ดวงตา 👁️", isDetected = biometrics.hasEyesDetected)
                 FeatureBadge(label = "สันจมูก 👃", isDetected = biometrics.hasNoseDetected)
                 FeatureBadge(label = "ริมฝีปาก 👄", isDetected = biometrics.hasMouthDetected)
-                FeatureBadge(label = "ตรงกลาง 📐", isDetected = biometrics.isCentered)
+                FeatureBadge(label = "ตรงกลาง 📐", isDetected = inPlace)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -385,13 +437,14 @@ fun FaceEnrollmentScanner(
                     text = when {
                         isCompleted -> "✅ สแกนสำเร็จ 100% สมบูรณ์"
                         !biometrics.isFaceDetected -> "⚪ กรุณามองตรงมาที่กล้อง"
-                        !biometrics.isCentered -> "🟡 จัดใบหน้าให้อยู่ตรงกลางกรอบ"
+                        !inPlace -> "🟡 จัดใบหน้าให้อยู่ตรงกลางกรอบ"
+                        turnStep != null -> "↔️ ค่อยๆ หันหน้าไปทางซ้ายและขวาเล็กน้อย ($turnedCount/${turnStep.target})"
                         restarted -> "🔄 ใบหน้าหลุดกรอบหรือเปลี่ยนคน — เริ่มเก็บใหม่"
                         else -> "🟢 กำลังวิเคราะห์จุดต่างและโครงหน้า..."
                     },
                     color = when {
                         isCompleted -> Color(0xFF00E676)
-                        biometrics.isCentered -> Color(0xFF00F0FF)
+                        inPlace -> Color(0xFF00F0FF)
                         biometrics.isFaceDetected -> Color(0xFFFFB300)
                         else -> Color.White.copy(alpha = 0.6f)
                     },
@@ -438,6 +491,22 @@ fun FaceEnrollmentScanner(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            } else if (turnStep != null) {
+                Text(
+                    text = "ขั้นที่ 2: หันหน้าช้าๆ ไปซ้ายและขวาเล็กน้อย (ประมาณ 15–30°) ช่วยให้น้องจำได้แม้ไม่ได้มองตรง",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { frontResult?.let { (ratios, embedding) -> finish(ratios, embedding, turnStep.samples()) } },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(text = "ข้ามขั้นนี้ (บันทึกเฉพาะหน้าตรง)", color = Color.White, fontSize = 13.sp)
+                }
             } else {
                 Text(
                     text = "เคล็ดลับ: หันหน้าตรงเข้าหากล้องในที่มีแสงสว่างเพียงพอ และอยู่นิ่งๆ สักครู่",
@@ -450,6 +519,11 @@ fun FaceEnrollmentScanner(
     }
 }
 }
+
+/** the turned-head step gives up after this long and saves what it has (the frontal template at least) */
+private const val TURN_STEP_MS = 10_000L
+/** the share of the progress bar the frontal step fills when a turned-head step follows */
+private const val FRONT_SHARE = 0.7f
 
 @Composable
 private fun FeatureBadge(label: String, isDetected: Boolean) {

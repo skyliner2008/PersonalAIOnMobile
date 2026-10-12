@@ -240,7 +240,13 @@ class PetModeController(
     }
 
     /** @param embedding the scan's mean SFace embedding ([FaceRecognition.meanEmbedding]); empty without the model */
-    fun enrollFaceWithLandmarks(slotIndex: Int, name: String, landmarks: List<Float>, embedding: List<Float> = emptyList()): Boolean {
+    fun enrollFaceWithLandmarks(
+        slotIndex: Int,
+        name: String,
+        landmarks: List<Float>,
+        embedding: List<Float> = emptyList(),
+        poseEmbeddings: List<List<Float>> = emptyList()
+    ): Boolean {
         if (landmarks.isEmpty() && embedding.isEmpty()) return false
         val currentList = _faceProfiles.value.toMutableList()
         if (slotIndex !in currentList.indices) return false
@@ -250,14 +256,17 @@ class PetModeController(
             isEnrolled = true,
             landmarkRatios = landmarks,
             enrolledAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
-            embedding = if (embedding.size == FaceRecognition.EMBEDDING_SIZE) FaceRecognition.normalize(embedding) else emptyList()
+            embedding = if (embedding.size == FaceRecognition.EMBEDDING_SIZE) FaceRecognition.normalize(embedding) else emptyList(),
+            poseEmbeddings = if (embedding.size == FaceRecognition.EMBEDDING_SIZE) {
+                poseEmbeddings.filter { it.size == FaceRecognition.EMBEDDING_SIZE }.map { FaceRecognition.normalize(it) }
+            } else emptyList()
         )
         _faceProfiles.value = currentList
         PetMemoryStore.saveFaceProfiles(currentList)
         _currentRecognizedPerson.value = currentList[slotIndex].name
         _currentRecognizedSlot.value = slotIndex
         logDebug(TAG, "🪪 Enrolled slot ${slotIndex + 1} '${currentList[slotIndex].name}' by " +
-            if (currentList[slotIndex].usesEmbedding) "SFace embedding" else "landmark ratios")
+            if (currentList[slotIndex].usesEmbedding) "SFace embedding + ${currentList[slotIndex].poseEmbeddings.size} turned-head" else "landmark ratios")
         RobotSoundPlayer.playSparkle()
         return true
     }

@@ -60,6 +60,14 @@ class PetVisionDetector(
         private const val EMBED_INTERVAL_MS = 330L
         /** an embedding older than this no longer describes the face in front of the camera */
         private const val EMBED_FRESH_MS = 1_500L
+        /** the sentry alarms for a face nobody enrolled once it has stayed unknown this long (time to embed it) */
+        private const val SENTRY_UNKNOWN_MS = 1_000L
+        /** one frame without a gesture (motion blur, a dip under the score) does not break a gesture's run */
+        private const val GESTURE_GAP_FRAMES = 1
+        private const val SAME_GESTURE_COOLDOWN_MS = 3_500L
+        private const val NEW_GESTURE_COOLDOWN_MS = 1_500L
+        /** handleDetections runs on the main thread: say so in the log when a frame takes longer than this */
+        private const val SLOW_MAIN_MS = 8L
 
         /**
          * เรียกครั้งเดียวตอนเริ่มต้นแอปเพื่อลงทะเบียน processorFactory กับ PetVisionBridge
@@ -78,6 +86,8 @@ class PetVisionDetector(
         .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
         .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
         .setMinFaceSize(0.15f)
+        // a tracking id per face: the embedding is matched only to the face it was taken from
+        .enableTracking()
         .build()
 
     private val faceDetector: FaceDetector = FaceDetection.getClient(faceOptions)
@@ -88,8 +98,11 @@ class PetVisionDetector(
     private val gazeStabilizer = GazeStabilizer()
     private val gazeNeutral = com.skyliner2008.jarvis.ui.component.avatar.GazeNeutral()
 
-    private var isProcessing = false
-    private var lastProcessTime = 0L
+    // set on the camera thread, cleared on the main thread when the face task completes
+    @Volatile private var isProcessing = false
+    @Volatile private var lastProcessTime = 0L
+    // released: frames and task results that arrive after release() are dropped
+    @Volatile private var released = false
     private var lastIntruderAlertTime = 0L
     private var lastGazeLogTime = 0L
     private var lastDetectionLogTime = 0L
@@ -101,10 +114,20 @@ class PetVisionDetector(
     private var lastMatchedSlot = -1
     private var lastProfileEmitTime = 0L
 
-    // the primary face's latest SFace embedding ([FaceEmbedder]), refreshed every EMBED_INTERVAL_MS on its own thread
+    // the primary face's latest SFace embedding ([FaceEmbedder]), refreshed every EMBED_INTERVAL_MS on its own thread,
+    // with the tracking id and the yaw of the face it was taken from
     @Volatile private var latestEmbedding: List<Float>? = null
     @Volatile private var latestEmbeddingAt = 0L
+    @Volatile private var latestEmbeddingFace: Int? = null
+    @Volatile private var latestEmbeddingYaw = 0f
     private var lastEmbedRequestAt = 0L
+    // who the face is, embedding after embedding (averaged, with hysteresis) — and the embedding it last answered
+    private val identity = FaceIdentity()
+    private var identityAnswer: FaceIdentity.Answer? = null
+    private var identityEmbeddingAt = 0L
+    // since when the primary face has been nobody enrolled (the sentry waits SENTRY_UNKNOWN_MS)
+    private var unknownSince = 0L
+    private var gestureGap = 0
 
     init {
         PetVisionBridge.onResetAbsence = {
@@ -113,10 +136,12 @@ class PetVisionDetector(
         }
     }
 
+    /** Throttle processing to max ~12 fps (80ms) to conserve CPU/battery */
+    override fun wantsFrame(): Boolean =
+        !released && !isProcessing && System.currentTimeMillis() - lastProcessTime >= 80L
+
     override fun processFrame(rawBytes: ByteArray, isFrontCamera: Boolean) {
-        val now = System.currentTimeMillis()
-        // Throttle processing to max ~12 fps (80ms) to conserve CPU/battery
-        if (isProcessing || now - lastProcessTime < 80L) return
+        if (!wantsFrame()) return
 
         if (!hasLoggedFirstFrame) {
             hasLoggedFirstFrame = true
@@ -178,7 +203,12 @@ class PetVisionDetector(
             }
     }
 
+    /** takes [bitmap] (ARGB_8888) and recycles it once face detection completes */
     fun processBitmap(bitmap: Bitmap, isFrontCamera: Boolean = true, isAlreadyMirrored: Boolean = false) {
+        if (released) {
+            bitmap.recycle()
+            return
+        }
         isProcessing = true
         lastProcessTime = System.currentTimeMillis()
 
@@ -190,7 +220,9 @@ class PetVisionDetector(
 
         Tasks.whenAllComplete(faceTask)
             .addOnSuccessListener {
+                if (released) return@addOnSuccessListener
                 try {
+                    val t0 = System.currentTimeMillis()
                     val faces = if (faceTask.isSuccessful) faceTask.result ?: emptyList() else emptyList()
                     handleDetections(
                         faces = faces,
@@ -202,6 +234,8 @@ class PetVisionDetector(
                         isAlreadyMirrored = isAlreadyMirrored,
                         bitmap = bitmap
                     )
+                    val ms = System.currentTimeMillis() - t0
+                    if (ms > SLOW_MAIN_MS) logDebug(TAG, "slow detections on the main thread ${ms}ms")
                 } catch (e: Exception) {
                     logError(TAG, "Error handling detections: ${e.message}", e)
                 }
@@ -224,6 +258,7 @@ class PetVisionDetector(
      */
     private fun handObjects(
         hands: List<HandSighting>?,
+        things: List<ThingSighting>?,
         width: Int,
         height: Int,
         isFrontCamera: Boolean,
@@ -231,7 +266,9 @@ class PetVisionDetector(
         faceCovered: Boolean
     ): List<DetectedObject> {
         val now = System.currentTimeMillis()
-        val reading = handReader.read(hands.orEmpty(), now)
+        // the model's candidates, not only the things shown: a hand round a cup is holding it either way
+        val thingBoxes = (ObjectSpotter.candidates() + things.orEmpty()).map { it.box }
+        val reading = handReader.read(hands.orEmpty(), now, thingBoxes)
         handleGestureFrame(reading?.gesture ?: HandGesture.NONE, now)
         logHands(hands.orEmpty(), reading, faceCovered, now)
         if (reading == null) return emptyList()
@@ -298,6 +335,7 @@ class PetVisionDetector(
         if (candidateStreak >= CONFIRM_FRAMES) candidateGesture else HandGesture.NONE
 
     private var lastGestureTriggerTime: Long = 0L
+    private var lastTriggeredGesture: HandGesture = HandGesture.NONE
     private var candidateGesture: HandGesture = HandGesture.NONE
     private var candidateStreak: Int = 0
     private var activeLatchedGesture: HandGesture = HandGesture.NONE
@@ -308,11 +346,12 @@ class PetVisionDetector(
      * 1. Multi-Frame Confirmation: ต้องตรวจจับท่าเดิมติดต่อกันอย่างน้อย 3 เฟรม (~240ms)
      * 2. Edge-Triggered Latch: ยิง Event เพียงครั้งเดียวเมื่อตรวจพบท่าใหม่ ตราบใดที่ยังค้างท่าเดิมจะไม่ยิงซ้ำ
      * 3. Latch Release: ท่าเดิมจะปลดล็อกเมื่อเอามือลง (NONE) ติดต่อกันเกิน 800ms
-     * 4. Cooldown Guard: เว้นระยะอย่างน้อย 3.5 วินาทีระหว่างการสั่งงาน
+     * 4. Cooldown Guard: ท่าเดิมซ้ำเว้น 3.5 วินาที ท่าใหม่เว้น 1.5 วินาที
      */
     private fun handleGestureFrame(gesture: HandGesture, now: Long) {
         if (gesture != HandGesture.NONE) {
             lastNoneGestureTime = 0L
+            gestureGap = 0
             if (gesture == candidateGesture) {
                 candidateStreak++
             } else {
@@ -323,18 +362,28 @@ class PetVisionDetector(
             if (candidateStreak >= CONFIRM_FRAMES) {
                 val confirmed = candidateGesture
                 val isNewGesture = (confirmed != activeLatchedGesture)
-                val isCooldownPassed = (now - lastGestureTriggerTime > 3500L)
+                // the same gesture again waits 3.5 s; another one 1.5 s (✌️ right after 👌, 👎 after 👍, the wave that
+                // begins as a held palm — phone 2026-10-10 00:57: shown, but the pet did not answer)
+                val cooldown = if (confirmed == lastTriggeredGesture) SAME_GESTURE_COOLDOWN_MS else NEW_GESTURE_COOLDOWN_MS
+                val isCooldownPassed = (now - lastGestureTriggerTime > cooldown)
 
                 if (isNewGesture && isCooldownPassed) {
                     activeLatchedGesture = confirmed
                     lastGestureTriggerTime = now
+                    lastTriggeredGesture = confirmed
                     logDebug(TAG, "🖐️ [HandGesture] Confirmed & Triggered: ${confirmed.name}")
                     PetVisionBridge.onHandGestureDetected?.invoke(confirmed)
                 }
             }
         } else {
-            candidateGesture = HandGesture.NONE
-            candidateStreak = 0
+            // one gap frame keeps the run (the streak waits); a second ends it
+            if (candidateStreak > 0 && gestureGap < GESTURE_GAP_FRAMES) {
+                gestureGap++
+            } else {
+                candidateGesture = HandGesture.NONE
+                candidateStreak = 0
+                gestureGap = 0
+            }
 
             if (activeLatchedGesture != HandGesture.NONE) {
                 if (lastNoneGestureTime == 0L) {
@@ -348,7 +397,10 @@ class PetVisionDetector(
         }
     }
 
-    /** ask for the primary face's embedding when one is due (5 ML Kit landmarks → SFace on its own thread) */
+    /**
+     * ask for the primary face's embedding when one is due (5 ML Kit landmarks → SFace on its own thread) — only for a
+     * face the model can read ([FaceRecognition.readable]): turned away, tilted or tiny, it would not look like its owner
+     */
     private fun requestEmbedding(face: Face, bitmap: Bitmap) {
         if (!FaceEmbedder.isAvailable) return
         val now = System.currentTimeMillis()
@@ -359,9 +411,14 @@ class PetVisionDetector(
         val nose = point(FaceLandmark.NOSE_BASE) ?: return
         val mouthA = point(FaceLandmark.MOUTH_LEFT) ?: return
         val mouthB = point(FaceLandmark.MOUTH_RIGHT) ?: return
+        val yaw = face.headEulerAngleY
+        if (!FaceRecognition.readable(yaw, face.headEulerAngleX, hypot(eyeA[0] - eyeB[0], eyeA[1] - eyeB[1]))) return
         val points = FaceRecognition.templateOrder(eyeA, eyeB, nose, mouthA, mouthB)
+        val faceId = face.trackingId
         val started = FaceEmbedder.embedAsync(bitmap, points) { embedding ->
             if (embedding != null) {
+                latestEmbeddingFace = faceId
+                latestEmbeddingYaw = yaw
                 latestEmbedding = embedding
                 latestEmbeddingAt = System.currentTimeMillis()
             }
@@ -378,7 +435,7 @@ class PetVisionDetector(
         if (slot == lastScoreLogSlot && now - lastScoreLogAt < 3_000L) return
         lastScoreLogSlot = slot
         lastScoreLogAt = now
-        val scores = profiles.map { it.name to FaceRecognition.cosine(it.embedding, embedding) }.sortedByDescending { it.second }
+        val scores = profiles.map { it.name to FaceRecognition.profileCosine(it, embedding) }.sortedByDescending { it.second }
         logDebug(
             TAG,
             "🪪 SFace: " + (if (scores.isEmpty()) "ไม่มีโปรไฟล์ที่บันทึกด้วยโมเดล" else scores.joinToString { "${it.first} cos=${"%.2f".format(it.second)}" }) +
@@ -386,8 +443,14 @@ class PetVisionDetector(
         )
     }
 
-    private fun freshEmbedding(now: Long): List<Float>? =
-        latestEmbedding?.takeIf { now - latestEmbeddingAt <= EMBED_FRESH_MS }
+    /** the latest embedding if it is recent and of [face] (another face's, after the primary changed, is not) */
+    private fun freshEmbedding(face: Face, now: Long): List<Float>? {
+        val embedding = latestEmbedding ?: return null
+        if (now - latestEmbeddingAt > EMBED_FRESH_MS) return null
+        val id = face.trackingId
+        val takenFrom = latestEmbeddingFace
+        return embedding.takeIf { id == null || takenFrom == null || id == takenFrom }
+    }
 
     /** report the match to the bridge: a new person at once, the same person's score smoothed every 0.8 s */
     private fun emitMatch(profile: PetFaceProfile?, rawPct: Int, noMatchLabel: String, nowTime: Long) {
@@ -413,6 +476,106 @@ class PetVisionDetector(
                 PetVisionBridge.onFaceProfileMatched?.invoke(noMatchLabel, -1)
             }
         }
+    }
+
+    private var debugFrames = 0
+    private var debugFpsSince = 0L
+    private var debugFps = 0f
+
+    /**
+     * The vision test screen's frame ([PetVisionBridge.onVisionDebug]): every face, hand and thing candidate with
+     * what the models said, the pet's own (tracked) list, and the hands' points. Built only while the screen is open.
+     */
+    private fun emitDebug(
+        sink: (VisionDebugFrame) -> Unit,
+        faces: List<Face>,
+        primary: Face?,
+        hands: List<HandSighting>,
+        shownThings: List<ThingSighting>,
+        tracked: List<DetectedObject>,
+        w: Int,
+        h: Int,
+        mirror: Boolean
+    ) {
+        val now = System.currentTimeMillis()
+        debugFrames++
+        if (debugFpsSince == 0L) debugFpsSince = now
+        if (now - debugFpsSince >= 1_000L) {
+            debugFps = debugFrames * 1_000f / (now - debugFpsSince)
+            debugFrames = 0
+            debugFpsSince = now
+        }
+        val fw = w.toFloat().coerceAtLeast(1f)
+        val fh = h.toFloat().coerceAtLeast(1f)
+        fun nx(x: Float) = if (mirror) 1f - x / fw else x / fw
+        fun box(l: Float, t: Float, r: Float, b: Float): BoundingBox {
+            val x0 = minOf(nx(l), nx(r)).coerceIn(0f, 1f)
+            return BoundingBox(
+                x = x0,
+                y = (t / fh).coerceIn(0f, 1f),
+                width = (abs(r - l) / fw).coerceIn(0.01f, 1f),
+                height = ((b - t) / fh).coerceIn(0.01f, 1f)
+            )
+        }
+        val raw = mutableListOf<DetectedObject>()
+        val answer = identityAnswer
+        faces.forEach { face ->
+            val fb = face.boundingBox
+            val isPrimary = face === primary
+            val smile = face.smilingProbability?.let { " 😊${(it * 100).toInt()}" } ?: ""
+            val who = if (isPrimary) (answer?.profile?.name ?: "ไม่รู้จัก") + (answer?.let { " cos ${"%.2f".format(it.cosine)}" } ?: "") else "หน้า"
+            raw += DetectedObject(
+                label = "$who · yaw ${face.headEulerAngleY.toInt()}°$smile",
+                confidence = 1f,
+                boundingBox = box(fb.left.toFloat(), fb.top.toFloat(), fb.right.toFloat(), fb.bottom.toFloat()),
+                color = if (isPrimary && answer?.profile != null) "#76FF03" else if (isPrimary) "#00F0FF" else "#80DEEA"
+            )
+        }
+        hands.forEach { hand ->
+            val (l, t, r, b) = hand.bounds()
+            raw += DetectedObject(
+                label = "✋ ${hand.side} ${hand.modelGesture} ${"%.2f".format(hand.gestureScore)}",
+                confidence = hand.handScore,
+                boundingBox = box(l, t, r, b),
+                color = "#FF9100"
+            )
+        }
+        val candidates = ObjectSpotter.candidates()
+        val shownNames = shownThings.map { it.name }.toSet()
+        candidates.forEach { thing ->
+            val (l, t, r, b) = thing.box
+            val shown = thing.name in shownNames
+            raw += DetectedObject(
+                label = (if (shown) "${Things.thai(thing.name)} ✓" else "${thing.name} ✗") + " ${"%.2f".format(thing.score)}",
+                confidence = thing.score,
+                boundingBox = box(l, t, r, b),
+                color = if (shown) "#B388FF" else "#9E9E9E",
+                isLocked = shown
+            )
+        }
+        val handPoints = hands.map { hand ->
+            FloatArray(hand.points.size) { i -> if (i % 2 == 0) nx(hand.points[i]).coerceIn(0f, 1f) else (hand.points[i] / fh).coerceIn(0f, 1f) }
+        }
+        val faceLine = if (primary == null) "👤 ไม่พบใบหน้า" else {
+            val readable = FaceRecognition.readable(primary.headEulerAngleY, primary.headEulerAngleX,
+                primary.getLandmark(FaceLandmark.LEFT_EYE)?.position?.let { a ->
+                    primary.getLandmark(FaceLandmark.RIGHT_EYE)?.position?.let { b -> hypot(a.x - b.x, a.y - b.y) }
+                } ?: 0f)
+            "👤 ${faces.size} หน้า · ${answer?.profile?.name ?: "ไม่รู้จัก"}" +
+                (answer?.let { " cos ${"%.2f".format(it.cosine)}" } ?: "") +
+                " · yaw ${primary.headEulerAngleY.toInt()}° pitch ${primary.headEulerAngleX.toInt()}°" +
+                if (readable) " · อ่านหน้าได้" else " · ไม่อ่าน (หัน/ก้ม/เล็กไป)"
+        }
+        val handLine = if (hands.isEmpty()) "✋ ไม่พบมือ" else {
+            "✋ " + hands.joinToString { "${it.side} ${it.modelGesture} ${"%.2f".format(it.gestureScore)}" } +
+                " → ${confirmedGesture().takeIf { it != HandGesture.NONE }?.let { "${it.icon} ${it.name}" } ?: "ยังไม่ยืนยัน"}" +
+                (if (candidateGesture != HandGesture.NONE) " (${candidateGesture.name} ×$candidateStreak)" else "")
+        }
+        val thingLine = "📦 โมเดล: " + candidates.joinToString { "${it.name} ${"%.2f".format(it.score)}" }.ifEmpty { "—" } +
+            " → แสดง: " + shownThings.joinToString { "${Things.thai(it.name)} ${"%.2f".format(it.score)}" }.ifEmpty { "—" }
+        val modelLine = "⏱ ${"%.1f".format(debugFps)} เฟรม/วิ · SFace ${if (FaceEmbedder.isAvailable) "✓" else "✗"}" +
+            " · มือ ${if (HandTracker.isAvailable) "✓" else "✗"} · วัตถุ ${if (ObjectSpotter.isAvailable) "✓" else "✗"} · ${w}×${h}"
+        sink(VisionDebugFrame(w, h, raw, tracked, handPoints, listOf(faceLine, handLine, thingLine, modelLine), debugFps))
     }
 
     private fun handleDetections(
@@ -441,6 +604,10 @@ class PetVisionDetector(
         }
         val primaryCovered = primary != null && coveredByHand(primary)
         if (primary != null && bitmap != null && !primaryCovered) requestEmbedding(primary, bitmap)
+        // the primary face's answers, for the sentry and the copycat game below
+        var primaryMatched: PetFaceProfile? = null
+        var primaryWinking = false
+        var anyEnrolled = false
 
         // ─── 1. Face Recognition & Expression Bounding Boxes ───────────────
         faces.forEach { face ->
@@ -458,6 +625,7 @@ class PetVisionDetector(
             val covered = if (face === primary) primaryCovered else coveredByHand(face)
             if (face === primary) winkFrames = if (eyesDiffer && !covered) winkFrames + 1 else 0
             val isWinking = if (face === primary) winkFrames >= WINK_FRAMES else eyesDiffer && !covered
+            if (face === primary) primaryWinking = isWinking
 
             val isSmiling = smileProb >= SMILE_THRESHOLD
 
@@ -513,8 +681,10 @@ class PetVisionDetector(
                     width = (face.boundingBox.width().toFloat() / imageWidth).coerceIn(0.01f, 1f),
                     height = (face.boundingBox.height().toFloat() / imageHeight).coerceIn(0.01f, 1f)
                 ),
-                embedding = if (face === primary) freshEmbedding(System.currentTimeMillis()).orEmpty() else emptyList(),
-                embeddingAtMs = if (face === primary) latestEmbeddingAt else 0L
+                embedding = if (face === primary) freshEmbedding(face, System.currentTimeMillis()).orEmpty() else emptyList(),
+                embeddingAtMs = if (face === primary) latestEmbeddingAt else 0L,
+                embeddingYaw = if (face === primary) latestEmbeddingYaw else 0f,
+                isPlaced = isCentered
             )
             if (face === primary) PetVisionBridge.onFaceBiometrics?.invoke(biometrics)
 
@@ -526,15 +696,22 @@ class PetVisionDetector(
             if (face === primary) {
                 if (FaceEmbedder.isAvailable) {
                     // SFace: the same person when the embeddings' cosine reaches FaceRecognition.SAME_PERSON_COSINE
+                    // (FaceIdentity: the last few embeddings averaged, a name kept through one poor one)
                     val withEmbedding = enrolledProfiles.filter { it.usesEmbedding }
-                    val embedding = freshEmbedding(nowTime)
+                    val embedding = freshEmbedding(face, nowTime)
                     if (embedding != null) {
-                        val best = FaceRecognition.bestMatch(withEmbedding, embedding)
-                        matchedProfile = best?.first
-                        logScore(withEmbedding, embedding, matchedProfile, nowTime)
+                        // a new embedding moves the identity on; the frames between keep its answer
+                        val embeddedAt = latestEmbeddingAt
+                        val answer = identityAnswer?.takeIf { embeddedAt == identityEmbeddingAt }
+                            ?: identity.offer(withEmbedding, embedding, face.trackingId).also {
+                                identityAnswer = it
+                                identityEmbeddingAt = embeddedAt
+                                logScore(withEmbedding, embedding, it.profile, nowTime)
+                            }
+                        matchedProfile = answer.profile
                         emitMatch(
                             matchedProfile,
-                            best?.let { (it.second * 100).toInt().coerceIn(0, 100) } ?: 0,
+                            (answer.cosine * 100).toInt().coerceIn(0, 100),
                             when {
                                 enrolledProfiles.isEmpty() -> "ตรวจพบใบหน้า (ยังไม่ลงทะเบียน)"
                                 withEmbedding.isEmpty() -> "ใบหน้าที่บันทึกไว้ต้องสแกนใหม่ (ระบบจดจำใหม่)"
@@ -543,8 +720,10 @@ class PetVisionDetector(
                             nowTime
                         )
                     } else {
-                        // the first embedding is ~0.3 s away: keep the last answer rather than flash "someone else"
+                        // no recent embedding of this face (just arrived, or turned away): keep its last answer rather
+                        // than flash "someone else" — but not another face's
                         matchedProfile = enrolledProfiles.firstOrNull { it.slotIndex == lastMatchedSlot }
+                            ?.takeIf { face.trackingId == null || face.trackingId == latestEmbeddingFace }
                     }
                 } else {
                     // no model: the landmark ratios, closest profile within MATCH_THRESHOLD
@@ -562,6 +741,10 @@ class PetVisionDetector(
                 }
             }
 
+            if (face === primary) {
+                primaryMatched = matchedProfile
+                anyEnrolled = enrolledProfiles.isNotEmpty()
+            }
             val faceDisplayName = matchedProfile?.name ?: if (enrolledProfiles.isEmpty()) "Boss" else "Guest"
 
             val label: String
@@ -609,7 +792,7 @@ class PetVisionDetector(
         }
 
         // ─── 2. Hands & Gestures ───────────────────────────────────────────
-        detectedList.addAll(handObjects(hands, imageWidth, imageHeight, isFrontCamera, isAlreadyMirrored, primaryCovered))
+        detectedList.addAll(handObjects(hands, things, imageWidth, imageHeight, isFrontCamera, isAlreadyMirrored, primaryCovered))
 
         // ─── 3. Things (EfficientDet-Lite0, [ObjectSpotter]) ────────────────
         // held things stay: a phone or a cup in the hand overlaps the hand by nature
@@ -663,6 +846,9 @@ class PetVisionDetector(
 
         onObjectsDetected?.invoke(stabilizedList)
         PetVisionBridge.onObjectsDetected?.invoke(stabilizedList)
+        PetVisionBridge.onVisionDebug?.let { sink ->
+            emitDebug(sink, faces, primary, handList, thingList, stabilizedList, imageWidth, imageHeight, isFrontCamera && !isAlreadyMirrored)
+        }
 
         if (stabilizedList.isNotEmpty()) {
             val now = System.currentTimeMillis()
@@ -677,6 +863,9 @@ class PetVisionDetector(
             lastMatchedSlot = -1
             smoothedMatchScore = 0f
             latestEmbedding = null
+            identity.clear()
+            identityAnswer = null
+            unknownSince = 0L
             winkFrames = 0
             PetVisionBridge.onCurrentFaceLandmarks?.invoke(emptyList())
             PetVisionBridge.onFaceBiometrics?.invoke(FaceBiometricDetails())
@@ -701,7 +890,15 @@ class PetVisionDetector(
         val primaryFace = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() } ?: return
 
         // ─── 4. Desk Sentry: Intruder Detection ───────────────────────────
-        if (isSentryActive()) {
+        // a face nobody enrolled, unknown for SENTRY_UNKNOWN_MS (the owner at the desk used to set off the alarm every
+        // 5 s). With no one enrolled every face is a stranger, as before.
+        if (primaryMatched != null) {
+            unknownSince = 0L
+        } else if (unknownSince == 0L) {
+            unknownSince = now
+        }
+        val isStranger = primaryMatched == null && (!anyEnrolled || now - unknownSince >= SENTRY_UNKNOWN_MS)
+        if (isSentryActive() && isStranger) {
             if (now - lastIntruderAlertTime > 5000L) {
                 lastIntruderAlertTime = now
                 logDebug(TAG, "🚨 Sentry detected intruder face!")
@@ -763,14 +960,11 @@ class PetVisionDetector(
                     }
                 }
                 AvatarEmotion.WINK -> {
-                    if (!primaryCovered && leftEyeOpen >= 0f && rightEyeOpen >= 0f) {
-                        val diff = abs(leftEyeOpen - rightEyeOpen)
-                        val oneOpenOneClosed = (leftEyeOpen > 0.60f && rightEyeOpen < 0.30f) ||
-                                               (rightEyeOpen > 0.60f && leftEyeOpen < 0.30f)
-                        if (diff >= WINK_DIFF_THRESHOLD || oneOpenOneClosed) {
-                            logDebug(TAG, "🎉 Copycat: User wink detected! (L:$leftEyeOpen, R:$rightEyeOpen)")
-                            onCopycatSuccess()
-                        }
+                    // the same wink as the label: uneven eyes held WINK_FRAMES frames on an uncovered face
+                    // (a single frame of a blink caught half way used to win the game)
+                    if (primaryWinking) {
+                        logDebug(TAG, "🎉 Copycat: User wink detected! (L:$leftEyeOpen, R:$rightEyeOpen)")
+                        onCopycatSuccess()
                     }
                 }
                 else -> { /* other challenges */ }
@@ -779,6 +973,7 @@ class PetVisionDetector(
     }
 
     override fun release() {
+        released = true
         try {
             candidateGesture = HandGesture.NONE
             candidateStreak = 0
@@ -790,6 +985,8 @@ class PetVisionDetector(
             isGazeActive = false
             targetTracker.clear()
             latestEmbedding = null
+            identity.clear()
+            identityAnswer = null
             PetVisionBridge.onCurrentFaceLandmarks?.invoke(emptyList())
             PetVisionBridge.onFaceBiometrics?.invoke(FaceBiometricDetails())
             PetVisionBridge.onFaceProfileMatched?.invoke(null, -1)

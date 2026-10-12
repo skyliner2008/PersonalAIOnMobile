@@ -6,6 +6,7 @@ import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.os.SystemClock
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -18,16 +19,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.skyliner2008.jarvis.pet.PetVisionDetector
+import com.skyliner2008.jarvis.pet.PetVisionProcessor
 import io.ktor.util.encodeBase64
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -52,9 +57,17 @@ actual fun CameraPreviewView(
     modifier: Modifier,
     onFrameCapture: (jpegBase64: String, rawBytes: ByteArray) -> Unit,
     isFrontCamera: Boolean,
-    isActive: Boolean
+    isActive: Boolean,
+    visionProcessor: PetVisionProcessor?,
+    jpegIntervalMs: Long?
 ) {
     val context = LocalContext.current
+    // the analyzer is set once per bind: it reads the latest callback, processor and interval through these
+    // (it used to keep the ones from the bind — a Live toggle or a new processor reached it only on a rebind)
+    val currentOnFrameCapture by rememberUpdatedState(onFrameCapture)
+    val currentVisionProcessor by rememberUpdatedState(visionProcessor)
+    val currentJpegIntervalMs by rememberUpdatedState(jpegIntervalMs)
+    val lastJpegAt = remember { AtomicLong(0L) }
     val lifecycleOwner = remember(context) {
         generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
             .filterIsInstance<androidx.lifecycle.LifecycleOwner>()
@@ -126,7 +139,14 @@ actual fun CameraPreviewView(
 
                     imageAnalysisUseCase.clearAnalyzer()
                     imageAnalysisUseCase.setAnalyzer(cameraExecutor) { imageProxy ->
-                        processFrame(imageProxy, isFrontCamera, onFrameCapture)
+                        processFrame(
+                            imageProxy,
+                            isFrontCamera,
+                            currentVisionProcessor,
+                            currentJpegIntervalMs,
+                            lastJpegAt,
+                            currentOnFrameCapture
+                        )
                     }
 
                     provider.bindToLifecycle(
@@ -173,19 +193,44 @@ actual fun CameraPreviewView(
 // ─── Frame Processing ──────────────────────────────────────────────────────────
 
 /**
- * แปลง ImageProxy (YUV_420_888) ➔ JPEG bytes ➔ Base64
- * แล้วส่งกลับผ่าน callback
+ * One camera frame → the on-device vision (the upright Bitmap itself) and/or JPEG + Base64 for the callback.
+ *
+ * Only what someone takes is made (2026-10-09 review): every frame used to be converted, JPEG-encoded and Base64'd at
+ * ~30 fps, and the pet's vision decoded the JPEG back into a Bitmap — while it takes at most ~12 frames a second and
+ * Live one every 0.9 s. The q70 JPEG also blurred the face the recognizer embeds.
  */
 private fun processFrame(
     imageProxy: ImageProxy,
     isFrontCamera: Boolean,
+    vision: PetVisionProcessor?,
+    jpegIntervalMs: Long?,
+    lastJpegAt: AtomicLong,
     onFrameCapture: (jpegBase64: String, rawBytes: ByteArray) -> Unit
 ) {
     try {
-        val jpegBytes = imageProxyToJpeg(imageProxy, isFrontCamera)
-        if (jpegBytes != null && jpegBytes.isNotEmpty()) {
-            val base64 = jpegBytes.encodeBase64()
-            onFrameCapture(base64, jpegBytes)
+        val now = SystemClock.uptimeMillis()
+        val detector = vision as? PetVisionDetector
+        val visionWants = vision?.wantsFrame() == true
+        val jpegDue = jpegIntervalMs != null && now - lastJpegAt.get() >= jpegIntervalMs
+        // a processor that takes only JPEG bytes (not the Android detector) still needs them
+        val bytesForVision = visionWants && detector == null
+        if (!jpegDue && !visionWants) return
+
+        val frame = uprightFrame(imageProxy, isFrontCamera) ?: return
+        var jpeg: ByteArray? = null
+        if (jpegDue || bytesForVision) {
+            jpeg = ByteArrayOutputStream().also { frame.compress(Bitmap.CompressFormat.JPEG, 70, it) }.toByteArray()
+        }
+        if (jpegDue && jpeg != null && jpeg.isNotEmpty()) {
+            lastJpegAt.set(now)
+            onFrameCapture(jpeg.encodeBase64(), jpeg)
+        }
+        if (detector != null && visionWants) {
+            // the detector takes the frame and recycles it once its models are done with it
+            detector.processBitmap(frame, isFrontCamera = isFrontCamera, isAlreadyMirrored = isFrontCamera)
+        } else {
+            if (bytesForVision && jpeg != null) vision?.processFrame(jpeg, isFrontCamera)
+            frame.recycle()
         }
     } catch (e: Exception) {
         android.util.Log.w("CameraPreview", "Frame processing error: ${e.message}")
@@ -195,11 +240,10 @@ private fun processFrame(
 }
 
 /**
- * แปลง ImageProxy ➔ JPEG ByteArray
+ * ImageProxy ➔ Bitmap ตั้งตรง (หมุนตามเซนเซอร์, กลับด้านกล้องหน้า, ย่อด้านยาวสุดเหลือ 640px)
  * ใช้ CameraX imageProxy.toBitmap() แปลงทุก Format (YUV_420_888, JPEG, RGBA)
- * ได้ภาพคมชัด ถูกต้อง 100% ไม่เกิดแถบลายหรือภาพสีเพี้ยน
  */
-private fun imageProxyToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): ByteArray? {
+private fun uprightFrame(imageProxy: ImageProxy, isFrontCamera: Boolean): Bitmap? {
     return try {
         val bitmap = imageProxy.toBitmap()
         val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
@@ -216,13 +260,10 @@ private fun imageProxyToJpeg(imageProxy: ImageProxy, isFrontCamera: Boolean): By
             }
         }
         val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        val out = ByteArrayOutputStream()
-        transformed.compress(Bitmap.CompressFormat.JPEG, 70, out)
-        if (transformed != bitmap) transformed.recycle()
-        bitmap.recycle()
-        out.toByteArray()
+        if (transformed !== bitmap) bitmap.recycle()
+        transformed
     } catch (e: Exception) {
-        android.util.Log.w("CameraPreview", "imageProxyToJpeg conversion error: ${e.message}")
+        android.util.Log.w("CameraPreview", "frame conversion error: ${e.message}")
         null
     }
 }

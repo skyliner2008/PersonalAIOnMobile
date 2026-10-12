@@ -8,13 +8,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.skyliner2008.jarvis.pet.PetVisionProcessor
 
 @Composable
 actual fun CameraPreviewView(
     modifier: Modifier,
     onFrameCapture: (jpegBase64: String, rawBytes: ByteArray) -> Unit,
     isFrontCamera: Boolean,
-    isActive: Boolean
+    isActive: Boolean,
+    visionProcessor: PetVisionProcessor?,
+    jpegIntervalMs: Long?
 ) {
     // iOS camera implementation — placeholder (not yet implemented)
     Box(

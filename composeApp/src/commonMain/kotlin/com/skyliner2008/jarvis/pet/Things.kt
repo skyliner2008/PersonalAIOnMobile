@@ -15,8 +15,19 @@ class ThingSighting(
  * "Object #64" held 20 s after the user left).
  */
 object Things {
-    /** a thing counts from this score */
-    const val MIN_SCORE = 0.5f
+    /**
+     * a thing is a candidate from this score; it shows only once [ThingStabilizer] has seen it in the same place run
+     * after run with a mean of [SHOW_SCORE] (phone 2026-10-09 19:31: with nothing on the desk the model reported tv,
+     * book, laptop, bottle, handbag, car … at 0.41–0.66, a different one every second — showing from 0.4 alone was wrong)
+     */
+    const val MIN_SCORE = 0.4f
+    /** the mean score a thing needs over its runs to show */
+    const val SHOW_SCORE = 0.55f
+    /** worn or carried things the model sees in a shirt, an arm or a raised hand: they need more */
+    const val WEARABLE_SHOW_SCORE = 0.65f
+    val WEARABLES = setOf("handbag", "backpack", "tie", "suitcase", "umbrella")
+
+    fun showScore(name: String): Float = if (name in WEARABLES) WEARABLE_SHOW_SCORE else SHOW_SCORE
     /** how a thing's label starts in the detection list */
     const val PREFIX = "Thing "
 
@@ -51,4 +62,69 @@ object Things {
 
     /** the detection list's label: "Thing ☕ แก้ว" */
     fun label(name: String): String = PREFIX + thai(name)
+}
+
+/**
+ * Things that stay (phone 2026-10-09 19:31): one run of the model is not a thing on the desk — with nothing there it
+ * named a tv, a book, a laptop, a bottle, a handbag, one after another. A thing shows when the same class is seen in
+ * about the same place (IoU ≥ [minIou]) in [minHits] of the last [window] runs, at a mean score of
+ * [Things.showScore]; once shown it stays while seen in [keepHits] of them. Runs come every ~300 ms, so a real
+ * thing shows after ~1 s.
+ */
+class ThingStabilizer(
+    private val window: Int = 4,
+    private val minHits: Int = 3,
+    private val keepHits: Int = 2,
+    private val minIou: Float = 0.3f
+) {
+    private class Track(var sighting: ThingSighting) {
+        val hits = ArrayDeque<Float?>()   // the score of each of the last runs, null where it was missing
+        var shown = false
+        val hitCount: Int get() = hits.count { it != null }
+        val meanScore: Float get() = hits.filterNotNull().let { if (it.isEmpty()) 0f else it.sum() / it.size }
+    }
+
+    private val tracks = mutableListOf<Track>()
+
+    /** one run's sightings → the things to show (with their mean score and latest box) */
+    fun offer(sightings: List<ThingSighting>): List<ThingSighting> {
+        val free = tracks.toMutableList()
+        val seen = mutableMapOf<Track, ThingSighting>()
+        for (s in sightings.sortedByDescending { it.score }) {
+            val track = free.filter { it.sighting.name == s.name }
+                .maxByOrNull { iou(it.sighting.box, s.box) }
+                ?.takeIf { iou(it.sighting.box, s.box) >= minIou }
+            if (track != null) {
+                free.remove(track)
+                seen[track] = s
+            } else {
+                val t = Track(s)
+                tracks += t
+                seen[t] = s
+            }
+        }
+        for (t in tracks) {
+            val s = seen[t]
+            if (s != null) t.sighting = s
+            t.hits.addLast(s?.score)
+            while (t.hits.size > window) t.hits.removeFirst()
+        }
+        tracks.removeAll { it.hitCount == 0 }
+        for (t in tracks) {
+            val enough = t.meanScore >= Things.showScore(t.sighting.name)
+            t.shown = enough && t.hitCount >= (if (t.shown) keepHits else minHits)
+        }
+        return tracks.filter { it.shown }.map { ThingSighting(it.sighting.name, it.meanScore, it.sighting.box) }
+    }
+
+    fun clear() = tracks.clear()
+
+    private fun iou(a: FloatArray, b: FloatArray): Float {
+        val iw = minOf(a[2], b[2]) - maxOf(a[0], b[0])
+        val ih = minOf(a[3], b[3]) - maxOf(a[1], b[1])
+        if (iw <= 0f || ih <= 0f) return 0f
+        val inter = iw * ih
+        val union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+        return if (union > 0f) inter / union else 0f
+    }
 }

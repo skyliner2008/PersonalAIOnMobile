@@ -17,6 +17,8 @@ import kotlin.math.sqrt
  * @param enrolledAt เวลาที่บันทึก (มิลลิวินาที)
  * @param embedding SFace embedding 128 ค่า (normalized, ค่าเฉลี่ยจากการสแกน) — ว่าง = บันทึกด้วยระบบสัดส่วนเดิม ต้องสแกนใหม่
  *   เพื่อจดจำด้วย [FaceRecognition]
+ * @param poseEmbeddings SFace embedding ตอนหันหน้าซ้าย/ขวาเล็กน้อย (normalized) — จับคู่ด้วยค่าที่ดีที่สุด
+ *   ([FaceRecognition.profileCosine]) จึงจำได้แม้ไม่ได้มองตรง; ว่าง = สแกนหน้าตรงอย่างเดียว
  */
 @Serializable
 data class PetFaceProfile(
@@ -25,7 +27,8 @@ data class PetFaceProfile(
     val isEnrolled: Boolean = false,
     val landmarkRatios: List<Float> = emptyList(),
     val enrolledAt: Long = 0L,
-    val embedding: List<Float> = emptyList()
+    val embedding: List<Float> = emptyList(),
+    val poseEmbeddings: List<List<Float>> = emptyList()
 ) {
     /** enrolled with an SFace embedding (matched by [FaceRecognition]) */
     val usesEmbedding: Boolean get() = embedding.size == FaceRecognition.EMBEDDING_SIZE

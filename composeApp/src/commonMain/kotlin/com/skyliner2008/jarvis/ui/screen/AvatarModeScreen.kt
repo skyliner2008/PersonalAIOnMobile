@@ -121,6 +121,8 @@ internal fun AvatarModeContent(
     // ─── Settings, Debug HUD & Face Profiles State ───
     var isPetSettingsOpen by remember { mutableStateOf(false) }
     var enrollingSlot by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    // the vision test screen (camera + every Bounding Box) — it has the camera while open
+    var isVisionTestOpen by remember { mutableStateOf(false) }
     var showDebugHud by remember { mutableStateOf(false) }
     val petFaceProfiles by petController.faceProfiles.collectAsState()
     val currentRecognizedPerson by petController.currentRecognizedPerson.collectAsState()
@@ -428,23 +430,23 @@ internal fun AvatarModeContent(
 
         // the camera without a preview: face tracking for the gaze (not while asleep), and frames for the
         // live session while the AI's eyes are open
+        val sendLiveFrame: (String) -> Unit = { jpegBase64 ->
+            if (isAiVisionOn) {
+                onUpdateLastLiveFrameSendTime(Clock.System.now().toEpochMilliseconds())
+                onLiveVideoFrame?.invoke(jpegBase64)
+            }
+        }
         val isEnrolling = enrollingSlot != null
         val trackFaces = petVisionProcessor != null && activeAvatarState.emotion != AvatarEmotion.SLEEPING
-        if (!isEnrolling && (trackFaces || isAiVisionOn)) {
+        if (!isEnrolling && !isVisionTestOpen && (trackFaces || isAiVisionOn)) {
             CameraPreviewView(
                 modifier = Modifier.size(1.dp).alpha(0.001f).align(Alignment.TopStart).padding(0.dp),
                 isFrontCamera = isFrontCam,
                 isActive = true,
-                onFrameCapture = { jpegBase64, rawBytes ->
-                    petVisionProcessor?.processFrame(rawBytes, isFrontCamera = isFrontCam)
-                    if (isAiVisionOn) {
-                        val now = Clock.System.now().toEpochMilliseconds()
-                        if (now - lastLiveFrameSendTime >= 900L) {
-                            onUpdateLastLiveFrameSendTime(now)
-                            onLiveVideoFrame?.invoke(jpegBase64)
-                        }
-                    }
-                }
+                // the pet's vision gets the frames as Bitmaps; JPEG only for Live, one every LIVE_FRAME_MS
+                visionProcessor = petVisionProcessor,
+                jpegIntervalMs = if (isAiVisionOn) LIVE_FRAME_MS else null,
+                onFrameCapture = { jpegBase64, _ -> sendLiveFrame(jpegBase64) }
             )
         }
 
@@ -535,7 +537,7 @@ internal fun AvatarModeContent(
             )?.let { it to (recognizedSlot >= 0) }
         )
         val sightLine = heldDetection(com.skyliner2008.jarvis.pet.FaceBanner.sight(labels))
-        if (!isPetSettingsOpen && enrollingSlot == null && (faceLine != null || sightLine != null)) {
+        if (!isPetSettingsOpen && enrollingSlot == null && !isVisionTestOpen && (faceLine != null || sightLine != null)) {
             val stageUnitDp = with(androidx.compose.ui.platform.LocalDensity.current) {
                 minOf(stageSize.width.toDp().value / 720f, stageSize.height.toDp().value / 1280f)
             }
@@ -568,7 +570,23 @@ internal fun AvatarModeContent(
                 isFrontCam = isFrontCam,
                 onToggleCamera = onSwitchCamera,
                 recognizedSlot = recognizedSlot,
-                embeddingAvailable = com.skyliner2008.jarvis.pet.PetVisionBridge.faceEmbeddingAvailable()
+                embeddingAvailable = com.skyliner2008.jarvis.pet.PetVisionBridge.faceEmbeddingAvailable(),
+                onOpenVisionTest = {
+                    isPetSettingsOpen = false
+                    isVisionTestOpen = true
+                }
+            )
+        }
+
+        // ─── Vision test: the camera with every Bounding Box (faces, hands, things) ───
+        if (isVisionTestOpen) {
+            com.skyliner2008.jarvis.pet.VisionTestScreen(
+                processor = petVisionProcessor,
+                isFrontCamera = isFrontCam,
+                onSwitchCamera = onSwitchCamera,
+                onClose = { isVisionTestOpen = false },
+                onLiveFrame = sendLiveFrame,
+                liveIntervalMs = if (isAiVisionOn) LIVE_FRAME_MS else null
             )
         }
 
@@ -578,8 +596,8 @@ internal fun AvatarModeContent(
                 slotIndex = slotIndex,
                 slotName = slotName,
                 biometrics = petBiometrics,
-                onCompleteEnrollment = { idx, name, averagedLandmarks, embedding ->
-                    petController.enrollFaceWithLandmarks(idx, name, averagedLandmarks, embedding)
+                onCompleteEnrollment = { idx, name, averagedLandmarks, embedding, poses ->
+                    petController.enrollFaceWithLandmarks(idx, name, averagedLandmarks, embedding, poses)
                 },
                 onCancel = {
                     enrollingSlot = null
@@ -590,16 +608,9 @@ internal fun AvatarModeContent(
                         modifier = Modifier.fillMaxSize(),
                         isFrontCamera = isFrontCam,
                         isActive = true,
-                        onFrameCapture = { jpegBase64, rawBytes ->
-                            petVisionProcessor?.processFrame(rawBytes, isFrontCamera = isFrontCam)
-                            if (isAiVisionOn) {
-                                val now = Clock.System.now().toEpochMilliseconds()
-                                if (now - lastLiveFrameSendTime >= 900L) {
-                                    onUpdateLastLiveFrameSendTime(now)
-                                    onLiveVideoFrame?.invoke(jpegBase64)
-                                }
-                            }
-                        }
+                        visionProcessor = petVisionProcessor,
+                        jpegIntervalMs = if (isAiVisionOn) LIVE_FRAME_MS else null,
+                        onFrameCapture = { jpegBase64, _ -> sendLiveFrame(jpegBase64) }
                     )
                 }
             )
@@ -758,3 +769,6 @@ internal fun PetModeController.onAvatarTouch(kind: String, zone: String) {
         "drag" -> notifyInteraction()
     }
 }
+
+/** at most one camera frame a second to the Live session */
+private const val LIVE_FRAME_MS = 900L

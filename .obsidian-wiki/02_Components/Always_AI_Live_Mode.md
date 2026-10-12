@@ -252,6 +252,10 @@ To allow users to rapidly verify and interact with all 50 robot moodsets from bo
   - Compares with enrolled templates using Euclidean distance ($D < 0.12$ match threshold) with zero cloud biometric transmission.
   - Rule 12 in `JarvisPersona.kt` guides Gemini Live to warmly greet registered users by their custom nicknames.
   - **Since 2026-10-09** the profiles are matched by the SFace face model (cosine ≥ 0.363), not the landmark ratios — see [[Avatar_Mode]] and log 2026-10-09.
+    Matching goes through `FaceIdentity` (the last 3 embeddings averaged; a name is taken at 0.363, kept down to 0.30, dropped after 2 misses;
+    another profile must win by 0.05) and only faces the model can read are embedded (|yaw| ≤ 30°, |pitch| ≤ 25°, eyes ≥ 28 px). The
+    embedding is tied to ML Kit's tracking id. Enrollment has a second step with the head turned 12–30° each way (`poseEmbeddings`).
+    The Desk Sentry alarms only for a face that matches no profile for 1 s.
 - **7 Hand Gesture Detections**:
   - **Since 2026-10-09: MediaPipe Gesture Recognizer** (`HandTracker.kt`, `assets/models/gesture_recognizer.task`, Apache-2.0, 8.4 MB,
     arm64 only) → 21 points per hand + the model's gesture → `HandPose` / `HandGestureReader` (commonMain, tested in `HandPoseTest`):
@@ -260,10 +264,21 @@ To allow users to rapidly verify and interact with all 50 robot moodsets from bo
     It replaced counting skin-coloured pixels outside the face box (arms, the desk and a hand in front of the face counted as hands; the
     gesture was guessed from the blob's width and height).
   - A hand over the face (≥ 4 of its points inside the face box): no wink, no face embedding (the covered eye read as a wink).
+  - Hands are told apart by the nearest wrist from the last frame, not by the model's Left/Right (both hands were sometimes "Right" and
+    their motion mixed into a fake wave). One frame without a gesture does not break its 3-frame run. 👌 needs hand score ≥ 0.6.
+  - Frames: the camera hands the pet's vision the upright Bitmap itself, only when it wants one (`PetVisionProcessor.wantsFrame`); JPEG is
+    made only for Live (`CameraPreviewView(jpegIntervalMs = 900)`).
   - **Things (since 2026-10-09)**: `ObjectSpotter.kt` — MediaPipe Object Detector + EfficientDet-Lite0 int8 (`assets/models/efficientdet_lite0.tflite`,
-    COCO 80, score ≥ 0.5, every 400 ms) → `Things.kt` Thai names, label `Thing ☕ แก้ว`; people and room furniture left out. Replaced ML Kit
+    COCO 80, candidates ≥ 0.4, every 300 ms on its own thread on a copy shrunk to 320 px; `ThingStabilizer` shows a thing only when the
+    same class is in the same place (IoU ≥ 0.3) in 3 of the last 4 runs at a mean ≥ 0.55 — 0.65 for handbag/backpack/tie/suitcase/umbrella) → `Things.kt` Thai names, label `Thing ☕ แก้ว`;
+    people and room furniture left out (things are not dropped by the tracker's face-and-neck zone). Replaced ML Kit
     object detection (5 broad classes, unnamed `Object #N` with a hard-coded 75%).
   - Avatar mode shows two lines at the bottom (`FaceBanner`): the face bottom-left, hands and things bottom-right.
+  - **Vision test screen (since 2026-10-10)**: ⚙️ → Display & Vision → "🧪 ทดสอบการมองเห็น (Bounding Box)" (`VisionTestScreen.kt`).
+    The live camera with the existing `BoundingBoxOverlay`/`ObjectLabelTags`: every face, every hand with its 21-point skeleton, every
+    thing candidate (✓ shown / ✗ held back by `ThingStabilizer`), or only what the pet uses after `PetVisionTargetTracker`; a panel with
+    each model's reading and the frame rate. Fed by `PetVisionBridge.onVisionDebug` (`VisionDebugFrame`), built only while it is open.
+  - A hand holding a thing (thumb or index tip on its box) makes no 👌. A gesture repeats after 3.5 s, another gesture after 1.5 s.
   - Labels start with `Hand` (and a plain face says `Face`) so `PetVisionTargetTracker` sorts them right; the label shows a gesture only
     once confirmed.
   - Triggers matching procedural robot SFX, facial expressions, and Tamagotchi affection boosts.

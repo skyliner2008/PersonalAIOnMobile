@@ -1,5 +1,6 @@
 package com.skyliner2008.jarvis.pet
 
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -15,8 +16,24 @@ import kotlin.math.sqrt
 object FaceRecognition {
     /** OpenCV's same-person cosine for SFace (opencv_zoo models/face_recognition_sface/sface.py) */
     const val SAME_PERSON_COSINE = 0.363f
+    /** a face already named keeps its name down to this cosine ([FaceIdentity]) */
+    const val KEEP_COSINE = 0.30f
+    /** another profile takes a named face over only by beating its cosine by this much ([FaceIdentity]) */
+    const val SWITCH_MARGIN = 0.05f
     const val EMBEDDING_SIZE = 128
     const val ALIGNED_SIZE = 112
+
+    /** a face the model can read ([readable]): turned or tilted at most this many degrees, eyes this many px apart */
+    const val MAX_YAW = 30f
+    const val MAX_PITCH = 25f
+    const val MIN_EYE_PX = 28f
+
+    /**
+     * Whether a face is worth embedding (2026-10-09 review): a face turned away, tilted, or so small that 112×112 is
+     * mostly upscaling gives an embedding far from its own template, and the name dropped to "someone else".
+     */
+    fun readable(yaw: Float, pitch: Float, eyeDistancePx: Float): Boolean =
+        abs(yaw) <= MAX_YAW && abs(pitch) <= MAX_PITCH && eyeDistancePx >= MIN_EYE_PX
 
     /**
      * The ArcFace / SFace 5-point template in a 112×112 crop (OpenCV FaceRecognizerSF.alignCrop), as x,y pairs:
@@ -88,6 +105,10 @@ object FaceRecognition {
         return normalize(sum.toList())
     }
 
+    /** a profile's cosine to [embedding]: its best template — the frontal mean or one with the head turned */
+    fun profileCosine(profile: PetFaceProfile, embedding: List<Float>): Float =
+        profile.poseEmbeddings.fold(cosine(profile.embedding, embedding)) { best, pose -> maxOf(best, cosine(pose, embedding)) }
+
     /** the enrolled profile closest to [embedding] at or above [threshold], with its cosine */
     fun bestMatch(
         profiles: List<PetFaceProfile>,
@@ -95,9 +116,105 @@ object FaceRecognition {
         threshold: Float = SAME_PERSON_COSINE
     ): Pair<PetFaceProfile, Float>? =
         profiles.filter { it.isEnrolled && it.usesEmbedding }
-            .map { it to cosine(it.embedding, embedding) }
+            .map { it to profileCosine(it, embedding) }
             .filter { it.second >= threshold }
             .maxByOrNull { it.second }
+}
+
+/**
+ * Who the face in front is, embedding after embedding (2026-10-09 review): one off-angle or blurred embedding dropped
+ * the name to "someone else" for a moment, and a face that took another's place in view could keep its name.
+ * - the last [window] embeddings of the same face are averaged before matching
+ * - a name is taken at [FaceRecognition.SAME_PERSON_COSINE], kept down to [FaceRecognition.KEEP_COSINE], and let go
+ *   only after [missesToDrop] embeddings in a row below that
+ * - another profile takes over only when it beats the current one by [FaceRecognition.SWITCH_MARGIN]
+ * - a different face (another faceKey — ML Kit's tracking id) starts over
+ */
+class FaceIdentity(private val window: Int = 3, private val missesToDrop: Int = 2) {
+    data class Answer(val profile: PetFaceProfile?, val cosine: Float)
+
+    private val recent = ArrayDeque<List<Float>>()
+    private var faceKey: Any? = null
+    private var slot = -1
+    private var misses = 0
+
+    /** the slot the face is named as, -1 for none */
+    val currentSlot: Int get() = slot
+
+    fun offer(profiles: List<PetFaceProfile>, embedding: List<Float>, faceKey: Any?): Answer {
+        if (faceKey != this.faceKey) {
+            clear()
+            this.faceKey = faceKey
+        }
+        recent.addLast(embedding)
+        while (recent.size > window) recent.removeFirst()
+        val mean = FaceRecognition.meanEmbedding(recent.toList())
+        val usable = profiles.filter { it.isEnrolled && it.usesEmbedding }
+        val best = FaceRecognition.bestMatch(usable, mean)
+        val current = usable.firstOrNull { it.slotIndex == slot }
+        if (current != null) {
+            val currentCos = FaceRecognition.profileCosine(current, mean)
+            val overtaken = best != null && best.first.slotIndex != slot && best.second > currentCos + FaceRecognition.SWITCH_MARGIN
+            if (!overtaken) {
+                if (currentCos >= FaceRecognition.KEEP_COSINE) {
+                    misses = 0
+                    return Answer(current, currentCos)
+                }
+                if (++misses < missesToDrop) return Answer(current, currentCos)
+            }
+        }
+        misses = 0
+        slot = best?.first?.slotIndex ?: -1
+        return Answer(best?.first, best?.second ?: 0f)
+    }
+
+    fun clear() {
+        recent.clear()
+        faceKey = null
+        slot = -1
+        misses = 0
+    }
+}
+
+/**
+ * The enrollment scan's second step (2026-10-09 review): the scan kept only frontal samples (yaw under 18°), so the
+ * name dropped whenever the user turned toward the screen beside the phone. Now up to [perSide] embeddings a side with
+ * the head turned [MIN_TURN]..[FaceRecognition.MAX_YAW] degrees, each still the frontal template's person
+ * (cosine ≥ [FaceRecognition.KEEP_COSINE] — someone else stepping in is not kept).
+ */
+class TurnedHeadSampler(
+    private val front: List<Float>,
+    val perSide: Int = 2,
+    private val minIntervalMs: Long = 250L
+) {
+    companion object {
+        const val MIN_TURN = 12f
+    }
+
+    private val one = mutableListOf<List<Float>>()
+    private val other = mutableListOf<List<Float>>()
+    private var lastAddedAt = 0L
+
+    val target: Int get() = perSide * 2
+    val count: Int get() = one.size + other.size
+    val done: Boolean get() = one.size >= perSide && other.size >= perSide
+
+    /** an embedding taken with the head at [yaw] degrees; true when it was kept */
+    fun offer(embedding: List<Float>, yaw: Float, nowMs: Long): Boolean {
+        if (done || nowMs - lastAddedAt < minIntervalMs) return false
+        val side = when {
+            yaw >= MIN_TURN && yaw <= FaceRecognition.MAX_YAW -> one
+            yaw <= -MIN_TURN && yaw >= -FaceRecognition.MAX_YAW -> other
+            else -> return false
+        }
+        if (side.size >= perSide) return false
+        if (FaceRecognition.cosine(front, embedding) < FaceRecognition.KEEP_COSINE) return false
+        side += embedding
+        lastAddedAt = nowMs
+        return true
+    }
+
+    fun samples(): List<List<Float>> = one + other
 }
 
 /**

@@ -12,6 +12,9 @@ interface PetVisionProcessor {
      */
     fun processFrame(rawBytes: ByteArray, isFrontCamera: Boolean = true)
 
+    /** whether a frame now would be processed — the camera skips converting frames nobody takes */
+    fun wantsFrame(): Boolean = true
+
     /**
      * คืนทรัพยากรเมื่อเลิกใช้งาน
      */
@@ -51,6 +54,12 @@ object PetVisionBridge {
      * Callback ส่งรายละเอียดไบโอเมตริกซ์ของใบหน้าแบบสด (สำหรับสแกนเนอร์ลงทะเบียนใบหน้าระดับสูง)
      */
     var onFaceBiometrics: ((FaceBiometricDetails) -> Unit)? = null
+
+    /**
+     * The vision test screen ([VisionTestScreen]): every frame's faces, hands and things before and after filtering.
+     * Set only while the screen is open — the detector builds the frame only then.
+     */
+    var onVisionDebug: ((VisionDebugFrame) -> Unit)? = null
 
     /** whether the phone can recognize faces by embedding ([FaceRecognition]) — false = landmark-ratio matching */
     var faceEmbeddingAvailable: () -> Boolean = { false }
@@ -133,5 +142,28 @@ data class FaceBiometricDetails(
     val faceBounds: com.skyliner2008.jarvis.camera.BoundingBox? = null,
     /** the face's latest SFace embedding (normalized) and when it was taken — empty without the model */
     val embedding: List<Float> = emptyList(),
-    val embeddingAtMs: Long = 0L
+    val embeddingAtMs: Long = 0L,
+    /** the head's yaw in the frame the embedding was taken from */
+    val embeddingYaw: Float = 0f,
+    /** the face sits in the middle of the frame, whichever way it is turned (isCentered also wants it straight) */
+    val isPlaced: Boolean = false
+)
+
+/**
+ * One processed frame for the vision test screen. Boxes and points are normalized to the frame as the screen shows it
+ * (the front camera mirrored), the same as the pet's detection list.
+ */
+data class VisionDebugFrame(
+    val frameWidth: Int,
+    val frameHeight: Int,
+    /** every face, every hand and every thing the models proposed — kept or not */
+    val raw: List<com.skyliner2008.jarvis.camera.DetectedObject>,
+    /** what the pet uses: after [PetVisionTargetTracker] (one face, one hand, one thing) */
+    val tracked: List<com.skyliner2008.jarvis.camera.DetectedObject>,
+    /** each hand's 21 points, x0, y0, x1, y1 … normalized */
+    val handPoints: List<FloatArray>,
+    /** one line per model, what it saw and decided */
+    val lines: List<String>,
+    /** frames processed per second */
+    val fps: Float
 )

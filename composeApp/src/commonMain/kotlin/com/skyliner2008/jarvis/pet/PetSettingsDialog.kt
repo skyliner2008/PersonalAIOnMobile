@@ -75,7 +75,9 @@ fun PetSettingsDialog(
     /** the slot of the face in front of the camera, -1 = no enrolled match ([PetModeController.currentRecognizedSlot]) */
     recognizedSlot: Int = -1,
     /** faces are recognized by SFace embedding ([FaceRecognition]) — profiles saved without one need a new scan */
-    embeddingAvailable: Boolean = false
+    embeddingAvailable: Boolean = false,
+    /** opens the vision test screen ([VisionTestScreen]); null hides its button */
+    onOpenVisionTest: (() -> Unit)? = null
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var editingSlotIndex by remember { mutableStateOf<Int?>(null) }
@@ -192,7 +194,8 @@ fun PetSettingsDialog(
                             isSentryActive = isSentryActive,
                             onToggleSentry = onToggleSentry,
                             isFrontCam = isFrontCam,
-                            onToggleCamera = onToggleCamera
+                            onToggleCamera = onToggleCamera,
+                            onOpenVisionTest = onOpenVisionTest
                         )
                     }
                 }
@@ -470,12 +473,54 @@ private fun TabDisplayAndVision(
     isSentryActive: Boolean,
     onToggleSentry: () -> Unit,
     isFrontCam: Boolean,
-    onToggleCamera: () -> Unit
+    onToggleCamera: () -> Unit,
+    onOpenVisionTest: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Vision test: the camera with every Bounding Box
+        if (onOpenVisionTest != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF1E293B).copy(alpha = 0.7f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.35f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "🧪 ทดสอบการมองเห็น (Bounding Box)",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "ภาพกล้องสด + กรอบใบหน้า มือ (จุด 21 จุด) และสิ่งของ พร้อมคะแนนของแต่ละโมเดล",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 11.sp
+                        )
+                    }
+                    Button(
+                        onClick = onOpenVisionTest,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00F0FF)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text(text = "เปิด", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         // Debug HUD Toggle
         Surface(
             modifier = Modifier.fillMaxWidth(),

@@ -14,7 +14,7 @@ class HandSighting(
     val gestureScore: Float = 0f,
     /** how sure the model is that this is a hand */
     val handScore: Float = 1f,
-    /** "Left" / "Right" as the model sees it — keeps each hand's motion apart */
+    /** "Left" / "Right" as the model sees it (it assumes a mirrored frame) — for the log */
     val side: String = "?"
 ) {
     fun x(i: Int) = points[2 * i]
@@ -48,6 +48,8 @@ object HandPose {
 
     /** the model's gesture counts from this score */
     const val MIN_GESTURE_SCORE = 0.55f
+    /** 👌 is read from the points only on a hand the model is this sure of (edge-on, thumb and index tips overlap) */
+    const val MIN_HAND_SCORE = 0.6f
     /** points of a hand inside the face box (shrunk by [COVER_INSET]) from which the hand covers the face */
     const val COVER_POINTS = 4
     const val COVER_INSET = 0.10f
@@ -55,9 +57,10 @@ object HandPose {
     /**
      * @param swinging the fingers swing side to side ([SideToSide.reversals]) — Open_Palm is then a wave, Pointing_Up a wag
      * @param still the hand has held its place — an open palm is a high five only when held, not on its way to a wave
+     * @param holding the hand holds a thing ([holds]) — a hand round a cup has its thumb and index tips together, as 👌
      */
-    fun gesture(hand: HandSighting, swinging: Boolean, still: Boolean): HandGesture {
-        if (isOk(hand)) return HandGesture.OK
+    fun gesture(hand: HandSighting, swinging: Boolean, still: Boolean, holding: Boolean = false): HandGesture {
+        if (!holding && isOk(hand)) return HandGesture.OK
         if (hand.gestureScore < MIN_GESTURE_SCORE) return HandGesture.NONE
         return when (hand.modelGesture) {
             "Victory" -> HandGesture.V_SIGN
@@ -75,6 +78,7 @@ object HandPose {
 
     /** 👌: thumb and index tips touch while the other three fingers stand out (the model has no OK of its own) */
     fun isOk(hand: HandSighting): Boolean {
+        if (hand.handScore < MIN_HAND_SCORE) return false
         val palm = hand.palm
         if (palm < 1f) return false
         if (hand.distance(THUMB_TIP, INDEX_TIP) > palm * 0.35f) return false
@@ -92,6 +96,21 @@ object HandPose {
         "Open_Palm" -> "✋ แบมือ"
         else -> "✋ ยกมือ"
     }
+
+    /**
+     * The hand holds a thing: its thumb or index tip is on the thing's box [left, top, right, bottom] (frame pixels),
+     * grown by [HOLD_MARGIN] of its size (phone 2026-10-10 00:57: a hand round a cup read 👌 and the pet answered it)
+     */
+    fun holds(hand: HandSighting, box: FloatArray): Boolean {
+        val mx = (box[2] - box[0]) * HOLD_MARGIN
+        val my = (box[3] - box[1]) * HOLD_MARGIN
+        return listOf(THUMB_TIP, INDEX_TIP).any { i ->
+            hand.x(i) in (box[0] - mx)..(box[2] + mx) && hand.y(i) in (box[1] - my)..(box[3] + my)
+        }
+    }
+
+    /** how far around a thing's box a fingertip still holds it */
+    const val HOLD_MARGIN = 0.15f
 
     /**
      * The hand is over the face [left, top, right, bottom] (frame pixels): ML Kit then sees a covered eye as a
@@ -148,8 +167,10 @@ class SideToSide(private val windowMs: Long = 1_500L, private val gapMs: Long = 
 }
 
 /**
- * Each frame's hands → the main hand and its gesture. Keeps each hand's motion ([SideToSide]) by the side the model
- * names, so two hands do not mix into one swing.
+ * Each frame's hands → the main hand and its gesture. Keeps each hand's motion ([SideToSide]) apart, so two hands do
+ * not mix into one swing: a hand is the one whose wrist was nearest last frame (within [MATCH_PALMS] palms). It used to
+ * be the side the model names, which with two hands in view sometimes named both "Right" — their x mixed into
+ * one track and made swings (a wave, a no) nobody made; the side also flips with the back camera.
  */
 class HandGestureReader {
     companion object {
@@ -161,35 +182,56 @@ class HandGestureReader {
         /** held still: the middle fingertip moved under this many palms over [STILL_MS] */
         const val STILL_PALMS = 0.35f
         const val STILL_MS = 400L
+        /** the same hand as last frame: its wrist moved at most this many palms */
+        const val MATCH_PALMS = 2.5f
     }
 
     data class Reading(val hand: HandSighting, val gesture: HandGesture)
 
-    private val fingertip = mutableMapOf<String, SideToSide>()
-    private val indexTip = mutableMapOf<String, SideToSide>()
+    private class Track(var wristX: Float, var wristY: Float) {
+        val tip = SideToSide()
+        val index = SideToSide()
+    }
 
-    /** null when no hand is in view; otherwise the hand with a gesture (the surest), else the biggest */
-    fun read(hands: List<HandSighting>, nowMs: Long): Reading? {
+    private var tracks: List<Track> = emptyList()
+
+    /**
+     * null when no hand is in view; otherwise the hand with a gesture (the surest), else the biggest.
+     * [thingBoxes]: the things in view [left, top, right, bottom] (frame pixels) — a hand holding one makes no 👌
+     */
+    fun read(hands: List<HandSighting>, nowMs: Long, thingBoxes: List<FloatArray> = emptyList()): Reading? {
         if (hands.isEmpty()) {
-            fingertip.clear(); indexTip.clear()
+            tracks = emptyList()
             return null
         }
+        val free = tracks.toMutableList()
+        val next = mutableListOf<Track>()
         val readings = hands.map { hand ->
-            val tip = fingertip.getOrPut(hand.side) { SideToSide() }.apply { offer(hand.x(HandPose.MIDDLE_TIP), nowMs) }
-            val index = indexTip.getOrPut(hand.side) { SideToSide() }.apply { offer(hand.x(HandPose.INDEX_TIP), nowMs) }
+            val wx = hand.x(HandPose.WRIST)
+            val wy = hand.y(HandPose.WRIST)
+            val nearest = free.minByOrNull { hypot(it.wristX - wx, it.wristY - wy) }
+                ?.takeIf { hypot(it.wristX - wx, it.wristY - wy) <= hand.palm * MATCH_PALMS }
+            val track = nearest?.also { free.remove(it) } ?: Track(wx, wy)
+            track.wristX = wx
+            track.wristY = wy
+            next += track
+            val tip = track.tip.apply { offer(hand.x(HandPose.MIDDLE_TIP), nowMs) }
+            val index = track.index.apply { offer(hand.x(HandPose.INDEX_TIP), nowMs) }
             val palm = hand.palm
             val swinging = when (hand.modelGesture) {
                 "Pointing_Up" -> index.reversals(palm * WAG_SWING_PALMS) >= TURNS
                 else -> tip.reversals(palm * WAVE_SWING_PALMS) >= TURNS
             }
             val still = tip.span(nowMs, STILL_MS) < palm * STILL_PALMS
-            Reading(hand, HandPose.gesture(hand, swinging, still))
+            val holding = thingBoxes.any { HandPose.holds(hand, it) }
+            Reading(hand, HandPose.gesture(hand, swinging, still, holding))
         }
+        tracks = next
         return readings.filter { it.gesture != HandGesture.NONE }.maxByOrNull { it.hand.gestureScore }
             ?: readings.maxByOrNull { it.hand.palm }
     }
 
     fun clear() {
-        fingertip.clear(); indexTip.clear()
+        tracks = emptyList()
     }
 }
